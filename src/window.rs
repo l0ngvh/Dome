@@ -7,12 +7,18 @@ use objc2_core_foundation::{
 };
 
 #[derive(Debug)]
-pub(crate) struct MacWindow(pub(crate) CFRetained<AXUIElement>);
+pub(crate) struct MacWindow {
+    window: CFRetained<AXUIElement>,
+    app: CFRetained<AXUIElement>,
+}
 
 impl MacWindow {
+    pub(crate) fn new(window: CFRetained<AXUIElement>, app: CFRetained<AXUIElement>) -> Self {
+        Self { window, app }
+    }
     #[tracing::instrument]
     pub(crate) fn set_position(&self, x: f32, y: f32) -> Result<()> {
-        let window = &self.0;
+        let window = &self.window;
         let pos_ptr: *mut CGPoint = &mut CGPoint::new(x as f64, y as f64);
         let pos_ptr = NonNull::new(pos_ptr.cast()).unwrap();
         let pos_ptr = unsafe { AXValue::new(AXValueType::CGPoint, pos_ptr) }.unwrap();
@@ -30,7 +36,7 @@ impl MacWindow {
 
     #[tracing::instrument]
     pub(crate) fn set_size(&self, width: f32, height: f32) -> Result<()> {
-        let window = &self.0;
+        let window = &self.window;
         let size_ptr: *mut CGSize = &mut CGSize::new(width as f64, height as f64);
         let size = NonNull::new(size_ptr.cast()).unwrap();
         let size = unsafe { AXValue::new(AXValueType::CGSize, size) }.unwrap();
@@ -50,7 +56,7 @@ impl MacWindow {
     // Then when it's show, call modify api to sync the position + size
     pub(crate) fn hide(&self) -> Result<()> {
         let res = unsafe {
-            self.0.set_attribute_value(
+            self.window.set_attribute_value(
                 &CFString::from_static_str("AXMinimized"),
                 kCFBooleanTrue.unwrap(),
             )
@@ -66,7 +72,7 @@ impl MacWindow {
 
     pub(crate) fn show(&self) -> Result<()> {
         let res = unsafe {
-            self.0.set_attribute_value(
+            self.window.set_attribute_value(
                 &CFString::from_static_str("AXMinimized"),
                 kCFBooleanFalse.unwrap(),
             )
@@ -74,6 +80,34 @@ impl MacWindow {
         if res != AXError::Success {
             Err(anyhow::anyhow!(
                 "Failed to set attribute. Error code: {res:?}"
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn focus(&self) -> Result<()> {
+        let res = unsafe {
+            self.app.set_attribute_value(
+                &CFString::from_static_str("AXFrontmost"),
+                kCFBooleanTrue.unwrap(),
+            )
+        };
+        if res != AXError::Success {
+            return Err(anyhow::anyhow!(
+                "Failed to set app frontmost. Error code: {res:?}"
+            ));
+        }
+
+        let res = unsafe {
+            self.window.set_attribute_value(
+                &CFString::from_static_str("AXMain"),
+                kCFBooleanTrue.unwrap(),
+            )
+        };
+        if res != AXError::Success {
+            Err(anyhow::anyhow!(
+                "Failed to focus window. Error code: {res:?}"
             ))
         } else {
             Ok(())

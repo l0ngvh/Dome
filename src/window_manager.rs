@@ -59,9 +59,16 @@ impl WindowManager {
             ))
         });
 
-        let mut all_windows = Vec::new();
         let pids = list_apps();
         let mut pids_window_ids = HashMap::new();
+
+        let screen = get_main_screen();
+        tracing::info!("Screen {screen:?}");
+        let mut hub = Hub::new(screen);
+
+        // Track CFHash -> WindowId and WindowId -> MacWindow mappings
+        let mut window_mapping = HashMap::new();
+        let mut id_to_window = HashMap::new();
 
         for pid in pids.iter() {
             let app = unsafe { AXUIElement::new_application(*pid) };
@@ -77,28 +84,14 @@ impl WindowManager {
             for window in windows {
                 // TODO: don't tile window, but still manage it as floating
                 if is_standard_window(&window) {
-                    all_windows.push(window.clone());
-                    window_ids.push(CFHash(Some(&window)));
+                    let window_id = hub.insert_window();
+                    let cf_hash = CFHash(Some(&window));
+                    window_mapping.insert(cf_hash, window_id);
+                    id_to_window.insert(window_id, MacWindow::new(window.clone(), app.clone()));
+                    window_ids.push(cf_hash);
                 }
             }
             pids_window_ids.insert(*pid, window_ids);
-        }
-
-        let screen = get_main_screen();
-        tracing::info!("Screen {screen:?}");
-        let mut hub = Hub::new(screen);
-
-        // Track CFHash -> WindowId and WindowId -> MacWindow mappings
-        let mut window_mapping = HashMap::new();
-        let mut id_to_window = HashMap::new();
-        let mut window_ids = Vec::new();
-        // TODO: sort windows based on origin first
-        for window in all_windows.iter() {
-            let window_id = hub.insert_window();
-            let cf_hash = CFHash(Some(window));
-            window_mapping.insert(cf_hash, window_id);
-            id_to_window.insert(window_id, MacWindow(window.clone()));
-            window_ids.push(window_id);
         }
 
         let config = Config::load();
@@ -268,18 +261,26 @@ unsafe extern "C-unwind" fn observer_callback(
     let element = unsafe { CFRetained::retain(element) };
     tracing::info!("AX Notification: {notification} {element:?}");
     if notification.to_string() == *"AXWindowCreated" && is_standard_window(&element) {
-        let window = MacWindow(element.clone());
-        let window_id = context.hub.insert_window();
-        let cf_hash = CFHash(Some(&element));
-        context
-            .window_mapping
-            .borrow_mut()
-            .insert(cf_hash, window_id);
-        context.id_to_window.borrow_mut().insert(window_id, window);
-        // Render the entire workspace since insert_window may have resized other windows
-        let workspace_id = context.hub.current_workspace();
-        if let Err(e) = render_workspace(context, workspace_id) {
-            tracing::warn!("Failed to render workspace after window insert: {e:#}");
+        match get_pid(&element) {
+            Ok(pid) => {
+                let app = unsafe { AXUIElement::new_application(pid) };
+                let window = MacWindow::new(element.clone(), app);
+                let window_id = context.hub.insert_window();
+                let cf_hash = CFHash(Some(&element));
+                context
+                    .window_mapping
+                    .borrow_mut()
+                    .insert(cf_hash, window_id);
+                context.id_to_window.borrow_mut().insert(window_id, window);
+                // Render the entire workspace since insert_window may have resized other windows
+                let workspace_id = context.hub.current_workspace();
+                if let Err(e) = render_workspace(context, workspace_id) {
+                    tracing::warn!("Failed to render workspace after window insert: {e:#}");
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get PID for window: {e:#}");
+            }
         }
     } else if notification.to_string() == *"AXUIElementDestroyed" {
         let cf_hash = CFHash(Some(&element));
@@ -435,6 +436,12 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
             ToggleTarget::Direction => context.hub.toggle_new_window_direction(),
         },
     }
+
+    let workspace_id = context.hub.current_workspace();
+    if let Err(e) = render_workspace(context, workspace_id) {
+        tracing::warn!("Failed to render workspace after action: {e:#}");
+    }
+
     Ok(())
 }
 
@@ -484,7 +491,7 @@ fn listen_to_launching_app(
                         context
                             .id_to_window
                             .borrow_mut()
-                            .insert(window_id, MacWindow(window.clone()));
+                            .insert(window_id, MacWindow::new(window.clone(), app.clone()));
                         window_ids.push(cf_hash);
                     }
                 }
@@ -578,6 +585,15 @@ fn listen_to_keyboard(context_ptr: *mut WindowContext) -> Result<()> {
 fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Result<()> {
     if let Some(root) = context.hub.get_workspace(workspace_id).root() {
         render_child(context, root)?;
+
+        // Focus the currently focused window in this workspace
+        if let Some(focused) = context.hub.get_workspace(workspace_id).focused()
+            && let Child::Window(window_id) = focused
+            && let Some(os_window) = context.id_to_window.borrow().get(&window_id)
+            && let Err(e) = os_window.focus()
+        {
+            tracing::warn!("Failed to focus window {window_id:?}: {e:#}");
+        }
     }
     Ok(())
 }
@@ -649,4 +665,15 @@ fn show_child(context: &WindowContext, child: Child) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn get_pid(window: &AXUIElement) -> Result<i32> {
+    let mut pid = 0;
+    let value_ptr = NonNull::new(&mut pid as *mut i32).unwrap();
+    let res = unsafe { window.pid(value_ptr) };
+
+    if res != AXError::Success {
+        return Err(anyhow::anyhow!("Failed to get pid. Error code: {res:?}"));
+    }
+    Ok(pid)
 }

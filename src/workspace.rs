@@ -661,6 +661,10 @@ impl Workspace {
     pub(crate) fn root(&self) -> Option<Child> {
         self.root
     }
+
+    pub(crate) fn focused(&self) -> Option<Child> {
+        self.focused
+    }
 }
 
 #[derive(Debug)]
