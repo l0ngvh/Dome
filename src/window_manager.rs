@@ -8,58 +8,229 @@ use std::{
 use anyhow::{Context, Result};
 
 use block2::RcBlock;
-use objc2::{MainThreadMarker, rc::Retained};
+use objc2::runtime::ProtocolObject;
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
-    NSApplicationActivationPolicy, NSRunningApplication, NSScreen, NSWorkspace,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
+    NSBezierPath, NSColor, NSEvent, NSNormalWindowLevel, NSResponder, NSRunningApplication,
+    NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
     NSWorkspaceApplicationKey, NSWorkspaceDidLaunchApplicationNotification,
     NSWorkspaceDidTerminateApplicationNotification,
 };
 use objc2_application_services::{AXError, AXIsProcessTrustedWithOptions, AXObserver, AXUIElement};
 use objc2_core_foundation::{
-    CFArray, CFHash, CFMachPort, CFRetained, CFRunLoop, CFString, CFType, kCFAllocatorDefault,
-    kCFBooleanTrue, kCFRunLoopDefaultMode,
+    CFArray, CFHash, CFMachPort, CFRetained, CFRunLoop, CFString, CFType, CGFloat,
+    kCFAllocatorDefault, kCFBooleanTrue, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventTapProxy, CGEventType,
 };
-use objc2_foundation::{NSNotification, NSOperationQueue};
+use objc2_foundation::{
+    NSNotification, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint, NSRect, NSSize,
+};
 
 use crate::config::{Action, Config, Keymap, Modifier, Target, ToggleTarget};
+use crate::core::{Child, Dimension, Hub, WindowId, WorkspaceId};
 use crate::window::MacWindow;
-use crate::workspace::{Child, Dimension, Hub, WindowId, WorkspaceId};
 
-pub struct WindowContext {
-    pub hub: Hub,
-    pub pid_to_window_ids: Rc<RefCell<HashMap<i32, Vec<usize>>>>,
-    pub window_mapping: Rc<RefCell<HashMap<usize, WindowId>>>,
-    pub id_to_window: Rc<RefCell<HashMap<WindowId, MacWindow>>>,
-    pub config: Config,
+pub fn run_app() {
+    let mtm = MainThreadMarker::new().unwrap();
+    let app = NSApplication::sharedApplication(mtm);
+    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+
+    let delegate = AppDelegate::new(mtm);
+    app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+
+    app.run();
 }
 
-#[derive(Debug)]
-pub struct WindowManager;
+pub fn check_accessibility() {
+    use objc2_application_services::kAXTrustedCheckOptionPrompt;
+    use objc2_core_foundation::CFDictionary;
 
-impl WindowManager {
-    pub fn new() -> Result<Self> {
-        Ok(Self)
+    tracing::debug!("Accessibility: {}", unsafe {
+        AXIsProcessTrustedWithOptions(Some(
+            CFDictionary::from_slices(&[kAXTrustedCheckOptionPrompt], &[kCFBooleanTrue.unwrap()])
+                .as_opaque(),
+        ))
+    });
+}
+
+#[derive(Default)]
+struct AppDelegateIvars {
+    context: std::cell::OnceCell<*mut WindowContext>,
+    observers: std::cell::OnceCell<Observers>,
+    overlay_window: std::cell::OnceCell<Retained<NSWindow>>,
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = AppDelegateIvars]
+    struct AppDelegate;
+
+    unsafe impl NSObjectProtocol for AppDelegate {}
+
+    unsafe impl NSApplicationDelegate for AppDelegate {
+        #[unsafe(method(applicationDidFinishLaunching:))]
+        fn did_finish_launching(&self, _notification: &NSNotification) {
+            tracing::info!("Application did finish launching");
+            let mtm = self.mtm();
+
+            let screen = get_main_screen();
+            let frame = NSRect::new(
+                NSPoint::new(screen.x as f64, 0.0),
+                NSSize::new(screen.width as f64, screen.height as f64),
+            );
+
+            let overlay_window = unsafe {
+                NSWindow::initWithContentRect_styleMask_backing_defer(
+                    NSWindow::alloc(mtm),
+                    frame,
+                    NSWindowStyleMask::Borderless,
+                    NSBackingStoreType::Buffered,
+                    false,
+                )
+            };
+
+            overlay_window.setBackgroundColor(Some(&NSColor::clearColor()));
+            overlay_window.setOpaque(false);
+            overlay_window.setLevel(NSNormalWindowLevel - 1);
+            overlay_window.setCollectionBehavior(
+                NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::Stationary,
+            );
+            unsafe { overlay_window.setReleasedWhenClosed(false) };
+
+            let overlay_view = OverlayView::new(mtm, frame);
+            overlay_window.setContentView(Some(&overlay_view));
+            overlay_window.makeKeyAndOrderFront(None);
+
+            let pids = list_apps();
+            let context = WindowContext::new(&pids, overlay_view);
+
+            let workspace_id = context.hub.current_workspace();
+            if let Err(e) = render_workspace(&context, workspace_id) {
+                tracing::warn!("Failed to render workspace after initialization: {e:#}");
+            }
+
+            let context = Box::new(context);
+            let context_ptr = Box::into_raw(context);
+
+            if let Err(e) = listen_to_keyboard(context_ptr) {
+                tracing::error!("Failed to setup keyboard listener: {e:#}");
+            }
+
+            let mut observers = HashMap::new();
+            for pid in pids {
+                match create_observer(pid, context_ptr) {
+                    Ok(observer) => {
+                        observers.insert(pid, observer);
+                    }
+                    Err(e) => {
+                        tracing::info!("Can't create observer for application {pid}: {e:#}");
+                    }
+                }
+            }
+
+            let apps: Observers = Rc::new(RefCell::new(observers));
+            listen_to_launching_app(context_ptr, apps.clone());
+            listen_to_terminating_app(context_ptr, apps.clone());
+
+            self.ivars().context.set(context_ptr).unwrap();
+            self.ivars().observers.set(apps).unwrap();
+            self.ivars().overlay_window.set(overlay_window).unwrap();
+        }
+
+        #[unsafe(method(applicationWillTerminate:))]
+        fn will_terminate(&self, _notification: &NSNotification) {
+            if let Some(&context_ptr) = self.ivars().context.get() {
+                let _ = unsafe { Box::from_raw(context_ptr) };
+            }
+        }
+    }
+);
+
+impl AppDelegate {
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(AppDelegateIvars::default());
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+// OverlayView for drawing borders
+#[derive(Default)]
+struct OverlayViewIvars {
+    rects: RefCell<Vec<OverlayRect>>,
+}
+
+define_class!(
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = OverlayViewIvars]
+    struct OverlayView;
+
+    unsafe impl NSObjectProtocol for OverlayView {}
+
+    impl OverlayView {
+        #[unsafe(method(drawRect:))]
+        fn draw_rect(&self, _dirty_rect: NSRect) {
+            for rect in self.ivars().rects.borrow().iter() {
+                let color = NSColor::colorWithSRGBRed_green_blue_alpha(
+                    rect.r as CGFloat, rect.g as CGFloat, rect.b as CGFloat, rect.a as CGFloat,
+                );
+                color.setFill();
+                NSBezierPath::fillRect(NSRect::new(
+                    NSPoint::new(rect.x as CGFloat, rect.y as CGFloat),
+                    NSSize::new(rect.width as CGFloat, rect.height as CGFloat),
+                ));
+            }
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            let location = event.locationInWindow();
+            tracing::debug!("Overlay clicked at: ({}, {})", location.x, location.y);
+        }
+    }
+);
+
+impl OverlayView {
+    fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(OverlayViewIvars::default());
+        unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 
-    pub fn list_windows(&self) -> Result<()> {
-        use objc2_application_services::kAXTrustedCheckOptionPrompt;
-        use objc2_core_foundation::CFDictionary;
+    fn set_rects(&self, rects: Vec<OverlayRect>) {
+        *self.ivars().rects.borrow_mut() = rects;
+        self.setNeedsDisplay(true);
+    }
+}
 
-        tracing::debug!("Accessibility: {}", unsafe {
-            AXIsProcessTrustedWithOptions(Some(
-                CFDictionary::from_slices(
-                    &[kAXTrustedCheckOptionPrompt],
-                    &[kCFBooleanTrue.unwrap()],
-                )
-                .as_opaque(),
-            ))
-        });
+#[derive(Clone)]
+struct OverlayRect {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+}
 
-        let pids = list_apps();
+struct WindowContext {
+    hub: Hub,
+    overlay_view: Retained<OverlayView>,
+    pid_to_window_ids: Rc<RefCell<HashMap<i32, Vec<usize>>>>,
+    window_mapping: Rc<RefCell<HashMap<usize, WindowId>>>,
+    id_to_window: Rc<RefCell<HashMap<WindowId, MacWindow>>>,
+    config: Config,
+}
+
+impl WindowContext {
+    fn new(pids: &[i32], overlay_view: Retained<OverlayView>) -> Self {
         let mut pids_window_ids = HashMap::new();
 
         let screen = get_main_screen();
@@ -96,45 +267,14 @@ impl WindowManager {
 
         let config = Config::load();
 
-        let context = Box::new(WindowContext {
+        Self {
             hub,
+            overlay_view,
             pid_to_window_ids: Rc::new(RefCell::new(pids_window_ids)),
             window_mapping: Rc::new(RefCell::new(window_mapping)),
             id_to_window: Rc::new(RefCell::new(id_to_window)),
             config,
-        });
-
-        let context_ptr = Box::into_raw(context);
-
-        // Render all windows after initialization
-        let workspace_id = unsafe { (*context_ptr).hub.current_workspace() };
-        if let Err(e) = render_workspace(unsafe { &*context_ptr }, workspace_id) {
-            tracing::warn!("Failed to render workspace after initialization: {e:#}");
         }
-
-        listen_to_keyboard(context_ptr)?;
-
-        let mut observers = HashMap::new();
-        for pid in pids {
-            let observer = match create_observer(pid, context_ptr) {
-                Ok(observer) => observer,
-                Err(e) => {
-                    tracing::info!("Can't create observer for application {pid}: {e:#}");
-                    continue;
-                }
-            };
-            observers.insert(pid, observer);
-        }
-
-        let apps = Rc::new(RefCell::new(observers));
-
-        listen_to_launching_app(context_ptr, apps.clone());
-        listen_to_terminating_app(context_ptr, apps);
-
-        CFRunLoop::run();
-        let _ = unsafe { Box::from_raw(context_ptr) };
-
-        Ok(())
     }
 }
 
@@ -586,6 +726,11 @@ fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Resul
     if let Some(root) = context.hub.get_workspace(workspace_id).root() {
         render_child(context, root)?;
 
+        // Update overlay with border rects
+        let mut rects = Vec::new();
+        collect_border_rects(context, root, &mut rects);
+        context.overlay_view.set_rects(rects);
+
         // Focus the currently focused window in this workspace
         if let Some(focused) = context.hub.get_workspace(workspace_id).focused()
             && let Child::Window(window_id) = focused
@@ -594,8 +739,76 @@ fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Resul
         {
             tracing::warn!("Failed to focus window {window_id:?}: {e:#}");
         }
+    } else {
+        // No windows, clear overlay
+        context.overlay_view.set_rects(Vec::new());
     }
     Ok(())
+}
+
+fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<OverlayRect>) {
+    const BORDER_WIDTH: f32 = 4.0;
+    const COLOR: (f32, f32, f32, f32) = (0.4, 0.6, 1.0, 1.0); // Light blue
+
+    match child {
+        Child::Window(window_id) => {
+            let dim = context.hub.get_window(window_id).dimension();
+            // Convert from top-left to bottom-left coordinates for NSView
+            let screen = context.hub.screen();
+            let y = screen.height - dim.y - dim.height;
+
+            // Draw border around window
+            // Top
+            rects.push(OverlayRect {
+                x: dim.x - BORDER_WIDTH,
+                y: y + dim.height,
+                width: dim.width + BORDER_WIDTH * 2.0,
+                height: BORDER_WIDTH,
+                r: COLOR.0,
+                g: COLOR.1,
+                b: COLOR.2,
+                a: COLOR.3,
+            });
+            // Bottom
+            rects.push(OverlayRect {
+                x: dim.x - BORDER_WIDTH,
+                y: y - BORDER_WIDTH,
+                width: dim.width + BORDER_WIDTH * 2.0,
+                height: BORDER_WIDTH,
+                r: COLOR.0,
+                g: COLOR.1,
+                b: COLOR.2,
+                a: COLOR.3,
+            });
+            // Left
+            rects.push(OverlayRect {
+                x: dim.x - BORDER_WIDTH,
+                y,
+                width: BORDER_WIDTH,
+                height: dim.height,
+                r: COLOR.0,
+                g: COLOR.1,
+                b: COLOR.2,
+                a: COLOR.3,
+            });
+            // Right
+            rects.push(OverlayRect {
+                x: dim.x + dim.width,
+                y,
+                width: BORDER_WIDTH,
+                height: dim.height,
+                r: COLOR.0,
+                g: COLOR.1,
+                b: COLOR.2,
+                a: COLOR.3,
+            });
+        }
+        Child::Container(container_id) => {
+            for child in context.hub.get_container(container_id).children() {
+                collect_border_rects(context, *child, rects);
+            }
+        }
+    }
 }
 
 fn render_child(context: &WindowContext, child: Child) -> Result<()> {
@@ -677,3 +890,5 @@ fn get_pid(window: &AXUIElement) -> Result<i32> {
     }
     Ok(pid)
 }
+
+type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;

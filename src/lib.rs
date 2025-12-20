@@ -1,9 +1,9 @@
 mod config;
-#[cfg(all(target_os = "macos", not(test)))]
+mod core;
+#[cfg(target_os = "macos")]
 mod window;
-#[cfg(all(target_os = "macos", not(test)))]
+#[cfg(target_os = "macos")]
 mod window_manager;
-mod workspace;
 
-#[cfg(all(target_os = "macos", not(test)))]
-pub use window_manager::WindowManager;
+#[cfg(target_os = "macos")]
+pub use window_manager::{check_accessibility, run_app};

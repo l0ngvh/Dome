@@ -1,5 +1,4 @@
-use anyhow::Result;
-use new_wm::WindowManager;
+use new_wm::{check_accessibility, run_app};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -14,12 +13,7 @@ fn main() {
         let backtrace = backtrace::Backtrace::new();
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
     }));
-    if let Err(e) = run() {
-        eprintln!("{e:#}");
-    }
-}
 
-fn run() -> Result<()> {
-    let wm = WindowManager::new()?;
-    wm.list_windows()
+    check_accessibility();
+    run_app();
 }
