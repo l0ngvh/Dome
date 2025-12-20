@@ -212,6 +212,9 @@ impl Hub {
                 workspace
             }
             Parent::Workspace(workspace_id) => {
+                self.workspaces.get_mut(workspace_id).root = None;
+                self.workspaces.get_mut(workspace_id).focused = None;
+
                 if workspace_id != self.current {
                     self.workspaces.delete(workspace_id);
                 }
@@ -844,6 +847,57 @@ mod tests {
     }
 
     #[test]
+    fn delete_all_windows() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        let w1 = hub.insert_window();
+        let w2 = hub.insert_window();
+        let w3 = hub.insert_window();
+
+        hub.delete_window(w1);
+        hub.delete_window(w2);
+        hub.delete_window(w3);
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0)
+        )
+        ");
+    }
+
+    #[test]
+    fn delete_all_windows_cleanup_unfocused_workspace() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        let w1 = hub.insert_window();
+        let w2 = hub.insert_window();
+
+        hub.focus_workspace(1);
+        hub.delete_window(w1);
+        hub.delete_window(w2);
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=1, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=1, name=1)
+        )
+        ");
+    }
+
+    #[test]
     fn switch_workspace_attaches_windows_correctly() {
         setup_logger();
         let screen = Dimension {
@@ -886,6 +940,31 @@ mod tests {
     }
 
     #[test]
+    fn focus_same_workspace() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        hub.insert_window();
+        let initial_workspace = hub.current_workspace();
+        hub.focus_workspace(0);
+
+        assert_eq!(hub.current_workspace(), initial_workspace);
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0, focused=WindowId(0),
+            Window(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00)
+          )
+        )
+        ");
+    }
+
+    #[test]
     fn toggle_new_window_direction_creates_new_container() {
         setup_logger();
         let screen = Dimension {
@@ -910,6 +989,35 @@ mod tests {
                 Window(id=1, parent=ContainerId(1), x=5.00, y=0.00, w=5.00, h=5.00)
                 Window(id=2, parent=ContainerId(1), x=5.00, y=5.00, w=5.00, h=5.00)
               )
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn delete_window_after_orientation_change() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        hub.insert_window();
+        hub.insert_window();
+        hub.toggle_new_window_direction();
+        let w3 = hub.insert_window();
+        hub.delete_window(w3);
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0, focused=WindowId(2),
+            Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
+              Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
+              Window(id=1, parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00)
             )
           )
         )
@@ -992,34 +1100,9 @@ mod tests {
             .with_max_level(tracing::Level::TRACE)
             .with_span_events(FmtSpan::ENTER)
             .try_init();
-    }
-
-    #[test]
-    fn delete_window_after_orientation_change() {
-        setup_logger();
-        let screen = Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: 10.0,
-            height: 10.0,
-        };
-        let mut hub = Hub::new(screen);
-
-        hub.insert_window();
-        hub.insert_window();
-        hub.toggle_new_window_direction();
-        let w3 = hub.insert_window();
-        hub.delete_window(w3);
-
-        assert_snapshot!(snapshot(&hub), @r"
-        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
-          Workspace(id=0, name=0, focused=WindowId(2),
-            Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
-              Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
-              Window(id=1, parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00)
-            )
-          )
-        )
-        ");
+        std::panic::set_hook(Box::new(|panic_info| {
+            let backtrace = backtrace::Backtrace::new();
+            tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
+        }));
     }
 }
