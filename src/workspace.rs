@@ -511,7 +511,6 @@ impl Hub {
         }
     }
 
-    #[tracing::instrument(skip(self))]
     fn distribute_available_space(
         &mut self,
         child: Child,

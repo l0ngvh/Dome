@@ -85,6 +85,7 @@ impl WindowManager {
         }
 
         let screen = get_main_screen();
+        tracing::info!("Screen {screen:?}");
         let mut hub = Hub::new(screen);
 
         // Track CFHash -> WindowId and WindowId -> MacWindow mappings
@@ -166,11 +167,14 @@ fn get_main_screen() -> Dimension {
     let mtm = MainThreadMarker::new().unwrap();
     let main_screen = NSScreen::mainScreen(mtm).unwrap();
     let frame = main_screen.frame();
+    let visible_frame = main_screen.visibleFrame();
     Dimension {
-        x: frame.origin.x as f32,
-        y: frame.origin.y as f32,
-        width: frame.size.width as f32,
-        height: frame.size.height as f32,
+        x: visible_frame.origin.x as f32,
+        // Reason: NSScreen returns bottom-left coordinate instead of the usual top left
+        // Then subtract to exclude the menu bar
+        y: (frame.size.height - visible_frame.size.height) as f32,
+        width: visible_frame.size.width as f32,
+        height: visible_frame.size.height as f32,
     }
 }
 
