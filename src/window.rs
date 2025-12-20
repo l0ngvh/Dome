@@ -9,8 +9,7 @@ use objc2_core_foundation::{
 
 use crate::objc2_wrapper::{
     get_attribute, kAXFrontmostAttribute, kAXMainAttribute, kAXMinimizedAttribute,
-    kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute, kAXTitleAttribute,
-    set_attribute_value,
+    kAXPositionAttribute, kAXSizeAttribute, kAXTitleAttribute, set_attribute_value,
 };
 
 #[derive(Debug)]
@@ -86,12 +85,6 @@ impl MacWindow {
         set_attribute_value(&self.window, &kAXMainAttribute(), unsafe {
             kCFBooleanTrue.unwrap()
         })
-    }
-
-    pub(crate) fn is_valid(&self) -> bool {
-        // Technically we should check for InvalidUIElement (-25202), but if a we could get the window
-        // role fine previously, then we can't, then it's most likely that window got deleted
-        get_attribute::<CFString>(&self.window, &kAXRoleAttribute()).is_ok()
     }
 }
 

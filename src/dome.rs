@@ -27,7 +27,7 @@ use objc2_core_graphics::{
     CGEventTapProxy, CGEventType,
 };
 use objc2_foundation::{
-    NSNotification, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint, NSRect, NSSize, NSTimer,
+    NSNotification, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint, NSRect, NSSize,
 };
 
 use crate::{
@@ -148,7 +148,6 @@ define_class!(
             let apps: Observers = Rc::new(RefCell::new(observers));
             listen_to_launching_app(context_ptr, apps.clone());
             listen_to_terminating_app(context_ptr, apps.clone());
-            poll_deleted_windows(context_ptr);
 
             self.ivars().context.set(context_ptr).unwrap();
             self.ivars().observers.set(apps).unwrap();
@@ -273,18 +272,6 @@ impl WindowRegistry {
         Some(window_id)
     }
 
-    fn remove_by_id(&mut self, window_id: WindowId) {
-        if let Some(cf_hash) = self.id_to_hash.remove(&window_id) {
-            self.hash_to_id.remove(&cf_hash);
-            self.id_to_window.remove(&window_id);
-            if let Some(pid) = self.hash_to_pid.remove(&cf_hash)
-                && let Some(hashes) = self.pid_to_hashes.get_mut(&pid)
-            {
-                hashes.retain(|&h| h != cf_hash);
-            }
-        }
-    }
-
     fn remove_by_pid(&mut self, pid: i32) -> Vec<WindowId> {
         let Some(hashes) = self.pid_to_hashes.remove(&pid) else {
             return Vec::new();
@@ -307,10 +294,6 @@ impl WindowRegistry {
 
     fn get(&self, window_id: WindowId) -> Option<&MacWindow> {
         self.id_to_window.get(&window_id)
-    }
-
-    fn iter(&self) -> impl Iterator<Item = (&WindowId, &MacWindow)> {
-        self.id_to_window.iter()
     }
 }
 
@@ -662,31 +645,6 @@ fn listen_to_terminating_app(
                 }
             }),
         );
-    };
-}
-
-fn poll_deleted_windows(context_ptr: *mut WindowContext) {
-    unsafe {
-        NSTimer::scheduledTimerWithTimeInterval_repeats_block(
-            0.1,
-            true,
-            &RcBlock::new(move |_timer| {
-                let context = &mut *context_ptr;
-                let mut invalid_ids = Vec::new();
-
-                for (&id, window) in context.registry.borrow().iter() {
-                    if !window.is_valid() {
-                        tracing::debug!("Window {id:?} is no longer valid, removing");
-                        invalid_ids.push(id);
-                    }
-                }
-
-                for id in invalid_ids {
-                    context.registry.borrow_mut().remove_by_id(id);
-                    context.hub.delete_window(id);
-                }
-            }),
-        )
     };
 }
 
