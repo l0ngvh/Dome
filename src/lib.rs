@@ -3,7 +3,7 @@ mod core;
 #[cfg(target_os = "macos")]
 mod window;
 #[cfg(target_os = "macos")]
-mod window_manager;
+mod dome;
 
 #[cfg(target_os = "macos")]
-pub use window_manager::{check_accessibility, run_app};
+pub use dome::{check_accessibility, run_app};

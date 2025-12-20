@@ -1,4 +1,4 @@
-use new_wm::{check_accessibility, run_app};
+use dome::{check_accessibility, run_app};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::util::SubscriberInitExt;

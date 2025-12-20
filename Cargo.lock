@@ -82,6 +82,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "dome"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "backtrace",
+ "block2",
+ "insta",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-application-services",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation",
+ "serde",
+ "toml",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -157,27 +178,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
 dependencies = [
  "adler2",
-]
-
-[[package]]
-name = "new-wm"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "backtrace",
- "block2",
- "insta",
- "objc2",
- "objc2-app-kit",
- "objc2-application-services",
- "objc2-core-foundation",
- "objc2-core-graphics",
- "objc2-foundation",
- "serde",
- "toml",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
 ]
 
 [[package]]
