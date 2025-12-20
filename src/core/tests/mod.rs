@@ -1,4 +1,11 @@
+mod border;
+mod delete_window;
+mod focus_direction;
+mod focus_parent;
+mod focus_workspace;
+mod insert_window;
 mod move_to_workspace;
+mod toggle_new_window_direction;
 
 use crate::core::hub::Hub;
 use crate::core::node::Child;
