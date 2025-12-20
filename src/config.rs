@@ -140,6 +140,12 @@ where
 pub struct Config {
     #[serde(default = "default_keymaps", deserialize_with = "deserialize_keymaps")]
     keymaps: HashMap<Keymap, Vec<Action>>,
+    #[serde(default = "default_border_size")]
+    pub border_size: f32,
+}
+
+fn default_border_size() -> f32 {
+    2.0
 }
 
 impl Config {
@@ -149,12 +155,18 @@ impl Config {
                 Ok(config) => config,
                 Err(e) => {
                     tracing::warn!("Failed to parse config: {e}, using defaults");
-                    Config { keymaps: default_keymaps() }
+                    Config { 
+                        keymaps: default_keymaps(),
+                        border_size: default_border_size(),
+                    }
                 }
             },
             Err(e) => {
                 tracing::warn!("Failed to load config: {e}, using defaults");
-                Config { keymaps: default_keymaps() }
+                Config { 
+                    keymaps: default_keymaps(),
+                    border_size: default_border_size(),
+                }
             }
         }
     }

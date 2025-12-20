@@ -32,6 +32,7 @@ impl Workspace {
     }
 }
 
+/// Contain the windows, dimension including borders
 #[derive(Debug, Clone)]
 pub(crate) struct Container {
     pub(super) parent: Parent,
@@ -58,6 +59,10 @@ impl Container {
 
     pub(crate) fn children(&self) -> &[Child] {
         &self.children
+    }
+
+    pub(crate) fn dimension(&self) -> Dimension {
+        self.dimension
     }
 
     pub(super) fn push_window(&mut self, window_id: WindowId) {
@@ -115,6 +120,7 @@ impl std::fmt::Display for Parent {
     }
 }
 
+/// Represents a single application window, dimension doesn't account for border
 #[derive(Debug, Clone)]
 pub(crate) struct Window {
     pub(super) parent: Parent,

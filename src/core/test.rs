@@ -11,7 +11,7 @@ fn initial_window_cover_full_screen() {
         width: 20.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
     hub.insert_window();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=2.00 y=1.00 w=20.00 h=10.00),
@@ -31,7 +31,7 @@ fn split_window_evenly() {
         width: 20.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     for _ in 0..4 {
         hub.insert_window();
@@ -60,7 +60,7 @@ fn delete_window_removes_from_container() {
         width: 12.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     let w2 = hub.insert_window();
@@ -89,7 +89,7 @@ fn delete_window_removes_parent_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     let w2 = hub.insert_window();
@@ -125,7 +125,7 @@ fn delete_all_windows() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     let w1 = hub.insert_window();
     let w2 = hub.insert_window();
@@ -151,7 +151,7 @@ fn delete_all_windows_cleanup_unfocused_workspace() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     let w1 = hub.insert_window();
     let w2 = hub.insert_window();
@@ -176,7 +176,7 @@ fn switch_workspace_attaches_windows_correctly() {
         width: 12.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -218,7 +218,7 @@ fn focus_same_workspace() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     let initial_workspace = hub.current_workspace();
@@ -243,7 +243,7 @@ fn toggle_new_window_direction_creates_new_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -274,7 +274,7 @@ fn delete_window_after_orientation_change() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -303,7 +303,7 @@ fn toggle_new_window_direction_in_single_window_workspace_creates_vertical_conta
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.toggle_new_window_direction();
@@ -330,7 +330,7 @@ fn toggle_new_window_direction_in_vertical_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -343,12 +343,12 @@ fn toggle_new_window_direction_in_vertical_container() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=10.00 h=10.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=5.00, y=0.00, w=5.00, h=5.00)
-            Container(id=ContainerId(2), parent=ContainerId(1), x=5.00, y=5.00, w=5.00, h=5.00, direction=Horizontal,
-              Window(id=WindowId(2), parent=ContainerId(2), x=5.00, y=5.00, w=2.50, h=5.00)
-              Window(id=WindowId(3), parent=ContainerId(2), x=7.50, y=5.00, w=2.50, h=5.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=3.33, h=10.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=3.33, y=0.00, w=6.67, h=10.00, direction=Vertical,
+            Window(id=WindowId(1), parent=ContainerId(1), x=3.33, y=0.00, w=6.67, h=5.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=3.33, y=5.00, w=6.67, h=5.00, direction=Horizontal,
+              Window(id=WindowId(2), parent=ContainerId(2), x=3.33, y=5.00, w=3.33, h=5.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=6.67, y=5.00, w=3.33, h=5.00)
             )
           )
         )
@@ -366,7 +366,7 @@ fn focus_parent_twice_nested_containers() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     // Create nested containers
     hub.insert_window();
@@ -401,7 +401,7 @@ fn focus_parent_twice_single_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -430,7 +430,7 @@ fn insert_window_after_focusing_parent() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -461,7 +461,7 @@ fn new_container_preserves_wrapped_window_position() {
         width: 12.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -497,7 +497,7 @@ fn insert_window_after_focused_window() {
         width: 12.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -530,7 +530,7 @@ fn insert_window_after_focused_container_in_parent() {
         width: 12.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     // Create: [w0] [w1, w2] [w3]
     hub.insert_window();
@@ -573,7 +573,7 @@ fn insert_to_new_container_when_focused_container_window_insert_direction_differ
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -609,7 +609,7 @@ fn insert_to_parent_when_focused_container_window_insert_direction_differ_but_ha
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     // Creating [w0, [w1, w2], w3]
     hub.insert_window();
@@ -652,7 +652,7 @@ fn clean_up_parent_container_when_only_child_is_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     let w1 = hub.insert_window();
     hub.insert_window();
@@ -690,7 +690,7 @@ fn delete_focused_window_change_focus_to_previous_window() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     let w2 = hub.insert_window();
@@ -720,7 +720,7 @@ fn delete_focused_window_change_focus_to_next_window() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     let w1 = hub.insert_window();
     hub.insert_window();
@@ -746,7 +746,7 @@ fn delete_focused_window_focus_last_window_of_preceding_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.toggle_new_window_direction();
@@ -792,7 +792,7 @@ fn delete_focused_window_focus_first_window_of_following_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     let w1 = hub.insert_window();
     hub.insert_window();
@@ -824,7 +824,7 @@ fn delete_window_when_parent_focused_gives_focus_to_last_child() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     let w1 = hub.insert_window();
     hub.insert_window();
@@ -852,7 +852,7 @@ fn container_replaced_by_child_keeps_position_in_parent() {
         width: 12.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     // Create: [w0] [w1, w2] [w3]
     hub.insert_window();
@@ -887,7 +887,7 @@ fn focus_left_right_in_horizontal_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -929,7 +929,7 @@ fn focus_up_down_in_vertical_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.toggle_new_window_direction();
@@ -972,7 +972,7 @@ fn focus_right_selects_first_child_of_next_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -991,13 +991,13 @@ fn focus_right_selects_first_child_of_next_container() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=10.00 h=10.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00, direction=Vertical,
-            Container(id=ContainerId(2), parent=ContainerId(1), x=5.00, y=0.00, w=5.00, h=5.00, direction=Horizontal,
-              Window(id=WindowId(1), parent=ContainerId(2), x=5.00, y=0.00, w=2.50, h=5.00)
-              Window(id=WindowId(3), parent=ContainerId(2), x=7.50, y=0.00, w=2.50, h=5.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=3.33, h=10.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=3.33, y=0.00, w=6.67, h=10.00, direction=Vertical,
+            Container(id=ContainerId(2), parent=ContainerId(1), x=3.33, y=0.00, w=6.67, h=5.00, direction=Horizontal,
+              Window(id=WindowId(1), parent=ContainerId(2), x=3.33, y=0.00, w=3.33, h=5.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=6.67, y=0.00, w=3.33, h=5.00)
             )
-            Window(id=WindowId(2), parent=ContainerId(1), x=5.00, y=5.00, w=5.00, h=5.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=3.33, y=5.00, w=6.67, h=5.00)
           )
         )
       )
@@ -1014,7 +1014,7 @@ fn focus_left_selects_last_child_of_previous_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     // Create: [w0, w1] [w2]
     hub.insert_window();
@@ -1051,7 +1051,7 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     // Create: [w0, [w1, [w2, w3]]]
     hub.insert_window();
@@ -1068,12 +1068,12 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=10.00 h=10.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=5.00, y=0.00, w=5.00, h=5.00)
-            Container(id=ContainerId(2), parent=ContainerId(1), x=5.00, y=5.00, w=5.00, h=5.00, direction=Horizontal,
-              Window(id=WindowId(2), parent=ContainerId(2), x=5.00, y=5.00, w=2.50, h=5.00)
-              Window(id=WindowId(3), parent=ContainerId(2), x=7.50, y=5.00, w=2.50, h=5.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=3.33, h=10.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=3.33, y=0.00, w=6.67, h=10.00, direction=Vertical,
+            Window(id=WindowId(1), parent=ContainerId(1), x=3.33, y=0.00, w=6.67, h=5.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=3.33, y=5.00, w=6.67, h=5.00, direction=Horizontal,
+              Window(id=WindowId(2), parent=ContainerId(2), x=3.33, y=5.00, w=3.33, h=5.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=6.67, y=5.00, w=3.33, h=5.00)
             )
           )
         )
@@ -1091,7 +1091,7 @@ fn focus_down_from_nested_container_goes_to_grandparent_next() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     // Create: [[[w0, w1], w2], w3]
     hub.insert_window();
@@ -1109,14 +1109,14 @@ fn focus_down_from_nested_container_goes_to_grandparent_next() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=10.00 h=10.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Vertical,
-          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=0.00, w=10.00, h=5.00, direction=Horizontal,
-            Container(id=ContainerId(2), parent=ContainerId(1), x=0.00, y=0.00, w=5.00, h=5.00, direction=Vertical,
-              Window(id=WindowId(0), parent=ContainerId(2), x=0.00, y=0.00, w=5.00, h=2.50)
-              Window(id=WindowId(3), parent=ContainerId(2), x=0.00, y=2.50, w=5.00, h=2.50)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=0.00, w=10.00, h=6.67, direction=Horizontal,
+            Container(id=ContainerId(2), parent=ContainerId(1), x=0.00, y=0.00, w=5.00, h=6.67, direction=Vertical,
+              Window(id=WindowId(0), parent=ContainerId(2), x=0.00, y=0.00, w=5.00, h=3.33)
+              Window(id=WindowId(3), parent=ContainerId(2), x=0.00, y=3.33, w=5.00, h=3.33)
             )
-            Window(id=WindowId(2), parent=ContainerId(1), x=5.00, y=0.00, w=5.00, h=5.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=5.00, y=0.00, w=5.00, h=6.67)
           )
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=5.00, w=10.00, h=5.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=6.67, w=10.00, h=3.33)
         )
       )
     )
@@ -1132,7 +1132,7 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     // Create: [w0, w1] [w2]
     hub.insert_window();
@@ -1172,7 +1172,7 @@ fn focus_down_into_horizontal_nested_container() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.toggle_new_window_direction();
@@ -1211,7 +1211,7 @@ fn focus_left_at_boundary_does_nothing() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -1239,7 +1239,7 @@ fn focus_right_at_boundary_does_nothing() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.insert_window();
@@ -1266,7 +1266,7 @@ fn focus_up_at_boundary_does_nothing() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.toggle_new_window_direction();
@@ -1295,7 +1295,7 @@ fn focus_down_at_boundary_does_nothing() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen);
+    let mut hub = Hub::new(screen, 0.0);
 
     hub.insert_window();
     hub.toggle_new_window_direction();
@@ -1308,6 +1308,58 @@ fn focus_down_at_boundary_does_nothing() {
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Vertical,
           Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=10.00, h=5.00)
           Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=5.00, w=10.00, h=5.00)
+        )
+      )
+    )
+    ");
+}
+
+#[test]
+fn window_with_border() {
+    setup_logger();
+    let screen = Dimension {
+        x: 0.0,
+        y: 0.0,
+        width: 10.0,
+        height: 10.0,
+    };
+    let mut hub = Hub::new(screen, 2.0);
+    hub.insert_window();
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=2.00, y=2.00, w=6.00, h=6.00)
+      )
+    )");
+}
+
+#[test]
+fn border_with_nested_containers() {
+    setup_logger();
+    let screen = Dimension {
+        x: 0.0,
+        y: 0.0,
+        width: 12.0,
+        height: 10.0,
+    };
+    let mut hub = Hub::new(screen, 1.0);
+    hub.insert_window();
+    hub.insert_window();
+    hub.insert_window();
+    hub.insert_window();
+    hub.toggle_new_window_direction();
+    hub.insert_window();
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=12.00 h=10.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=12.00, h=10.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=1.00, h=8.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=4.00, y=1.00, w=1.00, h=8.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=7.00, y=1.00, w=1.00, h=8.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=9.00, y=0.00, w=3.00, h=10.00, direction=Vertical,
+            Window(id=WindowId(3), parent=ContainerId(1), x=10.00, y=1.00, w=1.00, h=3.00)
+            Window(id=WindowId(4), parent=ContainerId(1), x=10.00, y=6.00, w=1.00, h=3.00)
+          )
         )
       )
     )
@@ -1327,21 +1379,21 @@ fn snapshot(hub: &Hub) -> String {
         let focused = if let Some(current) = workspace.focused {
             format!(", focused={}", current)
         } else {
-                String::new()
-            };
-            if workspace.root().is_none() {
-                s.push_str(&format!(
-                    "  Workspace(id={}, name={}{})\n",
-                    workspace_id, workspace.name, focused
-                ));
-            } else {
-                s.push_str(&format!(
-                    "  Workspace(id={}, name={}{},\n",
-                    workspace_id, workspace.name, focused
-                ));
-                fmt_child_str(hub, &mut s, workspace.root().unwrap(), 2);
-                s.push_str("  )\n");
-            }
+            String::new()
+        };
+        if workspace.root().is_none() {
+            s.push_str(&format!(
+                "  Workspace(id={}, name={}{})\n",
+                workspace_id, workspace.name, focused
+            ));
+        } else {
+            s.push_str(&format!(
+                "  Workspace(id={}, name={}{},\n",
+                workspace_id, workspace.name, focused
+            ));
+            fmt_child_str(hub, &mut s, workspace.root().unwrap(), 2);
+            s.push_str("  )\n");
+        }
     }
     s.push_str(")\n");
     s

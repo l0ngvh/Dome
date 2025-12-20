@@ -16,7 +16,7 @@ impl MacWindow {
     pub(crate) fn new(window: CFRetained<AXUIElement>, app: CFRetained<AXUIElement>) -> Self {
         Self { window, app }
     }
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     pub(crate) fn set_position(&self, x: f32, y: f32) -> Result<()> {
         let window = &self.window;
         let pos_ptr: *mut CGPoint = &mut CGPoint::new(x as f64, y as f64);
@@ -34,7 +34,7 @@ impl MacWindow {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     pub(crate) fn set_size(&self, width: f32, height: f32) -> Result<()> {
         let window = &self.window;
         let size_ptr: *mut CGSize = &mut CGSize::new(width as f64, height as f64);

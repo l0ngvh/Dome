@@ -3,11 +3,13 @@ use super::node::{
     Child, Container, ContainerId, Dimension, Direction, Parent, Window, WindowId, Workspace,
     WorkspaceId,
 };
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub(crate) struct Hub {
     screen: Dimension,
     current: WorkspaceId,
+    border_size: f32,
 
     workspaces: Allocator<Workspace>,
     windows: Allocator<Window>,
@@ -15,7 +17,7 @@ pub(crate) struct Hub {
 }
 
 impl Hub {
-    pub(crate) fn new(screen: Dimension) -> Self {
+    pub(crate) fn new(screen: Dimension, border_size: f32) -> Self {
         let mut workspace_allocator: Allocator<Workspace> = Allocator::new();
         let window_allocator: Allocator<Window> = Allocator::new();
         let container_allocator: Allocator<Container> = Allocator::new();
@@ -27,6 +29,7 @@ impl Hub {
             current: initial_workspace,
             workspaces: workspace_allocator,
             screen,
+            border_size,
             windows: window_allocator,
             containers: container_allocator,
         }
@@ -475,56 +478,30 @@ impl Hub {
         };
         let screen = workspace.screen;
         match root {
-            Child::Window(window_id) => self.windows.get_mut(window_id).dimension = screen,
+            Child::Window(window_id) => {
+                let window = self.windows.get_mut(window_id);
+                window.dimension.x = screen.x + self.border_size;
+                window.dimension.y = screen.y + self.border_size;
+                window.dimension.width = screen.width - 2.0 * self.border_size;
+                window.dimension.height = screen.height - 2.0 * self.border_size;
+            }
             Child::Container(container_id) => {
-                let (fixed_width, fixed_height) = self.query_fixed(Child::Container(container_id));
-                tracing::debug!(
-                    "Container {container_id}'s fixed size {fixed_width} {fixed_height}"
-                );
-                let container = self.containers.get_mut(container_id);
-                container.dimension = screen;
-
-                let available_width = screen.width - fixed_width;
-                let available_height = screen.height - fixed_height;
-                tracing::debug!(
-                    "Distributing available space ({available_width}, {available_height}) to {container_id}"
-                );
+                let mut cache = HashMap::new();
+                let ((free_h, free_v), _) =
+                    self.query_container_structure(container_id, &mut cache);
                 self.distribute_available_space(
                     Child::Container(container_id),
                     screen.x,
                     screen.y,
-                    available_width,
-                    available_height,
+                    screen.width,
+                    screen.height,
+                    &cache,
                 );
             }
         }
     }
 
-    fn query_fixed(&self, child: Child) -> (f32, f32) {
-        match child {
-            Child::Window(_window_id) => (0.0, 0.0), // TODO: query fixed size
-            Child::Container(container_id) => {
-                let container = self.containers.get(container_id);
-                let child_sizes = container
-                    .children
-                    .iter()
-                    .map(|child| self.query_fixed(*child));
-                match container.direction {
-                    Direction::Horizontal => child_sizes
-                        .reduce(|(width_1, height_1), (width_2, height_2)| {
-                            (width_1 + width_2, height_1.max(height_2))
-                        })
-                        .unwrap_or_default(),
-                    Direction::Vertical => child_sizes
-                        .reduce(|(width_1, height_1), (width_2, height_2)| {
-                            (width_1.max(width_2), height_1 + height_2)
-                        })
-                        .unwrap_or_default(),
-                }
-            }
-        }
-    }
-
+    #[tracing::instrument(skip(self, cache))]
     fn distribute_available_space(
         &mut self,
         child: Child,
@@ -532,84 +509,112 @@ impl Hub {
         y: f32,
         available_width: f32,
         available_height: f32,
+        cache: &HashMap<ContainerId, ((usize, usize), (f32, f32))>,
     ) {
         match child {
             Child::Window(window_id) => {
                 let window = self.windows.get_mut(window_id);
-                window.dimension.x = x;
-                window.dimension.y = y;
-                // TODO: ignore when window is fixed size
-                window.dimension.width = available_width;
-                window.dimension.height = available_height;
+                window.dimension.x = x + self.border_size;
+                window.dimension.y = y + self.border_size;
+                window.dimension.width = available_width - 2.0 * self.border_size;
+                window.dimension.height = available_height - 2.0 * self.border_size;
             }
             Child::Container(container_id) => {
+                let ((free_h, free_v), _) = cache[&container_id];
+                tracing::debug!("{container_id}, {free_h}, {free_v}");
                 let container = self.containers.get(container_id);
+                let mut actual_width = 0.0;
+                let mut actual_height: f32 = 0.0;
+
                 match container.direction {
                     Direction::Horizontal => {
-                        // TODO: filter out fixed width windows/containers in width calculation
-                        let column_width = available_width / container.children.len() as f32;
+                        let column_width = if free_h > 0 {
+                            available_width / free_h as f32
+                        } else {
+                            0.0
+                        };
                         let mut current_x = x;
-                        let mut actual_height = available_height;
                         for child_id in container.children.clone() {
+                            let child_width = match child_id {
+                                Child::Window(_) => column_width,
+                                Child::Container(c) => {
+                                    let ((child_free_h, _), _) = cache[&c];
+                                    column_width * child_free_h as f32
+                                }
+                            };
                             self.distribute_available_space(
                                 child_id,
                                 current_x,
                                 y,
-                                column_width,
+                                child_width,
                                 available_height,
+                                cache,
                             );
-                            match child_id {
-                                Child::Window(window) => {
-                                    let window = self.windows.get(window);
-                                    current_x += window.dimension.width;
-                                    actual_height = actual_height.max(window.dimension.height)
+                            let child_actual_width = match child_id {
+                                Child::Window(w) => {
+                                    let d = self.windows.get(w).dimension;
+                                    actual_height =
+                                        actual_height.max(d.height + 2.0 * self.border_size);
+                                    d.width + 2.0 * self.border_size
                                 }
-                                Child::Container(container) => {
-                                    let container = self.containers.get(container);
-                                    current_x += container.dimension.width;
-                                    actual_height = actual_height.max(container.dimension.height)
+                                Child::Container(c) => {
+                                    let d = self.containers.get(c).dimension;
+                                    actual_height = actual_height.max(d.height);
+                                    d.width
                                 }
-                            }
+                            };
+                            current_x += child_actual_width;
                         }
-                        let container = self.containers.get_mut(container_id);
-                        container.dimension.x = x;
-                        container.dimension.y = y;
-                        container.dimension.width = current_x - x;
-                        container.dimension.height = actual_height;
+                        actual_width = current_x - x;
                     }
                     Direction::Vertical => {
-                        // TODO: filter out fixed height windows/containers in width calculation
-                        let row_height = available_height / container.children.len() as f32;
+                        let row_height = if free_v > 0 {
+                            available_height / free_v as f32
+                        } else {
+                            0.0
+                        };
                         let mut current_y = y;
-                        let mut actual_width = available_width;
                         for child_id in container.children.clone() {
+                            let child_height = match child_id {
+                                Child::Window(_) => row_height,
+                                Child::Container(c) => {
+                                    let ((_, child_free_v), _) = cache[&c];
+                                    row_height * child_free_v as f32
+                                }
+                            };
                             self.distribute_available_space(
                                 child_id,
                                 x,
                                 current_y,
                                 available_width,
-                                row_height,
+                                child_height,
+                                cache,
                             );
                             match child_id {
-                                Child::Window(window) => {
-                                    let window = self.windows.get(window);
-                                    current_y += window.dimension.height;
-                                    actual_width = actual_width.max(window.dimension.width)
+                                Child::Window(w) => {
+                                    let d = self.windows.get(w).dimension;
+                                    current_y += d.height + 2.0 * self.border_size;
+                                    actual_width =
+                                        actual_width.max(d.width + 2.0 * self.border_size);
                                 }
-                                Child::Container(container) => {
-                                    let container = self.containers.get(container);
-                                    current_y += container.dimension.height;
-                                    actual_width = actual_width.max(container.dimension.width)
+                                Child::Container(c) => {
+                                    let d = self.containers.get(c).dimension;
+                                    current_y += d.height;
+                                    actual_width = actual_width.max(d.width);
                                 }
-                            }
+                            };
                         }
-                        let container = self.containers.get_mut(container_id);
-                        container.dimension.x = x;
-                        container.dimension.y = y;
-                        container.dimension.width = actual_width;
-                        container.dimension.height = current_y - y;
+                        actual_height = current_y - y;
                     }
                 }
+
+                let container = self.containers.get_mut(container_id);
+                container.dimension = Dimension {
+                    x,
+                    y,
+                    width: actual_width,
+                    height: actual_height,
+                };
             }
         }
     }
@@ -630,6 +635,74 @@ impl Hub {
                 }
             }
         }
+    }
+
+    fn query_container_structure(
+        &self,
+        container_id: ContainerId,
+        cache: &mut HashMap<ContainerId, ((usize, usize), (f32, f32))>,
+    ) -> ((usize, usize), (f32, f32)) {
+        if let Some(&cached) = cache.get(&container_id) {
+            return cached;
+        }
+
+        let container = self.containers.get(container_id);
+        let mut free_horizontal = 0;
+        let mut free_vertical = 0;
+        let mut fixed_height = 0.0;
+        let mut fixed_width = 0.0;
+
+        for &child in &container.children {
+            match child {
+                Child::Window(_) => {
+                    match container.direction {
+                        Direction::Horizontal => {
+                            free_horizontal += 1;
+                            free_vertical = free_vertical.max(1)
+                        }
+                        Direction::Vertical => {
+                            free_vertical += 1;
+                            free_horizontal = free_horizontal.max(1)
+                        }
+                    }
+                    // TODO: calculate fixed size. + border size as well
+                }
+                Child::Container(child_container_id) => {
+                    let ((child_free_ho, child_free_v), (child_fixed_w, child_fixed_h)) =
+                        self.query_container_structure(child_container_id, cache);
+
+                    match container.direction {
+                        Direction::Horizontal => {
+                            free_horizontal += child_free_ho;
+                            fixed_width += child_fixed_w;
+                            if child_fixed_h > fixed_height {
+                                free_vertical = child_free_v;
+                                fixed_height = child_fixed_h
+                            } else if child_fixed_h == fixed_height {
+                                free_vertical = free_vertical.max(child_free_v)
+                            }
+                        }
+                        Direction::Vertical => {
+                            free_vertical += child_free_v;
+                            fixed_height += child_fixed_h;
+                            if child_fixed_w > fixed_width {
+                                free_horizontal = free_horizontal.max(child_free_ho);
+                                fixed_width = child_fixed_w
+                            } else if child_fixed_w == fixed_width {
+                                free_horizontal = free_horizontal.max(child_free_ho)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let result = (
+            (free_horizontal, free_vertical),
+            (fixed_height, fixed_width),
+        );
+        cache.insert(container_id, result);
+        result
     }
 }
 

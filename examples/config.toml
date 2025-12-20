@@ -1,0 +1,12 @@
+# Border size in pixels (default: 2.0)
+border_size = 5.0
+
+[keymaps]
+"cmd+0" = ["focus workspace 0"]
+"cmd+1" = ["focus workspace 1"]
+"cmd+e" = ["toggle direction"]
+"cmd+p" = ["focus parent"]
+"cmd+h" = ["focus left"]
+"cmd+j" = ["focus down"]
+"cmd+k" = ["focus up"]
+"cmd+l" = ["focus right"]

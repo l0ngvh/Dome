@@ -232,10 +232,11 @@ struct WindowContext {
 impl WindowContext {
     fn new(pids: &[i32], overlay_view: Retained<OverlayView>) -> Self {
         let mut pids_window_ids = HashMap::new();
+        let config = Config::load();
 
         let screen = get_main_screen();
         tracing::info!("Screen {screen:?}");
-        let mut hub = Hub::new(screen);
+        let mut hub = Hub::new(screen, config.border_size);
 
         // Track CFHash -> WindowId and WindowId -> MacWindow mappings
         let mut window_mapping = HashMap::new();
@@ -264,8 +265,6 @@ impl WindowContext {
             }
             pids_window_ids.insert(*pid, window_ids);
         }
-
-        let config = Config::load();
 
         Self {
             hub,
@@ -502,10 +501,9 @@ fn is_standard_window(window: &AXUIElement) -> bool {
         && !is_minimized(window)
 }
 
-#[tracing::instrument]
 unsafe extern "C-unwind" fn event_tap_callback(
     _proxy: CGEventTapProxy,
-    event_type: CGEventType,
+    _event_type: CGEventType,
     event: NonNull<CGEvent>,
     refcon: *mut std::ffi::c_void,
 ) -> *mut CGEvent {
@@ -535,7 +533,6 @@ unsafe extern "C-unwind" fn event_tap_callback(
     let actions = context.config.get_actions(&keymap);
 
     if actions.is_empty() {
-        tracing::trace!("Event tap: {event_type:?} {key:?}");
         return event;
     }
 
@@ -755,15 +752,16 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
             let dim = context.hub.get_window(window_id).dimension();
             // Convert from top-left to bottom-left coordinates for NSView
             let screen = context.hub.screen();
-            let y = screen.height - dim.y - dim.height;
+            let y = screen.y + screen.height - dim.y - dim.height;
+            let border_size = context.config.border_size;
 
             // Draw border around window
             // Top
             rects.push(OverlayRect {
-                x: dim.x - BORDER_WIDTH,
+                x: dim.x - border_size,
                 y: y + dim.height,
-                width: dim.width + BORDER_WIDTH * 2.0,
-                height: BORDER_WIDTH,
+                width: dim.width + border_size * 2.0,
+                height: border_size,
                 r: COLOR.0,
                 g: COLOR.1,
                 b: COLOR.2,
@@ -771,10 +769,10 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
             });
             // Bottom
             rects.push(OverlayRect {
-                x: dim.x - BORDER_WIDTH,
-                y: y - BORDER_WIDTH,
-                width: dim.width + BORDER_WIDTH * 2.0,
-                height: BORDER_WIDTH,
+                x: dim.x - border_size,
+                y: y - border_size,
+                width: dim.width + border_size * 2.0,
+                height: border_size,
                 r: COLOR.0,
                 g: COLOR.1,
                 b: COLOR.2,
@@ -782,9 +780,9 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
             });
             // Left
             rects.push(OverlayRect {
-                x: dim.x - BORDER_WIDTH,
+                x: dim.x - border_size,
                 y,
-                width: BORDER_WIDTH,
+                width: border_size,
                 height: dim.height,
                 r: COLOR.0,
                 g: COLOR.1,
@@ -795,7 +793,7 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
             rects.push(OverlayRect {
                 x: dim.x + dim.width,
                 y,
-                width: BORDER_WIDTH,
+                width: border_size,
                 height: dim.height,
                 r: COLOR.0,
                 g: COLOR.1,
@@ -804,6 +802,63 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
             });
         }
         Child::Container(container_id) => {
+            // If container is focused, draw border inside its dimension
+            let workspace = context.hub.get_workspace(context.hub.current_workspace());
+            if let Some(Child::Container(focused_id)) = workspace.focused()
+                && focused_id == container_id
+            {
+                let dim = context.hub.get_container(container_id).dimension();
+                let screen = context.hub.screen();
+                let y = screen.y + screen.height - dim.y - dim.height;
+                let border_size = context.config.border_size;
+
+                // Draw border inside container dimension
+                // Top
+                rects.push(OverlayRect {
+                    x: dim.x,
+                    y: y + dim.height - border_size,
+                    width: dim.width,
+                    height: border_size,
+                    r: COLOR.0,
+                    g: COLOR.1,
+                    b: COLOR.2,
+                    a: COLOR.3,
+                });
+                // Bottom
+                rects.push(OverlayRect {
+                    x: dim.x,
+                    y,
+                    width: dim.width,
+                    height: border_size,
+                    r: COLOR.0,
+                    g: COLOR.1,
+                    b: COLOR.2,
+                    a: COLOR.3,
+                });
+                // Left
+                rects.push(OverlayRect {
+                    x: dim.x,
+                    y: y + border_size,
+                    width: border_size,
+                    height: dim.height - 2.0 * border_size,
+                    r: COLOR.0,
+                    g: COLOR.1,
+                    b: COLOR.2,
+                    a: COLOR.3,
+                });
+                // Right
+                rects.push(OverlayRect {
+                    x: dim.x + dim.width - border_size,
+                    y: y + border_size,
+                    width: border_size,
+                    height: dim.height - 2.0 * border_size,
+                    r: COLOR.0,
+                    g: COLOR.1,
+                    b: COLOR.2,
+                    a: COLOR.3,
+                });
+            }
+
             for child in context.hub.get_container(container_id).children() {
                 collect_border_rects(context, *child, rects);
             }
