@@ -392,6 +392,18 @@ unsafe extern "C-unwind" fn event_tap_callback(
     } else if key == *"p" && flags.contains(CGEventFlags::MaskCommand) {
         context.hub.focus_parent();
         return std::ptr::null_mut();
+    } else if key == *"h" && flags.contains(CGEventFlags::MaskCommand) {
+        context.hub.focus_left();
+        return std::ptr::null_mut();
+    } else if key == *"j" && flags.contains(CGEventFlags::MaskCommand) {
+        context.hub.focus_down();
+        return std::ptr::null_mut();
+    } else if key == *"k" && flags.contains(CGEventFlags::MaskCommand) {
+        context.hub.focus_up();
+        return std::ptr::null_mut();
+    } else if key == *"l" && flags.contains(CGEventFlags::MaskCommand) {
+        context.hub.focus_right();
+        return std::ptr::null_mut();
     }
     tracing::trace!("Event tap: {event_type:?} {key:?} ",);
     event
