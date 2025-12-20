@@ -6,12 +6,6 @@ use objc2_core_foundation::{
     CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse, kCFBooleanTrue,
 };
 
-#[cfg(all(target_os = "macos", not(test)))]
-pub(crate) type OsWindow = MacWindow;
-
-#[cfg(test)]
-pub(crate) type OsWindow = MockWindow;
-
 #[cfg(target_os = "macos")]
 #[derive(Debug)]
 pub(crate) struct MacWindow(pub(crate) CFRetained<AXUIElement>);
@@ -83,28 +77,5 @@ impl MacWindow {
         } else {
             Ok(())
         }
-    }
-}
-
-#[cfg(test)]
-#[derive(Debug, Default)]
-pub(crate) struct MockWindow {}
-
-#[cfg(test)]
-impl MockWindow {
-    pub(crate) fn set_position(&self, x: f32, y: f32) -> Result<()> {
-        Ok(())
-    }
-
-    pub(crate) fn set_size(&self, width: f32, height: f32) -> Result<()> {
-        Ok(())
-    }
-
-    pub(crate) fn hide(&self) -> Result<()> {
-        Ok(())
-    }
-
-    pub(crate) fn show(&self) -> Result<()> {
-        Ok(())
     }
 }

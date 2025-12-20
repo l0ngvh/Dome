@@ -3,19 +3,16 @@ use std::{cell::RefCell, collections::HashMap, ptr::NonNull, rc::Rc};
 use anyhow::{Context, Result};
 
 use block2::RcBlock;
-use objc2::{MainThreadMarker, rc::Retained, sel};
+use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::{
     NSApplicationActivationPolicy, NSRunningApplication, NSScreen, NSWorkspace,
     NSWorkspaceApplicationKey, NSWorkspaceDidLaunchApplicationNotification,
     NSWorkspaceDidTerminateApplicationNotification,
 };
-use objc2_application_services::{
-    AXError, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXObserver, AXUIElement, AXValue,
-    AXValueType,
-};
+use objc2_application_services::{AXError, AXIsProcessTrustedWithOptions, AXObserver, AXUIElement};
 use objc2_core_foundation::{
-    CFArray, CFHash, CFMachPort, CFRetained, CFRunLoop, CFString, CFType, CGPoint, CGSize,
-    kCFAllocatorDefault, kCFBooleanFalse, kCFBooleanTrue, kCFRunLoopDefaultMode,
+    CFArray, CFHash, CFMachPort, CFRetained, CFRunLoop, CFString, CFType, kCFAllocatorDefault,
+    kCFBooleanTrue, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
@@ -24,12 +21,13 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSNotification, NSOperationQueue};
 
 use crate::window::MacWindow;
-use crate::workspace::{Hub, Screen, WindowId};
+use crate::workspace::{Child, Hub, Screen, WindowId, WorkspaceId};
 
 pub struct WindowContext {
     pub hub: Hub,
     pub pid_to_window_ids: Rc<RefCell<HashMap<i32, Vec<usize>>>>,
     pub window_mapping: Rc<RefCell<HashMap<usize, WindowId>>>,
+    pub id_to_window: Rc<RefCell<HashMap<WindowId, MacWindow>>>,
 }
 
 #[derive(Debug)]
@@ -83,25 +81,36 @@ impl WindowManager {
         let screen = get_main_screen();
         let mut hub = Hub::new(screen);
 
-        // Track CFHash -> NodeId mapping for window deletion
+        // Track CFHash -> WindowId and WindowId -> MacWindow mappings
         let mut window_mapping = HashMap::new();
+        let mut id_to_window = HashMap::new();
+        let mut window_ids = Vec::new();
         for window in all_windows.iter() {
-            let window_id = hub.insert_window(MacWindow(window.clone()));
+            let window_id = hub.insert_window();
             let cf_hash = CFHash(Some(window));
             window_mapping.insert(cf_hash, window_id);
+            id_to_window.insert(window_id, MacWindow(window.clone()));
+            window_ids.push(window_id);
         }
 
         let context = Box::new(WindowContext {
             hub,
             pid_to_window_ids: Rc::new(RefCell::new(pids_window_ids)),
             window_mapping: Rc::new(RefCell::new(window_mapping)),
+            id_to_window: Rc::new(RefCell::new(id_to_window)),
         });
 
         let context_ptr = Box::into_raw(context);
 
-        listen_to_keyboard(context_ptr);
+        // Render all windows after initialization
+        let workspace_id = unsafe { (*context_ptr).hub.current_workspace() };
+        if let Err(e) = render_workspace(unsafe { &*context_ptr }, workspace_id) {
+            tracing::warn!("Failed to render workspace after initialization: {e:#}");
+        }
 
-        let mut observers = Vec::new();
+        listen_to_keyboard(context_ptr)?;
+
+        let mut observers = HashMap::new();
         for pid in pids {
             let observer = match create_observer(pid, context_ptr) {
                 Ok(observer) => observer,
@@ -110,7 +119,7 @@ impl WindowManager {
                     continue;
                 }
             };
-            observers.push((pid, observer));
+            observers.insert(pid, observer);
         }
 
         let apps = Rc::new(RefCell::new(observers));
@@ -176,6 +185,7 @@ fn create_observer(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetain
     run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
 
     let app = unsafe { AXUIElement::new_application(pid) };
+
     let res = unsafe {
         observer.add_notification(
             &app,
@@ -183,30 +193,50 @@ fn create_observer(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetain
             context_ptr as *mut std::ffi::c_void,
         )
     };
+    if res != AXError::Success {
+        return Err(anyhow::anyhow!(
+            "Failed to add AXWindowCreated notification: {res:?}"
+        ));
+    }
 
-    unsafe {
+    let res = unsafe {
         observer.add_notification(
             &app,
             &CFString::from_static_str("AXWindowMiniaturized"),
             context_ptr as *mut std::ffi::c_void,
         )
     };
+    if res != AXError::Success {
+        return Err(anyhow::anyhow!(
+            "Failed to add AXWindowMiniaturized notification: {res:?}"
+        ));
+    }
 
-    unsafe {
+    let res = unsafe {
         observer.add_notification(
             &app,
             &CFString::from_static_str("AXResized"),
             context_ptr as *mut std::ffi::c_void,
         )
     };
+    if res != AXError::Success {
+        return Err(anyhow::anyhow!(
+            "Failed to add AXResized notification: {res:?}"
+        ));
+    }
 
-    unsafe {
+    let res = unsafe {
         observer.add_notification(
             &app,
             &CFString::from_static_str("AXUIElementDestroyed"),
             context_ptr as *mut std::ffi::c_void,
         )
     };
+    if res != AXError::Success {
+        return Err(anyhow::anyhow!(
+            "Failed to add AXUIElementDestroyed notification: {res:?}"
+        ));
+    }
 
     Ok(observer)
 }
@@ -225,12 +255,18 @@ unsafe extern "C-unwind" fn observer_callback(
     tracing::info!("AX Notification: {notification} {element:?}");
     if notification.to_string() == *"AXWindowCreated" && is_standard_window(&element) {
         let window = MacWindow(element.clone());
-        let window_id = context.hub.insert_window(window);
+        let window_id = context.hub.insert_window();
         let cf_hash = CFHash(Some(&element));
         context
             .window_mapping
             .borrow_mut()
             .insert(cf_hash, window_id);
+        context.id_to_window.borrow_mut().insert(window_id, window);
+        // Render the entire workspace since insert_window may have resized other windows
+        let workspace_id = context.hub.current_workspace();
+        if let Err(e) = render_workspace(context, workspace_id) {
+            tracing::warn!("Failed to render workspace after window insert: {e:#}");
+        }
     } else if notification.to_string() == *"AXUIElementDestroyed" {
         let cf_hash = CFHash(Some(&element));
         if let Some(window_id) = context.window_mapping.borrow_mut().remove(&cf_hash) {
@@ -336,10 +372,14 @@ unsafe extern "C-unwind" fn event_tap_callback(
     let slice = &buffer[..actual_len as usize];
     let key = String::from_utf16(slice).unwrap();
     if key == *"0" && flags.contains(CGEventFlags::MaskCommand) {
-        context.hub.focus_workspace(0);
+        if let Err(e) = focus_workspace(context, 0) {
+            tracing::warn!("Failed to focus workspace 0: {e:#}");
+        }
         return std::ptr::null_mut();
     } else if key == *"1" && flags.contains(CGEventFlags::MaskCommand) {
-        context.hub.focus_workspace(1);
+        if let Err(e) = focus_workspace(context, 1) {
+            tracing::warn!("Failed to focus workspace 1: {e:#}");
+        }
         return std::ptr::null_mut();
     }
     tracing::trace!("Event tap: {event_type:?} {key:?} ",);
@@ -348,7 +388,7 @@ unsafe extern "C-unwind" fn event_tap_callback(
 
 fn listen_to_launching_app(
     context_ptr: *mut WindowContext,
-    apps: Rc<RefCell<Vec<(i32, CFRetained<AXObserver>)>>>,
+    apps: Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>,
 ) {
     let notification_center = NSWorkspace::sharedWorkspace().notificationCenter();
     unsafe {
@@ -383,21 +423,30 @@ fn listen_to_launching_app(
                 let mut window_ids = Vec::new();
                 for window in windows {
                     if is_standard_window(&window) {
-                        let window_id = context.hub.insert_window(MacWindow(window.clone()));
+                        let window_id = context.hub.insert_window();
                         let cf_hash = CFHash(Some(&window));
                         context
                             .window_mapping
                             .borrow_mut()
                             .insert(cf_hash, window_id);
+                        context
+                            .id_to_window
+                            .borrow_mut()
+                            .insert(window_id, MacWindow(window.clone()));
                         window_ids.push(cf_hash);
                     }
+                }
+                // Render the entire workspace after inserting all windows
+                let workspace_id = context.hub.current_workspace();
+                if let Err(e) = render_workspace(context, workspace_id) {
+                    tracing::warn!("Failed to render workspace after app launch: {e:#}");
                 }
                 context
                     .pid_to_window_ids
                     .borrow_mut()
                     .insert(pid, window_ids);
 
-                apps.borrow_mut().push((pid, observer));
+                apps.borrow_mut().insert(pid, observer);
             }),
         );
     };
@@ -405,7 +454,7 @@ fn listen_to_launching_app(
 
 fn listen_to_terminating_app(
     context_ptr: *mut WindowContext,
-    apps: Rc<RefCell<Vec<(i32, CFRetained<AXObserver>)>>>,
+    apps: Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>,
 ) {
     let notification_center = NSWorkspace::sharedWorkspace().notificationCenter();
     unsafe {
@@ -419,8 +468,7 @@ fn listen_to_terminating_app(
                     return;
                 };
                 tracing::trace!("Received notification for terminating app with pid: {pid:?}",);
-                // How many apps are we talking about, 100, 1000?
-                apps.borrow_mut().retain(|(p, _)| *p != pid);
+                apps.borrow_mut().remove(&pid);
                 let context = &mut *context_ptr;
                 if let Some(window_ids) = context.pid_to_window_ids.borrow_mut().remove(&pid) {
                     tracing::trace!("Removing window {window_ids:?}");
@@ -472,5 +520,80 @@ fn listen_to_keyboard(context_ptr: *mut WindowContext) -> Result<()> {
         ));
     };
     run_loop.add_source(Some(&run_loop_source), unsafe { kCFRunLoopDefaultMode });
+    Ok(())
+}
+
+fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Result<()> {
+    if let Some(root) = context.hub.get_workspace(workspace_id).root() {
+        render_child(context, root)?;
+    }
+    Ok(())
+}
+
+fn render_child(context: &WindowContext, child: Child) -> Result<()> {
+    match child {
+        Child::Window(window_id) => {
+            if let Some(os_window) = context.id_to_window.borrow().get(&window_id) {
+                let window = context.hub.get_window(window_id);
+                os_window.set_position(window.x(), window.y())?;
+                os_window.set_size(window.width(), window.height())?;
+            }
+            Ok(())
+        }
+        Child::Container(container_id) => {
+            for child in context.hub.get_container(container_id).children() {
+                render_child(context, *child)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
+    let old_workspace = context.hub.current_workspace();
+    context.hub.focus_workspace(name);
+    let new_workspace = context.hub.current_workspace();
+
+    if old_workspace != new_workspace {
+        if let Some(root) = context.hub.get_workspace(old_workspace).root() {
+            hide_child(context, root)?;
+        }
+
+        if let Some(root) = context.hub.get_workspace(new_workspace).root() {
+            show_child(context, root)?;
+        }
+    }
+    Ok(())
+}
+
+fn hide_child(context: &WindowContext, child: Child) -> Result<()> {
+    match child {
+        Child::Window(window_id) => {
+            if let Some(window) = context.id_to_window.borrow().get(&window_id) {
+                window.hide()?;
+            }
+        }
+        Child::Container(container_id) => {
+            for child in context.hub.get_container(container_id).children() {
+                hide_child(context, *child)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn show_child(context: &WindowContext, child: Child) -> Result<()> {
+    match child {
+        Child::Window(window_id) => {
+            if let Some(window) = context.id_to_window.borrow().get(&window_id) {
+                window.show()?;
+            }
+        }
+        Child::Container(container_id) => {
+            for child in context.hub.get_container(container_id).children() {
+                show_child(context, *child)?;
+            }
+        }
+    }
     Ok(())
 }
