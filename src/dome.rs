@@ -744,7 +744,6 @@ fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Resul
 }
 
 fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<OverlayRect>) {
-    const BORDER_WIDTH: f32 = 4.0;
     const COLOR: (f32, f32, f32, f32) = (0.4, 0.6, 1.0, 1.0); // Light blue
 
     match child {
@@ -872,6 +871,7 @@ fn render_child(context: &WindowContext, child: Child) -> Result<()> {
             if let Some(os_window) = context.id_to_window.borrow().get(&window_id) {
                 let window = context.hub.get_window(window_id);
                 let dim = window.dimension();
+                os_window.show()?;
                 os_window.set_position(dim.x, dim.y)?;
                 os_window.set_size(dim.width, dim.height)?;
             }
@@ -890,17 +890,15 @@ fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
     let old_workspace = context.hub.current_workspace();
     context.hub.focus_workspace(name);
     let new_workspace = context.hub.current_workspace();
-
-    if old_workspace != new_workspace {
-        if let Some(root) = context.hub.get_workspace(old_workspace).root() {
-            hide_child(context, root)?;
-        }
-
-        if let Some(root) = context.hub.get_workspace(new_workspace).root() {
-            show_child(context, root)?;
-        }
+    if old_workspace == new_workspace {
+        return Ok(());
     }
-    Ok(())
+
+    if let Some(root) = context.hub.get_workspace(old_workspace).root() {
+        hide_child(context, root)?;
+    }
+
+    render_workspace(context, new_workspace)
 }
 
 fn hide_child(context: &WindowContext, child: Child) -> Result<()> {
@@ -913,22 +911,6 @@ fn hide_child(context: &WindowContext, child: Child) -> Result<()> {
         Child::Container(container_id) => {
             for child in context.hub.get_container(container_id).children() {
                 hide_child(context, *child)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn show_child(context: &WindowContext, child: Child) -> Result<()> {
-    match child {
-        Child::Window(window_id) => {
-            if let Some(window) = context.id_to_window.borrow().get(&window_id) {
-                window.show()?;
-            }
-        }
-        Child::Container(container_id) => {
-            for child in context.hub.get_container(container_id).children() {
-                show_child(context, *child)?;
             }
         }
     }
