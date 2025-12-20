@@ -1,4 +1,9 @@
-use std::{cell::RefCell, collections::HashMap, ptr::NonNull, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    ptr::NonNull,
+    rc::Rc,
+};
 
 use anyhow::{Context, Result};
 
@@ -20,6 +25,7 @@ use objc2_core_graphics::{
 };
 use objc2_foundation::{NSNotification, NSOperationQueue};
 
+use crate::config::{Action, Config, Keymap, Modifier, Target, ToggleTarget};
 use crate::window::MacWindow;
 use crate::workspace::{Child, Dimension, Hub, WindowId, WorkspaceId};
 
@@ -28,6 +34,7 @@ pub struct WindowContext {
     pub pid_to_window_ids: Rc<RefCell<HashMap<i32, Vec<usize>>>>,
     pub window_mapping: Rc<RefCell<HashMap<usize, WindowId>>>,
     pub id_to_window: Rc<RefCell<HashMap<WindowId, MacWindow>>>,
+    pub config: Config,
 }
 
 #[derive(Debug)]
@@ -93,11 +100,14 @@ impl WindowManager {
             window_ids.push(window_id);
         }
 
+        let config = Config::load();
+
         let context = Box::new(WindowContext {
             hub,
             pid_to_window_ids: Rc::new(RefCell::new(pids_window_ids)),
             window_mapping: Rc::new(RefCell::new(window_mapping)),
             id_to_window: Rc::new(RefCell::new(id_to_window)),
+            config,
         });
 
         let context_ptr = Box::into_raw(context);
@@ -357,15 +367,45 @@ unsafe extern "C-unwind" fn event_tap_callback(
     let event = event.as_ptr();
     let flags = CGEvent::flags(Some(unsafe { &*event }));
     let context = unsafe { &mut *(refcon as *mut WindowContext) };
-    // Pick a reasonably large buffer
+    let key = get_key_from_event(event);
+
+    let mut modifiers = HashSet::new();
+    if flags.contains(CGEventFlags::MaskCommand) {
+        modifiers.insert(Modifier::Cmd);
+    }
+    if flags.contains(CGEventFlags::MaskShift) {
+        modifiers.insert(Modifier::Shift);
+    }
+    if flags.contains(CGEventFlags::MaskAlternate) {
+        modifiers.insert(Modifier::Alt);
+    }
+    if flags.contains(CGEventFlags::MaskControl) {
+        modifiers.insert(Modifier::Ctrl);
+    }
+
+    let keymap = Keymap {
+        key: key.clone(),
+        modifiers,
+    };
+    let actions = context.config.get_actions(&keymap);
+
+    if actions.is_empty() {
+        tracing::trace!("Event tap: {event_type:?} {key:?}");
+        return event;
+    }
+
+    for action in actions {
+        if let Err(e) = execute_action(context, &action) {
+            tracing::warn!("Failed to execute action: {e:#}");
+        }
+    }
+    std::ptr::null_mut()
+}
+
+fn get_key_from_event(event: *mut CGEvent) -> String {
     let max_len: usize = 256;
-
-    // Create a UTF-16 buffer initialized to 0
     let mut buffer: Vec<u16> = vec![0; max_len];
-
-    // Storage for actual number of UTF-16 code units
     let mut actual_len: std::ffi::c_ulong = 0;
-
     unsafe {
         CGEvent::keyboard_get_unicode_string(
             Some(&*event),
@@ -374,39 +414,24 @@ unsafe extern "C-unwind" fn event_tap_callback(
             buffer.as_mut_ptr(),
         )
     };
-    let slice = &buffer[..actual_len as usize];
-    let key = String::from_utf16(slice).unwrap();
-    if key == *"0" && flags.contains(CGEventFlags::MaskCommand) {
-        if let Err(e) = focus_workspace(context, 0) {
-            tracing::warn!("Failed to focus workspace 0: {e:#}");
-        }
-        return std::ptr::null_mut();
-    } else if key == *"1" && flags.contains(CGEventFlags::MaskCommand) {
-        if let Err(e) = focus_workspace(context, 1) {
-            tracing::warn!("Failed to focus workspace 1: {e:#}");
-        }
-        return std::ptr::null_mut();
-    } else if key == *"e" && flags.contains(CGEventFlags::MaskCommand) {
-        context.hub.toggle_new_window_direction();
-        return std::ptr::null_mut();
-    } else if key == *"p" && flags.contains(CGEventFlags::MaskCommand) {
-        context.hub.focus_parent();
-        return std::ptr::null_mut();
-    } else if key == *"h" && flags.contains(CGEventFlags::MaskCommand) {
-        context.hub.focus_left();
-        return std::ptr::null_mut();
-    } else if key == *"j" && flags.contains(CGEventFlags::MaskCommand) {
-        context.hub.focus_down();
-        return std::ptr::null_mut();
-    } else if key == *"k" && flags.contains(CGEventFlags::MaskCommand) {
-        context.hub.focus_up();
-        return std::ptr::null_mut();
-    } else if key == *"l" && flags.contains(CGEventFlags::MaskCommand) {
-        context.hub.focus_right();
-        return std::ptr::null_mut();
+    String::from_utf16(&buffer[..actual_len as usize]).unwrap()
+}
+
+fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
+    match action {
+        Action::Focus(target) => match target {
+            Target::Up => context.hub.focus_up(),
+            Target::Down => context.hub.focus_down(),
+            Target::Left => context.hub.focus_left(),
+            Target::Right => context.hub.focus_right(),
+            Target::Parent => context.hub.focus_parent(),
+            Target::Workspace(n) => return focus_workspace(context, *n),
+        },
+        Action::Toggle(target) => match target {
+            ToggleTarget::Direction => context.hub.toggle_new_window_direction(),
+        },
     }
-    tracing::trace!("Event tap: {event_type:?} {key:?} ",);
-    event
+    Ok(())
 }
 
 fn listen_to_launching_app(

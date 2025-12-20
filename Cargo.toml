@@ -8,6 +8,7 @@ anyhow = "1.0.100"
 backtrace = "0.3.76"
 block2 = "0.6.2"
 objc2 = "0.6.3"
+# TODO: use only necessary features to lower build time
 objc2-app-kit = "0.3.2"
 objc2-application-services = "0.3.2"
 objc2-core-foundation = "0.3.2"
@@ -16,6 +17,8 @@ objc2-foundation = "0.3.2"
 tracing = "0.1.41"
 tracing-error = "0.2.1"
 tracing-subscriber = "0.3.20"
+toml = "0.9.8"
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 insta = "1.44.3"
