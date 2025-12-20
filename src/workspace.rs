@@ -2,14 +2,65 @@ use anyhow::Result;
 
 use crate::window::OsWindow;
 
-type NodeId = usize;
+trait NodeId: Copy {
+    fn new(id: usize) -> Self;
+    fn get(self) -> usize;
+}
 
-#[derive(Debug)]
-enum Node {
-    Workspace(Workspace),
-    Container(Container),
-    Window(Window),
-    Tombstone,
+trait Node {
+    type Id: NodeId;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WindowId(usize);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ContainerId(usize);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WorkspaceId(usize);
+
+impl std::fmt::Display for WindowId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "WindowId({})", self.0)
+    }
+}
+
+impl std::fmt::Display for ContainerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ContainerId({})", self.0)
+    }
+}
+
+impl std::fmt::Display for WorkspaceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "WorkspaceId({})", self.0)
+    }
+}
+
+impl NodeId for WindowId {
+    fn new(id: usize) -> Self {
+        Self(id)
+    }
+    fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl NodeId for ContainerId {
+    fn new(id: usize) -> Self {
+        Self(id)
+    }
+    fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl NodeId for WorkspaceId {
+    fn new(id: usize) -> Self {
+        Self(id)
+    }
+    fn get(self) -> usize {
+        self.0
+    }
 }
 
 #[derive(Debug)]
@@ -21,6 +72,10 @@ struct Container {
     x: f32,
     y: f32,
     direction: Direction,
+}
+
+impl Node for Container {
+    type Id = ContainerId;
 }
 
 impl Container {
@@ -35,6 +90,24 @@ impl Container {
             direction: Direction::Horizontal,
         }
     }
+
+    fn push_window(&mut self, window_id: WindowId) {
+        self.children.push(Child::Window(window_id));
+    }
+
+    fn push_container(&mut self, container_id: ContainerId) {
+        self.children.push(Child::Container(container_id));
+    }
+
+    fn remove_window(&mut self, window_id: WindowId) {
+        self.children
+            .retain(|child| !child.is_window_and(|id| id == window_id));
+    }
+
+    fn remove_container(&mut self, container_id: ContainerId) {
+        self.children
+            .retain(|child| !child.is_container_and(|id| id == container_id));
+    }
 }
 
 #[derive(Debug)]
@@ -45,8 +118,8 @@ enum Direction {
 
 #[derive(Debug, Clone, Copy)]
 enum Parent {
-    Container(NodeId),
-    Workspace(NodeId),
+    Container(ContainerId),
+    Workspace(WorkspaceId),
 }
 
 #[derive(Debug)]
@@ -57,6 +130,10 @@ struct Window {
     height: f32,
     x: f32,
     y: f32,
+}
+
+impl Node for Window {
+    type Id = WindowId;
 }
 
 impl Window {
@@ -102,13 +179,21 @@ pub(crate) struct Screen {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Child {
-    Window(NodeId),
-    Container(NodeId),
+    Window(WindowId),
+    Container(ContainerId),
 }
 
 impl Child {
-    fn is_window_and(&self, f: impl Fn(NodeId) -> bool) -> bool {
+    fn is_window_and(&self, f: impl Fn(WindowId) -> bool) -> bool {
         if let Child::Window(id) = self {
+            f(*id)
+        } else {
+            false
+        }
+    }
+
+    fn is_container_and(&self, f: impl Fn(ContainerId) -> bool) -> bool {
+        if let Child::Container(id) = self {
             f(*id)
         } else {
             false
@@ -125,6 +210,10 @@ struct Workspace {
     current: Option<Child>,
 }
 
+impl Node for Workspace {
+    type Id = WorkspaceId;
+}
+
 impl Workspace {
     fn new(screen: Screen, name: usize) -> Self {
         Self {
@@ -139,7 +228,7 @@ impl Workspace {
 #[derive(Debug)]
 pub(crate) struct Hub {
     screen: Screen,
-    current: usize,
+    current: WorkspaceId,
 
     workspaces: Allocator<Workspace>,
     windows: Allocator<Window>,
@@ -154,7 +243,7 @@ impl Hub {
         let default_workspace_name = 0;
         let initial_workspace =
             workspace_allocator.allocate(Workspace::new(screen, default_workspace_name));
-        
+
         Self {
             current: initial_workspace,
             workspaces: workspace_allocator,
@@ -188,7 +277,7 @@ impl Hub {
         self.current = workspace_id
     }
 
-    pub(crate) fn insert_window(&mut self, os_window: OsWindow) -> NodeId {
+    pub(crate) fn insert_window(&mut self, os_window: OsWindow) -> WindowId {
         let focused_node = self
             .workspaces
             .get(self.current)
@@ -202,10 +291,7 @@ impl Hub {
                     let window_id = self
                         .windows
                         .allocate(Window::new(os_window, Parent::Container(container_id)));
-                    self.containers
-                        .get_mut(container_id)
-                        .children
-                        .push(Child::Window(window_id));
+                    self.containers.get_mut(container_id).push_window(window_id);
                     self.balance_container(container_id);
                     window_id
                 }
@@ -222,8 +308,7 @@ impl Hub {
                                 Parent::Container(container_id);
                             self.containers
                                 .get_mut(container_id)
-                                .children
-                                .push(Child::Window(root_window));
+                                .push_window(root_window);
                             self.workspaces.get_mut(workspace_id).root =
                                 Some(Child::Container(container_id));
                             let screen = self.workspaces.get(workspace_id).screen;
@@ -239,10 +324,7 @@ impl Hub {
                     let window_id = self
                         .windows
                         .allocate(Window::new(os_window, Parent::Container(container_id)));
-                    self.containers
-                        .get_mut(container_id)
-                        .children
-                        .push(Child::Window(window_id));
+                    self.containers.get_mut(container_id).push_window(window_id);
                     self.balance_container(container_id);
                     window_id
                 }
@@ -265,15 +347,12 @@ impl Hub {
         window_id
     }
 
-    pub(crate) fn delete_window(&mut self, id: NodeId) {
+    pub(crate) fn delete_window(&mut self, id: WindowId) {
         let parent = self.windows.get(id).parent;
         self.windows.delete(id);
         match parent {
             Parent::Container(container_id) => {
-                self.containers
-                    .get_mut(container_id)
-                    .children
-                    .retain(|child| !child.is_window_and(|child| id == child));
+                self.containers.get_mut(container_id).remove_window(id);
                 // Balance, containers must have at least 2 children
                 if self.containers.get(container_id).children.len() == 1 {
                     let parent = self.containers.get(container_id).parent;
@@ -283,6 +362,7 @@ impl Hub {
                         .children
                         .pop()
                         .unwrap();
+                    // FIXME: replace parent's children with the new child as well
                     match child {
                         Child::Window(id) => self.windows.get_mut(id).parent = parent,
 
@@ -290,11 +370,17 @@ impl Hub {
                     }
                     self.containers.delete(container_id);
                     match parent {
-                        Parent::Container(container) => self.balance_container(container),
+                        Parent::Container(parent) => {
+                            self.containers
+                                .get_mut(parent)
+                                .remove_container(container_id);
+                            self.balance_container(parent);
+                        }
                         Parent::Workspace(workspace) => {
                             let screen = self.workspaces.get(workspace).screen;
                             self.set_size(child, screen.width, screen.height);
                             self.set_position(child, screen.x, screen.y);
+                            self.workspaces.get_mut(workspace).root = Some(child);
                         }
                     }
                 } else {
@@ -314,7 +400,7 @@ impl Hub {
         self.workspaces.get_mut(self.current).current = Some(child)
     }
 
-    fn balance_container(&mut self, container: NodeId) {
+    fn balance_container(&mut self, container: ContainerId) {
         let container = self.containers.get(container);
         let nodes = &container.children;
         let node_count = nodes.len() as f32;
@@ -414,7 +500,7 @@ impl Hub {
             Child::Window(window_id) => self.windows.get_mut(window_id).hide(),
             Child::Container(container_id) => {
                 for child in self.containers.get(container_id).children.clone() {
-                    self.hide(child);
+                    self.hide(child)?;
                 }
                 Ok(())
             }
@@ -427,7 +513,7 @@ impl Hub {
             Child::Window(window_id) => self.windows.get_mut(window_id).show(),
             Child::Container(container_id) => {
                 for child in self.containers.get(container_id).children.clone() {
-                    self.show(child);
+                    self.show(child)?;
                 }
                 Ok(())
             }
@@ -436,12 +522,12 @@ impl Hub {
 }
 
 #[derive(Debug)]
-struct Allocator<T> {
+struct Allocator<T: Node> {
     storage: Vec<Option<T>>,
-    free_list: Vec<NodeId>,
+    free_list: Vec<usize>,
 }
 
-impl<T: std::fmt::Debug> Allocator<T> {
+impl<T: std::fmt::Debug + Node> Allocator<T> {
     fn new() -> Self {
         Self {
             storage: Vec::new(),
@@ -449,48 +535,46 @@ impl<T: std::fmt::Debug> Allocator<T> {
         }
     }
 
-    fn allocate(&mut self, node: T) -> NodeId {
+    fn allocate(&mut self, node: T) -> T::Id {
         if let Some(free) = self.free_list.pop() {
             self.storage[free] = Some(node);
-            free
+            T::Id::new(free)
         } else {
             let id = self.storage.len();
             self.storage.push(Some(node));
-            id
+            T::Id::new(id)
         }
     }
 
-    fn delete(&mut self, id: NodeId) {
-        if let Some(slot) = self.storage.get_mut(id) {
+    fn delete(&mut self, id: T::Id) {
+        let idx = id.get();
+        if let Some(slot) = self.storage.get_mut(idx) {
             *slot = None;
-            self.free_list.push(id);
+            self.free_list.push(idx);
         }
     }
 
-    fn get(&self, id: NodeId) -> &T {
+    fn get(&self, id: T::Id) -> &T {
         self.storage
-            .get(id)
-            // Safety: The assumption is that all nodes must be valid. If any of these happens it's
-            // undefined behavior
-            .expect("Node not found {id}")
+            .get(id.get())
+            .expect("Node not found")
             .as_ref()
-            .expect("Node was deleted {id}")
+            .expect("Node was deleted")
     }
 
-    fn get_mut(&mut self, id: NodeId) -> &mut T {
+    fn get_mut(&mut self, id: T::Id) -> &mut T {
         self.storage
-            .get_mut(id)
-            // Safety: The assumption is that all nodes must be valid. If any of these happens it's
-            // undefined behavior
-            .expect("Node not found {id}")
+            .get_mut(id.get())
+            .expect("Node not found")
             .as_mut()
-            .expect("Node was deleted {id}")
+            .expect("Node was deleted")
     }
 
-    fn find(&self, f: impl Fn(&T) -> bool) -> Option<NodeId> {
+    fn find(&self, f: impl Fn(&T) -> bool) -> Option<T::Id> {
         self.storage
             .iter()
             .position(|node| node.as_ref().is_some_and(&f))
+            .map(T::Id::new)
     }
 }
 
@@ -498,7 +582,7 @@ impl<T: std::fmt::Debug> Allocator<T> {
 mod tests {
     use crate::{
         window::MockWindow,
-        workspace::{Child, Hub, Screen, Workspace},
+        workspace::{Child, Hub, NodeId, Parent, Screen, Workspace},
     };
 
     #[test]
@@ -574,30 +658,54 @@ mod tests {
 
     #[test]
     fn delete_window_removes_from_container() {
-        let screen = Screen { x: 0.0, y: 0.0, width: 12.0, height: 10.0 };
+        let screen = Screen {
+            x: 0.0,
+            y: 0.0,
+            width: 12.0,
+            height: 10.0,
+        };
         let mut hub = Hub::new(screen);
-        
+
         let w1 = hub.insert_window(MockWindow::default());
         let w2 = hub.insert_window(MockWindow::default());
         let w3 = hub.insert_window(MockWindow::default());
-        
+
         hub.delete_window(w2);
-        
-        // Verify w2 is deleted
-        assert!(hub.windows.storage.get(w2).unwrap().is_none());
-        
-        // Verify w1 and w3 still exist and are resized correctly (12.0 / 2 = 6.0)
+
+        assert!(hub.windows.storage.get(w2.get()).unwrap().is_none());
+
         let window1 = hub.windows.get(w1);
         assert_eq!(window1.width, 6.0);
         assert_eq!(window1.height, 10.0);
         assert_eq!(window1.x, 0.0);
         assert_eq!(window1.y, 0.0);
-        
+
         let window3 = hub.windows.get(w3);
         assert_eq!(window3.width, 6.0);
         assert_eq!(window3.height, 10.0);
         assert_eq!(window3.x, 6.0);
         assert_eq!(window3.y, 0.0);
+    }
+
+    #[test]
+    fn delete_window_removes_parent_container() {
+        let screen = Screen {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        let w1 = hub.insert_window(MockWindow::default());
+        let w2 = hub.insert_window(MockWindow::default());
+
+        assert!(matches!(hub.windows.get(w1).parent, Parent::Container(_)));
+
+        hub.delete_window(w2);
+
+        assert_eq!(get_workspace(&hub, 0).root, Some(Child::Window(w1)));
+        assert!(matches!(hub.windows.get(w1).parent, Parent::Workspace(_)));
     }
 
     // TODO: test unfocus then insert new window

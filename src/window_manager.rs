@@ -24,12 +24,12 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSNotification, NSOperationQueue};
 
 use crate::window::MacWindow;
-use crate::workspace::{Hub, Screen};
+use crate::workspace::{Hub, Screen, WindowId};
 
 pub struct WindowContext {
     pub hub: Hub,
     pub pid_to_window_ids: Rc<RefCell<HashMap<i32, Vec<usize>>>>,
-    pub window_mapping: Rc<RefCell<HashMap<usize, usize>>>,
+    pub window_mapping: Rc<RefCell<HashMap<usize, WindowId>>>,
 }
 
 #[derive(Debug)]
