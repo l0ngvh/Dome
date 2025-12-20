@@ -45,6 +45,7 @@ impl Hub {
         self.current
     }
 
+    #[cfg(not(test))]
     pub(crate) fn get_workspace(&self, id: WorkspaceId) -> &Workspace {
         self.workspaces.get(id)
     }
@@ -420,6 +421,15 @@ pub(crate) enum Child {
     Container(ContainerId),
 }
 
+impl std::fmt::Display for Child {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Child::Window(id) => write!(f, "{}", id),
+            Child::Container(id) => write!(f, "{}", id),
+        }
+    }
+}
+
 impl Child {
     fn is_window_and(&self, f: impl Fn(WindowId) -> bool) -> bool {
         if let Child::Window(id) = self {
@@ -558,36 +568,8 @@ impl NodeId for WorkspaceId {
 
 #[cfg(test)]
 mod tests {
-    use crate::workspace::{Child, Hub, NodeId, Parent, Screen, Workspace};
-
-    #[test]
-    fn focus_default_workspace() {
-        let screen = Screen {
-            x: 0.0,
-            y: 0.0,
-            width: 0.0,
-            height: 0.0,
-        };
-        let hub = Hub::new(screen);
-        assert_eq!(hub.current, hub.workspaces.find(|w| w.name == 0).unwrap());
-    }
-
-    #[test]
-    fn focus_inserted_window() {
-        let screen = Screen {
-            x: 0.0,
-            y: 0.0,
-            width: 10.0,
-            height: 10.0,
-        };
-        let mut hub = Hub::new(screen);
-        let window_id = hub.insert_window();
-        assert_eq!(get_workspace(&hub, 0).root, Some(Child::Window(window_id)));
-        assert_eq!(
-            get_workspace(&hub, 0).current,
-            Some(Child::Window(window_id))
-        );
-    }
+    use crate::workspace::{Child, Hub, Screen};
+    use insta::assert_snapshot;
 
     #[test]
     fn initial_window_cover_full_screen() {
@@ -598,12 +580,14 @@ mod tests {
             height: 10.0,
         };
         let mut hub = Hub::new(screen);
-        let window_id = hub.insert_window();
-        let window = hub.windows.get(window_id);
-        assert_eq!(window.width, 20.0);
-        assert_eq!(window.height, 10.0);
-        assert_eq!(window.x, 2.0);
-        assert_eq!(window.y, 1.0);
+        hub.insert_window();
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=2 y=1 w=20 h=10),
+          Workspace(id=0, name=0, focused=WindowId(0),
+            Window(id=0, x=2, y=1, w=20, h=10)
+          )
+        )
+        ");
     }
 
     #[test]
@@ -616,19 +600,22 @@ mod tests {
         };
         let mut hub = Hub::new(screen);
 
-        let mut window_ids = Vec::new();
         for _ in 0..4 {
-            window_ids.push(hub.insert_window());
+            hub.insert_window();
         }
 
-        // Each window should have 1/4 of the screen width (20.0 / 4 = 5.0)
-        for (i, &window_id) in window_ids.iter().enumerate() {
-            let window = hub.windows.get(window_id);
-            assert_eq!(window.width, 5.0);
-            assert_eq!(window.height, 10.0);
-            assert_eq!(window.x, 2.0 + (i as f32 * 5.0));
-            assert_eq!(window.y, 1.0);
-        }
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=2 y=1 w=20 h=10),
+          Workspace(id=0, name=0, focused=WindowId(3),
+            Container(id=0, x=2, y=1, w=20, h=10,
+              Window(id=0, x=2, y=1, w=5, h=10)
+              Window(id=1, x=7, y=1, w=5, h=10)
+              Window(id=2, x=12, y=1, w=5, h=10)
+              Window(id=3, x=17, y=1, w=5, h=10)
+            )
+          )
+        )
+        ");
     }
 
     #[test]
@@ -641,25 +628,22 @@ mod tests {
         };
         let mut hub = Hub::new(screen);
 
-        let w1 = hub.insert_window();
+        hub.insert_window();
         let w2 = hub.insert_window();
-        let w3 = hub.insert_window();
+        hub.insert_window();
 
         hub.delete_window(w2);
 
-        assert!(hub.windows.storage.get(w2.get()).unwrap().is_none());
-
-        let window1 = hub.windows.get(w1);
-        assert_eq!(window1.width, 6.0);
-        assert_eq!(window1.height, 10.0);
-        assert_eq!(window1.x, 0.0);
-        assert_eq!(window1.y, 0.0);
-
-        let window3 = hub.windows.get(w3);
-        assert_eq!(window3.width, 6.0);
-        assert_eq!(window3.height, 10.0);
-        assert_eq!(window3.x, 6.0);
-        assert_eq!(window3.y, 0.0);
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0 y=0 w=12 h=10),
+          Workspace(id=0, name=0, focused=WindowId(2),
+            Container(id=0, x=0, y=0, w=12, h=10,
+              Window(id=0, x=0, y=0, w=6, h=10)
+              Window(id=2, x=6, y=0, w=6, h=10)
+            )
+          )
+        )
+        ");
     }
 
     #[test]
@@ -672,15 +656,29 @@ mod tests {
         };
         let mut hub = Hub::new(screen);
 
-        let w1 = hub.insert_window();
+        hub.insert_window();
         let w2 = hub.insert_window();
 
-        assert!(matches!(hub.windows.get(w1).parent, Parent::Container(_)));
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0 y=0 w=10 h=10),
+          Workspace(id=0, name=0, focused=WindowId(1),
+            Container(id=0, x=0, y=0, w=10, h=10,
+              Window(id=0, x=0, y=0, w=5, h=10)
+              Window(id=1, x=5, y=0, w=5, h=10)
+            )
+          )
+        )
+        ");
 
         hub.delete_window(w2);
 
-        assert_eq!(get_workspace(&hub, 0).root, Some(Child::Window(w1)));
-        assert!(matches!(hub.windows.get(w1).parent, Parent::Workspace(_)));
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0 y=0 w=10 h=10),
+          Workspace(id=0, name=0, focused=WindowId(1),
+            Window(id=0, x=0, y=0, w=10, h=10)
+          )
+        )
+        ");
     }
 
     #[test]
@@ -693,38 +691,100 @@ mod tests {
         };
         let mut hub = Hub::new(screen);
 
-        let w1 = hub.insert_window();
-        let w2 = hub.insert_window();
+        hub.insert_window();
+        hub.insert_window();
 
         hub.focus_workspace(1);
-        assert_eq!(
-            hub.current_workspace(),
-            hub.workspaces.find(|w| w.name == 1).unwrap()
-        );
 
-        let w3 = hub.insert_window();
-        let w4 = hub.insert_window();
+        hub.insert_window();
+        hub.insert_window();
 
         hub.focus_workspace(0);
-        assert_eq!(
-            hub.current_workspace(),
-            hub.workspaces.find(|w| w.name == 0).unwrap()
-        );
 
-        let w5 = hub.insert_window();
+        hub.insert_window();
 
-        assert_eq!(hub.get_window(w1).width(), 4.0);
-        assert_eq!(hub.get_window(w2).width(), 4.0);
-        assert_eq!(hub.get_window(w5).width(), 4.0);
-
-        assert_eq!(hub.get_window(w3).width(), 6.0);
-        assert_eq!(hub.get_window(w4).width(), 6.0);
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0 y=0 w=12 h=10),
+          Workspace(id=0, name=0, focused=WindowId(4),
+            Container(id=0, x=0, y=0, w=12, h=10,
+              Window(id=0, x=0, y=0, w=4, h=10)
+              Window(id=1, x=4, y=0, w=4, h=10)
+              Window(id=4, x=8, y=0, w=4, h=10)
+            )
+          )
+          Workspace(id=1, name=1, focused=WindowId(3),
+            Container(id=1, x=0, y=0, w=12, h=10,
+              Window(id=2, x=0, y=0, w=6, h=10)
+              Window(id=3, x=6, y=0, w=6, h=10)
+            )
+          )
+        )
+        ");
     }
 
     // TODO: test unfocus then insert new window
 
-    fn get_workspace(hub: &Hub, name: usize) -> &Workspace {
-        let id = hub.workspaces.find(|w| w.name == name).unwrap();
-        hub.workspaces.get(id)
+    fn snapshot(hub: &Hub) -> String {
+        let mut s = format!(
+            "Hub(focused={}, screen=(x={} y={} w={} h={}),\n",
+            hub.current_workspace().0,
+            hub.screen.x,
+            hub.screen.y,
+            hub.screen.width,
+            hub.screen.height
+        );
+        for (idx, workspace) in hub.workspaces.storage.iter().enumerate() {
+            if let Some(ws) = workspace {
+                let focused = if let Some(current) = ws.current {
+                    format!(", focused={}", current)
+                } else {
+                    String::new()
+                };
+                if ws.root().is_none() {
+                    s.push_str(&format!(
+                        "  Workspace(id={}, name={}{})\n",
+                        idx, ws.name, focused
+                    ));
+                } else {
+                    s.push_str(&format!(
+                        "  Workspace(id={}, name={}{},\n",
+                        idx, ws.name, focused
+                    ));
+                    fmt_child_str(hub, &mut s, ws.root().unwrap(), 2);
+                    s.push_str("  )\n");
+                }
+            }
+        }
+        s.push_str(")\n");
+        s
+    }
+
+    fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
+        let prefix = "  ".repeat(indent);
+        match child {
+            Child::Window(id) => {
+                let w = hub.get_window(id);
+                s.push_str(&format!(
+                    "{}Window(id={}, x={}, y={}, w={}, h={})\n",
+                    prefix,
+                    id.0,
+                    w.x(),
+                    w.y(),
+                    w.width(),
+                    w.height()
+                ));
+            }
+            Child::Container(id) => {
+                let c = hub.get_container(id);
+                s.push_str(&format!(
+                    "{}Container(id={}, x={}, y={}, w={}, h={},\n",
+                    prefix, id.0, c.x, c.y, c.width, c.height
+                ));
+                for &child in c.children() {
+                    fmt_child_str(hub, s, child, indent + 1);
+                }
+                s.push_str(&format!("{})\n", prefix));
+            }
+        }
     }
 }

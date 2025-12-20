@@ -1,3 +1,4 @@
+#[cfg(all(target_os = "macos", not(test)))]
 mod window;
 #[cfg(all(target_os = "macos", not(test)))]
 mod window_manager;

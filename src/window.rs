@@ -6,7 +6,6 @@ use objc2_core_foundation::{
     CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse, kCFBooleanTrue,
 };
 
-#[cfg(target_os = "macos")]
 #[derive(Debug)]
 pub(crate) struct MacWindow(pub(crate) CFRetained<AXUIElement>);
 
