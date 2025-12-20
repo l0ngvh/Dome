@@ -389,6 +389,9 @@ unsafe extern "C-unwind" fn event_tap_callback(
     } else if key == *"e" && flags.contains(CGEventFlags::MaskCommand) {
         context.hub.toggle_new_window_direction();
         return std::ptr::null_mut();
+    } else if key == *"p" && flags.contains(CGEventFlags::MaskCommand) {
+        context.hub.focus_parent();
+        return std::ptr::null_mut();
     }
     tracing::trace!("Event tap: {event_type:?} {key:?} ",);
     event

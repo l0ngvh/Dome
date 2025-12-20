@@ -69,27 +69,41 @@ impl Hub {
                     // Push to existing container
                     Child::Container(container_id) => {
                         let container = self.containers.get(container_id);
-                        tracing::debug!("Inserting new window to {container:?}");
                         let parent = container.parent;
                         let dimension = container.dimension;
                         let new_window_direction = container.new_window_direction;
                         let direction = container.direction;
-                        // Create new container if direction doesn't match
                         let container_id = if new_window_direction != direction {
-                            tracing::debug!(
-                                "Creating new parent container with direction {:?}",
-                                new_window_direction
-                            );
-                            let new_container_id = self.containers.allocate(Container::new(
-                                parent,
-                                dimension,
-                                new_window_direction,
-                            ));
-                            self.insert_parent(Child::Container(container_id), new_container_id);
-                            new_container_id
+                            match parent {
+                                Parent::Workspace(workspace_id) => {
+                                    debug_assert_eq!(workspace_id, self.current);
+                                    tracing::debug!(
+                                        "Creating new parent container with direction {:?}",
+                                        new_window_direction
+                                    );
+                                    let new_container_id = self.containers.allocate(
+                                        Container::new(parent, dimension, new_window_direction),
+                                    );
+                                    self.insert_parent(
+                                        Child::Container(container_id),
+                                        new_container_id,
+                                    );
+                                    new_container_id
+                                }
+                                // must match parent's direction, as child container's
+                                // direction must differ from parent
+                                Parent::Container(parent_container) => {
+                                    debug_assert_eq!(
+                                        self.containers.get(parent_container).direction,
+                                        new_window_direction
+                                    );
+                                    parent_container
+                                }
+                            }
                         } else {
                             container_id
                         };
+                        tracing::info!("Inserting new window to {container_id:?}");
                         let container = self.containers.get_mut(container_id);
                         let window_id = self.windows.allocate(Window::new(
                             Parent::Container(container_id),
@@ -128,12 +142,13 @@ impl Hub {
                                 }
                             }
                             Parent::Workspace(workspace_id) => {
+                                debug_assert_eq!(workspace_id, self.current);
                                 let workspace = self.workspaces.get_mut(workspace_id);
                                 let screen = workspace.screen;
                                 let container_id = self.containers.allocate(Container::new(
                                     Parent::Workspace(workspace_id),
                                     screen,
-                                    Direction::default(),
+                                    focused_window.new_window_direction,
                                 ));
                                 focused_window.parent = Parent::Container(container_id);
                                 self.containers
@@ -209,6 +224,10 @@ impl Hub {
                     self.get_containing_workspace(Child::Container(parent_id))
                 };
                 self.balance_workspace(workspace);
+                // TODO: focus preceded window/container
+                if self.workspaces.get_mut(workspace).focused == Some(Child::Window(id)) {
+                    self.workspaces.get_mut(workspace).focused = None;
+                }
                 workspace
             }
             Parent::Workspace(workspace_id) => {
@@ -225,7 +244,6 @@ impl Hub {
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn toggle_new_window_direction(&mut self) {
-        tracing::info!("Toggling new window inserting direction for focused node");
         let current_workspace = self.workspaces.get_mut(self.current);
         if let Some(focused) = current_workspace.focused {
             match focused {
@@ -235,6 +253,10 @@ impl Hub {
                         Direction::Horizontal => Direction::Vertical,
                         Direction::Vertical => Direction::Horizontal,
                     };
+                    tracing::info!(
+                        "Toggling new window inserting direction for {container_id} to {}",
+                        container.new_window_direction
+                    );
                 }
                 Child::Window(window_id) => {
                     let window = self.windows.get_mut(window_id);
@@ -242,6 +264,30 @@ impl Hub {
                         Direction::Horizontal => Direction::Vertical,
                         Direction::Vertical => Direction::Horizontal,
                     };
+                    tracing::info!(
+                        "Toggling new window inserting direction for {window_id} to {}",
+                        window.new_window_direction
+                    );
+                }
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub(crate) fn focus_parent(&mut self) {
+        let current_workspace = self.workspaces.get_mut(self.current);
+        if let Some(focused) = current_workspace.focused {
+            let parent = match focused {
+                Child::Window(window_id) => self.windows.get(window_id).parent,
+                Child::Container(container_id) => self.containers.get(container_id).parent,
+            };
+
+            match parent {
+                Parent::Container(container_id) => {
+                    current_workspace.focused = Some(Child::Container(container_id));
+                }
+                Parent::Workspace(_) => {
+                    tracing::info!("Cannot focus parent workspace, ignoring");
                 }
             }
         }
@@ -526,6 +572,15 @@ enum Direction {
     Vertical,
 }
 
+impl std::fmt::Display for Direction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Direction::Horizontal => write!(f, "Horizontal"),
+            Direction::Vertical => write!(f, "Vertical"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum Parent {
     Container(ContainerId),
@@ -621,6 +676,7 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     fn allocate(&mut self, node: T) -> T::Id {
         if let Some(free) = self.free_list.pop() {
             self.storage[free] = Some(node);
@@ -839,7 +895,7 @@ mod tests {
 
         assert_snapshot!(snapshot(&hub), @r"
         Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
-          Workspace(id=0, name=0, focused=WindowId(1),
+          Workspace(id=0, name=0,
             Window(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00)
           )
         )
@@ -1014,7 +1070,309 @@ mod tests {
 
         assert_snapshot!(snapshot(&hub), @r"
         Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0,
+            Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
+              Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
+              Window(id=1, parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00)
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn toggle_new_window_direction_in_single_window_workspace_creates_vertical_container() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        hub.insert_window();
+        hub.toggle_new_window_direction();
+        hub.insert_window();
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0, focused=WindowId(1),
+            Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Vertical,
+              Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=10.00, h=5.00)
+              Window(id=1, parent=ContainerId(0), x=0.00, y=5.00, w=10.00, h=5.00)
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn toggle_new_window_direction_in_vertical_container() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        hub.insert_window();
+        hub.insert_window();
+        hub.toggle_new_window_direction();
+        hub.insert_window();
+        hub.toggle_new_window_direction();
+        hub.insert_window();
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0, focused=WindowId(3),
+            Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
+              Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
+              Container(id=1, parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00, direction=Vertical,
+                Window(id=1, parent=ContainerId(1), x=5.00, y=0.00, w=5.00, h=5.00)
+                Container(id=2, parent=ContainerId(1), x=5.00, y=5.00, w=5.00, h=5.00, direction=Horizontal,
+                  Window(id=2, parent=ContainerId(2), x=5.00, y=5.00, w=2.50, h=5.00)
+                  Window(id=3, parent=ContainerId(2), x=7.50, y=5.00, w=2.50, h=5.00)
+                )
+              )
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn focus_parent_twice_nested_containers() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        // Create nested containers
+        hub.insert_window();
+        hub.insert_window();
+        hub.toggle_new_window_direction();
+        hub.insert_window();
+
+        hub.focus_parent();
+        hub.focus_parent();
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0, focused=ContainerId(0),
+            Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
+              Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
+              Container(id=1, parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00, direction=Vertical,
+                Window(id=1, parent=ContainerId(1), x=5.00, y=0.00, w=5.00, h=5.00)
+                Window(id=2, parent=ContainerId(1), x=5.00, y=5.00, w=5.00, h=5.00)
+              )
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn focus_parent_twice_single_container() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        hub.insert_window();
+        hub.insert_window();
+
+        hub.focus_parent();
+        hub.focus_parent();
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0, focused=ContainerId(0),
+            Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
+              Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
+              Window(id=1, parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00)
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn insert_window_after_focusing_parent() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        hub.insert_window();
+        hub.insert_window();
+
+        hub.focus_parent();
+
+        hub.insert_window();
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
           Workspace(id=0, name=0, focused=WindowId(2),
+            Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
+              Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=3.33, h=10.00)
+              Window(id=1, parent=ContainerId(0), x=3.33, y=0.00, w=3.33, h=10.00)
+              Window(id=2, parent=ContainerId(0), x=6.67, y=0.00, w=3.33, h=10.00)
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn insert_to_new_container_when_focused_container_window_insert_direction_differ_and_no_parent()
+    {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        hub.insert_window();
+        hub.insert_window();
+        hub.insert_window();
+
+        hub.focus_parent();
+        hub.toggle_new_window_direction();
+
+        hub.insert_window();
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0, focused=WindowId(3),
+            Container(id=1, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Vertical,
+              Container(id=0, parent=ContainerId(1), x=0.00, y=0.00, w=10.00, h=5.00, direction=Horizontal,
+                Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=3.33, h=5.00)
+                Window(id=1, parent=ContainerId(0), x=3.33, y=0.00, w=3.33, h=5.00)
+                Window(id=2, parent=ContainerId(0), x=6.67, y=0.00, w=3.33, h=5.00)
+              )
+              Window(id=3, parent=ContainerId(1), x=0.00, y=5.00, w=10.00, h=5.00)
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn insert_to_parent_when_focused_container_window_insert_direction_differ_but_has_parent() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        hub.insert_window();
+        hub.insert_window();
+
+        // Create new child container
+        hub.toggle_new_window_direction();
+        hub.insert_window();
+
+        hub.focus_parent();
+        hub.toggle_new_window_direction();
+
+        // Should be inserted in the root container
+        hub.insert_window();
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0, focused=WindowId(3),
+            Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
+              Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=3.33, h=10.00)
+              Container(id=1, parent=ContainerId(0), x=3.33, y=0.00, w=3.33, h=10.00, direction=Vertical,
+                Window(id=1, parent=ContainerId(1), x=3.33, y=0.00, w=3.33, h=5.00)
+                Window(id=2, parent=ContainerId(1), x=3.33, y=5.00, w=3.33, h=5.00)
+              )
+              Window(id=3, parent=ContainerId(0), x=6.67, y=0.00, w=3.33, h=10.00)
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn clean_up_parent_container_when_only_child_is_container() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        let w1 = hub.insert_window();
+        hub.insert_window();
+
+        // Create new child container
+        hub.toggle_new_window_direction();
+        hub.insert_window();
+
+        hub.focus_parent();
+        hub.toggle_new_window_direction();
+
+        // Should be inserted in the root container
+        let w4 = hub.insert_window();
+        hub.delete_window(w1);
+        hub.delete_window(w4);
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0,
+            Container(id=1, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Vertical,
+              Window(id=1, parent=ContainerId(1), x=0.00, y=0.00, w=10.00, h=5.00)
+              Window(id=2, parent=ContainerId(1), x=0.00, y=5.00, w=10.00, h=5.00)
+            )
+          )
+        )
+        ");
+    }
+
+    #[test]
+    fn delete_focused_window_clears_focus() {
+        setup_logger();
+        let screen = Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let mut hub = Hub::new(screen);
+
+        hub.insert_window();
+        hub.insert_window();
+        let w3 = hub.insert_window();
+
+        hub.delete_window(w3);
+
+        assert_snapshot!(snapshot(&hub), @r"
+        Hub(focused=0, screen=(x=0.00 y=0.00 w=10.00 h=10.00),
+          Workspace(id=0, name=0,
             Container(id=0, parent=WorkspaceId(0), x=0.00, y=0.00, w=10.00, h=10.00, direction=Horizontal,
               Window(id=0, parent=ContainerId(0), x=0.00, y=0.00, w=5.00, h=10.00)
               Window(id=1, parent=ContainerId(0), x=5.00, y=0.00, w=5.00, h=10.00)
