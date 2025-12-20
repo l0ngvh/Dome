@@ -132,6 +132,7 @@ impl Hub {
                                     self.containers
                                         .get_mut(parent_container)
                                         .insert_window_after(window_id, focused_node);
+                                    tracing::debug!("Inserting new window to {parent_container:?}");
                                     window_id
                                 }
                             }
@@ -140,6 +141,7 @@ impl Hub {
                                 .windows
                                 .allocate(Window::new(Parent::Container(container_id), direction));
                             self.containers.get_mut(container_id).push_window(window_id);
+                            tracing::debug!("Inserting new window to {container_id:?}");
                             window_id
                         }
                     }
@@ -487,8 +489,7 @@ impl Hub {
             }
             Child::Container(container_id) => {
                 let mut cache = HashMap::new();
-                let ((free_h, free_v), _) =
-                    self.query_container_structure(container_id, &mut cache);
+                self.query_container_structure(container_id, &mut cache);
                 self.distribute_available_space(
                     Child::Container(container_id),
                     screen.x,
@@ -521,7 +522,7 @@ impl Hub {
             }
             Child::Container(container_id) => {
                 let ((free_h, free_v), _) = cache[&container_id];
-                tracing::debug!("{container_id}, {free_h}, {free_v}");
+                tracing::debug!("Number of freely resized nodes: horizontal: {free_h}, {free_v}");
                 let container = self.containers.get(container_id);
                 let mut actual_width = 0.0;
                 let mut actual_height: f32 = 0.0;

@@ -5,7 +5,7 @@ use std::{
     rc::Rc,
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use block2::RcBlock;
 use objc2::runtime::ProtocolObject;
@@ -17,10 +17,10 @@ use objc2_app_kit::{
     NSWorkspaceApplicationKey, NSWorkspaceDidLaunchApplicationNotification,
     NSWorkspaceDidTerminateApplicationNotification,
 };
-use objc2_application_services::{AXError, AXIsProcessTrustedWithOptions, AXObserver, AXUIElement};
+use objc2_application_services::{AXIsProcessTrustedWithOptions, AXObserver, AXUIElement};
 use objc2_core_foundation::{
-    CFArray, CFHash, CFMachPort, CFRetained, CFRunLoop, CFString, CFType, CGFloat,
-    kCFAllocatorDefault, kCFBooleanTrue, kCFRunLoopDefaultMode,
+    CFArray, CFHash, CFMachPort, CFRetained, CFRunLoop, CFString, CGFloat, kCFAllocatorDefault,
+    kCFBooleanTrue, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
@@ -30,9 +30,20 @@ use objc2_foundation::{
     NSNotification, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint, NSRect, NSSize,
 };
 
-use crate::config::{Action, Config, Keymap, Modifier, Target, ToggleTarget};
-use crate::core::{Child, Dimension, Hub, WindowId, WorkspaceId};
-use crate::window::MacWindow;
+use crate::{
+    config::{Action, Config, Keymap, Modifier, Target, ToggleTarget},
+    objc2_wrapper::{
+        add_observer_notification, create_observer, get_attribute, get_pid, kAXMinimizedAttribute,
+        kAXRoleAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
+        kAXWindowCreatedNotification, kAXWindowMiniaturizedNotification, kAXWindowRole,
+        kAXWindowsAttribute,
+    },
+};
+use crate::{
+    core::{Child, Dimension, Hub, WindowId, WorkspaceId},
+    objc2_wrapper::kAXResizedNotification,
+};
+use crate::{objc2_wrapper::kAXUIElementDestroyedNotification, window::MacWindow};
 
 pub fn run_app() {
     let mtm = MainThreadMarker::new().unwrap();
@@ -124,7 +135,7 @@ define_class!(
 
             let mut observers = HashMap::new();
             for pid in pids {
-                match create_observer(pid, context_ptr) {
+                match register_observer(pid, context_ptr) {
                     Ok(observer) => {
                         observers.insert(pid, observer);
                     }
@@ -235,7 +246,7 @@ impl WindowContext {
         let config = Config::load();
 
         let screen = get_main_screen();
-        tracing::info!("Screen {screen:?}");
+        tracing::info!("Detected Screen {screen:?}");
         let mut hub = Hub::new(screen, config.border_size);
 
         // Track CFHash -> WindowId and WindowId -> MacWindow mappings
@@ -259,7 +270,8 @@ impl WindowContext {
                     let window_id = hub.insert_window();
                     let cf_hash = CFHash(Some(&window));
                     window_mapping.insert(cf_hash, window_id);
-                    id_to_window.insert(window_id, MacWindow::new(window.clone(), app.clone()));
+                    id_to_window
+                        .insert(window_id, MacWindow::new(window.clone(), app.clone(), *pid));
                     window_ids.push(cf_hash);
                 }
             }
@@ -284,7 +296,6 @@ fn list_apps() -> Vec<i32> {
         if app.activationPolicy() != NSApplicationActivationPolicy::Regular {
             continue;
         }
-        tracing::debug!("Working on app: {:?}", app.localizedName());
         let pid = app.processIdentifier();
         // Some applications may not have any PID, for some reasons
         if pid == -1 {
@@ -310,20 +321,9 @@ fn get_main_screen() -> Dimension {
     }
 }
 
-fn create_observer(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<AXObserver>> {
+fn register_observer(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<AXObserver>> {
     let run_loop = CFRunLoop::current().unwrap();
-
-    let mut observer: *mut AXObserver = std::ptr::null_mut();
-    let observer_ptr = NonNull::new(&mut observer as *mut *mut AXObserver).unwrap();
-    let res = unsafe { AXObserver::create(pid, Some(observer_callback), observer_ptr) };
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!("Failed to set size. Error code: {res:?}"));
-    }
-    let observer = unsafe { *observer_ptr.as_ptr() };
-    // Safety: value shouldn't be null as copy attribute call success
-    let observer = NonNull::new(observer).unwrap();
-    let observer = unsafe { CFRetained::from_raw(observer) };
-
+    let observer = create_observer(pid, Some(observer_callback))?;
     let source = unsafe { observer.run_loop_source() };
 
     // Swift docs func CFRunLoopGetCurrent() -> CFRunLoop!
@@ -331,58 +331,26 @@ fn create_observer(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetain
     run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
 
     let app = unsafe { AXUIElement::new_application(pid) };
-
-    let res = unsafe {
-        observer.add_notification(
-            &app,
-            &CFString::from_static_str("AXWindowCreated"),
-            context_ptr as *mut std::ffi::c_void,
-        )
-    };
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to add AXWindowCreated notification: {res:?}"
-        ));
-    }
-
-    let res = unsafe {
-        observer.add_notification(
-            &app,
-            &CFString::from_static_str("AXWindowMiniaturized"),
-            context_ptr as *mut std::ffi::c_void,
-        )
-    };
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to add AXWindowMiniaturized notification: {res:?}"
-        ));
-    }
-
-    let res = unsafe {
-        observer.add_notification(
-            &app,
-            &CFString::from_static_str("AXResized"),
-            context_ptr as *mut std::ffi::c_void,
-        )
-    };
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to add AXResized notification: {res:?}"
-        ));
-    }
-
-    let res = unsafe {
-        observer.add_notification(
-            &app,
-            &CFString::from_static_str("AXUIElementDestroyed"),
-            context_ptr as *mut std::ffi::c_void,
-        )
-    };
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to add AXUIElementDestroyed notification: {res:?}"
-        ));
-    }
+    let context_ptr = context_ptr as *mut std::ffi::c_void;
+    add_observer_notification(
+        &observer,
+        &app,
+        &kAXWindowCreatedNotification(),
+        context_ptr,
+    )?;
+    add_observer_notification(
+        &observer,
+        &app,
+        &kAXWindowMiniaturizedNotification(),
+        context_ptr,
+    )?;
+    add_observer_notification(&observer, &app, &kAXResizedNotification(), context_ptr)?;
+    add_observer_notification(
+        &observer,
+        &app,
+        &kAXUIElementDestroyedNotification(),
+        context_ptr,
+    )?;
 
     Ok(observer)
 }
@@ -398,12 +366,12 @@ unsafe extern "C-unwind" fn observer_callback(
     let notification = unsafe { &*notification.as_ptr() };
     let context = unsafe { &mut *(refcon as *mut WindowContext) };
     let element = unsafe { CFRetained::retain(element) };
-    tracing::info!("AX Notification: {notification} {element:?}");
     if notification.to_string() == *"AXWindowCreated" && is_standard_window(&element) {
         match get_pid(&element) {
             Ok(pid) => {
                 let app = unsafe { AXUIElement::new_application(pid) };
-                let window = MacWindow::new(element.clone(), app);
+                let window = MacWindow::new(element.clone(), app, pid);
+                tracing::debug!("New window created: {window}",);
                 let window_id = context.hub.insert_window();
                 let cf_hash = CFHash(Some(&element));
                 context
@@ -437,68 +405,33 @@ unsafe extern "C-unwind" fn observer_callback(
 
 fn get_windows(app: &AXUIElement) -> Result<CFRetained<CFArray<AXUIElement>>> {
     // TODO: log more info to know what app is this
-    get_attribute(app, &CFString::from_static_str("AXWindows")).context("Getting windows from app")
-}
-
-fn get_role(window: &AXUIElement) -> Result<CFRetained<CFString>> {
-    get_attribute(window, &CFString::from_static_str("AXRole")).context("Getting role from window")
-}
-
-fn get_subrole(window: &AXUIElement) -> Result<CFRetained<CFString>> {
-    get_attribute(window, &CFString::from_static_str("AXSubrole"))
-        .context("Getting sub role from window")
+    get_attribute(app, &kAXWindowsAttribute())
 }
 
 fn is_minimized(window: &AXUIElement) -> bool {
-    get_attribute::<objc2_core_foundation::CFBoolean>(
-        window,
-        &CFString::from_static_str("AXMinimized"),
-    )
-    .map(|b| b.as_bool())
-    .unwrap_or(false)
-}
-
-fn get_attribute<T: objc2_core_foundation::Type>(
-    element: &AXUIElement,
-    attribute: &CFString,
-) -> Result<CFRetained<T>> {
-    let mut value: *const CFType = std::ptr::null();
-    let value_ptr = NonNull::new(&mut value as *mut *const CFType).unwrap();
-
-    let res = unsafe { element.copy_attribute_value(attribute, value_ptr) };
-    // TODO: return no value error as None
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to get attribute value. Error code: {res:?}"
-        ));
-    }
-    let value = unsafe { *value_ptr.as_ptr() as *mut T };
-    // Safety: value shouldn't be null as copy attribute call success
-    let value = NonNull::new(value).unwrap();
-    let value = unsafe { CFRetained::from_raw(value) };
-    Ok(value)
+    get_attribute::<objc2_core_foundation::CFBoolean>(window, &kAXMinimizedAttribute())
+        .map(|b| b.as_bool())
+        .unwrap_or(false)
 }
 
 fn is_standard_window(window: &AXUIElement) -> bool {
-    let role = match get_role(window) {
+    let role: CFRetained<CFString> = match get_attribute(window, &kAXRoleAttribute()) {
         Ok(role) => role,
         Err(e) => {
-            tracing::debug!("Can't get role for window {window:?}: {e:#}");
+            tracing::trace!("Can't get role for window {window:?}: {e:#}");
             return false;
         }
     };
 
-    let subrole = match get_subrole(window) {
+    let subrole: CFRetained<CFString> = match get_attribute(window, &kAXSubroleAttribute()) {
         Ok(role) => role,
         Err(e) => {
-            tracing::debug!("Can't get subrole for window {window:?}: {e:#}");
+            tracing::trace!("Can't get subrole for window {window:?}: {e:#}");
             return false;
         }
     };
 
-    role == CFString::from_static_str("AXWindow")
-        && subrole == CFString::from_static_str("AXStandardWindow")
-        && !is_minimized(window)
+    role == kAXWindowRole() && subrole == kAXStandardWindowSubrole() && !is_minimized(window)
 }
 
 unsafe extern "C-unwind" fn event_tap_callback(
@@ -594,12 +527,12 @@ fn listen_to_launching_app(
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |notification: NonNull<NSNotification>| {
                 let Some(pid) = get_pid_from_notification(notification) else {
-                    tracing::debug!("Launched application doesn't have a pid");
+                    tracing::trace!("Launched application doesn't have a pid");
                     return;
                 };
 
                 tracing::trace!("Received notification for launching app with pid: {pid:?}",);
-                let observer = match create_observer(pid, context_ptr) {
+                let observer = match register_observer(pid, context_ptr) {
                     Ok(observer) => observer,
                     Err(e) => {
                         tracing::info!("Can't create observer for application {pid}: {e:#}");
@@ -612,7 +545,7 @@ fn listen_to_launching_app(
                 let windows = match get_windows(&app) {
                     Ok(windows) => windows,
                     Err(e) => {
-                        tracing::info!("{e:#}");
+                        tracing::debug!("{e:#}");
                         return;
                     }
                 };
@@ -628,7 +561,7 @@ fn listen_to_launching_app(
                         context
                             .id_to_window
                             .borrow_mut()
-                            .insert(window_id, MacWindow::new(window.clone(), app.clone()));
+                            .insert(window_id, MacWindow::new(window.clone(), app.clone(), pid));
                         window_ids.push(cf_hash);
                     }
                 }
@@ -660,24 +593,23 @@ fn listen_to_terminating_app(
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |notification: NonNull<NSNotification>| {
                 let Some(pid) = get_pid_from_notification(notification) else {
-                    tracing::debug!("Launched application doesn't have a pid");
+                    tracing::trace!("Launched application doesn't have a pid");
                     return;
                 };
                 tracing::trace!("Received notification for terminating app with pid: {pid:?}",);
                 apps.borrow_mut().remove(&pid);
                 let context = &mut *context_ptr;
                 if let Some(window_ids) = context.pid_to_window_ids.borrow_mut().remove(&pid) {
-                    tracing::trace!("Removing window {window_ids:?}");
                     for cf_hash in window_ids {
                         if let Some(window_id) =
                             context.window_mapping.borrow_mut().remove(&cf_hash)
                         {
                             context.hub.delete_window(window_id);
-                            tracing::info!("Window deleted: {window_id}");
+                            tracing::debug!("Window deleted: {window_id}");
                         }
                     }
                 } else {
-                    tracing::debug!("App {pid} doesn't have any windows");
+                    tracing::trace!("App {pid} doesn't have any windows");
                 }
             }),
         );
@@ -915,17 +847,6 @@ fn hide_child(context: &WindowContext, child: Child) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn get_pid(window: &AXUIElement) -> Result<i32> {
-    let mut pid = 0;
-    let value_ptr = NonNull::new(&mut pid as *mut i32).unwrap();
-    let res = unsafe { window.pid(value_ptr) };
-
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!("Failed to get pid. Error code: {res:?}"));
-    }
-    Ok(pid)
 }
 
 type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;

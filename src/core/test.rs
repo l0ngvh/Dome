@@ -1435,7 +1435,6 @@ fn setup_logger() {
     use tracing_subscriber::fmt::format::FmtSpan;
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::TRACE)
-        .with_span_events(FmtSpan::ENTER)
         .try_init();
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
