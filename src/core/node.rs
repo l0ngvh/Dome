@@ -69,6 +69,10 @@ impl Container {
         self.children.push(Child::Window(window_id));
     }
 
+    pub(super) fn push_child(&mut self, child: Child) {
+        self.children.push(child);
+    }
+
     pub(super) fn insert_window_after(&mut self, window_id: WindowId, after: Child) {
         if let Some(pos) = self.children.iter().position(|c| *c == after) {
             self.children.insert(pos + 1, Child::Window(window_id));
@@ -77,9 +81,21 @@ impl Container {
         }
     }
 
+    pub(super) fn insert_after(&mut self, child: Child, after: Child) {
+        if let Some(pos) = self.children.iter().position(|c| *c == after) {
+            self.children.insert(pos + 1, child);
+        } else {
+            self.children.push(child);
+        }
+    }
+
     pub(super) fn remove_window(&mut self, window_id: WindowId) {
         self.children
             .retain(|child| !child.is_window_and(|id| id == window_id));
+    }
+
+    pub(super) fn remove_child(&mut self, child: Child) {
+        self.children.retain(|c| *c != child);
     }
 
     pub(super) fn replace_child(&mut self, old: Child, new: Child) {

@@ -1,5 +1,6 @@
 use crate::core::hub::Hub;
-use crate::core::node::{Child, Dimension};
+use crate::core::node::Dimension;
+use crate::core::tests::{setup_logger, snapshot};
 use insta::assert_snapshot;
 
 #[test]
@@ -522,7 +523,7 @@ fn insert_window_after_focused_window() {
 }
 
 #[test]
-fn insert_window_after_focused_container_in_parent() {
+fn insert_window_after_focused_container_with_different_new_window_direction() {
     setup_logger();
     let screen = Dimension {
         x: 0.0,
@@ -541,7 +542,7 @@ fn insert_window_after_focused_container_in_parent() {
     hub.toggle_new_window_direction();
     hub.insert_window();
 
-    // Focus the middle container and toggle direction
+    // Focus the middle container
     hub.focus_left();
     hub.focus_parent();
     hub.insert_window();
@@ -558,6 +559,50 @@ fn insert_window_after_focused_container_in_parent() {
           )
           Window(id=WindowId(4), parent=ContainerId(0), x=6.00, y=0.00, w=3.00, h=10.00)
           Window(id=WindowId(3), parent=ContainerId(0), x=9.00, y=0.00, w=3.00, h=10.00)
+        )
+      )
+    )
+    ");
+}
+
+#[test]
+fn insert_window_after_focused_container_with_same_new_window_direction() {
+    setup_logger();
+    let screen = Dimension {
+        x: 0.0,
+        y: 0.0,
+        width: 12.0,
+        height: 10.0,
+    };
+    let mut hub = Hub::new(screen, 0.0);
+
+    // Create: [w0] [w1, w2] [w3]
+    hub.insert_window();
+    hub.insert_window();
+    hub.toggle_new_window_direction();
+    hub.insert_window();
+    hub.focus_parent();
+    hub.toggle_new_window_direction();
+    hub.insert_window();
+
+    // Focus the middle container and toggle back new window direction
+    hub.focus_left();
+    hub.focus_parent();
+    hub.toggle_new_window_direction();
+    hub.insert_window();
+
+    // w4 should be inserted right after the focused container, not at the end
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=12.00 h=10.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=12.00, h=10.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=4.00, h=10.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=4.00, y=0.00, w=4.00, h=10.00, direction=Vertical,
+            Window(id=WindowId(1), parent=ContainerId(1), x=4.00, y=0.00, w=4.00, h=3.33)
+            Window(id=WindowId(2), parent=ContainerId(1), x=4.00, y=3.33, w=4.00, h=3.33)
+            Window(id=WindowId(4), parent=ContainerId(1), x=4.00, y=6.67, w=4.00, h=3.33)
+          )
+          Window(id=WindowId(3), parent=ContainerId(0), x=8.00, y=0.00, w=4.00, h=10.00)
         )
       )
     )
@@ -1364,80 +1409,4 @@ fn border_with_nested_containers() {
       )
     )
     ");
-}
-
-fn snapshot(hub: &Hub) -> String {
-    let mut s = format!(
-        "Hub(focused={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
-        hub.current_workspace(),
-        hub.screen().x,
-        hub.screen().y,
-        hub.screen().width,
-        hub.screen().height
-    );
-    for (workspace_id, workspace) in hub.all_workspaces() {
-        let focused = if let Some(current) = workspace.focused {
-            format!(", focused={}", current)
-        } else {
-            String::new()
-        };
-        if workspace.root().is_none() {
-            s.push_str(&format!(
-                "  Workspace(id={}, name={}{})\n",
-                workspace_id, workspace.name, focused
-            ));
-        } else {
-            s.push_str(&format!(
-                "  Workspace(id={}, name={}{},\n",
-                workspace_id, workspace.name, focused
-            ));
-            fmt_child_str(hub, &mut s, workspace.root().unwrap(), 2);
-            s.push_str("  )\n");
-        }
-    }
-    s.push_str(")\n");
-    s
-}
-
-fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
-    let prefix = "  ".repeat(indent);
-    match child {
-        Child::Window(id) => {
-            let w = hub.get_window(id);
-            let dim = w.dimension();
-            s.push_str(&format!(
-                "{}Window(id={}, parent={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
-                prefix, id, w.parent, dim.x, dim.y, dim.width, dim.height
-            ));
-        }
-        Child::Container(id) => {
-            let c = hub.get_container(id);
-            s.push_str(&format!(
-                    "{}Container(id={}, parent={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}, direction={:?},\n",
-                    prefix,
-                    id,
-                    c.parent,
-                    c.dimension.x,
-                    c.dimension.y,
-                    c.dimension.width,
-                    c.dimension.height,
-                    c.direction,
-                ));
-            for &child in c.children() {
-                fmt_child_str(hub, s, child, indent + 1);
-            }
-            s.push_str(&format!("{})\n", prefix));
-        }
-    }
-}
-
-fn setup_logger() {
-    use tracing_subscriber::fmt::format::FmtSpan;
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .try_init();
-    std::panic::set_hook(Box::new(|panic_info| {
-        let backtrace = backtrace::Backtrace::new();
-        tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
-    }));
 }

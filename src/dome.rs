@@ -554,6 +554,10 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
             Target::Parent => context.hub.focus_parent(),
             Target::Workspace(n) => return focus_workspace(context, *n),
         },
+        Action::Move(target) => match target {
+            Target::Workspace(n) => return move_to_workspace(context, *n),
+            _ => {}
+        },
         Action::Toggle(target) => match target {
             ToggleTarget::Direction => context.hub.toggle_new_window_direction(),
         },
@@ -863,6 +867,12 @@ fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
     }
 
     render_workspace(context, new_workspace)
+}
+
+fn move_to_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
+    let current_workspace = context.hub.current_workspace();
+    context.hub.move_focused_to_workspace(name);
+    render_workspace(context, current_workspace)
 }
 
 fn hide_child(context: &WindowContext, child: Child) -> Result<()> {
