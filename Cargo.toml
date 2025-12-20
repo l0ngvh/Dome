@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
+backtrace = "0.3.76"
 block2 = "0.6.2"
 objc2 = "0.6.3"
 objc2-app-kit = "0.3.2"
