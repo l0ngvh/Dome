@@ -109,6 +109,14 @@ fn default_keymaps() -> HashMap<Keymap, Vec<Action>> {
     let mut keymaps = HashMap::new();
     keymaps.insert(Keymap { key: "0".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(0))]);
     keymaps.insert(Keymap { key: "1".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(1))]);
+    keymaps.insert(Keymap { key: "2".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(2))]);
+    keymaps.insert(Keymap { key: "3".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(3))]);
+    keymaps.insert(Keymap { key: "4".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(4))]);
+    keymaps.insert(Keymap { key: "5".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(5))]);
+    keymaps.insert(Keymap { key: "6".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(6))]);
+    keymaps.insert(Keymap { key: "7".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(7))]);
+    keymaps.insert(Keymap { key: "8".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(8))]);
+    keymaps.insert(Keymap { key: "9".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(9))]);
     keymaps.insert(Keymap { key: "e".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Toggle(ToggleTarget::Direction)]);
     keymaps.insert(Keymap { key: "p".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Parent)]);
     keymaps.insert(Keymap { key: "h".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Left)]);
