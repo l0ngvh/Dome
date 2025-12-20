@@ -4,7 +4,7 @@ use std::ptr::NonNull;
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse, kCFBooleanTrue,
+    CFHash, CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse, kCFBooleanTrue,
 };
 
 use crate::objc2_wrapper::{
@@ -37,6 +37,15 @@ impl MacWindow {
             running_app,
         }
     }
+
+    pub(crate) fn cf_hash(&self) -> usize {
+        CFHash(Some(&self.window))
+    }
+
+    pub(crate) fn pid(&self) -> i32 {
+        self.pid
+    }
+
     #[tracing::instrument(skip(self))]
     pub(crate) fn set_position(&self, x: f32, y: f32) -> Result<()> {
         let pos_ptr: *mut CGPoint = &mut CGPoint::new(x as f64, y as f64);

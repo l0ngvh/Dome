@@ -232,27 +232,103 @@ struct OverlayRect {
     a: f32,
 }
 
+struct WindowRegistry {
+    pid_to_hashes: HashMap<i32, Vec<usize>>,
+    hash_to_pid: HashMap<usize, i32>,
+    hash_to_id: HashMap<usize, WindowId>,
+    id_to_hash: HashMap<WindowId, usize>,
+    id_to_window: HashMap<WindowId, MacWindow>,
+}
+
+impl WindowRegistry {
+    fn new() -> Self {
+        Self {
+            pid_to_hashes: HashMap::new(),
+            hash_to_pid: HashMap::new(),
+            hash_to_id: HashMap::new(),
+            id_to_hash: HashMap::new(),
+            id_to_window: HashMap::new(),
+        }
+    }
+
+    fn insert(&mut self, window_id: WindowId, window: MacWindow) {
+        let cf_hash = window.cf_hash();
+        let pid = window.pid();
+        self.pid_to_hashes.entry(pid).or_default().push(cf_hash);
+        self.hash_to_pid.insert(cf_hash, pid);
+        self.hash_to_id.insert(cf_hash, window_id);
+        self.id_to_hash.insert(window_id, cf_hash);
+        self.id_to_window.insert(window_id, window);
+    }
+
+    fn remove_by_hash(&mut self, cf_hash: usize) -> Option<WindowId> {
+        let window_id = self.hash_to_id.remove(&cf_hash)?;
+        self.id_to_hash.remove(&window_id);
+        self.id_to_window.remove(&window_id);
+        if let Some(pid) = self.hash_to_pid.remove(&cf_hash)
+            && let Some(hashes) = self.pid_to_hashes.get_mut(&pid)
+        {
+            hashes.retain(|&h| h != cf_hash);
+        }
+        Some(window_id)
+    }
+
+    fn remove_by_id(&mut self, window_id: WindowId) {
+        if let Some(cf_hash) = self.id_to_hash.remove(&window_id) {
+            self.hash_to_id.remove(&cf_hash);
+            self.id_to_window.remove(&window_id);
+            if let Some(pid) = self.hash_to_pid.remove(&cf_hash)
+                && let Some(hashes) = self.pid_to_hashes.get_mut(&pid)
+            {
+                hashes.retain(|&h| h != cf_hash);
+            }
+        }
+    }
+
+    fn remove_by_pid(&mut self, pid: i32) -> Vec<WindowId> {
+        let Some(hashes) = self.pid_to_hashes.remove(&pid) else {
+            return Vec::new();
+        };
+        let mut removed = Vec::new();
+        for cf_hash in hashes {
+            self.hash_to_pid.remove(&cf_hash);
+            if let Some(window_id) = self.hash_to_id.remove(&cf_hash) {
+                self.id_to_hash.remove(&window_id);
+                self.id_to_window.remove(&window_id);
+                removed.push(window_id);
+            }
+        }
+        removed
+    }
+
+    fn contains_hash(&self, cf_hash: usize) -> bool {
+        self.hash_to_id.contains_key(&cf_hash)
+    }
+
+    fn get(&self, window_id: WindowId) -> Option<&MacWindow> {
+        self.id_to_window.get(&window_id)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&WindowId, &MacWindow)> {
+        self.id_to_window.iter()
+    }
+}
+
 struct WindowContext {
     hub: Hub,
     overlay_view: Retained<OverlayView>,
-    pid_to_window_hashes: Rc<RefCell<HashMap<i32, Vec<usize>>>>,
-    window_hashes_to_id: Rc<RefCell<HashMap<usize, WindowId>>>,
-    id_to_window: Rc<RefCell<HashMap<WindowId, MacWindow>>>,
+    registry: RefCell<WindowRegistry>,
     config: Config,
 }
 
 impl WindowContext {
     fn new(pids: &[i32], overlay_view: Retained<OverlayView>) -> Self {
-        let mut pids_window_ids = HashMap::new();
         let config = Config::load();
 
         let screen = get_main_screen();
         tracing::info!("Detected Screen {screen:?}");
         let mut hub = Hub::new(screen, config.border_size);
-
-        // Track CFHash -> WindowId and WindowId -> MacWindow mappings
-        let mut window_mapping = HashMap::new();
-        let mut id_to_window = HashMap::new();
+        let mut registry = WindowRegistry::new();
 
         for pid in pids.iter() {
             let app = unsafe { AXUIElement::new_application(*pid) };
@@ -264,27 +340,20 @@ impl WindowContext {
                     continue;
                 }
             };
-            let mut window_ids = Vec::new();
             for window in windows {
                 // TODO: don't tile window, but still manage it as floating
                 if is_standard_window(&window) {
                     let window_id = hub.insert_window();
-                    let cf_hash = CFHash(Some(&window));
-                    window_mapping.insert(cf_hash, window_id);
-                    id_to_window
-                        .insert(window_id, MacWindow::new(window.clone(), app.clone(), *pid));
-                    window_ids.push(cf_hash);
+                    let mac_window = MacWindow::new(window.clone(), app.clone(), *pid);
+                    registry.insert(window_id, mac_window);
                 }
             }
-            pids_window_ids.insert(*pid, window_ids);
         }
 
         Self {
             hub,
             overlay_view,
-            pid_to_window_hashes: Rc::new(RefCell::new(pids_window_ids)),
-            window_hashes_to_id: Rc::new(RefCell::new(window_mapping)),
-            id_to_window: Rc::new(RefCell::new(id_to_window)),
+            registry: RefCell::new(registry),
             config,
         }
     }
@@ -369,7 +438,7 @@ unsafe extern "C-unwind" fn observer_callback(
     let element = unsafe { CFRetained::retain(element) };
     if notification.to_string() == *"AXWindowCreated" && is_standard_window(&element) {
         let cf_hash = CFHash(Some(&element));
-        if context.window_hashes_to_id.borrow().contains_key(&cf_hash) {
+        if context.registry.borrow().contains_hash(cf_hash) {
             return;
         }
         match get_pid(&element) {
@@ -378,11 +447,7 @@ unsafe extern "C-unwind" fn observer_callback(
                 let window = MacWindow::new(element.clone(), app, pid);
                 tracing::debug!("New window created: {window}",);
                 let window_id = context.hub.insert_window();
-                context
-                    .window_hashes_to_id
-                    .borrow_mut()
-                    .insert(cf_hash, window_id);
-                context.id_to_window.borrow_mut().insert(window_id, window);
+                context.registry.borrow_mut().insert(window_id, window);
                 // Render the entire workspace since insert_window may have resized other windows
                 let workspace_id = context.hub.current_workspace();
                 if let Err(e) = render_workspace(context, workspace_id) {
@@ -395,8 +460,7 @@ unsafe extern "C-unwind" fn observer_callback(
         }
     } else if notification.to_string() == *"AXUIElementDestroyed" {
         let cf_hash = CFHash(Some(&element));
-        if let Some(window_id) = context.window_hashes_to_id.borrow_mut().remove(&cf_hash) {
-            context.id_to_window.borrow_mut().remove(&window_id);
+        if let Some(window_id) = context.registry.borrow_mut().remove_by_hash(cf_hash) {
             let workspace_id = context.hub.delete_window(window_id);
             tracing::info!("Window deleted: {window_id}");
             if workspace_id == context.hub.current_workspace()
@@ -554,20 +618,11 @@ fn listen_to_launching_app(
                         return;
                     }
                 };
-                let mut window_ids = Vec::new();
                 for window in windows {
                     if is_standard_window(&window) {
                         let window_id = context.hub.insert_window();
-                        let cf_hash = CFHash(Some(&window));
-                        context
-                            .window_hashes_to_id
-                            .borrow_mut()
-                            .insert(cf_hash, window_id);
-                        context
-                            .id_to_window
-                            .borrow_mut()
-                            .insert(window_id, MacWindow::new(window.clone(), app.clone(), pid));
-                        window_ids.push(cf_hash);
+                        let mac_window = MacWindow::new(window.clone(), app.clone(), pid);
+                        context.registry.borrow_mut().insert(window_id, mac_window);
                     }
                 }
                 // Render the entire workspace after inserting all windows
@@ -575,10 +630,6 @@ fn listen_to_launching_app(
                 if let Err(e) = render_workspace(context, workspace_id) {
                     tracing::warn!("Failed to render workspace after app launch: {e:#}");
                 }
-                context
-                    .pid_to_window_hashes
-                    .borrow_mut()
-                    .insert(pid, window_ids);
 
                 apps.borrow_mut().insert(pid, observer);
             }),
@@ -604,17 +655,10 @@ fn listen_to_terminating_app(
                 tracing::trace!("Received notification for terminating app with pid: {pid:?}",);
                 apps.borrow_mut().remove(&pid);
                 let context = &mut *context_ptr;
-                if let Some(window_ids) = context.pid_to_window_hashes.borrow_mut().remove(&pid) {
-                    for cf_hash in window_ids {
-                        if let Some(window_id) =
-                            context.window_hashes_to_id.borrow_mut().remove(&cf_hash)
-                        {
-                            context.hub.delete_window(window_id);
-                            tracing::debug!("Window deleted: {window_id}");
-                        }
-                    }
-                } else {
-                    tracing::trace!("App {pid} doesn't have any windows");
+                let window_ids = context.registry.borrow_mut().remove_by_pid(pid);
+                for window_id in window_ids {
+                    context.hub.delete_window(window_id);
+                    tracing::debug!("Window deleted: {window_id}");
                 }
             }),
         );
@@ -630,7 +674,7 @@ fn poll_deleted_windows(context_ptr: *mut WindowContext) {
                 let context = &mut *context_ptr;
                 let mut invalid_ids = Vec::new();
 
-                for (&id, window) in context.id_to_window.borrow().iter() {
+                for (&id, window) in context.registry.borrow().iter() {
                     if !window.is_valid() {
                         tracing::debug!("Window {id:?} is no longer valid, removing");
                         invalid_ids.push(id);
@@ -638,7 +682,7 @@ fn poll_deleted_windows(context_ptr: *mut WindowContext) {
                 }
 
                 for id in invalid_ids {
-                    context.id_to_window.borrow_mut().remove(&id);
+                    context.registry.borrow_mut().remove_by_id(id);
                     context.hub.delete_window(id);
                 }
             }),
@@ -693,7 +737,7 @@ fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Resul
         // Focus the currently focused window in this workspace
         if let Some(focused) = context.hub.get_workspace(workspace_id).focused()
             && let Child::Window(window_id) = focused
-            && let Some(os_window) = context.id_to_window.borrow().get(&window_id)
+            && let Some(os_window) = context.registry.borrow().get(window_id)
             && let Err(e) = os_window.focus()
         {
             tracing::warn!("Failed to focus window {window_id:?}: {e:#}");
@@ -830,7 +874,7 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
 fn render_child(context: &WindowContext, child: Child) -> Result<()> {
     match child {
         Child::Window(window_id) => {
-            if let Some(os_window) = context.id_to_window.borrow().get(&window_id) {
+            if let Some(os_window) = context.registry.borrow().get(window_id) {
                 let window = context.hub.get_window(window_id);
                 let dim = window.dimension();
                 os_window.show()?;
@@ -866,7 +910,7 @@ fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
 fn hide_child(context: &WindowContext, child: Child) -> Result<()> {
     match child {
         Child::Window(window_id) => {
-            if let Some(window) = context.id_to_window.borrow().get(&window_id) {
+            if let Some(window) = context.registry.borrow().get(window_id) {
                 window.hide()?;
             }
         }
