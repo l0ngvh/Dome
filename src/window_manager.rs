@@ -21,7 +21,7 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSNotification, NSOperationQueue};
 
 use crate::window::MacWindow;
-use crate::workspace::{Child, Hub, Screen, WindowId, WorkspaceId};
+use crate::workspace::{Child, Dimension, Hub, WindowId, WorkspaceId};
 
 pub struct WindowContext {
     pub hub: Hub,
@@ -152,11 +152,11 @@ fn list_apps() -> Vec<i32> {
     apps
 }
 
-fn get_main_screen() -> Screen {
+fn get_main_screen() -> Dimension {
     let mtm = MainThreadMarker::new().unwrap();
     let main_screen = NSScreen::mainScreen(mtm).unwrap();
     let frame = main_screen.frame();
-    Screen {
+    Dimension {
         x: frame.origin.x as f32,
         y: frame.origin.y as f32,
         width: frame.size.width as f32,
@@ -535,8 +535,9 @@ fn render_child(context: &WindowContext, child: Child) -> Result<()> {
         Child::Window(window_id) => {
             if let Some(os_window) = context.id_to_window.borrow().get(&window_id) {
                 let window = context.hub.get_window(window_id);
-                os_window.set_position(window.x(), window.y())?;
-                os_window.set_size(window.width(), window.height())?;
+                let dim = window.dimension();
+                os_window.set_position(dim.x, dim.y)?;
+                os_window.set_size(dim.width, dim.height)?;
             }
             Ok(())
         }
