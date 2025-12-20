@@ -10,6 +10,7 @@ use objc2_core_foundation::{
 pub(crate) struct MacWindow(pub(crate) CFRetained<AXUIElement>);
 
 impl MacWindow {
+    #[tracing::instrument]
     pub(crate) fn set_position(&self, x: f32, y: f32) -> Result<()> {
         let window = &self.0;
         let pos_ptr: *mut CGPoint = &mut CGPoint::new(x as f64, y as f64);
@@ -27,6 +28,7 @@ impl MacWindow {
         }
     }
 
+    #[tracing::instrument]
     pub(crate) fn set_size(&self, width: f32, height: f32) -> Result<()> {
         let window = &self.0;
         let size_ptr: *mut CGSize = &mut CGSize::new(width as f64, height as f64);

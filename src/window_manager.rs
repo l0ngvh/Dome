@@ -38,7 +38,6 @@ impl WindowManager {
         Ok(Self)
     }
 
-    #[tracing::instrument]
     pub fn list_windows(&self) -> Result<()> {
         use objc2_application_services::kAXTrustedCheckOptionPrompt;
         use objc2_core_foundation::CFDictionary;
@@ -85,6 +84,7 @@ impl WindowManager {
         let mut window_mapping = HashMap::new();
         let mut id_to_window = HashMap::new();
         let mut window_ids = Vec::new();
+        // TODO: sort windows based on origin first
         for window in all_windows.iter() {
             let window_id = hub.insert_window();
             let cf_hash = CFHash(Some(window));
@@ -242,7 +242,7 @@ fn create_observer(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetain
 }
 
 // AXObserver callback
-#[tracing::instrument]
+#[tracing::instrument(skip_all)]
 unsafe extern "C-unwind" fn observer_callback(
     _observer: NonNull<AXObserver>,
     element: NonNull<AXUIElement>,
@@ -270,8 +270,13 @@ unsafe extern "C-unwind" fn observer_callback(
     } else if notification.to_string() == *"AXUIElementDestroyed" {
         let cf_hash = CFHash(Some(&element));
         if let Some(window_id) = context.window_mapping.borrow_mut().remove(&cf_hash) {
-            context.hub.delete_window(window_id);
+            let workspace_id = context.hub.delete_window(window_id);
             tracing::info!("Window deleted: {window_id}");
+            if workspace_id == context.hub.current_workspace()
+                && let Err(e) = render_workspace(context, workspace_id)
+            {
+                tracing::warn!("Failed to render workspace after window insert: {e:#}");
+            }
         }
     }
 }
@@ -380,6 +385,9 @@ unsafe extern "C-unwind" fn event_tap_callback(
         if let Err(e) = focus_workspace(context, 1) {
             tracing::warn!("Failed to focus workspace 1: {e:#}");
         }
+        return std::ptr::null_mut();
+    } else if key == *"e" && flags.contains(CGEventFlags::MaskCommand) {
+        context.hub.toggle_new_window_direction();
         return std::ptr::null_mut();
     }
     tracing::trace!("Event tap: {event_type:?} {key:?} ",);
