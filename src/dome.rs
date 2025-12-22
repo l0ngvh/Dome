@@ -443,7 +443,8 @@ unsafe extern "C-unwind" fn observer_callback(
         }
     } else if notification.to_string() == *"AXUIElementDestroyed" {
         let cf_hash = CFHash(Some(&element));
-        if let Some(window_id) = context.registry.borrow_mut().remove_by_hash(cf_hash) {
+        let removed = context.registry.borrow_mut().remove_by_hash(cf_hash);
+        if let Some(window_id) = removed {
             let workspace_id = context.hub.delete_window(window_id);
             tracing::info!("Window deleted: {window_id}");
             if workspace_id == context.hub.current_workspace()
