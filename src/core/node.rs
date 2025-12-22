@@ -89,11 +89,6 @@ impl Container {
         }
     }
 
-    pub(super) fn remove_window(&mut self, window_id: WindowId) {
-        self.children
-            .retain(|child| !child.is_window_and(|id| id == window_id));
-    }
-
     pub(super) fn remove_child(&mut self, child: Child) {
         self.children.retain(|c| *c != child);
     }
@@ -181,16 +176,6 @@ impl std::fmt::Display for Child {
         match self {
             Child::Window(id) => write!(f, "{}", id),
             Child::Container(id) => write!(f, "{}", id),
-        }
-    }
-}
-
-impl Child {
-    fn is_window_and(&self, f: impl Fn(WindowId) -> bool) -> bool {
-        if let Child::Window(id) = self {
-            f(*id)
-        } else {
-            false
         }
     }
 }

@@ -121,8 +121,7 @@ impl Hub {
                     workspace.focused = Some(Child::Window(new_focus));
                 }
 
-                self.containers.get_mut(parent_id).remove_window(id);
-                self.cleanup_single_child_container(parent_id, workspace_id);
+                self.remove_child_and_cleanup(parent_id, Child::Window(id), workspace_id);
                 self.balance_workspace(workspace_id);
                 self.windows.delete(id);
                 workspace_id
@@ -140,11 +139,13 @@ impl Hub {
         }
     }
 
-    fn cleanup_single_child_container(
+    fn remove_child_and_cleanup(
         &mut self,
         container_id: ContainerId,
+        child: Child,
         workspace_id: WorkspaceId,
     ) {
+        self.containers.get_mut(container_id).remove_child(child);
         if self.containers.get(container_id).children.len() != 1 {
             return;
         }
@@ -218,38 +219,189 @@ impl Hub {
     }
 
     pub(crate) fn focus_left(&mut self) {
-        let Some(focused) = self.workspaces.get(self.current).focused else {
-            return;
-        };
-        if let Some(id) = self.find_prev(focused, Direction::Horizontal) {
-            self.workspaces.get_mut(self.current).focused = Some(Child::Window(id));
-        }
+        self.focus_in_direction(Direction::Horizontal, false);
     }
 
     pub(crate) fn focus_right(&mut self) {
-        let Some(focused) = self.workspaces.get(self.current).focused else {
-            return;
-        };
-        if let Some(id) = self.find_next(focused, Direction::Horizontal) {
-            self.workspaces.get_mut(self.current).focused = Some(Child::Window(id));
-        }
+        self.focus_in_direction(Direction::Horizontal, true);
     }
 
     pub(crate) fn focus_up(&mut self) {
-        let Some(focused) = self.workspaces.get(self.current).focused else {
-            return;
-        };
-        if let Some(id) = self.find_prev(focused, Direction::Vertical) {
-            self.workspaces.get_mut(self.current).focused = Some(Child::Window(id));
-        }
+        self.focus_in_direction(Direction::Vertical, false);
     }
 
     pub(crate) fn focus_down(&mut self) {
+        self.focus_in_direction(Direction::Vertical, true);
+    }
+
+    fn focus_in_direction(&mut self, direction: Direction, forward: bool) {
         let Some(focused) = self.workspaces.get(self.current).focused else {
             return;
         };
-        if let Some(id) = self.find_next(focused, Direction::Vertical) {
-            self.workspaces.get_mut(self.current).focused = Some(Child::Window(id));
+        let Some(mut container_id) = self.get_parent_container(focused) else {
+            return;
+        };
+        let mut current_child = focused;
+        let mut iterations = 0;
+        loop {
+            iterations += 1;
+            if iterations > 1000 {
+                panic!("focus_in_direction exceeded max iterations");
+            }
+            if self.containers.get(container_id).direction != direction {
+                current_child = Child::Container(container_id);
+                let Some(parent) = self.get_parent_container(current_child) else {
+                    return;
+                };
+                container_id = parent;
+                continue;
+            }
+            let container = self.containers.get(container_id);
+            let Some(pos) = container.children.iter().position(|c| *c == current_child) else {
+                return;
+            };
+            let has_sibling = if forward {
+                pos + 1 < container.children.len()
+            } else {
+                pos > 0
+            };
+            if has_sibling {
+                let sibling_pos = if forward { pos + 1 } else { pos - 1 };
+                let window_id = match container.children[sibling_pos] {
+                    Child::Window(id) => id,
+                    Child::Container(id) => {
+                        if forward {
+                            first_window(&self.containers, id)
+                        } else {
+                            last_window(&self.containers, id)
+                        }
+                    }
+                };
+                self.workspaces.get_mut(self.current).focused = Some(Child::Window(window_id));
+                return;
+            }
+            current_child = Child::Container(container_id);
+            let Some(parent) = self.get_parent_container(current_child) else {
+                return;
+            };
+            container_id = parent;
+        }
+    }
+
+    pub(crate) fn move_left(&mut self) {
+        self.move_in_direction(Direction::Horizontal, false);
+    }
+
+    pub(crate) fn move_right(&mut self) {
+        self.move_in_direction(Direction::Horizontal, true);
+    }
+
+    pub(crate) fn move_up(&mut self) {
+        self.move_in_direction(Direction::Vertical, false);
+    }
+
+    pub(crate) fn move_down(&mut self) {
+        self.move_in_direction(Direction::Vertical, true);
+    }
+
+    fn move_in_direction(&mut self, direction: Direction, forward: bool) {
+        let Some(focused) = self.workspaces.get(self.current).focused else {
+            return;
+        };
+        let Parent::Container(old_parent_id) = self.get_parent(focused) else {
+            return;
+        };
+
+        // Handle swap within same container
+        let old_container = self.containers.get(old_parent_id);
+        if old_container.direction == direction {
+            let pos = old_container
+                .children
+                .iter()
+                .position(|c| *c == focused)
+                .unwrap();
+            let target_pos = if forward {
+                pos + 1
+            } else {
+                pos.saturating_sub(1)
+            };
+            if target_pos != pos && target_pos < old_container.children.len() {
+                tracing::debug!(
+                    "Swapping {focused:?} from pos {pos} to {target_pos} in {old_parent_id:?}"
+                );
+                self.containers
+                    .get_mut(old_parent_id)
+                    .children
+                    .swap(pos, target_pos);
+                self.balance_workspace(self.current);
+                return;
+            }
+            // At edge, fall through to find ancestor
+        }
+
+        let mut current_anchor = Child::Container(old_parent_id);
+        let mut iterations = 0;
+
+        loop {
+            iterations += 1;
+            if iterations > 1000 {
+                panic!("move_in_direction exceeded max iterations");
+            }
+
+            let parent = self.get_parent(current_anchor);
+            match parent {
+                Parent::Container(container_id) => {
+                    let container = self.containers.get(container_id);
+                    if container.direction == direction {
+                        let pos = container
+                            .children
+                            .iter()
+                            .position(|c| *c == current_anchor)
+                            .unwrap();
+                        let insert_pos = if forward { pos + 1 } else { pos };
+
+                        tracing::debug!(
+                            "Moving {focused:?} from {old_parent_id:?} to {container_id:?} at pos {insert_pos}"
+                        );
+                        self.containers
+                            .get_mut(container_id)
+                            .children
+                            .insert(insert_pos, focused);
+                        self.set_parent(focused, Parent::Container(container_id));
+                        self.remove_child_and_cleanup(old_parent_id, focused, self.current);
+                        self.balance_workspace(self.current);
+                        return;
+                    }
+                    current_anchor = Child::Container(container_id);
+                }
+                Parent::Workspace(workspace_id) => {
+                    tracing::debug!("Moving {focused:?} to new root container in {workspace_id:?}");
+                    self.remove_child_and_cleanup(old_parent_id, focused, workspace_id);
+                    let root = self.workspaces.get(workspace_id).root.unwrap();
+                    let screen = self.workspaces.get(workspace_id).screen;
+
+                    let new_root_id = self.containers.allocate(Container::new(
+                        Parent::Workspace(workspace_id),
+                        screen,
+                        direction,
+                    ));
+                    self.set_parent(root, Parent::Container(new_root_id));
+                    self.set_parent(focused, Parent::Container(new_root_id));
+
+                    let children = &mut self.containers.get_mut(new_root_id).children;
+                    if forward {
+                        children.push(root);
+                        children.push(focused);
+                    } else {
+                        children.push(focused);
+                        children.push(root);
+                    }
+                    self.workspaces.get_mut(workspace_id).root =
+                        Some(Child::Container(new_root_id));
+                    self.balance_workspace(workspace_id);
+                    return;
+                }
+            }
         }
     }
 
@@ -276,8 +428,7 @@ impl Hub {
                 let new_focus = sibling_window(&self.containers, parent_id, focused);
                 self.workspaces.get_mut(current_workspace_id).focused =
                     Some(Child::Window(new_focus));
-                self.containers.get_mut(parent_id).remove_child(focused);
-                self.cleanup_single_child_container(parent_id, current_workspace_id);
+                self.remove_child_and_cleanup(parent_id, focused, current_workspace_id);
             }
             Parent::Workspace(_) => {
                 self.workspaces.get_mut(current_workspace_id).root = None;
@@ -306,70 +457,6 @@ impl Hub {
 
         self.balance_workspace(current_workspace_id);
         self.balance_workspace(target_workspace_id);
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn find_prev(&self, child: Child, direction: Direction) -> Option<WindowId> {
-        let mut container_id = self.get_parent_container(child)?;
-        let mut current_child = child;
-        let mut iterations = 0;
-        loop {
-            iterations += 1;
-            if iterations > 1000 {
-                tracing::error!("find_prev exceeded max iterations");
-                return None;
-            }
-            if self.containers.get(container_id).direction != direction {
-                current_child = Child::Container(container_id);
-                container_id = self.get_parent_container(current_child)?;
-                continue;
-            }
-            let container = self.containers.get(container_id);
-            let pos = container
-                .children
-                .iter()
-                .position(|c| *c == current_child)?;
-            if pos > 0 {
-                return Some(match container.children[pos - 1] {
-                    Child::Window(id) => id,
-                    Child::Container(id) => last_window(&self.containers, id),
-                });
-            }
-            current_child = Child::Container(container_id);
-            container_id = self.get_parent_container(current_child)?;
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn find_next(&self, child: Child, direction: Direction) -> Option<WindowId> {
-        let mut container_id = self.get_parent_container(child)?;
-        let mut current_child = child;
-        let mut iterations = 0;
-        loop {
-            iterations += 1;
-            if iterations > 1000 {
-                tracing::error!("find_next exceeded max iterations");
-                return None;
-            }
-            if self.containers.get(container_id).direction != direction {
-                current_child = Child::Container(container_id);
-                container_id = self.get_parent_container(current_child)?;
-                continue;
-            }
-            let container = self.containers.get(container_id);
-            let pos = container
-                .children
-                .iter()
-                .position(|c| *c == current_child)?;
-            if pos + 1 < container.children.len() {
-                return Some(match container.children[pos + 1] {
-                    Child::Window(id) => id,
-                    Child::Container(id) => first_window(&self.containers, id),
-                });
-            }
-            current_child = Child::Container(container_id);
-            container_id = self.get_parent_container(current_child)?;
-        }
     }
 
     /// Returns (parent, optional child to insert after)

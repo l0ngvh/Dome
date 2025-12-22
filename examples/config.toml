@@ -28,3 +28,7 @@ border_size = 5.0
 "cmd+j" = ["focus down"]
 "cmd+k" = ["focus up"]
 "cmd+l" = ["focus right"]
+"cmd+shift+h" = ["move left"]
+"cmd+shift+j" = ["move down"]
+"cmd+shift+k" = ["move up"]
+"cmd+shift+l" = ["move right"]

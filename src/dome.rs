@@ -31,7 +31,7 @@ use objc2_foundation::{
 };
 
 use crate::{
-    config::{Action, Config, Keymap, Modifier, Target, ToggleTarget},
+    config::{Action, Config, FocusTarget, Keymap, Modifier, MoveTarget, ToggleTarget},
     objc2_wrapper::{
         add_observer_notification, create_observer, get_attribute, get_pid, kAXMinimizedAttribute,
         kAXRoleAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
@@ -547,16 +547,19 @@ fn get_key_from_event(event: *mut CGEvent) -> String {
 fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
     match action {
         Action::Focus(target) => match target {
-            Target::Up => context.hub.focus_up(),
-            Target::Down => context.hub.focus_down(),
-            Target::Left => context.hub.focus_left(),
-            Target::Right => context.hub.focus_right(),
-            Target::Parent => context.hub.focus_parent(),
-            Target::Workspace(n) => return focus_workspace(context, *n),
+            FocusTarget::Up => context.hub.focus_up(),
+            FocusTarget::Down => context.hub.focus_down(),
+            FocusTarget::Left => context.hub.focus_left(),
+            FocusTarget::Right => context.hub.focus_right(),
+            FocusTarget::Parent => context.hub.focus_parent(),
+            FocusTarget::Workspace(n) => return focus_workspace(context, *n),
         },
         Action::Move(target) => match target {
-            Target::Workspace(n) => return move_to_workspace(context, *n),
-            _ => {}
+            MoveTarget::Workspace(n) => return move_to_workspace(context, *n),
+            MoveTarget::Up => context.hub.move_up(),
+            MoveTarget::Down => context.hub.move_down(),
+            MoveTarget::Left => context.hub.move_left(),
+            MoveTarget::Right => context.hub.move_right(),
         },
         Action::Toggle(target) => match target {
             ToggleTarget::Direction => context.hub.toggle_new_window_direction(),

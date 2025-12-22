@@ -6,18 +6,27 @@ use anyhow::{Result, anyhow};
 
 #[derive(Debug, Clone)]
 pub enum Action {
-    Focus(Target),
-    Move(Target),
+    Focus(FocusTarget),
+    Move(MoveTarget),
     Toggle(ToggleTarget),
 }
 
 #[derive(Debug, Clone)]
-pub enum Target {
+pub enum FocusTarget {
     Up,
     Down,
     Left,
     Right,
     Parent,
+    Workspace(usize),
+}
+
+#[derive(Debug, Clone)]
+pub enum MoveTarget {
+    Up,
+    Down,
+    Left,
+    Right,
     Workspace(usize),
 }
 
@@ -63,13 +72,17 @@ impl FromStr for Action {
     fn from_str(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.split_whitespace().collect();
         match parts.as_slice() {
-            ["focus", "up"] => Ok(Action::Focus(Target::Up)),
-            ["focus", "down"] => Ok(Action::Focus(Target::Down)),
-            ["focus", "left"] => Ok(Action::Focus(Target::Left)),
-            ["focus", "right"] => Ok(Action::Focus(Target::Right)),
-            ["focus", "parent"] => Ok(Action::Focus(Target::Parent)),
-            ["focus", "workspace", n] => Ok(Action::Focus(Target::Workspace(n.parse()?))),
-            ["move", "workspace", n] => Ok(Action::Move(Target::Workspace(n.parse()?))),
+            ["focus", "up"] => Ok(Action::Focus(FocusTarget::Up)),
+            ["focus", "down"] => Ok(Action::Focus(FocusTarget::Down)),
+            ["focus", "left"] => Ok(Action::Focus(FocusTarget::Left)),
+            ["focus", "right"] => Ok(Action::Focus(FocusTarget::Right)),
+            ["focus", "parent"] => Ok(Action::Focus(FocusTarget::Parent)),
+            ["focus", "workspace", n] => Ok(Action::Focus(FocusTarget::Workspace(n.parse()?))),
+            ["move", "up"] => Ok(Action::Move(MoveTarget::Up)),
+            ["move", "down"] => Ok(Action::Move(MoveTarget::Down)),
+            ["move", "left"] => Ok(Action::Move(MoveTarget::Left)),
+            ["move", "right"] => Ok(Action::Move(MoveTarget::Right)),
+            ["move", "workspace", n] => Ok(Action::Move(MoveTarget::Workspace(n.parse()?))),
             ["toggle", "direction"] => Ok(Action::Toggle(ToggleTarget::Direction)),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
@@ -110,15 +123,19 @@ impl FromStr for Keymap {
 fn default_keymaps() -> HashMap<Keymap, Vec<Action>> {
     let mut keymaps = HashMap::new();
     for i in 0..=9 {
-        keymaps.insert(Keymap { key: i.to_string(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Workspace(i))]);
-        keymaps.insert(Keymap { key: i.to_string(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(Target::Workspace(i))]);
+        keymaps.insert(Keymap { key: i.to_string(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Workspace(i))]);
+        keymaps.insert(Keymap { key: i.to_string(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Workspace(i))]);
     }
     keymaps.insert(Keymap { key: "e".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Toggle(ToggleTarget::Direction)]);
-    keymaps.insert(Keymap { key: "p".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Parent)]);
-    keymaps.insert(Keymap { key: "h".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Left)]);
-    keymaps.insert(Keymap { key: "j".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Down)]);
-    keymaps.insert(Keymap { key: "k".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Up)]);
-    keymaps.insert(Keymap { key: "l".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(Target::Right)]);
+    keymaps.insert(Keymap { key: "p".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Parent)]);
+    keymaps.insert(Keymap { key: "h".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Left)]);
+    keymaps.insert(Keymap { key: "j".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Down)]);
+    keymaps.insert(Keymap { key: "k".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Up)]);
+    keymaps.insert(Keymap { key: "l".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Right)]);
+    keymaps.insert(Keymap { key: "h".into(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Left)]);
+    keymaps.insert(Keymap { key: "j".into(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Down)]);
+    keymaps.insert(Keymap { key: "k".into(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Up)]);
+    keymaps.insert(Keymap { key: "l".into(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Right)]);
     keymaps
 }
 
