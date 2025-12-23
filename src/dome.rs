@@ -303,6 +303,7 @@ struct WindowContext {
     overlay_view: Retained<OverlayView>,
     registry: RefCell<WindowRegistry>,
     config: Config,
+    event_tap: Option<CFRetained<CFMachPort>>,
 }
 
 impl WindowContext {
@@ -339,6 +340,7 @@ impl WindowContext {
             overlay_view,
             registry: RefCell::new(registry),
             config,
+            event_tap: None,
         }
     }
 }
@@ -403,6 +405,12 @@ fn register_observer(pid: i32, context_ptr: *mut WindowContext) -> Result<CFReta
         &observer,
         &app,
         &kAXUIElementDestroyedNotification(),
+        context_ptr,
+    )?;
+    add_observer_notification(
+        &observer,
+        &app,
+        &kAXFocusedWindowChangedNotification(),
         context_ptr,
     )?;
 
@@ -496,13 +504,25 @@ fn is_standard_window(window: &AXUIElement) -> bool {
 
 unsafe extern "C-unwind" fn event_tap_callback(
     _proxy: CGEventTapProxy,
-    _event_type: CGEventType,
+    event_type: CGEventType,
     event: NonNull<CGEvent>,
     refcon: *mut std::ffi::c_void,
 ) -> *mut CGEvent {
+    let context = unsafe { &mut *(refcon as *mut WindowContext) };
+
+    // Re-enable tap if it was disabled
+    if event_type == CGEventType::TapDisabledByTimeout
+        || event_type == CGEventType::TapDisabledByUserInput
+    {
+        if let Some(tap) = &context.event_tap {
+            tracing::debug!("Event tap disabled, re-enabling");
+            CGEvent::tap_enable(tap, true);
+        }
+        return event.as_ptr();
+    }
+
     let event = event.as_ptr();
     let flags = CGEvent::flags(Some(unsafe { &*event }));
-    let context = unsafe { &mut *(refcon as *mut WindowContext) };
     let key = get_key_from_event(event);
 
     let mut modifiers = HashSet::new();
@@ -674,6 +694,7 @@ fn get_pid_from_notification(notification: NonNull<NSNotification>) -> Option<i3
 
 fn listen_to_keyboard(context_ptr: *mut WindowContext) -> Result<()> {
     let run_loop = CFRunLoop::current().unwrap();
+    // TapDisabledByTimeout/TapDisabledByUserInput are delivered regardless of mask
     let Some(match_port) = (unsafe {
         CGEvent::tap_create(
             CGEventTapLocation::SessionEventTap,
@@ -686,6 +707,9 @@ fn listen_to_keyboard(context_ptr: *mut WindowContext) -> Result<()> {
     }) else {
         return Err(anyhow::anyhow!("Failed to create event tap"));
     };
+
+    let context = unsafe { &mut *context_ptr };
+    context.event_tap = Some(match_port.clone());
 
     let Some(run_loop_source) =
         CFMachPort::new_run_loop_source(unsafe { kCFAllocatorDefault }, Some(&match_port), 0)
@@ -727,7 +751,7 @@ fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Resul
             tracing::warn!("Failed to focus window {window_id:?}: {e:#}");
         }
     } else {
-        // No windows, clear overlay
+        // No windows, focus overlay to keep keyboard events working
         context.overlay_view.set_rects(Vec::new());
     }
     Ok(())
@@ -820,14 +844,11 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
                 return;
             }
             let dim = context.hub.get_window(window_id).dimension();
-            // Convert from top-left to bottom-left coordinates for NSView
             let screen = context.hub.screen();
             let y = screen.y + screen.height - dim.y - dim.height;
             let border_size = context.config.border_size;
             let color = context.config.border_color.clone();
 
-            // Draw border around window
-            // Top
             rects.push(OverlayRect {
                 x: dim.x - border_size,
                 y: y + dim.height,
@@ -835,7 +856,6 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
                 height: border_size,
                 color: color.clone(),
             });
-            // Bottom
             rects.push(OverlayRect {
                 x: dim.x - border_size,
                 y: y - border_size,
@@ -843,7 +863,6 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
                 height: border_size,
                 color: color.clone(),
             });
-            // Left
             rects.push(OverlayRect {
                 x: dim.x - border_size,
                 y,
@@ -851,7 +870,6 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
                 height: dim.height,
                 color: color.clone(),
             });
-            // Right
             rects.push(OverlayRect {
                 x: dim.x + dim.width,
                 y,
