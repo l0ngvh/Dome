@@ -229,18 +229,22 @@ impl Hub {
     }
 
     pub(crate) fn focus_left(&mut self) {
+        tracing::info!("Focusing left");
         self.focus_in_direction(Direction::Horizontal, false);
     }
 
     pub(crate) fn focus_right(&mut self) {
+        tracing::info!("Focusing right");
         self.focus_in_direction(Direction::Horizontal, true);
     }
 
     pub(crate) fn focus_up(&mut self) {
+        tracing::info!("Focusing up");
         self.focus_in_direction(Direction::Vertical, false);
     }
 
     pub(crate) fn focus_down(&mut self) {
+        tracing::info!("Focusing down");
         self.focus_in_direction(Direction::Vertical, true);
     }
 
@@ -277,7 +281,8 @@ impl Hub {
             };
             if has_sibling {
                 let sibling_pos = if forward { pos + 1 } else { pos - 1 };
-                let window_id = match container.children[sibling_pos] {
+                let sibling = container.children[sibling_pos];
+                let window_id = match sibling {
                     Child::Window(id) => id,
                     Child::Container(id) => {
                         if forward {
@@ -287,6 +292,7 @@ impl Hub {
                         }
                     }
                 };
+                tracing::debug!("Changing focus to: {:?}", window_id);
                 self.workspaces.get_mut(self.current).focused = Some(Child::Window(window_id));
                 return;
             }
