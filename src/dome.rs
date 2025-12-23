@@ -31,12 +31,12 @@ use objc2_foundation::{
 };
 
 use crate::{
-    config::{Action, Config, FocusTarget, Keymap, Modifier, MoveTarget, ToggleTarget},
+    config::{Action, Color, Config, FocusTarget, Keymap, Modifier, MoveTarget, ToggleTarget},
     objc2_wrapper::{
-        add_observer_notification, create_observer, get_attribute, get_pid, kAXMinimizedAttribute,
-        kAXRoleAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
-        kAXWindowCreatedNotification, kAXWindowMiniaturizedNotification, kAXWindowRole,
-        kAXWindowsAttribute,
+        add_observer_notification, create_observer, get_attribute, get_pid,
+        kAXFocusedWindowChangedNotification, kAXMinimizedAttribute, kAXRoleAttribute,
+        kAXStandardWindowSubrole, kAXSubroleAttribute, kAXWindowCreatedNotification,
+        kAXWindowMiniaturizedNotification, kAXWindowRole, kAXWindowsAttribute,
     },
 };
 use crate::{
@@ -189,7 +189,7 @@ define_class!(
         fn draw_rect(&self, _dirty_rect: NSRect) {
             for rect in self.ivars().rects.borrow().iter() {
                 let color = NSColor::colorWithSRGBRed_green_blue_alpha(
-                    rect.r as CGFloat, rect.g as CGFloat, rect.b as CGFloat, rect.a as CGFloat,
+                    rect.color.r as CGFloat, rect.color.g as CGFloat, rect.color.b as CGFloat, rect.color.a as CGFloat,
                 );
                 color.setFill();
                 NSBezierPath::fillRect(NSRect::new(
@@ -225,10 +225,7 @@ struct OverlayRect {
     y: f32,
     width: f32,
     height: f32,
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
+    color: Color,
 }
 
 struct WindowRegistry {
@@ -290,6 +287,10 @@ impl WindowRegistry {
 
     fn contains_hash(&self, cf_hash: usize) -> bool {
         self.hash_to_id.contains_key(&cf_hash)
+    }
+
+    fn get_id_by_hash(&self, cf_hash: usize) -> Option<WindowId> {
+        self.hash_to_id.get(&cf_hash).copied()
     }
 
     fn get(&self, window_id: WindowId) -> Option<&MacWindow> {
@@ -452,6 +453,12 @@ unsafe extern "C-unwind" fn observer_callback(
             {
                 tracing::warn!("Failed to render workspace after deleting window: {e:#}");
             }
+        }
+    } else if notification.to_string() == *"AXFocusedWindowChanged" {
+        let cf_hash = CFHash(Some(&element));
+        if let Some(window_id) = context.registry.borrow().get_id_by_hash(cf_hash) {
+            context.hub.set_focus(window_id);
+            update_overlay(context);
         }
     }
 }
@@ -691,6 +698,16 @@ fn listen_to_keyboard(context_ptr: *mut WindowContext) -> Result<()> {
     Ok(())
 }
 
+fn update_overlay(context: &WindowContext) {
+    let workspace_id = context.hub.current_workspace();
+    if let Some(root) = context.hub.get_workspace(workspace_id).root() {
+        let mut rects = Vec::new();
+        collect_border_rects(context, root, &mut rects);
+        collect_focused_border_rects(context, &mut rects);
+        context.overlay_view.set_rects(rects);
+    }
+}
+
 fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Result<()> {
     if let Some(root) = context.hub.get_workspace(workspace_id).root() {
         render_child(context, root)?;
@@ -698,6 +715,7 @@ fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Resul
         // Update overlay with border rects
         let mut rects = Vec::new();
         collect_border_rects(context, root, &mut rects);
+        collect_focused_border_rects(context, &mut rects);
         context.overlay_view.set_rects(rects);
 
         // Focus the currently focused window in this workspace
@@ -715,16 +733,98 @@ fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Resul
     Ok(())
 }
 
+fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<OverlayRect>) {
+    let workspace = context.hub.get_workspace(context.hub.current_workspace());
+    let Some(focused) = workspace.focused() else {
+        return;
+    };
+    let border_size = context.config.border_size;
+    let color = context.config.focused_color.clone();
+    let screen = context.hub.screen();
+
+    match focused {
+        Child::Window(window_id) => {
+            let dim = context.hub.get_window(window_id).dimension();
+            let y = screen.y + screen.height - dim.y - dim.height;
+            rects.push(OverlayRect {
+                x: dim.x - border_size,
+                y: y + dim.height,
+                width: dim.width + border_size * 2.0,
+                height: border_size,
+                color: color.clone(),
+            });
+            rects.push(OverlayRect {
+                x: dim.x - border_size,
+                y: y - border_size,
+                width: dim.width + border_size * 2.0,
+                height: border_size,
+                color: color.clone(),
+            });
+            rects.push(OverlayRect {
+                x: dim.x - border_size,
+                y,
+                width: border_size,
+                height: dim.height,
+                color: color.clone(),
+            });
+            rects.push(OverlayRect {
+                x: dim.x + dim.width,
+                y,
+                width: border_size,
+                height: dim.height,
+                color,
+            });
+        }
+        Child::Container(container_id) => {
+            let dim = context.hub.get_container(container_id).dimension();
+            let y = screen.y + screen.height - dim.y - dim.height;
+            rects.push(OverlayRect {
+                x: dim.x,
+                y: y + dim.height - border_size,
+                width: dim.width,
+                height: border_size,
+                color: color.clone(),
+            });
+            rects.push(OverlayRect {
+                x: dim.x,
+                y,
+                width: dim.width,
+                height: border_size,
+                color: color.clone(),
+            });
+            rects.push(OverlayRect {
+                x: dim.x,
+                y: y + border_size,
+                width: border_size,
+                height: dim.height - 2.0 * border_size,
+                color: color.clone(),
+            });
+            rects.push(OverlayRect {
+                x: dim.x + dim.width - border_size,
+                y: y + border_size,
+                width: border_size,
+                height: dim.height - 2.0 * border_size,
+                color,
+            });
+        }
+    }
+}
+
 fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<OverlayRect>) {
-    const COLOR: (f32, f32, f32, f32) = (0.4, 0.6, 1.0, 1.0); // Light blue
+    let workspace = context.hub.get_workspace(context.hub.current_workspace());
+    let focused = workspace.focused();
 
     match child {
         Child::Window(window_id) => {
+            if focused == Some(Child::Window(window_id)) {
+                return;
+            }
             let dim = context.hub.get_window(window_id).dimension();
             // Convert from top-left to bottom-left coordinates for NSView
             let screen = context.hub.screen();
             let y = screen.y + screen.height - dim.y - dim.height;
             let border_size = context.config.border_size;
+            let color = context.config.border_color.clone();
 
             // Draw border around window
             // Top
@@ -733,10 +833,7 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
                 y: y + dim.height,
                 width: dim.width + border_size * 2.0,
                 height: border_size,
-                r: COLOR.0,
-                g: COLOR.1,
-                b: COLOR.2,
-                a: COLOR.3,
+                color: color.clone(),
             });
             // Bottom
             rects.push(OverlayRect {
@@ -744,10 +841,7 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
                 y: y - border_size,
                 width: dim.width + border_size * 2.0,
                 height: border_size,
-                r: COLOR.0,
-                g: COLOR.1,
-                b: COLOR.2,
-                a: COLOR.3,
+                color: color.clone(),
             });
             // Left
             rects.push(OverlayRect {
@@ -755,10 +849,7 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
                 y,
                 width: border_size,
                 height: dim.height,
-                r: COLOR.0,
-                g: COLOR.1,
-                b: COLOR.2,
-                a: COLOR.3,
+                color: color.clone(),
             });
             // Right
             rects.push(OverlayRect {
@@ -766,70 +857,10 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
                 y,
                 width: border_size,
                 height: dim.height,
-                r: COLOR.0,
-                g: COLOR.1,
-                b: COLOR.2,
-                a: COLOR.3,
+                color,
             });
         }
         Child::Container(container_id) => {
-            // If container is focused, draw border inside its dimension
-            let workspace = context.hub.get_workspace(context.hub.current_workspace());
-            if let Some(Child::Container(focused_id)) = workspace.focused()
-                && focused_id == container_id
-            {
-                let dim = context.hub.get_container(container_id).dimension();
-                let screen = context.hub.screen();
-                let y = screen.y + screen.height - dim.y - dim.height;
-                let border_size = context.config.border_size;
-
-                // Draw border inside container dimension
-                // Top
-                rects.push(OverlayRect {
-                    x: dim.x,
-                    y: y + dim.height - border_size,
-                    width: dim.width,
-                    height: border_size,
-                    r: COLOR.0,
-                    g: COLOR.1,
-                    b: COLOR.2,
-                    a: COLOR.3,
-                });
-                // Bottom
-                rects.push(OverlayRect {
-                    x: dim.x,
-                    y,
-                    width: dim.width,
-                    height: border_size,
-                    r: COLOR.0,
-                    g: COLOR.1,
-                    b: COLOR.2,
-                    a: COLOR.3,
-                });
-                // Left
-                rects.push(OverlayRect {
-                    x: dim.x,
-                    y: y + border_size,
-                    width: border_size,
-                    height: dim.height - 2.0 * border_size,
-                    r: COLOR.0,
-                    g: COLOR.1,
-                    b: COLOR.2,
-                    a: COLOR.3,
-                });
-                // Right
-                rects.push(OverlayRect {
-                    x: dim.x + dim.width - border_size,
-                    y: y + border_size,
-                    width: border_size,
-                    height: dim.height - 2.0 * border_size,
-                    r: COLOR.0,
-                    g: COLOR.1,
-                    b: COLOR.2,
-                    a: COLOR.3,
-                });
-            }
-
             for child in context.hub.get_container(container_id).children() {
                 collect_border_rects(context, *child, rects);
             }

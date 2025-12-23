@@ -157,12 +157,32 @@ where
     Ok(keymaps)
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct Color {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+fn default_focused_color() -> Color {
+    Color { r: 0.4, g: 0.6, b: 1.0, a: 1.0 }
+}
+
+fn default_border_color() -> Color {
+    Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default = "default_keymaps", deserialize_with = "deserialize_keymaps")]
     keymaps: HashMap<Keymap, Vec<Action>>,
     #[serde(default = "default_border_size")]
     pub border_size: f32,
+    #[serde(default = "default_focused_color")]
+    pub focused_color: Color,
+    #[serde(default = "default_border_color")]
+    pub border_color: Color,
 }
 
 fn default_border_size() -> f32 {
@@ -179,6 +199,8 @@ impl Config {
                     Config { 
                         keymaps: default_keymaps(),
                         border_size: default_border_size(),
+                        focused_color: default_focused_color(),
+                        border_color: default_border_color(),
                     }
                 }
             },
@@ -187,6 +209,8 @@ impl Config {
                 Config { 
                     keymaps: default_keymaps(),
                     border_size: default_border_size(),
+                    focused_color: default_focused_color(),
+                    border_color: default_border_color(),
                 }
             }
         }

@@ -54,6 +54,16 @@ impl Hub {
         self.current
     }
 
+    pub(crate) fn set_focus(&mut self, window_id: WindowId) {
+        let workspace_id = match self.windows.get(window_id).parent {
+            Parent::Container(c) => self.get_containing_workspace(c),
+            Parent::Workspace(w) => w,
+        };
+        if workspace_id == self.current {
+            self.workspaces.get_mut(self.current).focused = Some(Child::Window(window_id));
+        }
+    }
+
     pub(crate) fn screen(&self) -> Dimension {
         self.screen
     }

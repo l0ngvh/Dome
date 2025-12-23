@@ -168,6 +168,11 @@ pub(crate) fn kAXStandardWindowSubrole() -> CFRetained<CFString> {
     CFString::from_static_str("AXStandardWindow")
 }
 
+#[allow(non_snake_case)]
+pub(crate) fn kAXFocusedWindowChangedNotification() -> CFRetained<CFString> {
+    CFString::from_static_str("AXFocusedWindowChanged")
+}
+
 pub(crate) fn decorate_ax_error_message(error: AXError) -> String {
     let description = match error {
         AXError::Success => "No error occurred",
