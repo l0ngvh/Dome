@@ -450,10 +450,8 @@ impl Hub {
         }
     }
 
-    pub(crate) fn move_focused_to_workspace(&mut self, target_workspace: usize) {
-        let Some(focused) = self.workspaces.get(self.current).focused else {
-            return;
-        };
+    pub(crate) fn move_focused_to_workspace(&mut self, target_workspace: usize) -> Option<Child> {
+        let focused = self.workspaces.get(self.current).focused?;
 
         let current_workspace_id = self.current;
         let target_workspace_id = match self.workspaces.find(|w| w.name == target_workspace) {
@@ -463,7 +461,7 @@ impl Hub {
                 .allocate(Workspace::new(self.screen, target_workspace)),
         };
         if current_workspace_id == target_workspace_id {
-            return;
+            return None;
         }
 
         // Remove from current workspace
@@ -502,6 +500,9 @@ impl Hub {
 
         self.balance_workspace(current_workspace_id);
         self.balance_workspace(target_workspace_id);
+
+        tracing::info!("Moved {focused:?} to workspace {target_workspace}");
+        Some(focused)
     }
 
     /// Returns (parent, optional child to insert after)

@@ -956,7 +956,9 @@ fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
 
 fn move_to_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
     let current_workspace = context.hub.current_workspace();
-    context.hub.move_focused_to_workspace(name);
+    if let Some(moved) = context.hub.move_focused_to_workspace(name) {
+        hide_child(context, moved)?;
+    }
     render_workspace(context, current_workspace)
 }
 
