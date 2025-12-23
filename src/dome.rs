@@ -1,9 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    ptr::NonNull,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, ptr::NonNull, rc::Rc};
 
 use anyhow::Result;
 
@@ -325,7 +320,7 @@ impl WindowContext {
                 // TODO: don't tile window, but still manage it as floating
                 if is_standard_window(&window) {
                     let window_id = hub.insert_window();
-                    let mac_window = MacWindow::new(window.clone(), app.clone(), *pid);
+                    let mac_window = MacWindow::new(window.clone(), app.clone(), *pid, screen);
                     registry.insert(window_id, mac_window);
                 }
             }
@@ -426,7 +421,8 @@ unsafe extern "C-unwind" fn observer_callback(
         match get_pid(&element) {
             Ok(pid) => {
                 let app = unsafe { AXUIElement::new_application(pid) };
-                let window = MacWindow::new(element.clone(), app, pid);
+                let screen = context.hub.screen();
+                let window = MacWindow::new(element.clone(), app, pid, screen);
                 tracing::debug!("New window created: {window}",);
                 let window_id = context.hub.insert_window();
                 context.registry.borrow_mut().insert(window_id, window);
@@ -658,10 +654,11 @@ fn listen_to_launching_app(
                         return;
                     }
                 };
+                let screen = context.hub.screen();
                 for window in windows {
                     if is_standard_window(&window) {
                         let window_id = context.hub.insert_window();
-                        let mac_window = MacWindow::new(window.clone(), app.clone(), pid);
+                        let mac_window = MacWindow::new(window.clone(), app.clone(), pid, screen);
                         context.registry.borrow_mut().insert(window_id, mac_window);
                     }
                 }
@@ -809,7 +806,11 @@ fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<Overlay
                 y: y - border_size,
                 width: dim.width + border_size * 2.0,
                 height: border_size,
-                color: if direction == Direction::Vertical { spawn_color.clone() } else { color.clone() },
+                color: if direction == Direction::Vertical {
+                    spawn_color.clone()
+                } else {
+                    color.clone()
+                },
             });
             // Left
             rects.push(OverlayRect {
@@ -825,7 +826,11 @@ fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<Overlay
                 y,
                 width: border_size,
                 height: dim.height,
-                color: if direction == Direction::Horizontal { spawn_color } else { color },
+                color: if direction == Direction::Horizontal {
+                    spawn_color
+                } else {
+                    color
+                },
             });
         }
         Child::Container(container_id) => {
@@ -847,7 +852,11 @@ fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<Overlay
                 y,
                 width: dim.width,
                 height: border_size,
-                color: if direction == Direction::Vertical { spawn_color.clone() } else { color.clone() },
+                color: if direction == Direction::Vertical {
+                    spawn_color.clone()
+                } else {
+                    color.clone()
+                },
             });
             // Left
             rects.push(OverlayRect {
@@ -863,7 +872,11 @@ fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<Overlay
                 y: y + border_size,
                 width: border_size,
                 height: dim.height - 2.0 * border_size,
-                color: if direction == Direction::Horizontal { spawn_color } else { color },
+                color: if direction == Direction::Horizontal {
+                    spawn_color
+                } else {
+                    color
+                },
             });
         }
     }
@@ -927,8 +940,7 @@ fn render_child(context: &WindowContext, child: Child) -> Result<()> {
             if let Some(os_window) = context.registry.borrow().get(window_id) {
                 let window = context.hub.get_window(window_id);
                 let dim = window.dimension();
-                os_window.set_position(dim.x, dim.y)?;
-                os_window.set_size(dim.width, dim.height)?;
+                os_window.set_dimension(dim)?;
             }
             Ok(())
         }
@@ -965,17 +977,10 @@ fn move_to_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
 }
 
 fn hide_child(context: &WindowContext, child: Child) -> Result<()> {
-    let screen = context.hub.screen();
     match child {
         Child::Window(window_id) => {
             if let Some(window) = context.registry.borrow().get(window_id) {
-                // MacOS doesn't allow completely set windows offscreen, so we need to leave at
-                // least one pixel left
-                // Taken from https://github.com/nikitabobko/AeroSpace/blob/976b2cf4b04d371143bb31f3b094d04e9e85fdcd/Sources/AppBundle/tree/MacWindow.swift#L144
-                window.set_position(
-                    screen.x + screen.width - 1.0,
-                    screen.y + screen.height - 1.0,
-                )?;
+                window.hide()?
             }
         }
         Child::Container(container_id) => {
