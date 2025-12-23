@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ptr::NonNull,
     rc::Rc,
 };
@@ -31,7 +31,7 @@ use objc2_foundation::{
 };
 
 use crate::{
-    config::{Action, Color, Config, FocusTarget, Keymap, Modifier, MoveTarget, ToggleTarget},
+    config::{Action, Color, Config, FocusTarget, Keymap, Modifiers, MoveTarget, ToggleTarget},
     objc2_wrapper::{
         add_observer_notification, create_observer, get_attribute, get_pid, kAXMinimizedAttribute,
         kAXRoleAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
@@ -548,18 +548,18 @@ fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
     let flags = CGEvent::flags(Some(unsafe { &*event }));
     let key = get_key_from_event(event);
 
-    let mut modifiers = HashSet::new();
+    let mut modifiers = Modifiers::empty();
     if flags.contains(CGEventFlags::MaskCommand) {
-        modifiers.insert(Modifier::Cmd);
+        modifiers |= Modifiers::CMD;
     }
     if flags.contains(CGEventFlags::MaskShift) {
-        modifiers.insert(Modifier::Shift);
+        modifiers |= Modifiers::SHIFT;
     }
     if flags.contains(CGEventFlags::MaskAlternate) {
-        modifiers.insert(Modifier::Alt);
+        modifiers |= Modifiers::ALT;
     }
     if flags.contains(CGEventFlags::MaskControl) {
-        modifiers.insert(Modifier::Ctrl);
+        modifiers |= Modifiers::CTRL;
     }
 
     let keymap = Keymap { key, modifiers };
@@ -568,6 +568,8 @@ fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
     if actions.is_empty() {
         return false;
     }
+
+    tracing::trace!("Keypress: {keymap:?}, actions: {actions:?}");
 
     for action in actions {
         if let Err(e) = execute_action(context, &action) {

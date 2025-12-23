@@ -1,5 +1,4 @@
-use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 use std::str::FromStr;
 use serde::{Deserialize, Deserializer};
 use anyhow::{Result, anyhow};
@@ -35,35 +34,20 @@ pub enum ToggleTarget {
     Direction,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Modifier {
-    Cmd,
-    Shift,
-    Alt,
-    Ctrl,
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct Modifiers: u8 {
+        const CMD = 1 << 0;
+        const SHIFT = 1 << 1;
+        const ALT = 1 << 2;
+        const CTRL = 1 << 3;
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Keymap {
     pub key: String,
-    pub modifiers: HashSet<Modifier>,
-}
-
-impl PartialEq for Keymap {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key && self.modifiers == other.modifiers
-    }
-}
-
-impl Eq for Keymap {}
-
-impl Hash for Keymap {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.key.hash(state);
-        for m in &self.modifiers {
-            m.hash(state);
-        }
-    }
+    pub modifiers: Modifiers,
 }
 
 impl FromStr for Action {
@@ -89,20 +73,6 @@ impl FromStr for Action {
     }
 }
 
-impl FromStr for Modifier {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s {
-            "cmd" => Ok(Modifier::Cmd),
-            "shift" => Ok(Modifier::Shift),
-            "alt" => Ok(Modifier::Alt),
-            "ctrl" => Ok(Modifier::Ctrl),
-            _ => Err(anyhow!("Unknown modifier: {}", s)),
-        }
-    }
-}
-
 impl FromStr for Keymap {
     type Err = anyhow::Error;
 
@@ -112,10 +82,16 @@ impl FromStr for Keymap {
             return Err(anyhow!("Empty keymap"));
         }
         let key = parts.last().unwrap().to_string();
-        let modifiers = parts[..parts.len()-1]
-            .iter()
-            .map(|m| m.parse())
-            .collect::<Result<HashSet<_>>>()?;
+        let mut modifiers = Modifiers::empty();
+        for m in &parts[..parts.len()-1] {
+            modifiers |= match *m {
+                "cmd" => Modifiers::CMD,
+                "shift" => Modifiers::SHIFT,
+                "alt" => Modifiers::ALT,
+                "ctrl" => Modifiers::CTRL,
+                _ => return Err(anyhow!("Unknown modifier: {}", m)),
+            };
+        }
         Ok(Keymap { key, modifiers })
     }
 }
@@ -123,19 +99,19 @@ impl FromStr for Keymap {
 fn default_keymaps() -> HashMap<Keymap, Vec<Action>> {
     let mut keymaps = HashMap::new();
     for i in 0..=9 {
-        keymaps.insert(Keymap { key: i.to_string(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Workspace(i))]);
-        keymaps.insert(Keymap { key: i.to_string(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Workspace(i))]);
+        keymaps.insert(Keymap { key: i.to_string(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Workspace(i))]);
+        keymaps.insert(Keymap { key: i.to_string(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Workspace(i))]);
     }
-    keymaps.insert(Keymap { key: "e".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Toggle(ToggleTarget::Direction)]);
-    keymaps.insert(Keymap { key: "p".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Parent)]);
-    keymaps.insert(Keymap { key: "h".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Left)]);
-    keymaps.insert(Keymap { key: "j".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Down)]);
-    keymaps.insert(Keymap { key: "k".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Up)]);
-    keymaps.insert(Keymap { key: "l".into(), modifiers: HashSet::from([Modifier::Cmd]) }, vec![Action::Focus(FocusTarget::Right)]);
-    keymaps.insert(Keymap { key: "h".into(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Left)]);
-    keymaps.insert(Keymap { key: "j".into(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Down)]);
-    keymaps.insert(Keymap { key: "k".into(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Up)]);
-    keymaps.insert(Keymap { key: "l".into(), modifiers: HashSet::from([Modifier::Cmd, Modifier::Shift]) }, vec![Action::Move(MoveTarget::Right)]);
+    keymaps.insert(Keymap { key: "e".into(), modifiers: Modifiers::CMD }, vec![Action::Toggle(ToggleTarget::Direction)]);
+    keymaps.insert(Keymap { key: "p".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Parent)]);
+    keymaps.insert(Keymap { key: "h".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Left)]);
+    keymaps.insert(Keymap { key: "j".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Down)]);
+    keymaps.insert(Keymap { key: "k".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Up)]);
+    keymaps.insert(Keymap { key: "l".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Right)]);
+    keymaps.insert(Keymap { key: "h".into(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Left)]);
+    keymaps.insert(Keymap { key: "j".into(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Down)]);
+    keymaps.insert(Keymap { key: "k".into(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Up)]);
+    keymaps.insert(Keymap { key: "l".into(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Right)]);
     keymaps
 }
 
