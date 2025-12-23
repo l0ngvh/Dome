@@ -912,7 +912,6 @@ fn render_child(context: &WindowContext, child: Child) -> Result<()> {
             if let Some(os_window) = context.registry.borrow().get(window_id) {
                 let window = context.hub.get_window(window_id);
                 let dim = window.dimension();
-                os_window.show()?;
                 os_window.set_position(dim.x, dim.y)?;
                 os_window.set_size(dim.width, dim.height)?;
             }
@@ -949,10 +948,17 @@ fn move_to_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
 }
 
 fn hide_child(context: &WindowContext, child: Child) -> Result<()> {
+    let screen = context.hub.screen();
     match child {
         Child::Window(window_id) => {
             if let Some(window) = context.registry.borrow().get(window_id) {
-                window.hide()?;
+                // MacOS doesn't allow completely set windows offscreen, so we need to leave at
+                // least one pixel left
+                // Taken from https://github.com/nikitabobko/AeroSpace/blob/976b2cf4b04d371143bb31f3b094d04e9e85fdcd/Sources/AppBundle/tree/MacWindow.swift#L144
+                window.set_position(
+                    screen.x + screen.width - 1.0,
+                    screen.y + screen.height - 1.0,
+                )?;
             }
         }
         Child::Container(container_id) => {

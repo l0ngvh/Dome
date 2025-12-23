@@ -4,11 +4,11 @@ use std::ptr::NonNull;
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFHash, CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse, kCFBooleanTrue,
+    CFHash, CFRetained, CFString, CGPoint, CGSize, kCFBooleanTrue,
 };
 
 use crate::objc2_wrapper::{
-    get_attribute, kAXFrontmostAttribute, kAXMainAttribute, kAXMinimizedAttribute,
+    get_attribute, kAXFrontmostAttribute, kAXMainAttribute,
     kAXPositionAttribute, kAXSizeAttribute, kAXTitleAttribute, set_attribute_value,
 };
 
@@ -59,23 +59,6 @@ impl MacWindow {
         let size = NonNull::new(size_ptr.cast()).unwrap();
         let size = unsafe { AXValue::new(AXValueType::CGSize, size) }.unwrap();
         set_attribute_value(&self.window, &kAXSizeAttribute(), &size)
-    }
-
-    // Should introduce a new flag, hidden, in the window, as depend on OS we might want to emulate
-    // how windows are resized. For example, if we don't want to use minimize api and rather move
-    // it offscreen, it should be os dependent and abstracted away
-    // e.g. if it's hidden, then update the stored position + size, but don't call the modify api.
-    // Then when it's show, call modify api to sync the position + size
-    pub(crate) fn hide(&self) -> Result<()> {
-        set_attribute_value(&self.window, &kAXMinimizedAttribute(), unsafe {
-            kCFBooleanTrue.unwrap()
-        })
-    }
-
-    pub(crate) fn show(&self) -> Result<()> {
-        set_attribute_value(&self.window, &kAXMinimizedAttribute(), unsafe {
-            kCFBooleanFalse.unwrap()
-        })
     }
 
     pub(crate) fn focus(&self) -> Result<()> {
