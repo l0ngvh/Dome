@@ -65,6 +65,10 @@ impl Container {
         self.dimension
     }
 
+    pub(crate) fn new_window_direction(&self) -> Direction {
+        self.new_window_direction
+    }
+
     pub(super) fn push_window(&mut self, window_id: WindowId) {
         self.children.push(Child::Window(window_id));
     }
@@ -154,6 +158,10 @@ impl Window {
 
     pub(crate) fn dimension(&self) -> Dimension {
         self.dimension
+    }
+
+    pub(crate) fn new_window_direction(&self) -> Direction {
+        self.new_window_direction
     }
 }
 

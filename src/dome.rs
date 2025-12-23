@@ -40,7 +40,7 @@ use crate::{
     },
 };
 use crate::{
-    core::{Child, Dimension, Hub, WindowId, WorkspaceId},
+    core::{Child, Dimension, Direction, Hub, WindowId, WorkspaceId},
     objc2_wrapper::kAXResizedNotification,
 };
 use crate::{objc2_wrapper::kAXUIElementDestroyedNotification, window::MacWindow};
@@ -784,12 +784,16 @@ fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<Overlay
     };
     let border_size = context.config.border_size;
     let color = context.config.focused_color.clone();
+    let spawn_color = context.config.spawn_indicator_color.clone();
     let screen = context.hub.screen();
 
     match focused {
         Child::Window(window_id) => {
-            let dim = context.hub.get_window(window_id).dimension();
+            let window = context.hub.get_window(window_id);
+            let dim = window.dimension();
+            let direction = window.new_window_direction();
             let y = screen.y + screen.height - dim.y - dim.height;
+            // Top
             rects.push(OverlayRect {
                 x: dim.x - border_size,
                 y: y + dim.height,
@@ -797,13 +801,15 @@ fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<Overlay
                 height: border_size,
                 color: color.clone(),
             });
+            // Bottom (spawn indicator if Vertical)
             rects.push(OverlayRect {
                 x: dim.x - border_size,
                 y: y - border_size,
                 width: dim.width + border_size * 2.0,
                 height: border_size,
-                color: color.clone(),
+                color: if direction == Direction::Vertical { spawn_color.clone() } else { color.clone() },
             });
+            // Left
             rects.push(OverlayRect {
                 x: dim.x - border_size,
                 y,
@@ -811,17 +817,21 @@ fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<Overlay
                 height: dim.height,
                 color: color.clone(),
             });
+            // Right (spawn indicator if Horizontal)
             rects.push(OverlayRect {
                 x: dim.x + dim.width,
                 y,
                 width: border_size,
                 height: dim.height,
-                color,
+                color: if direction == Direction::Horizontal { spawn_color } else { color },
             });
         }
         Child::Container(container_id) => {
-            let dim = context.hub.get_container(container_id).dimension();
+            let container = context.hub.get_container(container_id);
+            let dim = container.dimension();
+            let direction = container.new_window_direction();
             let y = screen.y + screen.height - dim.y - dim.height;
+            // Top
             rects.push(OverlayRect {
                 x: dim.x,
                 y: y + dim.height - border_size,
@@ -829,13 +839,15 @@ fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<Overlay
                 height: border_size,
                 color: color.clone(),
             });
+            // Bottom (spawn indicator if Vertical)
             rects.push(OverlayRect {
                 x: dim.x,
                 y,
                 width: dim.width,
                 height: border_size,
-                color: color.clone(),
+                color: if direction == Direction::Vertical { spawn_color.clone() } else { color.clone() },
             });
+            // Left
             rects.push(OverlayRect {
                 x: dim.x,
                 y: y + border_size,
@@ -843,12 +855,13 @@ fn collect_focused_border_rects(context: &WindowContext, rects: &mut Vec<Overlay
                 height: dim.height - 2.0 * border_size,
                 color: color.clone(),
             });
+            // Right (spawn indicator if Horizontal)
             rects.push(OverlayRect {
                 x: dim.x + dim.width - border_size,
                 y: y + border_size,
                 width: border_size,
                 height: dim.height - 2.0 * border_size,
-                color,
+                color: if direction == Direction::Horizontal { spawn_color } else { color },
             });
         }
     }

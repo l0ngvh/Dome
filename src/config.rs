@@ -169,6 +169,10 @@ fn default_focused_color() -> Color {
     Color { r: 0.4, g: 0.6, b: 1.0, a: 1.0 }
 }
 
+fn default_spawn_indicator_color() -> Color {
+    Color { r: 1.0, g: 0.6, b: 0.2, a: 1.0 }
+}
+
 fn default_border_color() -> Color {
     Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 }
 }
@@ -181,12 +185,26 @@ pub struct Config {
     pub border_size: f32,
     #[serde(default = "default_focused_color")]
     pub focused_color: Color,
+    #[serde(default = "default_spawn_indicator_color")]
+    pub spawn_indicator_color: Color,
     #[serde(default = "default_border_color")]
     pub border_color: Color,
 }
 
 fn default_border_size() -> f32 {
     2.0
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            keymaps: default_keymaps(),
+            border_size: default_border_size(),
+            focused_color: default_focused_color(),
+            spawn_indicator_color: default_spawn_indicator_color(),
+            border_color: default_border_color(),
+        }
+    }
 }
 
 impl Config {
@@ -196,22 +214,12 @@ impl Config {
                 Ok(config) => config,
                 Err(e) => {
                     tracing::warn!("Failed to parse config: {e}, using defaults");
-                    Config { 
-                        keymaps: default_keymaps(),
-                        border_size: default_border_size(),
-                        focused_color: default_focused_color(),
-                        border_color: default_border_color(),
-                    }
+                    Config::default()
                 }
             },
             Err(e) => {
                 tracing::warn!("Failed to load config: {e}, using defaults");
-                Config { 
-                    keymaps: default_keymaps(),
-                    border_size: default_border_size(),
-                    focused_color: default_focused_color(),
-                    border_color: default_border_color(),
-                }
+                Config::default()
             }
         }
     }
