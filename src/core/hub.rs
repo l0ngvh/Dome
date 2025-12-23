@@ -64,6 +64,35 @@ impl Hub {
         }
     }
 
+    pub(crate) fn window_at(&self, x: f32, y: f32) -> Option<WindowId> {
+        let workspace = self.workspaces.get(self.current);
+        workspace
+            .root()
+            .and_then(|root| self.window_at_in_child(root, x, y))
+    }
+
+    fn window_at_in_child(&self, child: Child, x: f32, y: f32) -> Option<WindowId> {
+        match child {
+            Child::Window(id) => {
+                let dim = self.windows.get(id).dimension;
+                // Include border in hit area
+                if x >= dim.x && x <= dim.x + dim.width && y >= dim.y && y <= dim.y + dim.height {
+                    Some(id)
+                } else {
+                    None
+                }
+            }
+            Child::Container(id) => {
+                for child in self.containers.get(id).children() {
+                    if let Some(window_id) = self.window_at_in_child(*child, x, y) {
+                        return Some(window_id);
+                    }
+                }
+                None
+            }
+        }
+    }
+
     pub(crate) fn screen(&self) -> Dimension {
         self.screen
     }

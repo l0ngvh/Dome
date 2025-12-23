@@ -9,6 +9,7 @@ mod insert_window;
 mod move_in_direction;
 mod move_to_workspace;
 mod toggle_new_window_direction;
+mod window_at;
 
 use crate::core::allocator::NodeId;
 use crate::core::hub::Hub;

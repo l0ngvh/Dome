@@ -33,10 +33,10 @@ use objc2_foundation::{
 use crate::{
     config::{Action, Color, Config, FocusTarget, Keymap, Modifier, MoveTarget, ToggleTarget},
     objc2_wrapper::{
-        add_observer_notification, create_observer, get_attribute, get_pid,
-        kAXFocusedWindowChangedNotification, kAXMinimizedAttribute, kAXRoleAttribute,
-        kAXStandardWindowSubrole, kAXSubroleAttribute, kAXWindowCreatedNotification,
-        kAXWindowMiniaturizedNotification, kAXWindowRole, kAXWindowsAttribute,
+        add_observer_notification, create_observer, get_attribute, get_pid, kAXMinimizedAttribute,
+        kAXRoleAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
+        kAXWindowCreatedNotification, kAXWindowMiniaturizedNotification, kAXWindowRole,
+        kAXWindowsAttribute,
     },
 };
 use crate::{
@@ -289,10 +289,6 @@ impl WindowRegistry {
         self.hash_to_id.contains_key(&cf_hash)
     }
 
-    fn get_id_by_hash(&self, cf_hash: usize) -> Option<WindowId> {
-        self.hash_to_id.get(&cf_hash).copied()
-    }
-
     fn get(&self, window_id: WindowId) -> Option<&MacWindow> {
         self.id_to_window.get(&window_id)
     }
@@ -407,12 +403,6 @@ fn register_observer(pid: i32, context_ptr: *mut WindowContext) -> Result<CFReta
         &kAXUIElementDestroyedNotification(),
         context_ptr,
     )?;
-    add_observer_notification(
-        &observer,
-        &app,
-        &kAXFocusedWindowChangedNotification(),
-        context_ptr,
-    )?;
 
     Ok(observer)
 }
@@ -462,12 +452,6 @@ unsafe extern "C-unwind" fn observer_callback(
                 tracing::warn!("Failed to render workspace after deleting window: {e:#}");
             }
         }
-    } else if notification.to_string() == *"AXFocusedWindowChanged" {
-        let cf_hash = CFHash(Some(&element));
-        if let Some(window_id) = context.registry.borrow().get_id_by_hash(cf_hash) {
-            context.hub.set_focus(window_id);
-            update_overlay(context);
-        }
     }
 }
 
@@ -509,8 +493,8 @@ unsafe extern "C-unwind" fn event_tap_callback(
     refcon: *mut std::ffi::c_void,
 ) -> *mut CGEvent {
     let context = unsafe { &mut *(refcon as *mut WindowContext) };
+    let event = event.as_ptr();
 
-    // Re-enable tap if it was disabled
     if event_type == CGEventType::TapDisabledByTimeout
         || event_type == CGEventType::TapDisabledByUserInput
     {
@@ -518,10 +502,49 @@ unsafe extern "C-unwind" fn event_tap_callback(
             tracing::debug!("Event tap disabled, re-enabling");
             CGEvent::tap_enable(tap, true);
         }
-        return event.as_ptr();
+    } else if event_type == CGEventType::LeftMouseDown {
+        handle_mouse_down(context, event);
+    } else if event_type == CGEventType::KeyDown {
+        if handle_keyboard(context, event) {
+            return std::ptr::null_mut();
+        }
+    } else {
+        tracing::warn!("Unrecognized event type: {:?}", event_type);
     }
 
-    let event = event.as_ptr();
+    event
+}
+
+fn handle_mouse_down(context: &mut WindowContext, event: *mut CGEvent) {
+    let location = CGEvent::location(Some(unsafe { &*event }));
+    let screen = context.hub.screen();
+    let x = location.x as f32;
+    let y = screen.y + location.y as f32;
+    tracing::trace!(
+        "Mouse down at ({}, {}) -> hub ({}, {})",
+        location.x,
+        location.y,
+        x,
+        y
+    );
+    if let Some(window_id) = context.hub.window_at(x, y) {
+        if context
+            .hub
+            .get_workspace(context.hub.current_workspace())
+            .focused()
+            != Some(Child::Window(window_id))
+        {
+            tracing::info!("Mouse click focused {:?}", window_id);
+            context.hub.set_focus(window_id);
+            // Don't need to focus window as it should already be focused by the act of clicking
+            update_overlay(context);
+        }
+    } else {
+        tracing::debug!("No window at ({}, {})", x, y);
+    }
+}
+
+fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
     let flags = CGEvent::flags(Some(unsafe { &*event }));
     let key = get_key_from_event(event);
 
@@ -539,14 +562,11 @@ unsafe extern "C-unwind" fn event_tap_callback(
         modifiers.insert(Modifier::Ctrl);
     }
 
-    let keymap = Keymap {
-        key: key.clone(),
-        modifiers,
-    };
+    let keymap = Keymap { key, modifiers };
     let actions = context.config.get_actions(&keymap);
 
     if actions.is_empty() {
-        return event;
+        return false;
     }
 
     for action in actions {
@@ -554,7 +574,7 @@ unsafe extern "C-unwind" fn event_tap_callback(
             tracing::warn!("Failed to execute action: {e:#}");
         }
     }
-    std::ptr::null_mut()
+    true
 }
 
 fn get_key_from_event(event: *mut CGEvent) -> String {
@@ -694,13 +714,13 @@ fn get_pid_from_notification(notification: NonNull<NSNotification>) -> Option<i3
 
 fn listen_to_keyboard(context_ptr: *mut WindowContext) -> Result<()> {
     let run_loop = CFRunLoop::current().unwrap();
-    // TapDisabledByTimeout/TapDisabledByUserInput are delivered regardless of mask
+    let event_mask = (1u64 << CGEventType::KeyDown.0) | (1u64 << CGEventType::LeftMouseDown.0);
     let Some(match_port) = (unsafe {
         CGEvent::tap_create(
             CGEventTapLocation::SessionEventTap,
             CGEventTapPlacement::HeadInsertEventTap,
             CGEventTapOptions::Default,
-            1u64 << CGEventType::KeyDown.0,
+            event_mask,
             Some(event_tap_callback),
             context_ptr as *mut std::ffi::c_void,
         )
