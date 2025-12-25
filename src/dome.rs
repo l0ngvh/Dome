@@ -7,8 +7,9 @@ use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSBezierPath, NSColor, NSEvent, NSNormalWindowLevel, NSResponder, NSRunningApplication,
-    NSScreen, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
+    NSBezierPath, NSColor, NSEvent, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
+    NSNormalWindowLevel, NSResponder, NSRunningApplication, NSScreen, NSStringDrawing, NSView,
+    NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask, NSWorkspace,
     NSWorkspaceApplicationKey, NSWorkspaceDidLaunchApplicationNotification,
     NSWorkspaceDidTerminateApplicationNotification,
 };
@@ -22,7 +23,8 @@ use objc2_core_graphics::{
     CGEventTapProxy, CGEventType,
 };
 use objc2_foundation::{
-    NSNotification, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint, NSRect, NSSize,
+    NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint, NSRect,
+    NSSize, NSString,
 };
 
 use crate::{
@@ -169,6 +171,7 @@ impl AppDelegate {
 #[derive(Default)]
 struct OverlayViewIvars {
     rects: RefCell<Vec<OverlayRect>>,
+    labels: RefCell<Vec<OverlayLabel>>,
 }
 
 define_class!(
@@ -192,6 +195,31 @@ define_class!(
                     NSSize::new(rect.width as CGFloat, rect.height as CGFloat),
                 ));
             }
+            for label in self.ivars().labels.borrow().iter() {
+                let color = NSColor::colorWithSRGBRed_green_blue_alpha(
+                    label.color.r as CGFloat, label.color.g as CGFloat, label.color.b as CGFloat, label.color.a as CGFloat,
+                );
+                let ns_string = NSString::from_str(&label.text);
+                let font = NSFont::systemFontOfSize(12.0);
+                let attrs = unsafe {
+                    NSDictionary::from_slices(
+                        &[
+                            NSForegroundColorAttributeName,
+                            NSFontAttributeName,
+                        ],
+                        &[
+                            &*Retained::into_super(Retained::into_super(color)),
+                            &*Retained::into_super(Retained::into_super(font)),
+                        ],
+                    )
+                };
+                unsafe {
+                    ns_string.drawAtPoint_withAttributes(
+                        NSPoint::new(label.x as CGFloat, label.y as CGFloat),
+                        Some(&attrs),
+                    );
+                }
+            }
         }
 
         #[unsafe(method(mouseDown:))]
@@ -208,8 +236,9 @@ impl OverlayView {
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 
-    fn set_rects(&self, rects: Vec<OverlayRect>) {
+    fn set_rects(&self, rects: Vec<OverlayRect>, labels: Vec<OverlayLabel>) {
         *self.ivars().rects.borrow_mut() = rects;
+        *self.ivars().labels.borrow_mut() = labels;
         self.setNeedsDisplay(true);
     }
 }
@@ -220,6 +249,14 @@ struct OverlayRect {
     y: f32,
     width: f32,
     height: f32,
+    color: Color,
+}
+
+#[derive(Clone)]
+struct OverlayLabel {
+    x: f32,
+    y: f32,
+    text: String,
     color: Color,
 }
 
@@ -303,7 +340,7 @@ impl WindowContext {
 
         let screen = get_main_screen();
         tracing::info!("Detected Screen {screen:?}");
-        let mut hub = Hub::new(screen, config.border_size);
+        let mut hub = Hub::new(screen, config.border_size, config.tab_bar_height);
         let mut registry = WindowRegistry::new();
 
         for pid in pids.iter() {
@@ -599,6 +636,8 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
             FocusTarget::Right => context.hub.focus_right(),
             FocusTarget::Parent => context.hub.focus_parent(),
             FocusTarget::Workspace(n) => return focus_workspace(context, *n),
+            FocusTarget::NextTab => context.hub.focus_next_tab(),
+            FocusTarget::PrevTab => context.hub.focus_prev_tab(),
         },
         Action::Move(target) => match target {
             MoveTarget::Workspace(n) => return move_to_workspace(context, *n),
@@ -609,6 +648,7 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
         },
         Action::Toggle(target) => match target {
             ToggleTarget::Direction => context.hub.toggle_new_window_direction(),
+            ToggleTarget::Layout => context.hub.toggle_container_layout(),
         },
     }
 
@@ -745,9 +785,11 @@ fn update_overlay(context: &WindowContext) {
     let workspace_id = context.hub.current_workspace();
     if let Some(root) = context.hub.get_workspace(workspace_id).root() {
         let mut rects = Vec::new();
+        let mut labels = Vec::new();
         collect_border_rects(context, root, &mut rects);
         collect_focused_border_rects(context, &mut rects);
-        context.overlay_view.set_rects(rects);
+        collect_tab_bars(context, root, &mut rects, &mut labels);
+        context.overlay_view.set_rects(rects, labels);
     }
 }
 
@@ -757,9 +799,11 @@ fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Resul
 
         // Update overlay with border rects
         let mut rects = Vec::new();
+        let mut labels = Vec::new();
         collect_border_rects(context, root, &mut rects);
         collect_focused_border_rects(context, &mut rects);
-        context.overlay_view.set_rects(rects);
+        collect_tab_bars(context, root, &mut rects, &mut labels);
+        context.overlay_view.set_rects(rects, labels);
 
         // Focus the currently focused window in this workspace
         if let Some(focused) = context.hub.get_workspace(workspace_id).focused()
@@ -771,7 +815,7 @@ fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Resul
         }
     } else {
         // No windows, focus overlay to keep keyboard events working
-        context.overlay_view.set_rects(Vec::new());
+        context.overlay_view.set_rects(Vec::new(), Vec::new());
     }
     Ok(())
 }
@@ -931,6 +975,71 @@ fn collect_border_rects(context: &WindowContext, child: Child, rects: &mut Vec<O
                 collect_border_rects(context, *child, rects);
             }
         }
+    }
+}
+
+fn collect_tab_bars(
+    context: &WindowContext,
+    child: Child,
+    rects: &mut Vec<OverlayRect>,
+    labels: &mut Vec<OverlayLabel>,
+) {
+    let Child::Container(container_id) = child else {
+        return;
+    };
+    let container = context.hub.get_container(container_id);
+
+    if container.is_tabbed() {
+        let dim = container.dimension();
+        let screen = context.hub.screen();
+        let tab_bar_height = context.config.tab_bar_height;
+        let y = screen.y + screen.height - dim.y - tab_bar_height;
+
+        // Tab bar background
+        rects.push(OverlayRect {
+            x: dim.x,
+            y,
+            width: dim.width,
+            height: tab_bar_height,
+            color: context.config.border_color.clone(),
+        });
+
+        // Tab labels
+        let children = container.children();
+        let tab_count = children.len();
+        if tab_count > 0 {
+            let tab_width = dim.width / tab_count as f32;
+            let active_tab = container.active_tab();
+            for (i, child) in children.iter().enumerate() {
+                let label = match child {
+                    Child::Window(wid) => context.registry.borrow().get(*wid).unwrap().title(),
+                    Child::Container(_) => "Container".to_string(),
+                };
+                let display = if i == active_tab {
+                    format!("[{}]", label)
+                } else {
+                    label
+                };
+                let tab_x =
+                    dim.x + i as f32 * tab_width + tab_width / 2.0 - display.len() as f32 * 3.5;
+                labels.push(OverlayLabel {
+                    x: tab_x,
+                    y: y + tab_bar_height / 2.0 - 6.0,
+                    text: display,
+                    color: Color {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                        a: 1.0,
+                    },
+                });
+            }
+        }
+    }
+
+    // Recurse into children
+    for child in container.children() {
+        collect_tab_bars(context, *child, rects, labels);
     }
 }
 

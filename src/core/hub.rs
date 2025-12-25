@@ -10,6 +10,7 @@ pub(crate) struct Hub {
     screen: Dimension,
     current: WorkspaceId,
     border_size: f32,
+    tab_bar_height: f32,
 
     workspaces: Allocator<Workspace>,
     windows: Allocator<Window>,
@@ -17,7 +18,7 @@ pub(crate) struct Hub {
 }
 
 impl Hub {
-    pub(crate) fn new(screen: Dimension, border_size: f32) -> Self {
+    pub(crate) fn new(screen: Dimension, border_size: f32, tab_bar_height: f32) -> Self {
         let mut workspace_allocator: Allocator<Workspace> = Allocator::new();
         let window_allocator: Allocator<Window> = Allocator::new();
         let container_allocator: Allocator<Container> = Allocator::new();
@@ -30,6 +31,7 @@ impl Hub {
             workspaces: workspace_allocator,
             screen,
             border_size,
+            tab_bar_height,
             windows: window_allocator,
             containers: container_allocator,
         }
@@ -255,6 +257,78 @@ impl Hub {
                 }
             }
         }
+    }
+
+    pub(crate) fn focus_next_tab(&mut self) {
+        self.focus_tab(true);
+    }
+
+    pub(crate) fn focus_prev_tab(&mut self) {
+        self.focus_tab(false);
+    }
+
+    fn focus_tab(&mut self, forward: bool) {
+        let Some(focused) = self.workspaces.get(self.current).focused else {
+            return;
+        };
+        let Some(container_id) = self.find_tabbed_ancestor(focused) else {
+            return;
+        };
+        let container = self.containers.get(container_id);
+        let len = container.children.len();
+        if len == 0 {
+            return;
+        }
+        let new_tab = if forward {
+            (container.active_tab + 1) % len
+        } else {
+            (container.active_tab + len - 1) % len
+        };
+        self.containers.get_mut(container_id).active_tab = new_tab;
+        if let Some(&child) = self.containers.get(container_id).children.get(new_tab) {
+            let window_id = match child {
+                Child::Window(id) => id,
+                Child::Container(id) => first_window(&self.containers, id),
+            };
+            self.workspaces.get_mut(self.current).focused = Some(Child::Window(window_id));
+        }
+        self.balance_workspace(self.current);
+    }
+
+    fn find_tabbed_ancestor(&self, child: Child) -> Option<ContainerId> {
+        let mut current = child;
+        loop {
+            if let Child::Container(id) = current
+                && self.containers.get(id).is_tabbed
+            {
+                return Some(id);
+            }
+            match self.get_parent(current) {
+                Parent::Container(id) => current = Child::Container(id),
+                Parent::Workspace(_) => return None,
+            }
+        }
+    }
+
+    pub(crate) fn toggle_container_layout(&mut self) {
+        let Some(focused) = self.workspaces.get(self.current).focused else {
+            return;
+        };
+        let container_id = match focused {
+            Child::Container(id) => id,
+            Child::Window(_) => match self.get_parent_container(focused) {
+                Some(id) => id,
+                None => return,
+            },
+        };
+        let container = self.containers.get_mut(container_id);
+        container.is_tabbed = !container.is_tabbed;
+        if container.is_tabbed
+            && let Some(pos) = container.children.iter().position(|&c| c == focused)
+        {
+            container.active_tab = pos;
+        }
+        self.balance_workspace(self.current);
     }
 
     pub(crate) fn focus_left(&mut self) {
@@ -654,9 +728,33 @@ impl Hub {
                 window.dimension.height = available_height - 2.0 * self.border_size;
             }
             Child::Container(container_id) => {
+                let container = self.containers.get(container_id);
+
+                // Tabbed: layout all children at full size (only active is visible)
+                if container.is_tabbed {
+                    let content_y = y + self.tab_bar_height;
+                    let content_height = available_height - self.tab_bar_height;
+                    for &child in container.children.clone().iter() {
+                        self.distribute_available_space(
+                            child,
+                            x,
+                            content_y,
+                            available_width,
+                            content_height,
+                            cache,
+                        );
+                    }
+                    self.containers.get_mut(container_id).dimension = Dimension {
+                        x,
+                        y,
+                        width: available_width,
+                        height: available_height,
+                    };
+                    return;
+                }
+
                 let ((free_h, free_v), _) = cache[&container_id];
                 tracing::debug!("Number of freely resized nodes: horizontal: {free_h}, {free_v}");
-                let container = self.containers.get(container_id);
                 let mut actual_width = 0.0;
                 let mut actual_height: f32 = 0.0;
 
@@ -781,6 +879,26 @@ impl Hub {
         }
 
         let container = self.containers.get(container_id);
+
+        if container.is_tabbed {
+            let mut max_horizontal = 1;
+            let mut max_vertical = 1;
+            for &child in &container.children {
+                match child {
+                    Child::Window(_) => {}
+                    Child::Container(child_id) => {
+                        let ((child_h, child_v), _) =
+                            self.query_container_structure(child_id, cache);
+                        max_horizontal = max_horizontal.max(child_h);
+                        max_vertical = max_vertical.max(child_v);
+                    }
+                }
+            }
+            let result = ((max_horizontal, max_vertical), (0.0, 0.0));
+            cache.insert(container_id, result);
+            return result;
+        }
+
         let mut free_horizontal = 0;
         let mut free_vertical = 0;
         let mut fixed_height = 0.0;

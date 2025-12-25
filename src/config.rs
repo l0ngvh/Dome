@@ -18,6 +18,8 @@ pub enum FocusTarget {
     Right,
     Parent,
     Workspace(usize),
+    NextTab,
+    PrevTab,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +34,7 @@ pub enum MoveTarget {
 #[derive(Debug, Clone)]
 pub enum ToggleTarget {
     Direction,
+    Layout,
 }
 
 bitflags::bitflags! {
@@ -62,12 +65,15 @@ impl FromStr for Action {
             ["focus", "right"] => Ok(Action::Focus(FocusTarget::Right)),
             ["focus", "parent"] => Ok(Action::Focus(FocusTarget::Parent)),
             ["focus", "workspace", n] => Ok(Action::Focus(FocusTarget::Workspace(n.parse()?))),
+            ["focus", "next_tab"] => Ok(Action::Focus(FocusTarget::NextTab)),
+            ["focus", "prev_tab"] => Ok(Action::Focus(FocusTarget::PrevTab)),
             ["move", "up"] => Ok(Action::Move(MoveTarget::Up)),
             ["move", "down"] => Ok(Action::Move(MoveTarget::Down)),
             ["move", "left"] => Ok(Action::Move(MoveTarget::Left)),
             ["move", "right"] => Ok(Action::Move(MoveTarget::Right)),
             ["move", "workspace", n] => Ok(Action::Move(MoveTarget::Workspace(n.parse()?))),
             ["toggle", "direction"] => Ok(Action::Toggle(ToggleTarget::Direction)),
+            ["toggle", "layout"] => Ok(Action::Toggle(ToggleTarget::Layout)),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
     }
@@ -103,11 +109,14 @@ fn default_keymaps() -> HashMap<Keymap, Vec<Action>> {
         keymaps.insert(Keymap { key: i.to_string(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Workspace(i))]);
     }
     keymaps.insert(Keymap { key: "e".into(), modifiers: Modifiers::CMD }, vec![Action::Toggle(ToggleTarget::Direction)]);
+    keymaps.insert(Keymap { key: "b".into(), modifiers: Modifiers::CMD }, vec![Action::Toggle(ToggleTarget::Layout)]);
     keymaps.insert(Keymap { key: "p".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Parent)]);
     keymaps.insert(Keymap { key: "h".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Left)]);
     keymaps.insert(Keymap { key: "j".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Down)]);
     keymaps.insert(Keymap { key: "k".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Up)]);
     keymaps.insert(Keymap { key: "l".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Right)]);
+    keymaps.insert(Keymap { key: "[".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::PrevTab)]);
+    keymaps.insert(Keymap { key: "]".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::NextTab)]);
     keymaps.insert(Keymap { key: "h".into(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Left)]);
     keymaps.insert(Keymap { key: "j".into(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Down)]);
     keymaps.insert(Keymap { key: "k".into(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Up)]);
@@ -159,6 +168,8 @@ pub struct Config {
     keymaps: HashMap<Keymap, Vec<Action>>,
     #[serde(default = "default_border_size")]
     pub border_size: f32,
+    #[serde(default = "default_tab_bar_height")]
+    pub tab_bar_height: f32,
     #[serde(default = "default_focused_color")]
     pub focused_color: Color,
     #[serde(default = "default_spawn_indicator_color")]
@@ -171,11 +182,16 @@ fn default_border_size() -> f32 {
     2.0
 }
 
+fn default_tab_bar_height() -> f32 {
+    24.0
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
             keymaps: default_keymaps(),
             border_size: default_border_size(),
+            tab_bar_height: default_tab_bar_height(),
             focused_color: default_focused_color(),
             spawn_indicator_color: default_spawn_indicator_color(),
             border_color: default_border_color(),

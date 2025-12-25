@@ -40,6 +40,8 @@ pub(crate) struct Container {
     pub(super) dimension: Dimension,
     pub(super) direction: Direction,
     pub(super) new_window_direction: Direction,
+    pub(super) is_tabbed: bool,
+    pub(super) active_tab: usize,
 }
 
 impl Node for Container {
@@ -54,7 +56,17 @@ impl Container {
             dimension,
             direction,
             new_window_direction: direction,
+            is_tabbed: false,
+            active_tab: 0,
         }
+    }
+
+    pub(crate) fn is_tabbed(&self) -> bool {
+        self.is_tabbed
+    }
+
+    pub(crate) fn active_tab(&self) -> usize {
+        self.active_tab
     }
 
     pub(crate) fn children(&self) -> &[Child] {

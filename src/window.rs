@@ -115,14 +115,16 @@ impl MacWindow {
         let size = unsafe { AXValue::new(AXValueType::CGSize, size) }.unwrap();
         set_attribute_value(&self.window, &kAXSizeAttribute(), &size)
     }
+
+    pub(crate) fn title(&self) -> String {
+        get_attribute::<CFString>(&self.window, &kAXTitleAttribute())
+            .map(|t| t.to_string())
+            .unwrap_or_else(|_| "Unknown".to_string())
+    }
 }
 
 impl std::fmt::Display for MacWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let window_title = get_attribute::<CFString>(&self.window, &kAXTitleAttribute())
-            .map(|t| t.to_string())
-            .unwrap_or_else(|_| "Unknown".to_string());
-
         let app_name = self
             .running_app
             .localizedName()
@@ -132,7 +134,9 @@ impl std::fmt::Display for MacWindow {
         write!(
             f,
             "'{}' from app '{}' (PID: {})",
-            window_title, app_name, self.pid
+            self.title(),
+            app_name,
+            self.pid
         )
     }
 }

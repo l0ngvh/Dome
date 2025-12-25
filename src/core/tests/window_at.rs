@@ -13,6 +13,7 @@ fn setup() -> Hub {
             height: 100.0,
         },
         BORDER,
+        3.0,
     )
 }
 

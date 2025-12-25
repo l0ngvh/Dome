@@ -11,7 +11,7 @@ fn window_with_border() {
         width: 10.0,
         height: 10.0,
     };
-    let mut hub = Hub::new(screen, 2.0);
+    let mut hub = Hub::new(screen, 2.0, 3.0);
     hub.insert_window();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=10.00 h=10.00),
@@ -40,7 +40,7 @@ fn border_with_nested_containers() {
         width: 50.0,
         height: 20.0,
     };
-    let mut hub = Hub::new(screen, 1.0);
+    let mut hub = Hub::new(screen, 1.0, 3.0);
     hub.insert_window();
     hub.insert_window();
     hub.insert_window();
