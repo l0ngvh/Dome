@@ -6,10 +6,10 @@ fn focus_parent_twice_nested_containers() {
     let mut hub = setup();
 
     // Create nested containers
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
 
     hub.focus_parent();
     hub.focus_parent();
@@ -65,8 +65,8 @@ fn focus_parent_twice_nested_containers() {
 fn focus_parent_twice_single_container() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
 
     hub.focus_parent();
     hub.focus_parent();
@@ -118,10 +118,10 @@ fn focus_parent_twice_single_container() {
 fn insert_window_after_focusing_parent() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.focus_parent();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

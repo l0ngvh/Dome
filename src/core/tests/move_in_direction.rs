@@ -3,11 +3,11 @@ use super::{setup, snapshot};
 #[test]
 fn move_left_from_vertical_container_to_horizontal_parent() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
+    hub.insert_tiling("W3".into());
 
     hub.move_left();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -60,11 +60,11 @@ fn move_left_from_vertical_container_to_horizontal_parent() {
 #[test]
 fn move_right_from_vertical_container_to_horizontal_parent() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
+    hub.insert_tiling("W3".into());
 
     hub.move_right();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -117,12 +117,12 @@ fn move_right_from_vertical_container_to_horizontal_parent() {
 #[test]
 fn move_up_from_horizontal_container_to_vertical_parent() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
+    hub.insert_tiling("W3".into());
 
     hub.move_up();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -175,12 +175,12 @@ fn move_up_from_horizontal_container_to_vertical_parent() {
 #[test]
 fn move_down_from_horizontal_container_to_vertical_parent() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
+    hub.insert_tiling("W3".into());
 
     hub.move_down();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -233,11 +233,11 @@ fn move_down_from_horizontal_container_to_vertical_parent() {
 #[test]
 fn move_left_from_vertical_container_creates_new_root_container() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
+    hub.insert_tiling("W3".into());
 
     hub.move_left();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -290,9 +290,9 @@ fn move_left_from_vertical_container_creates_new_root_container() {
 #[test]
 fn move_left_from_vertical_container_replaces_new_root_container() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
 
     hub.move_left();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -341,10 +341,10 @@ fn move_left_from_vertical_container_replaces_new_root_container() {
 #[test]
 fn move_right_from_vertical_container_creates_new_root_container() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
 
     hub.move_right();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -396,9 +396,9 @@ fn move_right_from_vertical_container_creates_new_root_container() {
 #[test]
 fn move_right_from_vertical_container_replaces_new_root_container() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
 
     hub.move_right();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -447,9 +447,9 @@ fn move_right_from_vertical_container_replaces_new_root_container() {
 #[test]
 fn move_up_from_horizontal_container_creates_new_root_container() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
 
     hub.move_up();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -501,8 +501,8 @@ fn move_up_from_horizontal_container_creates_new_root_container() {
 #[test]
 fn move_up_from_horizontal_container_replaces_new_root_container() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
 
     hub.move_up();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -551,9 +551,9 @@ fn move_up_from_horizontal_container_replaces_new_root_container() {
 #[test]
 fn move_down_from_horizontal_container_creates_new_root_container() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
 
     hub.move_down();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -605,8 +605,8 @@ fn move_down_from_horizontal_container_creates_new_root_container() {
 #[test]
 fn move_down_from_horizontal_container_replaces_new_root_container() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
 
     hub.move_down();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -655,13 +655,13 @@ fn move_down_from_horizontal_container_replaces_new_root_container() {
 #[test]
 fn move_right_at_edge_goes_to_horizontal_grandparent() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
+    hub.insert_tiling("W4".into());
 
     hub.move_right();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -717,13 +717,13 @@ fn move_right_at_edge_goes_to_horizontal_grandparent() {
 #[test]
 fn move_left_at_edge_goes_to_horizontal_grandparent() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
+    hub.insert_tiling("W4".into());
     hub.focus_left();
     hub.focus_left();
 
@@ -781,14 +781,14 @@ fn move_left_at_edge_goes_to_horizontal_grandparent() {
 #[test]
 fn move_down_at_edge_goes_to_vertical_grandparent() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
+    hub.insert_tiling("W4".into());
 
     hub.move_down();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -844,14 +844,14 @@ fn move_down_at_edge_goes_to_vertical_grandparent() {
 #[test]
 fn move_up_at_edge_goes_to_vertical_grandparent() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
+    hub.insert_tiling("W4".into());
     hub.focus_up();
     hub.focus_up();
 
@@ -909,7 +909,7 @@ fn move_up_at_edge_goes_to_vertical_grandparent() {
 #[test]
 fn move_does_nothing_for_single_window() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     let before = snapshot(&hub);
     hub.move_left();
     hub.move_right();
@@ -921,8 +921,8 @@ fn move_does_nothing_for_single_window() {
 #[test]
 fn swap_left_in_horizontal_container() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
 
     hub.move_left();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -971,8 +971,8 @@ fn swap_left_in_horizontal_container() {
 #[test]
 fn swap_right_in_horizontal_container() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.focus_left();
 
     hub.move_right();
@@ -1022,9 +1022,9 @@ fn swap_right_in_horizontal_container() {
 #[test]
 fn swap_up_in_vertical_container() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
 
     hub.move_up();
     insta::assert_snapshot!(snapshot(&hub), @r"
@@ -1073,9 +1073,9 @@ fn swap_up_in_vertical_container() {
 #[test]
 fn swap_down_in_vertical_container() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.focus_up();
 
     hub.move_down();

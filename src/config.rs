@@ -142,7 +142,7 @@ where
     Ok(keymaps)
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 pub struct Color {
     pub r: f32,
     pub g: f32,
@@ -162,6 +162,14 @@ fn default_border_color() -> Color {
     Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 }
 }
 
+fn default_tab_bar_background_color() -> Color {
+    Color { r: 0.15, g: 0.15, b: 0.2, a: 1.0 }
+}
+
+fn default_active_tab_background_color() -> Color {
+    Color { r: 0.3, g: 0.3, b: 0.4, a: 1.0 }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default = "default_keymaps", deserialize_with = "deserialize_keymaps")]
@@ -176,6 +184,10 @@ pub struct Config {
     pub spawn_indicator_color: Color,
     #[serde(default = "default_border_color")]
     pub border_color: Color,
+    #[serde(default = "default_tab_bar_background_color")]
+    pub tab_bar_background_color: Color,
+    #[serde(default = "default_active_tab_background_color")]
+    pub active_tab_background_color: Color,
 }
 
 fn default_border_size() -> f32 {
@@ -195,6 +207,8 @@ impl Default for Config {
             focused_color: default_focused_color(),
             spawn_indicator_color: default_spawn_indicator_color(),
             border_color: default_border_color(),
+            tab_bar_background_color: default_tab_bar_background_color(),
+            active_tab_background_color: default_active_tab_background_color(),
         }
     }
 }

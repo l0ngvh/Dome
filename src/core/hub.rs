@@ -117,7 +117,7 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_window(&mut self, title: String) -> WindowId {
+    pub(crate) fn insert_tiling(&mut self, title: String) -> WindowId {
         let (parent, insert_after) = self.get_insert_target(self.current);
         let window_id = match parent {
             Parent::Container(container_id) => {

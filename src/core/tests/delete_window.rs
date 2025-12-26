@@ -4,10 +4,10 @@ use insta::assert_snapshot;
 #[test]
 fn delete_window_removes_from_container() {
     let mut hub = setup();
-    hub.insert_window();
-    let w2 = hub.insert_window();
-    hub.insert_window();
-    hub.delete_window(w2);
+    hub.insert_tiling("W0".into());
+    let w1 = hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
+    hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
@@ -54,9 +54,9 @@ fn delete_window_removes_from_container() {
 #[test]
 fn delete_window_removes_parent_container() {
     let mut hub = setup();
-    hub.insert_window();
-    let w2 = hub.insert_window();
-    hub.delete_window(w2);
+    hub.insert_tiling("W0".into());
+    let w1 = hub.insert_tiling("W1".into());
+    hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
@@ -100,12 +100,12 @@ fn delete_window_removes_parent_container() {
 #[test]
 fn delete_all_windows() {
     let mut hub = setup();
-    let w1 = hub.insert_window();
-    let w2 = hub.insert_window();
-    let w3 = hub.insert_window();
+    let w0 = hub.insert_tiling("W0".into());
+    let w1 = hub.insert_tiling("W1".into());
+    let w2 = hub.insert_tiling("W2".into());
+    hub.delete_window(w0);
     hub.delete_window(w1);
     hub.delete_window(w2);
-    hub.delete_window(w3);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
@@ -116,11 +116,11 @@ fn delete_all_windows() {
 #[test]
 fn delete_all_windows_cleanup_unfocused_workspace() {
     let mut hub = setup();
-    let w1 = hub.insert_window();
-    let w2 = hub.insert_window();
+    let w0 = hub.insert_tiling("W0".into());
+    let w1 = hub.insert_tiling("W1".into());
     hub.focus_workspace(1);
+    hub.delete_window(w0);
     hub.delete_window(w1);
-    hub.delete_window(w2);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(1), name=1)
@@ -131,15 +131,15 @@ fn delete_all_windows_cleanup_unfocused_workspace() {
 #[test]
 fn clean_up_parent_container_when_only_child_is_container() {
     let mut hub = setup();
-    let w0 = hub.insert_window();
-    hub.insert_window();
+    let w0 = hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     // Create new child container
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.focus_parent();
     hub.toggle_new_window_direction();
     // Should be inserted in the root container
-    let w3 = hub.insert_window();
+    let w3 = hub.insert_tiling("W3".into());
     hub.delete_window(w0);
     hub.delete_window(w3);
     assert_snapshot!(snapshot(&hub), @r"
@@ -188,9 +188,9 @@ fn clean_up_parent_container_when_only_child_is_container() {
 #[test]
 fn delete_focused_window_change_focus_to_previous_window() {
     let mut hub = setup();
-    hub.insert_window();
-    let w1 = hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    let w1 = hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
     hub.focus_left();
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
@@ -239,9 +239,9 @@ fn delete_focused_window_change_focus_to_previous_window() {
 #[test]
 fn delete_focused_window_change_focus_to_next_window() {
     let mut hub = setup();
-    let w0 = hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    let w0 = hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
     hub.focus_left();
     hub.focus_left();
     hub.delete_window(w0);
@@ -291,12 +291,12 @@ fn delete_focused_window_change_focus_to_next_window() {
 #[test]
 fn delete_focused_window_focus_last_window_of_preceding_container() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.focus_parent();
     hub.toggle_new_window_direction();
-    let w3 = hub.insert_window();
+    let w2 = hub.insert_tiling("W2".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
@@ -341,7 +341,7 @@ fn delete_focused_window_focus_last_window_of_preceding_container() {
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
     ");
-    hub.delete_window(w3);
+    hub.delete_window(w2);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
@@ -388,10 +388,10 @@ fn delete_focused_window_focus_last_window_of_preceding_container() {
 #[test]
 fn delete_focused_window_focus_first_window_of_following_container() {
     let mut hub = setup();
-    let w1 = hub.insert_window();
-    hub.insert_window();
+    let w0 = hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.focus_left();
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
@@ -438,7 +438,7 @@ fn delete_focused_window_focus_first_window_of_following_container() {
     *                                                                         *|                                                                         |
     ***************************************************************************+-------------------------------------------------------------------------+
     ");
-    hub.delete_window(w1);
+    hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
@@ -485,8 +485,8 @@ fn delete_focused_window_focus_first_window_of_following_container() {
 #[test]
 fn delete_window_when_parent_focused_gives_focus_to_last_child() {
     let mut hub = setup();
-    let w0 = hub.insert_window();
-    hub.insert_window();
+    let w0 = hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.focus_parent();
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
@@ -533,13 +533,13 @@ fn delete_window_when_parent_focused_gives_focus_to_last_child() {
 fn container_replaced_by_child_keeps_position_in_parent() {
     let mut hub = setup();
     // Create: [w0] [w1, w2] [w3]
-    hub.insert_window();
-    let w1 = hub.insert_window();
+    hub.insert_tiling("W0".into());
+    let w1 = hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.focus_parent();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),

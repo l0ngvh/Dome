@@ -4,7 +4,7 @@ use insta::assert_snapshot;
 #[test]
 fn initial_window_cover_full_screen() {
     let mut hub = setup();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
@@ -48,8 +48,8 @@ fn initial_window_cover_full_screen() {
 #[test]
 fn split_window_evenly() {
     let mut hub = setup();
-    for _ in 0..4 {
-        hub.insert_window();
+    for i in 0..4 {
+        hub.insert_tiling(format!("W{i}"));
     }
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -99,13 +99,13 @@ fn split_window_evenly() {
 #[test]
 fn new_container_preserves_wrapped_window_position() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
     // Focus w1 (middle)
     hub.focus_left();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
     // New container wrapping w1 should be in the middle position
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -157,12 +157,12 @@ fn new_container_preserves_wrapped_window_position() {
 #[test]
 fn insert_window_after_focused_window() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
     // Focus w1 (middle)
     hub.focus_left();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
     // w3 should be inserted right after w1, not at the end
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -213,18 +213,18 @@ fn insert_window_after_focused_window() {
 fn insert_window_after_focused_container_with_same_new_window_direction() {
     let mut hub = setup();
     // Create: [w0] [w1, w2] [w3]
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.focus_parent();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
     // Focus the middle container and toggle back new window direction
     hub.focus_left();
     hub.focus_parent();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W4".into());
     // w4 should be inserted right after the focused container, not at the end
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -277,12 +277,12 @@ fn insert_window_after_focused_container_with_same_new_window_direction() {
 #[test]
 fn insert_to_new_container_when_focused_container_window_insert_direction_differ_and_no_parent() {
     let mut hub = setup();
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
     hub.focus_parent();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
@@ -334,16 +334,16 @@ fn insert_to_new_container_when_focused_container_window_insert_direction_differ
 fn insert_to_parent_when_focused_container_window_insert_direction_differ_but_has_parent() {
     let mut hub = setup();
     // Creating [w0, [w1, w2], w3]
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
     hub.focus_left();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
     hub.focus_parent();
     hub.toggle_new_window_direction();
     // Should be inserted in the root container
-    hub.insert_window();
+    hub.insert_tiling("W4".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),

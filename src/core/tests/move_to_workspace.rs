@@ -5,8 +5,8 @@ use insta::assert_snapshot;
 fn move_window_to_empty_workspace() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.move_focused_to_workspace(1);
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -56,10 +56,10 @@ fn move_window_to_empty_workspace() {
 fn move_window_to_workspace_with_windows() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.focus_workspace(1);
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.focus_workspace(0);
     hub.move_focused_to_workspace(1);
 
@@ -113,7 +113,7 @@ fn move_window_to_workspace_with_windows() {
 fn move_only_window_to_workspace() {
     let mut hub = setup();
 
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.move_focused_to_workspace(1);
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -130,8 +130,8 @@ fn move_only_window_to_workspace() {
 fn move_to_same_workspace_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.move_focused_to_workspace(0);
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -181,10 +181,10 @@ fn move_to_same_workspace_does_nothing() {
 fn move_container_to_workspace() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.focus_parent();
     hub.move_focused_to_workspace(1);
 

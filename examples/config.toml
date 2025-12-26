@@ -15,6 +15,20 @@ g = 0.3
 b = 0.3
 a = 1.0
 
+# Tab bar background color (default: dark blue-gray)
+[tab_bar_background_color]
+r = 0.15
+g = 0.15
+b = 0.2
+a = 1.0
+
+# Active tab background color
+[active_tab_background_color]
+r = 0.3
+g = 0.3
+b = 0.4
+a = 1.0
+
 [keymaps]
 "cmd+0" = ["focus workspace 0"]
 "cmd+1" = ["focus workspace 1"]

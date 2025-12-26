@@ -5,9 +5,9 @@ use insta::assert_snapshot;
 fn focus_left_right_in_horizontal_container() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
 
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
@@ -102,10 +102,10 @@ fn focus_left_right_in_horizontal_container() {
 fn focus_up_down_in_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
 
     hub.focus_up();
     assert_snapshot!(snapshot(&hub), @r"
@@ -200,13 +200,13 @@ fn focus_up_down_in_vertical_container() {
 fn focus_right_selects_first_child_of_next_container() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.focus_up();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
 
     // Focus w0
     hub.focus_left();
@@ -314,12 +314,12 @@ fn focus_left_selects_last_child_of_previous_container() {
     let mut hub = setup();
 
     // Create: [w0, w1] [w2]
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.focus_parent();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -419,12 +419,12 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     let mut hub = setup();
 
     // Create: [w0, [w1, [w2, w3]]]
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
 
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
@@ -530,15 +530,15 @@ fn focus_down_from_nested_container_goes_to_grandparent_next() {
     let mut hub = setup();
 
     // Create: [[[w0, w1], w2], w3]
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.focus_up();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
     hub.focus_left();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W3".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
@@ -642,12 +642,12 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
     let mut hub = setup();
 
     // Create: [w0, w1] [w2]
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.focus_parent();
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
 
     // Focus w1 (last in nested container)
     hub.focus_left();
@@ -749,12 +749,12 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
 fn focus_down_into_horizontal_nested_container() {
     let mut hub = setup();
 
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W2".into());
+    hub.insert_tiling("W3".into());
 
     // Focus window 0 (top)
     hub.focus_up();
@@ -857,8 +857,8 @@ fn focus_down_into_horizontal_nested_container() {
 fn focus_left_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.focus_left();
     hub.focus_left(); // Already at leftmost
 
@@ -909,8 +909,8 @@ fn focus_left_at_boundary_does_nothing() {
 fn focus_right_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
     hub.focus_right(); // Already at rightmost
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -960,9 +960,9 @@ fn focus_right_at_boundary_does_nothing() {
 fn focus_up_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.focus_up();
     hub.focus_up(); // Already at topmost
 
@@ -1013,9 +1013,9 @@ fn focus_up_at_boundary_does_nothing() {
 fn focus_down_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W1".into());
     hub.focus_down(); // Already at bottommost
 
     assert_snapshot!(snapshot(&hub), @r"

@@ -64,7 +64,11 @@ define_class!(
                     label.color.r as CGFloat, label.color.g as CGFloat, label.color.b as CGFloat, label.color.a as CGFloat,
                 );
                 let ns_string = NSString::from_str(&label.text);
-                let font = NSFont::systemFontOfSize(12.0);
+                let font = if label.bold {
+                    NSFont::boldSystemFontOfSize(12.0)
+                } else {
+                    NSFont::systemFontOfSize(12.0)
+                };
                 let attrs = unsafe {
                     NSDictionary::from_slices(
                         &[NSForegroundColorAttributeName, NSFontAttributeName],
@@ -119,22 +123,23 @@ pub(super) struct OverlayLabel {
     pub(super) y: f32,
     pub(super) text: String,
     pub(super) color: Color,
+    pub(super) bold: bool,
 }
 
 fn border_rects(dim: Dimension, border_size: f32, inset: bool, colors: [Color; 4]) -> [OverlayRect; 4] {
     if inset {
         [
-            OverlayRect { x: dim.x, y: dim.y + dim.height - border_size, width: dim.width, height: border_size, color: colors[0].clone() },
-            OverlayRect { x: dim.x, y: dim.y, width: dim.width, height: border_size, color: colors[1].clone() },
-            OverlayRect { x: dim.x, y: dim.y + border_size, width: border_size, height: dim.height - 2.0 * border_size, color: colors[2].clone() },
-            OverlayRect { x: dim.x + dim.width - border_size, y: dim.y + border_size, width: border_size, height: dim.height - 2.0 * border_size, color: colors[3].clone() },
+            OverlayRect { x: dim.x, y: dim.y + dim.height - border_size, width: dim.width, height: border_size, color: colors[0] },
+            OverlayRect { x: dim.x, y: dim.y, width: dim.width, height: border_size, color: colors[1] },
+            OverlayRect { x: dim.x, y: dim.y + border_size, width: border_size, height: dim.height - 2.0 * border_size, color: colors[2] },
+            OverlayRect { x: dim.x + dim.width - border_size, y: dim.y + border_size, width: border_size, height: dim.height - 2.0 * border_size, color: colors[3] },
         ]
     } else {
         [
-            OverlayRect { x: dim.x - border_size, y: dim.y + dim.height, width: dim.width + border_size * 2.0, height: border_size, color: colors[0].clone() },
-            OverlayRect { x: dim.x - border_size, y: dim.y - border_size, width: dim.width + border_size * 2.0, height: border_size, color: colors[1].clone() },
-            OverlayRect { x: dim.x - border_size, y: dim.y, width: border_size, height: dim.height, color: colors[2].clone() },
-            OverlayRect { x: dim.x + dim.width, y: dim.y, width: border_size, height: dim.height, color: colors[3].clone() },
+            OverlayRect { x: dim.x - border_size, y: dim.y + dim.height, width: dim.width + border_size * 2.0, height: border_size, color: colors[0] },
+            OverlayRect { x: dim.x - border_size, y: dim.y - border_size, width: dim.width + border_size * 2.0, height: border_size, color: colors[1] },
+            OverlayRect { x: dim.x - border_size, y: dim.y, width: border_size, height: dim.height, color: colors[2] },
+            OverlayRect { x: dim.x + dim.width, y: dim.y, width: border_size, height: dim.height, color: colors[3] },
         ]
     }
 }
@@ -157,8 +162,8 @@ pub(super) fn collect_overlays(hub: &Hub, config: &Config, root: Child) -> (Vec<
                 }
                 let dim = hub.get_window(window_id).dimension();
                 let y = screen.y + screen.height - dim.y - dim.height;
-                let color = config.border_color.clone();
-                rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, false, [color.clone(), color.clone(), color.clone(), color]));
+                let color = config.border_color;
+                rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, false, [color, color, color, color]));
             }
             Child::Container(container_id) => {
                 let container = hub.get_container(container_id);
@@ -169,20 +174,34 @@ pub(super) fn collect_overlays(hub: &Hub, config: &Config, root: Child) -> (Vec<
                 if container.is_tabbed() {
                     let dim = container.dimension();
                     let y = screen.y + screen.height - dim.y - tab_bar_height;
-                    rects.push(OverlayRect { x: dim.x, y, width: dim.width, height: tab_bar_height, color: config.border_color.clone() });
+                    let is_focused = focused == Some(Child::Container(container_id));
+                    let tab_border_color = if is_focused { config.focused_color } else { config.border_color };
+                    rects.push(OverlayRect { x: dim.x, y, width: dim.width, height: tab_bar_height, color: config.tab_bar_background_color });
+                    // Tab bar border (inset)
+                    let tab_dim = Dimension { x: dim.x, y, width: dim.width, height: tab_bar_height };
+                    rects.extend(border_rects(tab_dim, border_size, true, [tab_border_color; 4]));
 
                     let children = container.children();
                     if !children.is_empty() {
                         let tab_width = dim.width / children.len() as f32;
                         let active_tab = container.active_tab();
+                        // Active tab background
+                        let active_x = dim.x + active_tab as f32 * tab_width;
+                        rects.push(OverlayRect { x: active_x, y, width: tab_width, height: tab_bar_height, color: config.active_tab_background_color });
+                        // Tab separators
+                        for i in 1..children.len() {
+                            let sep_x = dim.x + i as f32 * tab_width - border_size / 2.0;
+                            rects.push(OverlayRect { x: sep_x, y, width: border_size, height: tab_bar_height, color: tab_border_color });
+                        }
                         for (i, c) in children.iter().enumerate() {
                             let label = match c {
                                 Child::Window(wid) => hub.get_window(*wid).title().to_string(),
                                 Child::Container(_) => "Container".to_string(),
                             };
-                            let display = if i == active_tab { format!("[{}]", label) } else { label };
+                            let is_active = i == active_tab;
+                            let display = if is_active { format!("[{}]", label) } else { label };
                             let tab_x = dim.x + i as f32 * tab_width + tab_width / 2.0 - display.len() as f32 * 3.5;
-                            labels.push(OverlayLabel { x: tab_x, y: y + tab_bar_height / 2.0 - 6.0, text: display, color: Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 } });
+                            labels.push(OverlayLabel { x: tab_x, y: y + tab_bar_height / 2.0 - 6.0, text: display, color: Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }, bold: is_active });
                         }
                     }
                 }
@@ -191,26 +210,26 @@ pub(super) fn collect_overlays(hub: &Hub, config: &Config, root: Child) -> (Vec<
     }
 
     if let Some(focused) = focused {
-        let color = config.focused_color.clone();
-        let spawn_color = config.spawn_indicator_color.clone();
+        let color = config.focused_color;
+        let spawn_color = config.spawn_indicator_color;
         match focused {
             Child::Window(window_id) => {
                 let window = hub.get_window(window_id);
                 let dim = window.dimension();
                 let direction = window.new_window_direction();
                 let y = screen.y + screen.height - dim.y - dim.height;
-                let bottom = if direction == Direction::Vertical { spawn_color.clone() } else { color.clone() };
-                let right = if direction == Direction::Horizontal { spawn_color } else { color.clone() };
-                rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, false, [color.clone(), bottom, color, right]));
+                let bottom = if direction == Direction::Vertical { spawn_color } else { color };
+                let right = if direction == Direction::Horizontal { spawn_color } else { color };
+                rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, false, [color, bottom, color, right]));
             }
             Child::Container(container_id) => {
                 let container = hub.get_container(container_id);
                 let dim = container.dimension();
                 let direction = container.new_window_direction();
                 let y = screen.y + screen.height - dim.y - dim.height;
-                let bottom = if direction == Direction::Vertical { spawn_color.clone() } else { color.clone() };
-                let right = if direction == Direction::Horizontal { spawn_color } else { color.clone() };
-                rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, true, [color.clone(), bottom, color, right]));
+                let bottom = if direction == Direction::Vertical { spawn_color } else { color };
+                let right = if direction == Direction::Horizontal { spawn_color } else { color };
+                rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, true, [color, bottom, color, right]));
             }
         }
     }

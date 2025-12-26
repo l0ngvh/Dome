@@ -12,7 +12,7 @@ fn window_with_border() {
         height: 10.0,
     };
     let mut hub = Hub::new(screen, 2.0, 3.0);
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=10.00 h=10.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
@@ -41,12 +41,12 @@ fn border_with_nested_containers() {
         height: 20.0,
     };
     let mut hub = Hub::new(screen, 1.0, 3.0);
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
-    hub.insert_window();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
+    hub.insert_tiling("W3".into());
     hub.toggle_new_window_direction();
-    hub.insert_window();
+    hub.insert_tiling("W4".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=50.00 h=20.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
