@@ -8,7 +8,7 @@ use objc2_core_foundation::{
 };
 
 use crate::core::Dimension;
-use crate::objc2_wrapper::{
+use super::objc2_wrapper::{
     get_attribute, kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute, kAXMainAttribute,
     kAXPositionAttribute, kAXSizeAttribute, kAXTitleAttribute, set_attribute_value,
 };

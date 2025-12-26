@@ -117,12 +117,12 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_window(&mut self) -> WindowId {
+    pub(crate) fn insert_window(&mut self, title: String) -> WindowId {
         let (parent, insert_after) = self.get_insert_target(self.current);
         let window_id = match parent {
             Parent::Container(container_id) => {
                 let direction = self.containers.get(container_id).direction;
-                let window_id = self.windows.allocate(Window::new(parent, direction));
+                let window_id = self.windows.allocate(Window::new(parent, direction, title));
                 if let Some(after) = insert_after {
                     self.containers
                         .get_mut(container_id)
@@ -133,9 +133,9 @@ impl Hub {
                 window_id
             }
             Parent::Workspace(workspace_id) => {
-                let window_id = self
-                    .windows
-                    .allocate(Window::new(parent, Direction::default()));
+                let window_id =
+                    self.windows
+                        .allocate(Window::new(parent, Direction::default(), title));
                 let screen = self.workspaces.get(workspace_id).screen;
                 self.windows.get_mut(window_id).dimension = screen;
                 self.workspaces.get_mut(workspace_id).root = Some(Child::Window(window_id));

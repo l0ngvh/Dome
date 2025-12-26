@@ -153,6 +153,7 @@ pub(crate) struct Window {
     pub(super) parent: Parent,
     pub(super) dimension: Dimension,
     pub(super) new_window_direction: Direction,
+    pub(super) title: String,
 }
 
 impl Node for Window {
@@ -160,11 +161,12 @@ impl Node for Window {
 }
 
 impl Window {
-    pub(super) fn new(parent: Parent, new_window_direction: Direction) -> Self {
+    pub(super) fn new(parent: Parent, new_window_direction: Direction, title: String) -> Self {
         Self {
             parent,
             dimension: Dimension::default(),
             new_window_direction,
+            title,
         }
     }
 
@@ -174,6 +176,10 @@ impl Window {
 
     pub(crate) fn new_window_direction(&self) -> Direction {
         self.new_window_direction
+    }
+
+    pub(crate) fn title(&self) -> &str {
+        &self.title
     }
 }
 

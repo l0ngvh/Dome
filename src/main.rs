@@ -1,4 +1,4 @@
-use dome::{check_accessibility, run_app};
+use dome::run_app;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt};
@@ -13,6 +13,5 @@ fn main() {
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
     }));
 
-    check_accessibility();
     run_app();
 }
