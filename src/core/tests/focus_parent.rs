@@ -14,7 +14,6 @@ fn focus_parent_twice_nested_containers() {
     hub.focus_parent();
     hub.focus_parent();
 
-
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),

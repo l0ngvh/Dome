@@ -171,7 +171,7 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn delete_window(&mut self, id: WindowId) -> WorkspaceId {
+    pub(crate) fn delete_window(&mut self, id: WindowId) {
         let parent = self.windows.get(id).parent;
         match parent {
             Parent::Container(parent_id) => {
@@ -187,7 +187,6 @@ impl Hub {
                 self.remove_child_and_cleanup(parent_id, Child::Window(id));
                 self.balance_workspace(workspace_id);
                 self.windows.delete(id);
-                workspace_id
             }
             Parent::Workspace(workspace_id) => {
                 self.workspaces.get_mut(workspace_id).root = None;
@@ -197,7 +196,6 @@ impl Hub {
                 if workspace_id != self.current {
                     self.workspaces.delete(workspace_id);
                 }
-                workspace_id
             }
         }
     }
@@ -343,6 +341,36 @@ impl Hub {
             container.active_tab = pos;
         }
         self.balance_workspace(self.current);
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub(crate) fn toggle_float(&mut self) -> Option<(WindowId, FloatWindowId)> {
+        let focused = self.workspaces.get(self.current).focused?;
+        match focused {
+            Focus::Float(float_id) => {
+                let title = self.float_windows.get(float_id).title.clone();
+                self.delete_float(float_id);
+                let window_id = self.insert_tiling(title.clone());
+                tracing::info!("Window {title} is now tiling");
+                Some((window_id, float_id))
+            }
+            Focus::Tiling(Child::Window(window_id)) => {
+                let window = self.windows.get(window_id);
+                let title = window.title.clone();
+                let dim = window.dimension;
+                self.delete_window(window_id);
+                let dimension = Dimension {
+                    width: dim.width,
+                    height: dim.height,
+                    x: self.screen.x + (self.screen.width - dim.width) / 2.0,
+                    y: self.screen.y + (self.screen.height - dim.height) / 2.0,
+                };
+                let float_id = self.insert_float(dimension, title.clone());
+                tracing::info!("Window {title} is now floating");
+                Some((window_id, float_id))
+            }
+            Focus::Tiling(Child::Container(_)) => None,
+        }
     }
 
     pub(crate) fn focus_left(&mut self) {

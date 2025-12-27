@@ -63,3 +63,4 @@ a = 1.0
 "cmd+shift+j" = ["move down"]
 "cmd+shift+k" = ["move up"]
 "cmd+shift+l" = ["move right"]
+"cmd+f" = ["toggle float"]

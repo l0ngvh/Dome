@@ -320,3 +320,213 @@ fn focus_falls_back_to_last_float() {
              ********************************
     "#);
 }
+
+#[test]
+fn toggle_tiling_to_float() {
+    let mut hub = setup();
+    hub.insert_tiling("W0".into());
+    hub.toggle_float();
+    assert_snapshot!(snapshot(&hub), @r#"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
+        Float(id=FloatWindowId(0), title="W0", x=1.00, y=1.00, w=148.00, h=28.00)
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    "#);
+}
+
+#[test]
+fn toggle_float_to_tiling() {
+    let mut hub = setup();
+    hub.insert_float(
+        Dimension {
+            x: 50.0,
+            y: 5.0,
+            width: 40.0,
+            height: 15.0,
+        },
+        "Float1".into(),
+    );
+    hub.toggle_float();
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+}
+
+#[test]
+fn toggle_tiling_to_float_with_existing_tiling() {
+    let mut hub = setup();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.toggle_float();
+    assert_snapshot!(snapshot(&hub), @r#"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
+        Float(id=FloatWindowId(0), title="W1", x=38.50, y=1.00, w=73.00, h=28.00)
+      )
+    )
+
+    +-------------------------------------***************************************************************************------------------------------------+
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                   W1                                    *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    |                                     *                                                                         *                                    |
+    +-------------------------------------***************************************************************************------------------------------------+
+    "#);
+}
+
+#[test]
+fn toggle_float_to_tiling_with_nested_containers() {
+    let mut hub = setup();
+    hub.insert_tiling("W0".into());
+    hub.toggle_spawn_direction();
+    hub.insert_tiling("W1".into());
+    hub.toggle_spawn_direction();
+    hub.insert_tiling("W2".into());
+    hub.insert_float(
+        Dimension {
+            x: 50.0,
+            y: 5.0,
+            width: 40.0,
+            height: 15.0,
+        },
+        "Float1".into(),
+    );
+    hub.toggle_float();
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=148.00, h=13.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=15.00, w=150.00, h=15.00, direction=Horizontal,
+            Window(id=WindowId(1), parent=ContainerId(1), x=1.00, y=16.00, w=48.00, h=13.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=51.00, y=16.00, w=48.00, h=13.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=101.00, y=16.00, w=48.00, h=13.00)
+          )
+        )
+      )
+    )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                         W0                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    +------------------------------------------------++------------------------------------------------+**************************************************
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                       W1                       ||                       W2                       |*                       W3                       *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    +------------------------------------------------++------------------------------------------------+**************************************************
+    ");
+}

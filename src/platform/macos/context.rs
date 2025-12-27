@@ -64,21 +64,37 @@ impl WindowRegistry {
         Some(float_id)
     }
 
-    pub(super) fn remove_by_pid(&mut self, pid: i32) -> Vec<WindowId> {
+    pub(super) fn toggle_float(&mut self, window_id: WindowId, float_id: FloatWindowId) {
+        if let Some(w) = self.tiling_to_window.remove(&window_id) {
+            let h = w.cf_hash();
+            self.hash_to_tiling.remove(&h);
+            self.hash_to_float.insert(h, float_id);
+            self.float_to_window.insert(float_id, w);
+        } else if let Some(w) = self.float_to_window.remove(&float_id) {
+            let h = w.cf_hash();
+            self.hash_to_float.remove(&h);
+            self.hash_to_tiling.insert(h, window_id);
+            self.tiling_to_window.insert(window_id, w);
+        }
+    }
+
+    pub(super) fn remove_by_pid(&mut self, pid: i32) -> (Vec<WindowId>, Vec<FloatWindowId>) {
         let Some(hashes) = self.pid_to_hashes.remove(&pid) else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
-        let mut removed = Vec::new();
+        let mut removed_tiling = Vec::new();
+        let mut removed_float = Vec::new();
         for cf_hash in hashes {
             if let Some(window_id) = self.hash_to_tiling.remove(&cf_hash) {
                 self.tiling_to_window.remove(&window_id);
-                removed.push(window_id);
+                removed_tiling.push(window_id);
             }
             if let Some(float_id) = self.hash_to_float.remove(&cf_hash) {
                 self.float_to_window.remove(&float_id);
+                removed_float.push(float_id);
             }
         }
-        removed
+        (removed_tiling, removed_float)
     }
 
     pub(super) fn contains(&self, window: &MacWindow) -> bool {
@@ -97,19 +113,26 @@ impl WindowRegistry {
 
 pub(super) struct WindowContext {
     pub(super) hub: Hub,
-    pub(super) overlay_view: Retained<OverlayView>,
+    pub(super) tiling_overlay: Retained<OverlayView>,
+    pub(super) float_overlay: Retained<OverlayView>,
     pub(super) registry: RefCell<WindowRegistry>,
     pub(super) config: Config,
     pub(super) event_tap: Option<CFRetained<objc2_core_foundation::CFMachPort>>,
 }
 
 impl WindowContext {
-    pub(super) fn new(overlay_view: Retained<OverlayView>, screen: Dimension, config: Config) -> Self {
+    pub(super) fn new(
+        tiling_overlay: Retained<OverlayView>,
+        float_overlay: Retained<OverlayView>,
+        screen: Dimension,
+        config: Config,
+    ) -> Self {
         let hub = Hub::new(screen, config.border_size, config.tab_bar_height);
 
         Self {
             hub,
-            overlay_view,
+            tiling_overlay,
+            float_overlay,
             registry: RefCell::new(WindowRegistry::new()),
             config,
             event_tap: None,

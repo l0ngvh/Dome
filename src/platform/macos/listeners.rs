@@ -4,9 +4,8 @@ use anyhow::Result;
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2_app_kit::{
-    NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace,
-    NSWorkspaceApplicationKey, NSWorkspaceDidLaunchApplicationNotification,
-    NSWorkspaceDidTerminateApplicationNotification,
+    NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
+    NSWorkspaceDidLaunchApplicationNotification, NSWorkspaceDidTerminateApplicationNotification,
 };
 use objc2_application_services::{AXObserver, AXUIElement};
 use objc2_core_foundation::{
@@ -28,7 +27,7 @@ use super::objc2_wrapper::{
 use super::overlay::collect_overlays;
 use super::window::MacWindow;
 use crate::config::{Action, FocusTarget, Keymap, Modifiers, MoveTarget, ToggleTarget};
-use crate::core::{Child, Focus, WorkspaceId};
+use crate::core::{Child, Focus};
 
 pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers {
     let mut observers = HashMap::new();
@@ -73,8 +72,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                     }
                 };
                 let context = &mut *context_ptr;
-                let workspace_id = context.hub.current_workspace();
-                if let Err(e) = render_workspace(context, workspace_id) {
+                if let Err(e) = render_workspace(context) {
                     tracing::warn!("Failed to render workspace after app launch: {e:#}");
                 }
                 apps.borrow_mut().insert(pid, observer);
@@ -96,10 +94,19 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 tracing::trace!("Received notification for terminating app with pid: {pid:?}");
                 apps.borrow_mut().remove(&pid);
                 let context = &mut *context_ptr;
-                let window_ids = context.registry.borrow_mut().remove_by_pid(pid);
-                for window_id in window_ids {
-                    context.hub.delete_window(window_id);
+                let (window_ids, float_ids) = context.registry.borrow_mut().remove_by_pid(pid);
+                for window_id in &window_ids {
+                    context.hub.delete_window(*window_id);
                     tracing::debug!("Window deleted: {window_id}");
+                }
+                for float_id in &float_ids {
+                    context.hub.delete_float(*float_id);
+                    tracing::debug!("Float deleted: {float_id}");
+                }
+                if !window_ids.is_empty() || !float_ids.is_empty() {
+                    if let Err(e) = render_workspace(context) {
+                        tracing::warn!("Failed to render workspace after terminating app: {e:#}");
+                    }
                 }
             }),
         );
@@ -163,14 +170,16 @@ unsafe extern "C-unwind" fn observer_callback(
                 tracing::debug!("New window created: {window}",);
                 if window.should_tile() {
                     let window_id = context.hub.insert_tiling(window.title());
-                    context.registry.borrow_mut().insert_tiling(window_id, window);
+                    context
+                        .registry
+                        .borrow_mut()
+                        .insert_tiling(window_id, window);
                 } else {
                     let dim = window.dimension();
                     let float_id = context.hub.insert_float(dim, window.title());
                     context.registry.borrow_mut().insert_float(float_id, window);
                 }
-                let workspace_id = context.hub.current_workspace();
-                if let Err(e) = render_workspace(context, workspace_id) {
+                if let Err(e) = render_workspace(context) {
                     tracing::warn!("Failed to render workspace after window insert: {e:#}");
                 }
             }
@@ -180,17 +189,23 @@ unsafe extern "C-unwind" fn observer_callback(
         }
     } else if notification.to_string() == *"AXUIElementDestroyed" {
         let cf_hash = CFHash(Some(&element));
-        if let Some(window_id) = context.registry.borrow_mut().remove_tiling_by_hash(cf_hash) {
-            let workspace_id = context.hub.delete_window(window_id);
+        let removed_tiling = context.registry.borrow_mut().remove_tiling_by_hash(cf_hash);
+        let removed_float = if removed_tiling.is_none() {
+            context.registry.borrow_mut().remove_float_by_hash(cf_hash)
+        } else {
+            None
+        };
+        if let Some(window_id) = removed_tiling {
+            context.hub.delete_window(window_id);
             tracing::info!("Window deleted: {window_id}");
-            if workspace_id == context.hub.current_workspace()
-                && let Err(e) = render_workspace(context, workspace_id)
-            {
-                tracing::warn!("Failed to render workspace after deleting window: {e:#}");
-            }
-        } else if let Some(float_id) = context.registry.borrow_mut().remove_float_by_hash(cf_hash) {
+        } else if let Some(float_id) = removed_float {
             context.hub.delete_float(float_id);
             tracing::info!("Float window deleted: {float_id}");
+        }
+        if removed_tiling.is_some() || removed_float.is_some() {
+            if let Err(e) = render_workspace(context) {
+                tracing::warn!("Failed to render workspace after deleting window: {e:#}");
+            }
         }
     }
 }
@@ -319,11 +334,18 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
         Action::Toggle(target) => match target {
             ToggleTarget::SpawnDirection => context.hub.toggle_spawn_direction(),
             ToggleTarget::Layout => context.hub.toggle_container_layout(),
+            ToggleTarget::Float => {
+                if let Some((window_id, float_id)) = context.hub.toggle_float() {
+                    context
+                        .registry
+                        .borrow_mut()
+                        .toggle_float(window_id, float_id);
+                }
+            }
         },
     }
 
-    let workspace_id = context.hub.current_workspace();
-    if let Err(e) = render_workspace(context, workspace_id) {
+    if let Err(e) = render_workspace(context) {
         tracing::warn!("Failed to render workspace after action: {e:#}");
     }
 
@@ -353,11 +375,17 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
             if mac_window.is_manageable() {
                 if mac_window.should_tile() {
                     let window_id = context.hub.insert_tiling(mac_window.title());
-                    context.registry.borrow_mut().insert_tiling(window_id, mac_window);
+                    context
+                        .registry
+                        .borrow_mut()
+                        .insert_tiling(window_id, mac_window);
                 } else {
                     let dim = mac_window.dimension();
                     let float_id = context.hub.insert_float(dim, mac_window.title());
-                    context.registry.borrow_mut().insert_float(float_id, mac_window);
+                    context
+                        .registry
+                        .borrow_mut()
+                        .insert_float(float_id, mac_window);
                 }
             }
         }
@@ -383,11 +411,17 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
 
 fn update_overlay(context: &WindowContext) {
     let workspace_id = context.hub.current_workspace();
-    let (rects, labels) = collect_overlays(&context.hub, &context.config, workspace_id);
-    context.overlay_view.set_rects(rects, labels);
+    let overlays = collect_overlays(&context.hub, &context.config, workspace_id);
+    context
+        .tiling_overlay
+        .set_rects(overlays.tiling_rects, overlays.tiling_labels);
+    context
+        .float_overlay
+        .set_rects(overlays.float_rects, vec![]);
 }
 
-pub(super) fn render_workspace(context: &WindowContext, workspace_id: WorkspaceId) -> Result<()> {
+pub(super) fn render_workspace(context: &WindowContext) -> Result<()> {
+    let workspace_id = context.hub.current_workspace();
     let workspace = context.hub.get_workspace(workspace_id);
 
     let mut stack: Vec<Child> = workspace.root().into_iter().collect();
@@ -414,8 +448,13 @@ pub(super) fn render_workspace(context: &WindowContext, workspace_id: WorkspaceI
         }
     }
 
-    let (rects, labels) = collect_overlays(&context.hub, &context.config, workspace_id);
-    context.overlay_view.set_rects(rects, labels);
+    let overlays = collect_overlays(&context.hub, &context.config, workspace_id);
+    context
+        .tiling_overlay
+        .set_rects(overlays.tiling_rects, overlays.tiling_labels);
+    context
+        .float_overlay
+        .set_rects(overlays.float_rects, vec![]);
 
     match workspace.focused() {
         Some(Focus::Tiling(Child::Window(window_id))) => {
@@ -464,11 +503,10 @@ fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
         }
     }
 
-    render_workspace(context, new_workspace_id)
+    render_workspace(context)
 }
 
 fn move_to_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
-    let current_workspace = context.hub.current_workspace();
     match context.hub.move_focused_to_workspace(name) {
         Some(Focus::Tiling(Child::Window(window_id))) => {
             if let Some(os_window) = context.registry.borrow().get_tiling(window_id) {
@@ -499,5 +537,5 @@ fn move_to_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
         }
         None => {}
     }
-    render_workspace(context, current_workspace)
+    render_workspace(context)
 }

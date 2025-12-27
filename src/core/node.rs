@@ -201,7 +201,11 @@ impl Node for FloatWindow {
 
 impl FloatWindow {
     pub(super) fn new(workspace: WorkspaceId, dimension: Dimension, title: String) -> Self {
-        Self { workspace, dimension, title }
+        Self {
+            workspace,
+            dimension,
+            title,
+        }
     }
 
     pub(crate) fn dimension(&self) -> Dimension {

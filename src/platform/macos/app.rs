@@ -1,6 +1,9 @@
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSScreen};
+use objc2_app_kit::{
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSFloatingWindowLevel,
+    NSNormalWindowLevel, NSScreen,
+};
 use objc2_application_services::AXIsProcessTrustedWithOptions;
 use objc2_core_foundation::kCFBooleanTrue;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
@@ -36,7 +39,8 @@ pub fn run_app() {
 struct AppDelegateIvars {
     context: std::cell::OnceCell<*mut WindowContext>,
     observers: std::cell::OnceCell<Observers>,
-    overlay_window: std::cell::OnceCell<Retained<objc2_app_kit::NSWindow>>,
+    tiling_overlay_window: std::cell::OnceCell<Retained<objc2_app_kit::NSWindow>>,
+    float_overlay_window: std::cell::OnceCell<Retained<objc2_app_kit::NSWindow>>,
 }
 
 define_class!(
@@ -60,12 +64,22 @@ define_class!(
                 NSSize::new(screen.width as f64, screen.height as f64),
             );
 
-            let overlay_window = create_overlay_window(mtm, frame);
-            let overlay_view = OverlayView::new(mtm, frame);
-            overlay_window.setContentView(Some(&overlay_view));
-            overlay_window.makeKeyAndOrderFront(None);
+            let tiling_overlay_window = create_overlay_window(mtm, frame, NSNormalWindowLevel - 1);
+            let tiling_overlay = OverlayView::new(mtm, frame);
+            tiling_overlay_window.setContentView(Some(&tiling_overlay));
+            tiling_overlay_window.makeKeyAndOrderFront(None);
 
-            let context_ptr = Box::into_raw(Box::new(WindowContext::new(overlay_view, screen, config)));
+            let float_overlay_window = create_overlay_window(mtm, frame, NSFloatingWindowLevel);
+            let float_overlay = OverlayView::new(mtm, frame);
+            float_overlay_window.setContentView(Some(&float_overlay));
+            float_overlay_window.makeKeyAndOrderFront(None);
+
+            let context_ptr = Box::into_raw(Box::new(WindowContext::new(
+                tiling_overlay,
+                float_overlay,
+                screen,
+                config,
+            )));
 
             if let Err(e) = listen_to_input_devices(context_ptr) {
                 tracing::error!("Failed to setup keyboard listener: {e:#}");
@@ -74,13 +88,20 @@ define_class!(
             let apps = setup_app_observers(context_ptr);
 
             let context = unsafe { &*context_ptr };
-            if let Err(e) = render_workspace(context, context.hub.current_workspace()) {
+            if let Err(e) = render_workspace(context) {
                 tracing::warn!("Failed to render workspace after initialization: {e:#}");
             }
 
             self.ivars().context.set(context_ptr).unwrap();
             self.ivars().observers.set(apps).unwrap();
-            self.ivars().overlay_window.set(overlay_window).unwrap();
+            self.ivars()
+                .tiling_overlay_window
+                .set(tiling_overlay_window)
+                .unwrap();
+            self.ivars()
+                .float_overlay_window
+                .set(float_overlay_window)
+                .unwrap();
         }
 
         #[unsafe(method(applicationWillTerminate:))]

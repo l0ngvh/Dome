@@ -8,7 +8,6 @@ use objc2_core_foundation::{
     kCFBooleanTrue,
 };
 
-use crate::core::Dimension;
 use super::objc2_wrapper::{
     get_attribute, is_attribute_settable, kAXDialogSubrole, kAXEnhancedUserInterfaceAttribute,
     kAXFloatingWindowSubrole, kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute,
@@ -16,6 +15,7 @@ use super::objc2_wrapper::{
     kAXSizeAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute, kAXTitleAttribute,
     kAXWindowRole, set_attribute_value,
 };
+use crate::core::Dimension;
 
 #[derive(Debug)]
 pub(crate) struct MacWindow {
@@ -143,7 +143,12 @@ impl MacWindow {
                 (size.width as f32, size.height as f32)
             })
             .unwrap_or((0.0, 0.0));
-        Dimension { x, y, width, height }
+        Dimension {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// Returns true if this is a "real" window worth managing (tile or float)
@@ -156,11 +161,14 @@ impl MacWindow {
             .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
             .unwrap_or(false);
 
-        let is_valid_subrole = subrole.as_ref().map(|sr| {
-            CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole()))
-                || CFEqual(Some(&**sr), Some(&*kAXDialogSubrole()))
-                || CFEqual(Some(&**sr), Some(&*kAXFloatingWindowSubrole()))
-        }).unwrap_or(false);
+        let is_valid_subrole = subrole
+            .as_ref()
+            .map(|sr| {
+                CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole()))
+                    || CFEqual(Some(&**sr), Some(&*kAXDialogSubrole()))
+                    || CFEqual(Some(&**sr), Some(&*kAXFloatingWindowSubrole()))
+            })
+            .unwrap_or(false);
 
         is_window
             && is_valid_subrole

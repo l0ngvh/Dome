@@ -15,7 +15,7 @@ mod window_at;
 
 use crate::core::allocator::NodeId;
 use crate::core::hub::Hub;
-use crate::core::node::{Child, Focus, FloatWindowId};
+use crate::core::node::{Child, FloatWindowId, Focus};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
@@ -142,14 +142,16 @@ fn draw_windows(hub: &Hub, grid: &mut [Vec<char>], child: Child, border: f32) {
             let c = hub.get_container(id);
             if c.is_tabbed() {
                 let dim = c.dimension();
-                let tab_labels: Vec<String> = c.children().iter().map(|child| {
-                    match child {
+                let tab_labels: Vec<String> = c
+                    .children()
+                    .iter()
+                    .map(|child| match child {
                         Child::Window(wid) => format!("W{}", wid.get()),
                         Child::Container(cid) => format!("C{}", cid.get()),
-                    }
-                }).collect();
+                    })
+                    .collect();
                 draw_tab_bar(grid, dim.x, dim.y, dim.width, &tab_labels, c.active_tab());
-                
+
                 if let Some(&active) = c.children().get(c.active_tab()) {
                     draw_windows(hub, grid, active, border);
                 }
@@ -162,37 +164,48 @@ fn draw_windows(hub: &Hub, grid: &mut [Vec<char>], child: Child, border: f32) {
     }
 }
 
-fn draw_tab_bar(grid: &mut [Vec<char>], x: f32, y: f32, width: f32, labels: &[String], active: usize) {
+fn draw_tab_bar(
+    grid: &mut [Vec<char>],
+    x: f32,
+    y: f32,
+    width: f32,
+    labels: &[String],
+    active: usize,
+) {
     let x1 = x.round() as usize;
     let y1 = y.round() as usize;
     let y2 = y1 + TAB_BAR_HEIGHT as usize - 1;
     let x2 = (x + width).round() as usize - 1;
     let inner_width = x2 - x1 - 1;
     let tab_count = labels.len();
-    
+
     // Draw top border
     for col in x1..=x2 {
         grid[y1][col] = '-';
     }
     grid[y1][x1] = '+';
     grid[y1][x2] = '+';
-    
+
     // Draw side borders
     for row in (y1 + 1)..=y2 {
         grid[row][x1] = '|';
         grid[row][x2] = '|';
     }
-    
+
     if tab_count == 0 {
         return;
     }
-    
+
     // Draw tab labels evenly spread with separators (centered vertically in content area)
     let label_row = y1 + 1 + (y2 - y1 - 1) / 2;
     let tab_width = inner_width / tab_count;
     for (i, label) in labels.iter().enumerate() {
         let tab_start = x1 + 1 + i * tab_width;
-        let tab_end = if i == tab_count - 1 { x2 - 1 } else { tab_start + tab_width - 1 };
+        let tab_end = if i == tab_count - 1 {
+            x2 - 1
+        } else {
+            tab_start + tab_width - 1
+        };
         let display = if i == active {
             format!("[{}]", label)
         } else {
@@ -279,16 +292,16 @@ fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
                 format!("direction={:?}", c.direction)
             };
             s.push_str(&format!(
-                    "{}Container(id={}, parent={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}, {},\n",
-                    prefix,
-                    id,
-                    c.parent,
-                    c.dimension.x,
-                    c.dimension.y,
-                    c.dimension.width,
-                    c.dimension.height,
-                    layout_info,
-                ));
+                "{}Container(id={}, parent={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}, {},\n",
+                prefix,
+                id,
+                c.parent,
+                c.dimension.x,
+                c.dimension.y,
+                c.dimension.width,
+                c.dimension.height,
+                layout_info,
+            ));
             for &child in c.children() {
                 fmt_child_str(hub, s, child, indent + 1);
             }
@@ -303,7 +316,13 @@ fn fmt_float_str(hub: &Hub, s: &mut String, float_id: FloatWindowId, indent: usi
     let dim = f.dimension();
     s.push_str(&format!(
         "{}Float(id={}, title=\"{}\", x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
-        prefix, float_id, f.title(), dim.x, dim.y, dim.width, dim.height
+        prefix,
+        float_id,
+        f.title(),
+        dim.x,
+        dim.y,
+        dim.width,
+        dim.height
     ));
 }
 
