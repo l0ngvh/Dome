@@ -400,7 +400,12 @@ impl Hub {
         let Parent::Container(mut container_id) = self.get_parent(child) else {
             return;
         };
-        let mut current = child;
+        // If direct parent is tabbed, skip to parent's sibling
+        let mut current = if self.containers.get(container_id).is_tabbed {
+            Child::Container(container_id)
+        } else {
+            child
+        };
         let mut iterations = 0;
         loop {
             iterations += 1;
@@ -469,14 +474,14 @@ impl Hub {
         let Some(Focus::Tiling(child)) = self.workspaces.get(self.current).focused else {
             return;
         };
-        let Parent::Container(old_parent_id) = self.get_parent(child) else {
+        let Parent::Container(direct_parent_id) = self.get_parent(child) else {
             return;
         };
 
-        // Handle swap within same container
-        let old_container = self.containers.get(old_parent_id);
-        if old_container.direction == direction {
-            let pos = old_container
+        // Handle swap within same container (skip if parent is tabbed)
+        let direct_parent = self.containers.get(direct_parent_id);
+        if !direct_parent.is_tabbed && direct_parent.direction == direction {
+            let pos = direct_parent
                 .children
                 .iter()
                 .position(|c| *c == child)
@@ -486,12 +491,12 @@ impl Hub {
             } else {
                 pos.saturating_sub(1)
             };
-            if target_pos != pos && target_pos < old_container.children.len() {
+            if target_pos != pos && target_pos < direct_parent.children.len() {
                 tracing::debug!(
-                    "Swapping {child:?} from pos {pos} to {target_pos} in {old_parent_id:?}"
+                    "Swapping {child:?} from pos {pos} to {target_pos} in {direct_parent_id:?}"
                 );
                 self.containers
-                    .get_mut(old_parent_id)
+                    .get_mut(direct_parent_id)
                     .children
                     .swap(pos, target_pos);
                 self.balance_workspace(self.current);
@@ -500,7 +505,7 @@ impl Hub {
             // At edge, fall through to find ancestor
         }
 
-        let mut current_anchor = Child::Container(old_parent_id);
+        let mut current_anchor = Child::Container(direct_parent_id);
         let mut iterations = 0;
 
         loop {
@@ -522,14 +527,14 @@ impl Hub {
                         let insert_pos = if forward { pos + 1 } else { pos };
 
                         tracing::debug!(
-                            "Moving {child:?} from {old_parent_id:?} to {container_id:?} at pos {insert_pos}"
+                            "Moving {child:?} from {direct_parent_id:?} to {container_id:?} at pos {insert_pos}"
                         );
                         self.containers
                             .get_mut(container_id)
                             .children
                             .insert(insert_pos, child);
                         self.set_parent(child, Parent::Container(container_id));
-                        self.remove_child_and_cleanup(old_parent_id, child);
+                        self.remove_child_and_cleanup(direct_parent_id, child);
                         self.balance_workspace(self.current);
                         return;
                     }
@@ -537,7 +542,7 @@ impl Hub {
                 }
                 Parent::Workspace(workspace_id) => {
                     tracing::debug!("Moving {child:?} to new root container in {workspace_id:?}");
-                    self.remove_child_and_cleanup(old_parent_id, child);
+                    self.remove_child_and_cleanup(direct_parent_id, child);
                     let root = self.workspaces.get(workspace_id).root.unwrap();
                     let screen = self.workspaces.get(workspace_id).screen;
 

@@ -1121,3 +1121,61 @@ fn swap_down_in_vertical_container() {
     ******************************************************************************************************************************************************
     ");
 }
+
+#[test]
+fn move_from_tabbed_parent_goes_to_grandparent() {
+    let mut hub = setup();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.toggle_spawn_direction();
+    hub.insert_tiling("W2".into());
+    hub.insert_tiling("W3".into());
+    hub.toggle_container_layout();
+
+    hub.move_right();
+    insta::assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=2,
+            Window(id=WindowId(1), parent=ContainerId(1), x=51.00, y=3.00, w=48.00, h=26.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=51.00, y=3.00, w=48.00, h=26.00)
+          )
+          Window(id=WindowId(3), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=28.00)
+        )
+      )
+    )
+
+    +------------------------------------------------++------------------------------------------------+**************************************************
+    |                                                ||          W1            |         W2            |*                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                       W0                       |                                                  *                       W3                       *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    |                                                |                                                  *                                                *
+    +------------------------------------------------+                                                  **************************************************
+    ");
+}
