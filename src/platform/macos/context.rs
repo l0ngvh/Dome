@@ -109,6 +109,14 @@ impl WindowRegistry {
     pub(super) fn get_float(&self, float_id: FloatWindowId) -> Option<&MacWindow> {
         self.float_to_window.get(&float_id)
     }
+
+    pub(super) fn get_tiling_by_hash(&self, cf_hash: usize) -> Option<WindowId> {
+        self.hash_to_tiling.get(&cf_hash).copied()
+    }
+
+    pub(super) fn get_float_by_hash(&self, cf_hash: usize) -> Option<FloatWindowId> {
+        self.hash_to_float.get(&cf_hash).copied()
+    }
 }
 
 pub(super) struct WindowContext {

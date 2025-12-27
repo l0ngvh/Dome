@@ -64,9 +64,14 @@ impl Hub {
             Parent::Container(c) => self.get_containing_workspace(c),
             Parent::Workspace(w) => w,
         };
-        if workspace_id == self.current {
-            self.focus_window(self.current, window_id);
-        }
+        self.current = workspace_id;
+        self.focus_window(workspace_id, window_id);
+    }
+
+    pub(crate) fn set_float_focus(&mut self, float_id: FloatWindowId) {
+        let workspace_id = self.float_windows.get(float_id).workspace;
+        self.current = workspace_id;
+        self.workspaces.get_mut(workspace_id).focused = Some(Focus::Float(float_id));
     }
 
     pub(crate) fn window_at(&self, x: f32, y: f32) -> Option<WindowId> {

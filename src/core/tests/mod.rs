@@ -9,6 +9,7 @@ mod focus_workspace;
 mod insert_window;
 mod move_in_direction;
 mod move_to_workspace;
+mod set_focus;
 mod tabbed;
 mod toggle_spawn_direction;
 mod window_at;

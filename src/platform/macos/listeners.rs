@@ -5,7 +5,8 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2_app_kit::{
     NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
-    NSWorkspaceDidLaunchApplicationNotification, NSWorkspaceDidTerminateApplicationNotification,
+    NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
+    NSWorkspaceDidTerminateApplicationNotification,
 };
 use objc2_application_services::{AXObserver, AXUIElement};
 use objc2_core_foundation::{
@@ -20,14 +21,14 @@ use objc2_foundation::{NSNotification, NSOperationQueue};
 
 use super::context::{Observers, WindowContext};
 use super::objc2_wrapper::{
-    add_observer_notification, create_observer, get_attribute, get_pid, kAXResizedNotification,
-    kAXUIElementDestroyedNotification, kAXWindowCreatedNotification,
-    kAXWindowMiniaturizedNotification, kAXWindowsAttribute,
+    add_observer_notification, create_observer, get_attribute, get_pid, kAXFocusedWindowAttribute,
+    kAXFocusedWindowChangedNotification, kAXResizedNotification, kAXUIElementDestroyedNotification,
+    kAXWindowCreatedNotification, kAXWindowMiniaturizedNotification, kAXWindowsAttribute,
 };
 use super::overlay::collect_overlays;
 use super::window::MacWindow;
 use crate::config::{Action, FocusTarget, Keymap, Modifiers, MoveTarget, ToggleTarget};
-use crate::core::{Child, Focus};
+use crate::core::{Child, Focus, WorkspaceId};
 
 pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers {
     let mut observers = HashMap::new();
@@ -107,6 +108,56 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                     if let Err(e) = render_workspace(context) {
                         tracing::warn!("Failed to render workspace after terminating app: {e:#}");
                     }
+                }
+            }),
+        );
+    }
+
+    unsafe {
+        notification_center.addObserverForName_object_queue_usingBlock(
+            Some(NSWorkspaceDidActivateApplicationNotification),
+            None,
+            Some(&NSOperationQueue::mainQueue()),
+            &RcBlock::new(move |notification: NonNull<NSNotification>| {
+                let Some(pid) = get_pid_from_notification(notification) else {
+                    return;
+                };
+                tracing::trace!("App activated with pid: {pid}");
+                let app = AXUIElement::new_application(pid);
+                let Ok(focused_window) =
+                    get_attribute::<AXUIElement>(&app, &kAXFocusedWindowAttribute())
+                else {
+                    return;
+                };
+                let cf_hash = CFHash(Some(&focused_window));
+                let context = &mut *context_ptr;
+                let registry = context.registry.borrow();
+                if let Some(window_id) = registry.get_tiling_by_hash(cf_hash) {
+                    if !context.hub.is_focusing(Child::Window(window_id)) {
+                        drop(registry);
+                        let old_workspace = context.hub.current_workspace();
+                        context.hub.set_focus(window_id);
+                        if old_workspace != context.hub.current_workspace() {
+                            hide_workspace(context, old_workspace);
+                            if let Err(e) = render_workspace(context) {
+                                tracing::warn!("Failed to render workspace: {e:#}");
+                            }
+                        }
+                        update_overlay(context);
+                        tracing::debug!("Focus changed to tiling window: {window_id}");
+                    }
+                } else if let Some(float_id) = registry.get_float_by_hash(cf_hash) {
+                    drop(registry);
+                    let old_workspace = context.hub.current_workspace();
+                    context.hub.set_float_focus(float_id);
+                    if old_workspace != context.hub.current_workspace() {
+                        hide_workspace(context, old_workspace);
+                        if let Err(e) = render_workspace(context) {
+                            tracing::warn!("Failed to render workspace: {e:#}");
+                        }
+                    }
+                    update_overlay(context);
+                    tracing::debug!("Focus changed to float window: {float_id}");
                 }
             }),
         );
@@ -206,6 +257,32 @@ unsafe extern "C-unwind" fn observer_callback(
             if let Err(e) = render_workspace(context) {
                 tracing::warn!("Failed to render workspace after deleting window: {e:#}");
             }
+        }
+    } else if notification.to_string() == *"AXFocusedWindowChanged" {
+        tracing::info!("App  focus changed");
+        let Ok(pid) = get_pid(&element) else {
+            return;
+        };
+        let app = unsafe { AXUIElement::new_application(pid) };
+        tracing::info!("App {pid}'s focus changed");
+        let Ok(focused_window) = get_attribute::<AXUIElement>(&app, &kAXFocusedWindowAttribute())
+        else {
+            return;
+        };
+        let cf_hash = CFHash(Some(&focused_window));
+        let registry = context.registry.borrow();
+        if let Some(window_id) = registry.get_tiling_by_hash(cf_hash) {
+            if !context.hub.is_focusing(Child::Window(window_id)) {
+                drop(registry);
+                context.hub.set_focus(window_id);
+                update_overlay(context);
+                tracing::debug!("Focus changed to tiling window: {window_id}");
+            }
+        } else if let Some(float_id) = registry.get_float_by_hash(cf_hash) {
+            drop(registry);
+            context.hub.set_float_focus(float_id);
+            update_overlay(context);
+            tracing::debug!("Focus changed to float window: {float_id}");
         }
     }
 }
@@ -402,6 +479,7 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
         kAXWindowMiniaturizedNotification(),
         kAXResizedNotification(),
         kAXUIElementDestroyedNotification(),
+        kAXFocusedWindowChangedNotification(),
     ] {
         add_observer_notification(&observer, &app, &notification, context_ptr)?;
     }
@@ -473,21 +551,14 @@ pub(super) fn render_workspace(context: &WindowContext) -> Result<()> {
     Ok(())
 }
 
-fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
-    let old_workspace_id = context.hub.current_workspace();
-    context.hub.focus_workspace(name);
-    let new_workspace_id = context.hub.current_workspace();
-    if old_workspace_id == new_workspace_id {
-        return Ok(());
-    }
-
-    let old_workspace = context.hub.get_workspace(old_workspace_id);
-    let mut stack: Vec<Child> = old_workspace.root().into_iter().collect();
+fn hide_workspace(context: &WindowContext, workspace_id: WorkspaceId) {
+    let workspace = context.hub.get_workspace(workspace_id);
+    let mut stack: Vec<Child> = workspace.root().into_iter().collect();
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(window_id) => {
                 if let Some(os_window) = context.registry.borrow().get_tiling(window_id) {
-                    os_window.hide()?;
+                    let _ = os_window.hide();
                 }
             }
             Child::Container(container_id) => {
@@ -497,12 +568,22 @@ fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
             }
         }
     }
-    for &float_id in old_workspace.float_windows() {
+    for &float_id in workspace.float_windows() {
         if let Some(os_window) = context.registry.borrow().get_float(float_id) {
-            os_window.hide()?;
+            let _ = os_window.hide();
         }
     }
+}
 
+fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
+    let old_workspace_id = context.hub.current_workspace();
+    context.hub.focus_workspace(name);
+    let new_workspace_id = context.hub.current_workspace();
+    if old_workspace_id == new_workspace_id {
+        return Ok(());
+    }
+
+    hide_workspace(context, old_workspace_id);
     render_workspace(context)
 }
 
