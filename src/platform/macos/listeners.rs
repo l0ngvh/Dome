@@ -1,4 +1,6 @@
-use std::{cell::RefCell, collections::HashMap, ptr::NonNull, rc::Rc};
+use std::{
+    cell::RefCell, collections::HashMap, ptr::NonNull, rc::Rc, time::Duration, time::Instant,
+};
 
 use anyhow::Result;
 use block2::RcBlock;
@@ -10,8 +12,8 @@ use objc2_app_kit::{
 };
 use objc2_application_services::{AXObserver, AXUIElement};
 use objc2_core_foundation::{
-    CFArray, CFHash, CFMachPort, CFRetained, CFRunLoop, CFString, kCFAllocatorDefault,
-    kCFRunLoopDefaultMode,
+    CFAbsoluteTimeGetCurrent, CFArray, CFHash, CFMachPort, CFRetained, CFRunLoop, CFRunLoopTimer,
+    CFRunLoopTimerContext, CFString, kCFAllocatorDefault, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
@@ -31,6 +33,8 @@ use super::overlay::collect_overlays;
 use super::window::MacWindow;
 use crate::config::{Action, FocusTarget, Keymap, Modifiers, MoveTarget, ToggleTarget};
 use crate::core::{Child, Focus, WorkspaceId};
+
+const THROTTLE_DURATION: Duration = Duration::from_millis(20);
 
 pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers {
     let mut observers = HashMap::new();
@@ -210,20 +214,98 @@ unsafe extern "C-unwind" fn observer_callback(
     let Ok(pid) = get_pid(&element) else {
         return;
     };
-    let app = unsafe { AXUIElement::new_application(pid) };
     let notification = unsafe { CFRetained::retain(notification) };
-    tracing::trace!("Received events: {}", (*notification));
-    if *notification == *kAXFocusedWindowChangedNotification() {
+    tracing::trace!("Received event: {}", (*notification));
+
+    let is_focus_change = *notification == *kAXFocusedWindowChangedNotification();
+
+    let now = Instant::now();
+    let should_execute = context
+        .throttle
+        .last_execution
+        .map(|last| now.duration_since(last) >= THROTTLE_DURATION)
+        .unwrap_or(true);
+
+    if should_execute {
+        context.throttle.reset();
+        let app = unsafe { AXUIElement::new_application(pid) };
+        // AX notifications are unreliable, when new windows are being rapidly created and deleted,
+        // macOS may decide skip sending notifications.
+        // So we are basically polling as much as possible to keep the state in sync
+        // https://github.com/nikitabobko/AeroSpace/issues/445
         sync_windows(pid, &app, context);
-        sync_focus(&app, context);
+        if is_focus_change {
+            sync_focus(&app, context);
+        } else if let Err(e) = focus_window(context) {
+            tracing::warn!("Failed to focus window: {e:#}");
+        }
     } else {
+        context.throttle.pending_pids.insert(pid);
+        if is_focus_change {
+            context.throttle.pending_focus_sync = true;
+        }
+        if context.throttle.timer.is_none() {
+            schedule_throttle_timer(context, THROTTLE_DURATION);
+        }
+    }
+}
+
+fn schedule_throttle_timer(context: &mut WindowContext, delay: Duration) {
+    let context_ptr = context as *mut WindowContext;
+    let fire_time = CFAbsoluteTimeGetCurrent() + delay.as_secs_f64();
+    let mut timer_context = CFRunLoopTimerContext {
+        version: 0,
+        info: context_ptr as *mut std::ffi::c_void,
+        retain: None,
+        release: None,
+        copyDescription: None,
+    };
+    let timer = unsafe {
+        CFRunLoopTimer::new(
+            None,
+            fire_time,
+            0.0,
+            0,
+            0,
+            Some(throttle_timer_callback),
+            &mut timer_context,
+        )
+    };
+    if let Some(timer) = timer {
+        CFRunLoop::current()
+            .unwrap()
+            .add_timer(Some(&timer), unsafe { kCFRunLoopDefaultMode });
+        context.throttle.timer = Some(timer);
+    }
+}
+
+unsafe extern "C-unwind" fn throttle_timer_callback(
+    _timer: *mut CFRunLoopTimer,
+    info: *mut std::ffi::c_void,
+) {
+    let context = unsafe { &mut *(info as *mut WindowContext) };
+    context.throttle.timer = None;
+    context.throttle.last_execution = Some(Instant::now());
+
+    let pids: Vec<_> = context.throttle.pending_pids.drain().collect();
+    let pending_focus_sync = std::mem::take(&mut context.throttle.pending_focus_sync);
+
+    for pid in pids {
+        let app = unsafe { AXUIElement::new_application(pid) };
         sync_windows(pid, &app, context);
+        if pending_focus_sync {
+            sync_focus(&app, context);
+        }
+    }
+
+    if !pending_focus_sync {
         if let Err(e) = focus_window(context) {
             tracing::warn!("Failed to focus window: {e:#}");
         }
     }
 }
 
+#[tracing::instrument(skip(app, context))]
 fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
     let Ok(windows) = get_windows(app) else {
         return;

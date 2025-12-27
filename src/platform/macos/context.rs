@@ -1,8 +1,8 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, collections::HashSet, rc::Rc, time::Instant};
 
 use objc2::rc::Retained;
 use objc2_application_services::AXObserver;
-use objc2_core_foundation::CFRetained;
+use objc2_core_foundation::{CFRetained, CFRunLoopTimer};
 
 use super::overlay::OverlayView;
 use super::window::MacWindow;
@@ -10,6 +10,24 @@ use crate::config::Config;
 use crate::core::{Dimension, FloatWindowId, Hub, WindowId};
 
 pub(super) type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;
+
+pub(super) struct ThrottleState {
+    pub(super) last_execution: Option<Instant>,
+    pub(super) pending_pids: HashSet<i32>,
+    pub(super) pending_focus_sync: bool,
+    pub(super) timer: Option<CFRetained<CFRunLoopTimer>>,
+}
+
+impl ThrottleState {
+    pub(super) fn reset(&mut self) {
+        if let Some(timer) = self.timer.take() {
+            CFRunLoopTimer::invalidate(&timer);
+        }
+        self.pending_pids.clear();
+        self.pending_focus_sync = false;
+        self.last_execution = Some(Instant::now());
+    }
+}
 
 pub(super) struct WindowRegistry {
     pid_to_hashes: HashMap<i32, Vec<usize>>,
@@ -130,6 +148,7 @@ pub(super) struct WindowContext {
     pub(super) registry: RefCell<WindowRegistry>,
     pub(super) config: Config,
     pub(super) event_tap: Option<CFRetained<objc2_core_foundation::CFMachPort>>,
+    pub(super) throttle: ThrottleState,
 }
 
 impl WindowContext {
@@ -148,6 +167,12 @@ impl WindowContext {
             registry: RefCell::new(WindowRegistry::new()),
             config,
             event_tap: None,
+            throttle: ThrottleState {
+                last_execution: None,
+                pending_pids: HashSet::new(),
+                pending_focus_sync: false,
+                timer: None,
+            },
         }
     }
 }
