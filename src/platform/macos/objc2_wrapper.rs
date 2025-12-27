@@ -199,6 +199,21 @@ pub(crate) fn kAXFocusedWindowChangedNotification() -> CFRetained<CFString> {
 }
 
 #[allow(non_snake_case)]
+pub(crate) fn kAXWindowDeminiaturizedNotification() -> CFRetained<CFString> {
+    CFString::from_static_str("AXWindowDeminiaturized")
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn kAXApplicationHiddenNotification() -> CFRetained<CFString> {
+    CFString::from_static_str("AXApplicationHidden")
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn kAXApplicationShownNotification() -> CFRetained<CFString> {
+    CFString::from_static_str("AXApplicationShown")
+}
+
+#[allow(non_snake_case)]
 pub(crate) fn kAXFocusedWindowAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXFocusedWindow")
 }

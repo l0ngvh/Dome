@@ -117,6 +117,10 @@ impl WindowRegistry {
     pub(super) fn get_float_by_hash(&self, cf_hash: usize) -> Option<FloatWindowId> {
         self.hash_to_float.get(&cf_hash).copied()
     }
+
+    pub(super) fn hashes_for_pid(&self, pid: i32) -> Vec<usize> {
+        self.pid_to_hashes.get(&pid).cloned().unwrap_or_default()
+    }
 }
 
 pub(super) struct WindowContext {
