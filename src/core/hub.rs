@@ -234,31 +234,31 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn toggle_new_window_direction(&mut self) {
+    pub(crate) fn toggle_spawn_direction(&mut self) {
         let Some(Focus::Tiling(child)) = self.workspaces.get(self.current).focused else {
             return;
         };
         match child {
             Child::Container(container_id) => {
                 let container = self.containers.get_mut(container_id);
-                container.new_window_direction = match container.new_window_direction {
+                container.spawn_direction = match container.spawn_direction {
                     Direction::Horizontal => Direction::Vertical,
                     Direction::Vertical => Direction::Horizontal,
                 };
                 tracing::info!(
-                    "Toggling new window inserting direction for {container_id} to {}",
-                    container.new_window_direction
+                    "Toggling spawn direction for {container_id} to {}",
+                    container.spawn_direction
                 );
             }
             Child::Window(window_id) => {
                 let window = self.windows.get_mut(window_id);
-                window.new_window_direction = match window.new_window_direction {
+                window.spawn_direction = match window.spawn_direction {
                     Direction::Horizontal => Direction::Vertical,
                     Direction::Vertical => Direction::Horizontal,
                 };
                 tracing::info!(
-                    "Toggling new window inserting direction for {window_id} to {}",
-                    window.new_window_direction
+                    "Toggling spawn direction for {window_id} to {}",
+                    window.spawn_direction
                 );
             }
         }
@@ -619,17 +619,17 @@ impl Hub {
         match child {
             Some(Child::Window(focused_id)) => {
                 let focused_window = self.windows.get(focused_id);
-                let new_window_direction = focused_window.new_window_direction;
+                let spawn_direction = focused_window.spawn_direction;
                 match focused_window.parent {
                     Parent::Container(container_id) => {
                         let container = self.containers.get(container_id);
                         let direction = container.direction;
                         let dimension = container.dimension;
-                        if new_window_direction != direction {
+                        if spawn_direction != direction {
                             let new_container_id = self.containers.allocate(Container::new(
                                 Parent::Container(container_id),
                                 dimension,
-                                new_window_direction,
+                                spawn_direction,
                             ));
                             self.containers.get_mut(container_id).replace_child(
                                 Child::Window(focused_id),
@@ -657,7 +657,7 @@ impl Hub {
                         let container_id = self.containers.allocate(Container::new(
                             Parent::Workspace(workspace_id),
                             screen,
-                            new_window_direction,
+                            spawn_direction,
                         ));
                         self.windows.get_mut(focused_id).parent = Parent::Container(container_id);
                         self.containers
@@ -674,11 +674,11 @@ impl Hub {
             }
             Some(Child::Container(container_id)) => {
                 let container = self.containers.get(container_id);
-                let new_window_direction = container.new_window_direction;
+                let spawn_direction = container.spawn_direction;
                 let direction = container.direction;
                 let parent = container.parent;
                 let dimension = container.dimension;
-                if new_window_direction != direction {
+                if spawn_direction != direction {
                     match parent {
                         Parent::Container(parent_id) => (
                             Parent::Container(parent_id),
@@ -688,7 +688,7 @@ impl Hub {
                             let new_container_id = self.containers.allocate(Container::new(
                                 Parent::Workspace(workspace_id),
                                 dimension,
-                                new_window_direction,
+                                spawn_direction,
                             ));
                             self.containers.get_mut(container_id).parent =
                                 Parent::Container(new_container_id);

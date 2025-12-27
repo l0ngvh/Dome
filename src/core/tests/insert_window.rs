@@ -104,7 +104,7 @@ fn new_container_preserves_wrapped_window_position() {
     hub.insert_tiling("W2".into());
     // Focus w1 (middle)
     hub.focus_left();
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
     // New container wrapping w1 should be in the middle position
     assert_snapshot!(snapshot(&hub), @r"
@@ -215,15 +215,15 @@ fn insert_window_after_focused_container_with_same_new_window_direction() {
     // Create: [w0] [w1, w2] [w3]
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.focus_parent();
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
-    // Focus the middle container and toggle back new window direction
+    // Focus the middle container and toggle back spawn direction
     hub.focus_left();
     hub.focus_parent();
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W4".into());
     // w4 should be inserted right after the focused container, not at the end
     assert_snapshot!(snapshot(&hub), @r"
@@ -281,7 +281,7 @@ fn insert_to_new_container_when_focused_container_window_insert_direction_differ
     hub.insert_tiling("W1".into());
     hub.insert_tiling("W2".into());
     hub.focus_parent();
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -338,10 +338,10 @@ fn insert_to_parent_when_focused_container_window_insert_direction_differ_but_ha
     hub.insert_tiling("W1".into());
     hub.insert_tiling("W2".into());
     hub.focus_left();
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
     hub.focus_parent();
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     // Should be inserted in the root container
     hub.insert_tiling("W4".into());
     assert_snapshot!(snapshot(&hub), @r"

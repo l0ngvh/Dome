@@ -317,7 +317,7 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
             MoveTarget::Right => context.hub.move_right(),
         },
         Action::Toggle(target) => match target {
-            ToggleTarget::Direction => context.hub.toggle_new_window_direction(),
+            ToggleTarget::SpawnDirection => context.hub.toggle_spawn_direction(),
             ToggleTarget::Layout => context.hub.toggle_container_layout(),
         },
     }

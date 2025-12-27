@@ -183,7 +183,7 @@ fn move_container_to_workspace() {
 
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.focus_parent();
     hub.move_focused_to_workspace(1);

@@ -45,7 +45,7 @@ fn border_with_nested_containers() {
     hub.insert_tiling("W1".into());
     hub.insert_tiling("W2".into());
     hub.insert_tiling("W3".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W4".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=50.00 h=20.00),

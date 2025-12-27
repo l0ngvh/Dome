@@ -134,10 +134,10 @@ fn clean_up_parent_container_when_only_child_is_container() {
     let w0 = hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
     // Create new child container
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.focus_parent();
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     // Should be inserted in the root container
     let w3 = hub.insert_tiling("W3".into());
     hub.delete_window(w0);
@@ -292,10 +292,10 @@ fn delete_focused_window_change_focus_to_next_window() {
 fn delete_focused_window_focus_last_window_of_preceding_container() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
     hub.focus_parent();
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     let w2 = hub.insert_tiling("W2".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -390,7 +390,7 @@ fn delete_focused_window_focus_first_window_of_following_container() {
     let mut hub = setup();
     let w0 = hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.focus_left();
     hub.focus_left();
@@ -535,10 +535,10 @@ fn container_replaced_by_child_keeps_position_in_parent() {
     // Create: [w0] [w1, w2] [w3]
     hub.insert_tiling("W0".into());
     let w1 = hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.focus_parent();
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -636,7 +636,7 @@ fn delete_window_focus_sibling_containers_last_window() {
 
     let w0 = hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.focus_parent();
     hub.focus_parent();

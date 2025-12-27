@@ -44,7 +44,7 @@ pub(crate) struct Container {
     pub(super) children: Vec<Child>,
     pub(super) dimension: Dimension,
     pub(super) direction: Direction,
-    pub(super) new_window_direction: Direction,
+    pub(super) spawn_direction: Direction,
     pub(super) is_tabbed: bool,
     pub(super) active_tab: usize,
 }
@@ -60,7 +60,7 @@ impl Container {
             parent,
             dimension,
             direction,
-            new_window_direction: direction,
+            spawn_direction: direction,
             is_tabbed: false,
             active_tab: 0,
         }
@@ -82,8 +82,8 @@ impl Container {
         self.dimension
     }
 
-    pub(crate) fn new_window_direction(&self) -> Direction {
-        self.new_window_direction
+    pub(crate) fn spawn_direction(&self) -> Direction {
+        self.spawn_direction
     }
 
     pub(super) fn push_window(&mut self, window_id: WindowId) {
@@ -157,7 +157,7 @@ impl std::fmt::Display for Parent {
 pub(crate) struct Window {
     pub(super) parent: Parent,
     pub(super) dimension: Dimension,
-    pub(super) new_window_direction: Direction,
+    pub(super) spawn_direction: Direction,
     pub(super) title: String,
 }
 
@@ -166,11 +166,11 @@ impl Node for Window {
 }
 
 impl Window {
-    pub(super) fn new(parent: Parent, new_window_direction: Direction, title: String) -> Self {
+    pub(super) fn new(parent: Parent, spawn_direction: Direction, title: String) -> Self {
         Self {
             parent,
             dimension: Dimension::default(),
-            new_window_direction,
+            spawn_direction,
             title,
         }
     }
@@ -179,8 +179,8 @@ impl Window {
         self.dimension
     }
 
-    pub(crate) fn new_window_direction(&self) -> Direction {
-        self.new_window_direction
+    pub(crate) fn spawn_direction(&self) -> Direction {
+        self.spawn_direction
     }
 
     pub(crate) fn title(&self) -> &str {

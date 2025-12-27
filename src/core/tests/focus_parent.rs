@@ -8,7 +8,7 @@ fn focus_parent_twice_nested_containers() {
     // Create nested containers
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
 
     hub.focus_parent();

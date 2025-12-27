@@ -5,7 +5,7 @@ fn move_left_from_vertical_container_to_horizontal_parent() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.insert_tiling("W3".into());
 
@@ -62,7 +62,7 @@ fn move_right_from_vertical_container_to_horizontal_parent() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.insert_tiling("W3".into());
 
@@ -118,9 +118,9 @@ fn move_right_from_vertical_container_to_horizontal_parent() {
 fn move_up_from_horizontal_container_to_vertical_parent() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.insert_tiling("W3".into());
 
@@ -176,9 +176,9 @@ fn move_up_from_horizontal_container_to_vertical_parent() {
 fn move_down_from_horizontal_container_to_vertical_parent() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.insert_tiling("W3".into());
 
@@ -234,7 +234,7 @@ fn move_down_from_horizontal_container_to_vertical_parent() {
 fn move_left_from_vertical_container_creates_new_root_container() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
     hub.insert_tiling("W2".into());
     hub.insert_tiling("W3".into());
@@ -291,7 +291,7 @@ fn move_left_from_vertical_container_creates_new_root_container() {
 fn move_left_from_vertical_container_replaces_new_root_container() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
 
     hub.move_left();
@@ -342,7 +342,7 @@ fn move_left_from_vertical_container_replaces_new_root_container() {
 fn move_right_from_vertical_container_creates_new_root_container() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
     hub.insert_tiling("W2".into());
 
@@ -397,7 +397,7 @@ fn move_right_from_vertical_container_creates_new_root_container() {
 fn move_right_from_vertical_container_replaces_new_root_container() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
 
     hub.move_right();
@@ -657,9 +657,9 @@ fn move_right_at_edge_goes_to_horizontal_grandparent() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
     hub.insert_tiling("W4".into());
 
@@ -719,9 +719,9 @@ fn move_left_at_edge_goes_to_horizontal_grandparent() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
     hub.insert_tiling("W4".into());
     hub.focus_left();
@@ -782,11 +782,11 @@ fn move_left_at_edge_goes_to_horizontal_grandparent() {
 fn move_down_at_edge_goes_to_vertical_grandparent() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
     hub.insert_tiling("W4".into());
 
@@ -845,11 +845,11 @@ fn move_down_at_edge_goes_to_vertical_grandparent() {
 fn move_up_at_edge_goes_to_vertical_grandparent() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
     hub.insert_tiling("W4".into());
     hub.focus_up();
@@ -1023,7 +1023,7 @@ fn swap_right_in_horizontal_container() {
 fn swap_up_in_vertical_container() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
 
     hub.move_up();
@@ -1074,7 +1074,7 @@ fn swap_up_in_vertical_container() {
 fn swap_down_in_vertical_container() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
     hub.focus_up();
 

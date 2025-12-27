@@ -48,7 +48,7 @@ fn window_at_nested_containers() {
     let mut hub = setup();
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
 
     // First window (left half)

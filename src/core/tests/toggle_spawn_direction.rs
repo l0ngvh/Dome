@@ -2,12 +2,12 @@ use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
 #[test]
-fn toggle_new_window_direction_creates_new_container() {
+fn toggle_spawn_direction_creates_new_container() {
     let mut hub = setup();
 
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -62,7 +62,7 @@ fn delete_window_after_orientation_change() {
 
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     let w2 = hub.insert_tiling("W2".into());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -154,11 +154,11 @@ fn delete_window_after_orientation_change() {
 }
 
 #[test]
-fn toggle_new_window_direction_in_single_window_workspace_creates_vertical_container() {
+fn toggle_spawn_direction_in_single_window_workspace_creates_vertical_container() {
     let mut hub = setup();
 
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -205,14 +205,14 @@ fn toggle_new_window_direction_in_single_window_workspace_creates_vertical_conta
 }
 
 #[test]
-fn toggle_new_window_direction_in_vertical_container() {
+fn toggle_spawn_direction_in_vertical_container() {
     let mut hub = setup();
 
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W3".into());
 
     assert_snapshot!(snapshot(&hub), @r"

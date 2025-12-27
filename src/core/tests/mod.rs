@@ -10,7 +10,7 @@ mod insert_window;
 mod move_in_direction;
 mod move_to_workspace;
 mod tabbed;
-mod toggle_new_window_direction;
+mod toggle_spawn_direction;
 mod window_at;
 
 use crate::core::allocator::NodeId;

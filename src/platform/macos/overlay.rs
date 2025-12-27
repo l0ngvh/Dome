@@ -215,7 +215,7 @@ pub(super) fn collect_overlays(hub: &Hub, config: &Config, workspace_id: Workspa
             let spawn_color = config.spawn_indicator_color;
             let window = hub.get_window(window_id);
             let dim = window.dimension();
-            let direction = window.new_window_direction();
+            let direction = window.spawn_direction();
             let y = screen.y + screen.height - dim.y - dim.height;
             let bottom = if direction == Direction::Vertical { spawn_color } else { color };
             let right = if direction == Direction::Horizontal { spawn_color } else { color };
@@ -226,7 +226,7 @@ pub(super) fn collect_overlays(hub: &Hub, config: &Config, workspace_id: Workspa
             let spawn_color = config.spawn_indicator_color;
             let container = hub.get_container(container_id);
             let dim = container.dimension();
-            let direction = container.new_window_direction();
+            let direction = container.spawn_direction();
             let y = screen.y + screen.height - dim.y - dim.height;
             let bottom = if direction == Direction::Vertical { spawn_color } else { color };
             let right = if direction == Direction::Horizontal { spawn_color } else { color };

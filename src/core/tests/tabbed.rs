@@ -319,7 +319,7 @@ fn tabbed_container_takes_one_slot() {
 
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.insert_tiling("W3".into());
 
@@ -377,7 +377,7 @@ fn vertical_to_tabbed() {
     let mut hub = setup();
 
     hub.insert_tiling("W0".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W1".into());
     hub.insert_tiling("W2".into());
     hub.insert_tiling("W3".into());
@@ -435,11 +435,11 @@ fn container_in_tabbed_container() {
 
     hub.insert_tiling("W0".into());
     hub.insert_tiling("W1".into());
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W2".into());
     hub.insert_tiling("W3".into());
 
-    hub.toggle_new_window_direction();
+    hub.toggle_spawn_direction();
     hub.insert_tiling("W4".into());
 
     hub.focus_parent();

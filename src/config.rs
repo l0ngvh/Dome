@@ -33,7 +33,7 @@ pub enum MoveTarget {
 
 #[derive(Debug, Clone)]
 pub enum ToggleTarget {
-    Direction,
+    SpawnDirection,
     Layout,
 }
 
@@ -72,7 +72,7 @@ impl FromStr for Action {
             ["move", "left"] => Ok(Action::Move(MoveTarget::Left)),
             ["move", "right"] => Ok(Action::Move(MoveTarget::Right)),
             ["move", "workspace", n] => Ok(Action::Move(MoveTarget::Workspace(n.parse()?))),
-            ["toggle", "direction"] => Ok(Action::Toggle(ToggleTarget::Direction)),
+            ["toggle", "spawn_direction"] => Ok(Action::Toggle(ToggleTarget::SpawnDirection)),
             ["toggle", "layout"] => Ok(Action::Toggle(ToggleTarget::Layout)),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
@@ -108,7 +108,7 @@ fn default_keymaps() -> HashMap<Keymap, Vec<Action>> {
         keymaps.insert(Keymap { key: i.to_string(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Workspace(i))]);
         keymaps.insert(Keymap { key: i.to_string(), modifiers: Modifiers::CMD | Modifiers::SHIFT }, vec![Action::Move(MoveTarget::Workspace(i))]);
     }
-    keymaps.insert(Keymap { key: "e".into(), modifiers: Modifiers::CMD }, vec![Action::Toggle(ToggleTarget::Direction)]);
+    keymaps.insert(Keymap { key: "e".into(), modifiers: Modifiers::CMD }, vec![Action::Toggle(ToggleTarget::SpawnDirection)]);
     keymaps.insert(Keymap { key: "b".into(), modifiers: Modifiers::CMD }, vec![Action::Toggle(ToggleTarget::Layout)]);
     keymaps.insert(Keymap { key: "p".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Parent)]);
     keymaps.insert(Keymap { key: "h".into(), modifiers: Modifiers::CMD }, vec![Action::Focus(FocusTarget::Left)]);
