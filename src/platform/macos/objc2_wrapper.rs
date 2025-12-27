@@ -173,6 +173,33 @@ pub(crate) fn kAXEnhancedUserInterfaceAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXEnhancedUserInterface")
 }
 
+#[allow(non_snake_case)]
+pub(crate) fn kAXParentAttribute() -> CFRetained<CFString> {
+    CFString::from_static_str("AXParent")
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn kAXFullScreenAttribute() -> CFRetained<CFString> {
+    CFString::from_static_str("AXFullScreen")
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn kAXDialogSubrole() -> CFRetained<CFString> {
+    CFString::from_static_str("AXDialog")
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn kAXFloatingWindowSubrole() -> CFRetained<CFString> {
+    CFString::from_static_str("AXFloatingWindow")
+}
+
+pub(crate) fn is_attribute_settable(element: &AXUIElement, attribute: &CFString) -> bool {
+    let mut settable: u8 = 0;
+    let settable_ptr = NonNull::new(&mut settable as *mut u8).unwrap();
+    let res = unsafe { element.is_attribute_settable(attribute, settable_ptr) };
+    res == AXError::Success && settable != 0
+}
+
 pub(crate) fn decorate_ax_error_message(error: AXError) -> String {
     let description = match error {
         AXError::Success => "No error occurred",

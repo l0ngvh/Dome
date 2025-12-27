@@ -5,4 +5,4 @@ mod node;
 mod tests;
 
 pub(crate) use hub::Hub;
-pub(crate) use node::{Child, Dimension, Direction, WindowId, WorkspaceId};
+pub(crate) use node::{Child, Dimension, Direction, FloatWindowId, Focus, WindowId, WorkspaceId};

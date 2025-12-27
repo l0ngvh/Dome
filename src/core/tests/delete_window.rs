@@ -629,3 +629,59 @@ fn container_replaced_by_child_keeps_position_in_parent() {
     +------------------------------------------------++------------------------------------------------+**************************************************
     ");
 }
+
+#[test]
+fn delete_window_focus_sibling_containers_last_window() {
+    let mut hub = setup();
+
+    let w0 = hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.toggle_new_window_direction();
+    hub.insert_tiling("W2".into());
+    hub.focus_parent();
+    hub.focus_parent();
+
+    // Delete W0, container collapses, should focus W2 (last window of sibling container)
+    hub.delete_window(w0);
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(1), parent=ContainerId(1), x=1.00, y=1.00, w=148.00, h=13.00)
+          Window(id=WindowId(2), parent=ContainerId(1), x=1.00, y=16.00, w=148.00, h=13.00)
+        )
+      )
+    )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                         W1                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W2                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+}

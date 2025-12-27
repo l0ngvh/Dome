@@ -10,7 +10,7 @@ use objc2_core_foundation::CGFloat;
 use objc2_foundation::{NSDictionary, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 use crate::config::{Color, Config};
-use crate::core::{Child, Dimension, Direction, Hub};
+use crate::core::{Child, Dimension, Direction, Focus, Hub, WorkspaceId};
 
 pub(super) fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSWindow> {
     let window = unsafe {
@@ -144,20 +144,20 @@ fn border_rects(dim: Dimension, border_size: f32, inset: bool, colors: [Color; 4
     }
 }
 
-pub(super) fn collect_overlays(hub: &Hub, config: &Config, root: Child) -> (Vec<OverlayRect>, Vec<OverlayLabel>) {
+pub(super) fn collect_overlays(hub: &Hub, config: &Config, workspace_id: WorkspaceId) -> (Vec<OverlayRect>, Vec<OverlayLabel>) {
     let mut rects = Vec::new();
     let mut labels = Vec::new();
-    let workspace = hub.get_workspace(hub.current_workspace());
+    let workspace = hub.get_workspace(workspace_id);
     let focused = workspace.focused();
     let screen = hub.screen();
     let border_size = config.border_size;
     let tab_bar_height = config.tab_bar_height;
 
-    let mut stack = vec![root];
+    let mut stack: Vec<Child> = workspace.root().into_iter().collect();
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(window_id) => {
-                if focused == Some(child) {
+                if focused == Some(Focus::Tiling(child)) {
                     continue;
                 }
                 let dim = hub.get_window(window_id).dimension();
@@ -174,7 +174,7 @@ pub(super) fn collect_overlays(hub: &Hub, config: &Config, root: Child) -> (Vec<
                 if container.is_tabbed() {
                     let dim = container.dimension();
                     let y = screen.y + screen.height - dim.y - tab_bar_height;
-                    let is_focused = focused == Some(Child::Container(container_id));
+                    let is_focused = focused == Some(Focus::Tiling(Child::Container(container_id)));
                     let tab_border_color = if is_focused { config.focused_color } else { config.border_color };
                     rects.push(OverlayRect { x: dim.x, y, width: dim.width, height: tab_bar_height, color: config.tab_bar_background_color });
                     // Tab bar border (inset)
@@ -209,29 +209,37 @@ pub(super) fn collect_overlays(hub: &Hub, config: &Config, root: Child) -> (Vec<
         }
     }
 
-    if let Some(focused) = focused {
-        let color = config.focused_color;
-        let spawn_color = config.spawn_indicator_color;
-        match focused {
-            Child::Window(window_id) => {
-                let window = hub.get_window(window_id);
-                let dim = window.dimension();
-                let direction = window.new_window_direction();
-                let y = screen.y + screen.height - dim.y - dim.height;
-                let bottom = if direction == Direction::Vertical { spawn_color } else { color };
-                let right = if direction == Direction::Horizontal { spawn_color } else { color };
-                rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, false, [color, bottom, color, right]));
-            }
-            Child::Container(container_id) => {
-                let container = hub.get_container(container_id);
-                let dim = container.dimension();
-                let direction = container.new_window_direction();
-                let y = screen.y + screen.height - dim.y - dim.height;
-                let bottom = if direction == Direction::Vertical { spawn_color } else { color };
-                let right = if direction == Direction::Horizontal { spawn_color } else { color };
-                rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, true, [color, bottom, color, right]));
-            }
+    match focused {
+        Some(Focus::Tiling(Child::Window(window_id))) => {
+            let color = config.focused_color;
+            let spawn_color = config.spawn_indicator_color;
+            let window = hub.get_window(window_id);
+            let dim = window.dimension();
+            let direction = window.new_window_direction();
+            let y = screen.y + screen.height - dim.y - dim.height;
+            let bottom = if direction == Direction::Vertical { spawn_color } else { color };
+            let right = if direction == Direction::Horizontal { spawn_color } else { color };
+            rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, false, [color, bottom, color, right]));
         }
+        Some(Focus::Tiling(Child::Container(container_id))) => {
+            let color = config.focused_color;
+            let spawn_color = config.spawn_indicator_color;
+            let container = hub.get_container(container_id);
+            let dim = container.dimension();
+            let direction = container.new_window_direction();
+            let y = screen.y + screen.height - dim.y - dim.height;
+            let bottom = if direction == Direction::Vertical { spawn_color } else { color };
+            let right = if direction == Direction::Horizontal { spawn_color } else { color };
+            rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, true, [color, bottom, color, right]));
+        }
+        _ => {}
+    }
+
+    for &float_id in workspace.float_windows() {
+        let dim = hub.get_float(float_id).dimension();
+        let y = screen.y + screen.height - dim.y - dim.height;
+        let color = if focused == Some(Focus::Float(float_id)) { config.focused_color } else { config.border_color };
+        rects.extend(border_rects(Dimension { x: dim.x, y, width: dim.width, height: dim.height }, border_size, false, [color; 4]));
     }
 
     (rects, labels)

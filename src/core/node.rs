@@ -4,9 +4,9 @@ use crate::core::allocator::{Node, NodeId};
 pub(crate) struct Workspace {
     pub(super) name: usize,
     pub(super) screen: Dimension,
-    // TODO: Add list of float windows
     pub(super) root: Option<Child>,
-    pub(super) focused: Option<Child>,
+    pub(super) focused: Option<Focus>,
+    pub(super) float_windows: Vec<FloatWindowId>,
 }
 
 impl Node for Workspace {
@@ -20,6 +20,7 @@ impl Workspace {
             focused: None,
             screen,
             name,
+            float_windows: Vec::new(),
         }
     }
 
@@ -27,8 +28,12 @@ impl Workspace {
         self.root
     }
 
-    pub(crate) fn focused(&self) -> Option<Child> {
+    pub(crate) fn focused(&self) -> Option<Focus> {
         self.focused
+    }
+
+    pub(crate) fn float_windows(&self) -> &[FloatWindowId] {
+        &self.float_windows
     }
 }
 
@@ -183,6 +188,32 @@ impl Window {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct FloatWindow {
+    pub(super) workspace: WorkspaceId,
+    pub(super) dimension: Dimension,
+    pub(super) title: String,
+}
+
+impl Node for FloatWindow {
+    type Id = FloatWindowId;
+}
+
+impl FloatWindow {
+    pub(super) fn new(workspace: WorkspaceId, dimension: Dimension, title: String) -> Self {
+        Self { workspace, dimension, title }
+    }
+
+    pub(crate) fn dimension(&self) -> Dimension {
+        self.dimension
+    }
+
+    #[expect(unused)]
+    pub(crate) fn title(&self) -> &str {
+        &self.title
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Dimension {
     pub(crate) width: f32,
@@ -197,6 +228,18 @@ pub(crate) enum Child {
     Container(ContainerId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Focus {
+    Tiling(Child),
+    Float(FloatWindowId),
+}
+
+impl Focus {
+    pub(crate) fn window(id: WindowId) -> Self {
+        Focus::Tiling(Child::Window(id))
+    }
+}
+
 impl std::fmt::Display for Child {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -206,8 +249,19 @@ impl std::fmt::Display for Child {
     }
 }
 
+impl std::fmt::Display for Focus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Focus::Tiling(child) => write!(f, "{}", child),
+            Focus::Float(id) => write!(f, "{}", id),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct WindowId(usize);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FloatWindowId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ContainerId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -216,6 +270,12 @@ pub(crate) struct WorkspaceId(usize);
 impl std::fmt::Display for WindowId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "WindowId({})", self.0)
+    }
+}
+
+impl std::fmt::Display for FloatWindowId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FloatWindowId({})", self.0)
     }
 }
 
@@ -232,6 +292,15 @@ impl std::fmt::Display for WorkspaceId {
 }
 
 impl NodeId for WindowId {
+    fn new(id: usize) -> Self {
+        Self(id)
+    }
+    fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl NodeId for FloatWindowId {
     fn new(id: usize) -> Self {
         Self(id)
     }

@@ -7,44 +7,61 @@ use objc2_core_foundation::CFRetained;
 use super::overlay::OverlayView;
 use super::window::MacWindow;
 use crate::config::Config;
-use crate::core::{Dimension, Hub, WindowId};
+use crate::core::{Dimension, FloatWindowId, Hub, WindowId};
 
 pub(super) type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;
 
 pub(super) struct WindowRegistry {
     pid_to_hashes: HashMap<i32, Vec<usize>>,
-    hash_to_id: HashMap<usize, WindowId>,
-    id_to_hash: HashMap<WindowId, usize>,
-    id_to_window: HashMap<WindowId, MacWindow>,
+    hash_to_tiling: HashMap<usize, WindowId>,
+    hash_to_float: HashMap<usize, FloatWindowId>,
+    tiling_to_window: HashMap<WindowId, MacWindow>,
+    float_to_window: HashMap<FloatWindowId, MacWindow>,
 }
 
 impl WindowRegistry {
     fn new() -> Self {
         Self {
             pid_to_hashes: HashMap::new(),
-            hash_to_id: HashMap::new(),
-            id_to_hash: HashMap::new(),
-            id_to_window: HashMap::new(),
+            hash_to_tiling: HashMap::new(),
+            hash_to_float: HashMap::new(),
+            tiling_to_window: HashMap::new(),
+            float_to_window: HashMap::new(),
         }
     }
 
-    pub(super) fn insert(&mut self, window_id: WindowId, window: MacWindow) {
+    pub(super) fn insert_tiling(&mut self, window_id: WindowId, window: MacWindow) {
         let cf_hash = window.cf_hash();
         let pid = window.pid();
         self.pid_to_hashes.entry(pid).or_default().push(cf_hash);
-        self.hash_to_id.insert(cf_hash, window_id);
-        self.id_to_hash.insert(window_id, cf_hash);
-        self.id_to_window.insert(window_id, window);
+        self.hash_to_tiling.insert(cf_hash, window_id);
+        self.tiling_to_window.insert(window_id, window);
     }
 
-    pub(super) fn remove_by_hash(&mut self, cf_hash: usize) -> Option<WindowId> {
-        let window_id = self.hash_to_id.remove(&cf_hash)?;
-        let window = self.id_to_window.remove(&window_id)?;
-        self.id_to_hash.remove(&window_id);
+    pub(super) fn insert_float(&mut self, float_id: FloatWindowId, window: MacWindow) {
+        let cf_hash = window.cf_hash();
+        let pid = window.pid();
+        self.pid_to_hashes.entry(pid).or_default().push(cf_hash);
+        self.hash_to_float.insert(cf_hash, float_id);
+        self.float_to_window.insert(float_id, window);
+    }
+
+    pub(super) fn remove_tiling_by_hash(&mut self, cf_hash: usize) -> Option<WindowId> {
+        let window_id = self.hash_to_tiling.remove(&cf_hash)?;
+        let window = self.tiling_to_window.remove(&window_id)?;
         if let Some(hashes) = self.pid_to_hashes.get_mut(&window.pid()) {
             hashes.retain(|&h| h != cf_hash);
         }
         Some(window_id)
+    }
+
+    pub(super) fn remove_float_by_hash(&mut self, cf_hash: usize) -> Option<FloatWindowId> {
+        let float_id = self.hash_to_float.remove(&cf_hash)?;
+        let window = self.float_to_window.remove(&float_id)?;
+        if let Some(hashes) = self.pid_to_hashes.get_mut(&window.pid()) {
+            hashes.retain(|&h| h != cf_hash);
+        }
+        Some(float_id)
     }
 
     pub(super) fn remove_by_pid(&mut self, pid: i32) -> Vec<WindowId> {
@@ -53,21 +70,28 @@ impl WindowRegistry {
         };
         let mut removed = Vec::new();
         for cf_hash in hashes {
-            if let Some(window_id) = self.hash_to_id.remove(&cf_hash) {
-                self.id_to_hash.remove(&window_id);
-                self.id_to_window.remove(&window_id);
+            if let Some(window_id) = self.hash_to_tiling.remove(&cf_hash) {
+                self.tiling_to_window.remove(&window_id);
                 removed.push(window_id);
+            }
+            if let Some(float_id) = self.hash_to_float.remove(&cf_hash) {
+                self.float_to_window.remove(&float_id);
             }
         }
         removed
     }
 
     pub(super) fn contains(&self, window: &MacWindow) -> bool {
-        self.hash_to_id.contains_key(&window.cf_hash())
+        let h = window.cf_hash();
+        self.hash_to_tiling.contains_key(&h) || self.hash_to_float.contains_key(&h)
     }
 
-    pub(super) fn get(&self, window_id: WindowId) -> Option<&MacWindow> {
-        self.id_to_window.get(&window_id)
+    pub(super) fn get_tiling(&self, window_id: WindowId) -> Option<&MacWindow> {
+        self.tiling_to_window.get(&window_id)
+    }
+
+    pub(super) fn get_float(&self, float_id: FloatWindowId) -> Option<&MacWindow> {
+        self.float_to_window.get(&float_id)
     }
 }
 

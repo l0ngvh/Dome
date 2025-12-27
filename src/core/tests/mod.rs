@@ -2,6 +2,7 @@
 
 mod border;
 mod delete_window;
+mod float_window;
 mod focus_direction;
 mod focus_parent;
 mod focus_workspace;
@@ -14,7 +15,7 @@ mod window_at;
 
 use crate::core::allocator::NodeId;
 use crate::core::hub::Hub;
-use crate::core::node::Child;
+use crate::core::node::{Child, Focus, FloatWindowId};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
@@ -36,7 +37,8 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         } else {
             String::new()
         };
-        if workspace.root().is_none() {
+        let has_content = workspace.root().is_some() || !workspace.float_windows().is_empty();
+        if !has_content {
             s.push_str(&format!(
                 "  Workspace(id={}, name={}{})\n",
                 workspace_id, workspace.name, focused
@@ -46,7 +48,12 @@ pub(super) fn snapshot(hub: &Hub) -> String {
                 "  Workspace(id={}, name={}{},\n",
                 workspace_id, workspace.name, focused
             ));
-            fmt_child_str(hub, &mut s, workspace.root().unwrap(), 2);
+            if let Some(root) = workspace.root() {
+                fmt_child_str(hub, &mut s, root, 2);
+            }
+            for &float_id in workspace.float_windows() {
+                fmt_float_str(hub, &mut s, float_id, 2);
+            }
             s.push_str("  )\n");
         }
     }
@@ -61,23 +68,37 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         draw_windows(hub, &mut grid, root, BORDER);
     }
 
-    if let Some(child) = focused {
-        match child {
-            Child::Window(id) => {
-                let dim = hub.get_window(id).dimension();
-                draw_focused_border(
-                    &mut grid,
-                    dim.x - BORDER,
-                    dim.y - BORDER,
-                    dim.width + 2.0 * BORDER,
-                    dim.height + 2.0 * BORDER,
-                );
-            }
-            Child::Container(id) => {
-                let dim = hub.get_container(id).dimension();
-                draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
-            }
+    // Draw float windows
+    for &float_id in workspace.float_windows() {
+        draw_float(hub, &mut grid, float_id, BORDER);
+    }
+
+    match focused {
+        Some(Focus::Tiling(Child::Window(id))) => {
+            let dim = hub.get_window(id).dimension();
+            draw_focused_border(
+                &mut grid,
+                dim.x - BORDER,
+                dim.y - BORDER,
+                dim.width + 2.0 * BORDER,
+                dim.height + 2.0 * BORDER,
+            );
         }
+        Some(Focus::Tiling(Child::Container(id))) => {
+            let dim = hub.get_container(id).dimension();
+            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
+        }
+        Some(Focus::Float(id)) => {
+            let dim = hub.get_float(id).dimension();
+            draw_focused_border(
+                &mut grid,
+                dim.x - BORDER,
+                dim.y - BORDER,
+                dim.width + 2.0 * BORDER,
+                dim.height + 2.0 * BORDER,
+            );
+        }
+        None => {}
     }
 
     s.push('\n');
@@ -89,6 +110,19 @@ pub(super) fn snapshot(hub: &Hub) -> String {
             .join("\n"),
     );
     s
+}
+
+fn draw_float(hub: &Hub, grid: &mut [Vec<char>], float_id: FloatWindowId, border: f32) {
+    let float = hub.get_float(float_id);
+    let dim = float.dimension();
+    draw_rect(
+        grid,
+        dim.x - border,
+        dim.y - border,
+        dim.width + 2.0 * border,
+        dim.height + 2.0 * border,
+        float.title(),
+    );
 }
 
 fn draw_windows(hub: &Hub, grid: &mut [Vec<char>], child: Child, border: f32) {
@@ -261,6 +295,16 @@ fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
             s.push_str(&format!("{})\n", prefix));
         }
     }
+}
+
+fn fmt_float_str(hub: &Hub, s: &mut String, float_id: FloatWindowId, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let f = hub.get_float(float_id);
+    let dim = f.dimension();
+    s.push_str(&format!(
+        "{}Float(id={}, title=\"{}\", x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
+        prefix, float_id, f.title(), dim.x, dim.y, dim.width, dim.height
+    ));
 }
 
 fn setup_logger() {

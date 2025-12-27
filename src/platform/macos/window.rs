@@ -4,13 +4,17 @@ use std::ptr::NonNull;
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFBoolean, CFHash, CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse, kCFBooleanTrue,
+    CFBoolean, CFEqual, CFHash, CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse,
+    kCFBooleanTrue,
 };
 
 use crate::core::Dimension;
 use super::objc2_wrapper::{
-    get_attribute, kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute, kAXMainAttribute,
-    kAXPositionAttribute, kAXSizeAttribute, kAXTitleAttribute, set_attribute_value,
+    get_attribute, is_attribute_settable, kAXDialogSubrole, kAXEnhancedUserInterfaceAttribute,
+    kAXFloatingWindowSubrole, kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute,
+    kAXMinimizedAttribute, kAXParentAttribute, kAXPositionAttribute, kAXRoleAttribute,
+    kAXSizeAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute, kAXTitleAttribute,
+    kAXWindowRole, set_attribute_value,
 };
 
 #[derive(Debug)]
@@ -120,6 +124,92 @@ impl MacWindow {
         get_attribute::<CFString>(&self.window, &kAXTitleAttribute())
             .map(|t| t.to_string())
             .unwrap_or_else(|_| "Unknown".to_string())
+    }
+
+    pub(crate) fn dimension(&self) -> Dimension {
+        let (x, y) = get_attribute::<AXValue>(&self.window, &kAXPositionAttribute())
+            .map(|v| {
+                let mut pos = CGPoint::new(0.0, 0.0);
+                let ptr = NonNull::new(&mut pos as *mut _ as *mut _).unwrap();
+                unsafe { v.value(AXValueType::CGPoint, ptr) };
+                (pos.x as f32, pos.y as f32)
+            })
+            .unwrap_or((0.0, 0.0));
+        let (width, height) = get_attribute::<AXValue>(&self.window, &kAXSizeAttribute())
+            .map(|v| {
+                let mut size = CGSize::new(0.0, 0.0);
+                let ptr = NonNull::new(&mut size as *mut _ as *mut _).unwrap();
+                unsafe { v.value(AXValueType::CGSize, ptr) };
+                (size.width as f32, size.height as f32)
+            })
+            .unwrap_or((0.0, 0.0));
+        Dimension { x, y, width, height }
+    }
+
+    /// Returns true if this is a "real" window worth managing (tile or float)
+    pub(crate) fn is_manageable(&self) -> bool {
+        let role = get_attribute::<CFString>(&self.window, &kAXRoleAttribute()).ok();
+        let subrole = get_attribute::<CFString>(&self.window, &kAXSubroleAttribute()).ok();
+
+        let is_window = role
+            .as_ref()
+            .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
+            .unwrap_or(false);
+
+        let is_valid_subrole = subrole.as_ref().map(|sr| {
+            CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole()))
+                || CFEqual(Some(&**sr), Some(&*kAXDialogSubrole()))
+                || CFEqual(Some(&**sr), Some(&*kAXFloatingWindowSubrole()))
+        }).unwrap_or(false);
+
+        is_window
+            && is_valid_subrole
+            && self.is_root()
+            && self.can_move()
+            && !self.is_minimized()
+            && !self.is_hidden()
+    }
+
+    /// Returns true if this window should be tiled (not floated)
+    pub(crate) fn should_tile(&self) -> bool {
+        let subrole = get_attribute::<CFString>(&self.window, &kAXSubroleAttribute()).ok();
+        let is_standard = subrole
+            .as_ref()
+            .map(|sr| CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole())))
+            .unwrap_or(false);
+
+        is_standard && self.can_resize() && !self.is_fullscreen()
+    }
+
+    fn is_root(&self) -> bool {
+        match get_attribute::<AXUIElement>(&self.window, &kAXParentAttribute()) {
+            Err(_) => true,
+            Ok(parent) => CFEqual(Some(&*parent), Some(&*self.app)),
+        }
+    }
+
+    fn can_move(&self) -> bool {
+        is_attribute_settable(&self.window, &kAXPositionAttribute())
+    }
+
+    fn can_resize(&self) -> bool {
+        is_attribute_settable(&self.window, &kAXSizeAttribute())
+    }
+
+    fn is_fullscreen(&self) -> bool {
+        get_attribute::<CFBoolean>(&self.window, &kAXFullScreenAttribute())
+            .map(|b| b.as_bool())
+            .unwrap_or(false)
+    }
+
+    fn is_minimized(&self) -> bool {
+        get_attribute::<CFBoolean>(&self.window, &kAXMinimizedAttribute())
+            .map(|b| b.as_bool())
+            .unwrap_or(false)
+    }
+
+    fn is_hidden(&self) -> bool {
+        self.running_app.isHidden()
     }
 }
 
