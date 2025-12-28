@@ -42,6 +42,7 @@ impl Workspace {
 pub(crate) struct Container {
     pub(super) parent: Parent,
     pub(super) children: Vec<Child>,
+    pub(super) focused: Child,
     pub(super) dimension: Dimension,
     pub(super) direction: Direction,
     pub(super) spawn_direction: Direction,
@@ -54,9 +55,16 @@ impl Node for Container {
 }
 
 impl Container {
-    pub(super) fn new(parent: Parent, dimension: Dimension, direction: Direction) -> Self {
+    pub(super) fn new(
+        parent: Parent,
+        children: Vec<Child>,
+        focused: Child,
+        dimension: Dimension,
+        direction: Direction,
+    ) -> Self {
         Self {
-            children: Vec::new(),
+            children,
+            focused,
             parent,
             dimension,
             direction,
@@ -64,6 +72,10 @@ impl Container {
             is_tabbed: false,
             active_tab: 0,
         }
+    }
+
+    pub(crate) fn focused(&self) -> Child {
+        self.focused
     }
 
     pub(crate) fn is_tabbed(&self) -> bool {
@@ -86,28 +98,18 @@ impl Container {
         self.spawn_direction
     }
 
-    pub(super) fn push_window(&mut self, window_id: WindowId) {
-        self.children.push(Child::Window(window_id));
+    pub(super) fn window_position(&self, window_id: WindowId) -> usize {
+        self.children
+            .iter()
+            .position(|c| *c == Child::Window(window_id))
+            .unwrap()
     }
 
-    pub(super) fn push_child(&mut self, child: Child) {
-        self.children.push(child);
-    }
-
-    pub(super) fn insert_window_after(&mut self, window_id: WindowId, after: Child) {
-        if let Some(pos) = self.children.iter().position(|c| *c == after) {
-            self.children.insert(pos + 1, Child::Window(window_id));
-        } else {
-            self.children.push(Child::Window(window_id));
-        }
-    }
-
-    pub(super) fn insert_after(&mut self, child: Child, after: Child) {
-        if let Some(pos) = self.children.iter().position(|c| *c == after) {
-            self.children.insert(pos + 1, child);
-        } else {
-            self.children.push(child);
-        }
+    pub(super) fn container_position(&self, container_id: ContainerId) -> usize {
+        self.children
+            .iter()
+            .position(|c| *c == Child::Container(container_id))
+            .unwrap()
     }
 
     pub(super) fn remove_child(&mut self, child: Child) {
