@@ -149,13 +149,13 @@ impl Hub {
         let float_id =
             self.float_windows
                 .allocate(FloatWindow::new(self.current, dimension, title));
-        self.add_float_to_workspace(self.current, float_id);
+        self.attach_float_to_workspace(self.current, float_id);
         float_id
     }
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn delete_float(&mut self, id: FloatWindowId) {
-        self.remove_float_from_workspace(id);
+        self.detach_float_from_workspace(id);
         self.float_windows.delete(id);
     }
 
@@ -187,7 +187,7 @@ impl Hub {
 
     fn detach_child_from_container(&mut self, container_id: ContainerId, child: Child) {
         tracing::trace!("Detaching {child} from {container_id}");
-        // Focus preceded/following sibling if deleting focused window
+        // Focus preceded/following sibling if detaching focused window
         let new_focus = sibling_window(&self.containers, container_id, child);
         self.replace_focus(child, Child::Window(new_focus));
 
@@ -302,11 +302,11 @@ impl Hub {
         let container = self.containers.get_mut(container_id);
         container.active_tab = new_tab;
         let child = container.children.get(new_tab).copied().unwrap();
-        let window_id = match child {
-            Child::Window(id) => id,
-            Child::Container(id) => first_window(&self.containers, id),
+        let focus_target = match child {
+            Child::Window(_) => child,
+            Child::Container(id) => self.containers.get(id).focused,
         };
-        self.focus_window(window_id);
+        self.focus_child(focus_target);
         self.balance_workspace(self.current);
     }
 
@@ -440,18 +440,12 @@ impl Hub {
             if has_sibling {
                 let sibling_pos = if forward { pos + 1 } else { pos - 1 };
                 let sibling = container.children[sibling_pos];
-                let window_id = match sibling {
-                    Child::Window(id) => id,
-                    Child::Container(id) => {
-                        if forward {
-                            first_window(&self.containers, id)
-                        } else {
-                            last_window(&self.containers, id)
-                        }
-                    }
+                let focus_target = match sibling {
+                    Child::Window(id) => Child::Window(id),
+                    Child::Container(id) => self.containers.get(id).focused,
                 };
-                tracing::debug!("Changing focus to {:?} from {:?}", window_id, child);
-                self.focus_window(window_id);
+                tracing::debug!("Changing focus to {:?} from {:?}", focus_target, child);
+                self.focus_child(focus_target);
                 return;
             }
             current = Child::Container(container_id);
@@ -593,9 +587,9 @@ impl Hub {
 
         // Handle float window move
         if let Focus::Float(float_id) = focused {
-            self.remove_float_from_workspace(float_id);
+            self.detach_float_from_workspace(float_id);
             self.float_windows.get_mut(float_id).workspace = target_workspace_id;
-            self.add_float_to_workspace(target_workspace_id, float_id);
+            self.attach_float_to_workspace(target_workspace_id, float_id);
             tracing::info!("Moved {focused:?} to workspace {target_workspace}");
             return Some(focused);
         }
@@ -1148,10 +1142,10 @@ impl Hub {
                     container.focused = child;
                     container.title = title.clone();
                     // Update active_tab if this is a tabbed container
-                    if container.is_tabbed {
-                        if let Some(pos) = container.children.iter().position(|c| *c == current) {
-                            container.active_tab = pos;
-                        }
+                    if container.is_tabbed
+                        && let Some(pos) = container.children.iter().position(|c| *c == current)
+                    {
+                        container.active_tab = pos;
                     }
                     current = Child::Container(cid);
                 }
@@ -1198,13 +1192,13 @@ impl Hub {
         }
     }
 
-    fn add_float_to_workspace(&mut self, ws: WorkspaceId, id: FloatWindowId) {
+    fn attach_float_to_workspace(&mut self, ws: WorkspaceId, id: FloatWindowId) {
         self.workspaces.get_mut(ws).float_windows.push(id);
         self.workspaces.get_mut(ws).focused = Some(Focus::Float(id));
     }
 
     #[tracing::instrument(skip(self))]
-    fn remove_float_from_workspace(&mut self, id: FloatWindowId) {
+    fn detach_float_from_workspace(&mut self, id: FloatWindowId) {
         let ws = self.float_windows.get(id).workspace;
         let workspace = self.workspaces.get_mut(ws);
         workspace.float_windows.retain(|&f| f != id);
@@ -1216,7 +1210,7 @@ impl Hub {
                 .or_else(|| match workspace.root {
                     Some(Child::Window(w)) => Some(Focus::window(w)),
                     Some(Child::Container(c)) => {
-                        Some(Focus::window(last_window(&self.containers, c)))
+                        Some(Focus::Tiling(self.containers.get(c).focused))
                     }
                     None => None,
                 });
@@ -1230,29 +1224,6 @@ impl Hub {
             tracing::debug!("Removed {:?} from {:?} while not focused", id, ws);
         }
     }
-}
-
-// Valid containers must have at least 2 children, so unwrap is safe
-fn first_window(containers: &Allocator<Container>, container_id: ContainerId) -> WindowId {
-    let mut current = container_id;
-    for _ in 0..10000 {
-        match containers.get(current).children.first().unwrap() {
-            Child::Window(id) => return *id,
-            Child::Container(id) => current = *id,
-        }
-    }
-    panic!("first_window: too many iterations");
-}
-
-fn last_window(containers: &Allocator<Container>, container_id: ContainerId) -> WindowId {
-    let mut current = container_id;
-    for _ in 0..10000 {
-        match containers.get(current).children.last().unwrap() {
-            Child::Window(id) => return *id,
-            Child::Container(id) => current = *id,
-        }
-    }
-    panic!("last_window: too many iterations");
 }
 
 fn sibling_window(
@@ -1271,9 +1242,23 @@ fn sibling_window(
         Child::Window(w) => w,
         Child::Container(c) => {
             if pos > 0 {
-                last_window(containers, c)
+                let mut current = c;
+                for _ in 0..10000 {
+                    match containers.get(current).children.last().unwrap() {
+                        Child::Window(id) => return *id,
+                        Child::Container(id) => current = *id,
+                    }
+                }
+                panic!("sibling_window exceeded max iterations");
             } else {
-                first_window(containers, c)
+                let mut current = c;
+                for _ in 0..10000 {
+                    match containers.get(current).children.first().unwrap() {
+                        Child::Window(id) => return *id,
+                        Child::Container(id) => current = *id,
+                    }
+                }
+                panic!("sibling_window exceeded max iterations");
             }
         }
     }

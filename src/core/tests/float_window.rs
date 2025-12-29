@@ -272,6 +272,73 @@ fn focus_falls_back_to_tiling_after_float_delete() {
 }
 
 #[test]
+fn focus_falls_back_to_container_focus_after_float_delete() {
+    let mut hub = setup();
+    hub.insert_tiling("W0".into());
+    hub.insert_tiling("W1".into());
+    hub.insert_tiling("W2".into());
+
+    // Focus W1 (middle window)
+    hub.focus_left();
+
+    let f0 = hub.insert_float(
+        Dimension {
+            x: 50.0,
+            y: 5.0,
+            width: 40.0,
+            height: 15.0,
+        },
+        "Float0".into(),
+    );
+
+    hub.delete_float(f0);
+
+    // Focus should fall back to W1 (container's focus), not W2 (last window)
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=51.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=28.00)
+        )
+      )
+    )
+
+    +------------------------------------------------+**************************************************+------------------------------------------------+
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                       W0                       |*                       W1                       *|                       W2                       |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                                                |
+    +------------------------------------------------+**************************************************+------------------------------------------------+
+    ");
+}
+
+#[test]
 fn focus_falls_back_to_last_float() {
     let mut hub = setup();
     hub.insert_float(
