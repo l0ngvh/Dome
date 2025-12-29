@@ -1,4 +1,5 @@
 use crate::core::allocator::{Node, NodeId};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Workspace {
@@ -41,13 +42,16 @@ impl Workspace {
 #[derive(Debug, Clone)]
 pub(crate) struct Container {
     pub(super) parent: Parent,
+    pub(super) workspace: WorkspaceId,
     pub(super) children: Vec<Child>,
     pub(super) focused: Child,
+    pub(super) title: String,
     pub(super) dimension: Dimension,
     pub(super) direction: Direction,
     pub(super) spawn_direction: Direction,
     pub(super) is_tabbed: bool,
     pub(super) active_tab: usize,
+    pub(super) focused_by: HashSet<ContainerId>,
 }
 
 impl Node for Container {
@@ -57,25 +61,34 @@ impl Node for Container {
 impl Container {
     pub(super) fn new(
         parent: Parent,
+        workspace: WorkspaceId,
         children: Vec<Child>,
         focused: Child,
+        title: String,
         dimension: Dimension,
         direction: Direction,
     ) -> Self {
         Self {
             children,
             focused,
+            title,
             parent,
+            workspace,
             dimension,
             direction,
             spawn_direction: direction,
             is_tabbed: false,
             active_tab: 0,
+            focused_by: HashSet::new(),
         }
     }
 
     pub(crate) fn focused(&self) -> Child {
         self.focused
+    }
+
+    pub(crate) fn title(&self) -> &str {
+        &self.title
     }
 
     pub(crate) fn is_tabbed(&self) -> bool {
@@ -113,7 +126,12 @@ impl Container {
     }
 
     pub(super) fn remove_child(&mut self, child: Child) {
-        self.children.retain(|c| *c != child);
+        if let Some(pos) = self.children.iter().position(|c| *c == child) {
+            self.children.remove(pos);
+            if self.active_tab > 0 && pos <= self.active_tab {
+                self.active_tab -= 1;
+            }
+        }
     }
 
     pub(super) fn replace_child(&mut self, old: Child, new: Child) {
@@ -139,7 +157,7 @@ impl std::fmt::Display for Direction {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Parent {
     Container(ContainerId),
     Workspace(WorkspaceId),
@@ -158,9 +176,11 @@ impl std::fmt::Display for Parent {
 #[derive(Debug, Clone)]
 pub(crate) struct Window {
     pub(super) parent: Parent,
+    pub(super) workspace: WorkspaceId,
     pub(super) dimension: Dimension,
     pub(super) spawn_direction: Direction,
     pub(super) title: String,
+    pub(super) focused_by: HashSet<ContainerId>,
 }
 
 impl Node for Window {
@@ -168,12 +188,19 @@ impl Node for Window {
 }
 
 impl Window {
-    pub(super) fn new(parent: Parent, spawn_direction: Direction, title: String) -> Self {
+    pub(super) fn new(
+        parent: Parent,
+        workspace: WorkspaceId,
+        spawn_direction: Direction,
+        title: String,
+    ) -> Self {
         Self {
             parent,
+            workspace,
             dimension: Dimension::default(),
             spawn_direction,
             title,
+            focused_by: HashSet::new(),
         }
     }
 

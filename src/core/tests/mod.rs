@@ -16,7 +16,7 @@ mod window_at;
 
 use crate::core::allocator::NodeId;
 use crate::core::hub::Hub;
-use crate::core::node::{Child, FloatWindowId, Focus};
+use crate::core::node::{Child, ContainerId, FloatWindowId, Focus, Parent, WorkspaceId};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
@@ -24,6 +24,7 @@ const BORDER: f32 = 1.0;
 const TAB_BAR_HEIGHT: f32 = 2.0;
 
 pub(super) fn snapshot(hub: &Hub) -> String {
+    validate_hub(hub);
     let mut s = format!(
         "Hub(focused={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
         hub.current_workspace(),
@@ -325,6 +326,75 @@ fn fmt_float_str(hub: &Hub, s: &mut String, float_id: FloatWindowId, indent: usi
         dim.width,
         dim.height
     ));
+}
+
+fn validate_hub(hub: &Hub) {
+    for (workspace_id, workspace) in hub.all_workspaces() {
+        if let Some(Focus::Tiling(child)) = workspace.focused() {
+            validate_child_exists(hub, child);
+        }
+        let Some(root) = workspace.root() else {
+            continue;
+        };
+        let mut stack = vec![(root, Parent::Workspace(workspace_id))];
+        let mut iterations = 0;
+        while let Some((child, expected_parent)) = stack.pop() {
+            iterations += 1;
+            if iterations > 10000 {
+                panic!("validate_hub: cycle detected");
+            }
+            match child {
+                Child::Window(wid) => {
+                    let window = hub.get_window(wid);
+                    assert_eq!(window.parent, expected_parent, "Window {wid} has wrong parent");
+                    assert_eq!(window.workspace, workspace_id, "Window {wid} has wrong workspace");
+                    for &cid in &window.focused_by {
+                        let container = hub.get_container(cid);
+                        assert_eq!(container.focused, child, "Window {wid} focused_by {cid} but container doesn't focus it");
+                    }
+                }
+                Child::Container(cid) => {
+                    let container = hub.get_container(cid);
+                    assert_eq!(container.parent, expected_parent, "Container {cid} has wrong parent");
+                    assert_eq!(container.workspace, workspace_id, "Container {cid} has wrong workspace");
+                    assert!(container.children.len() >= 2, "Container {cid} has less than 2 children");
+
+                    if container.is_tabbed() {
+                        assert!(container.active_tab() < container.children().len(), "Container {cid} active_tab out of bounds");
+                    }
+
+                    if let Parent::Container(parent_cid) = expected_parent {
+                        let parent = hub.get_container(parent_cid);
+                        assert_ne!(parent.direction, container.direction, "Container {cid} has same direction as parent {parent_cid}");
+                    }
+
+                    let focused_title = match container.focused {
+                        Child::Window(wid) => hub.get_window(wid).title().to_string(),
+                        Child::Container(ccid) => hub.get_container(ccid).title().to_string(),
+                    };
+                    assert_eq!(container.title(), focused_title, "Container {cid} title doesn't match focused child's title");
+
+                    validate_child_exists(hub, container.focused);
+
+                    for &cid_focusing in &container.focused_by {
+                        let c = hub.get_container(cid_focusing);
+                        assert_eq!(c.focused, child, "Container {cid} focused_by {cid_focusing} but that container doesn't focus it");
+                    }
+
+                    for &c in container.children() {
+                        stack.push((c, Parent::Container(cid)));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn validate_child_exists(hub: &Hub, child: Child) {
+    match child {
+        Child::Window(wid) => { hub.get_window(wid); }
+        Child::Container(cid) => { hub.get_container(cid); }
+    }
 }
 
 fn setup_logger() {
