@@ -1147,6 +1147,12 @@ impl Hub {
                     let container = self.containers.get_mut(cid);
                     container.focused = child;
                     container.title = title.clone();
+                    // Update active_tab if this is a tabbed container
+                    if container.is_tabbed {
+                        if let Some(pos) = container.children.iter().position(|c| *c == current) {
+                            container.active_tab = pos;
+                        }
+                    }
                     current = Child::Container(cid);
                 }
                 Parent::Workspace(ws) => {

@@ -44,6 +44,7 @@ pub(crate) struct Container {
     pub(super) parent: Parent,
     pub(super) workspace: WorkspaceId,
     pub(super) children: Vec<Child>,
+    /// The focusing descendant, not just direct child
     pub(super) focused: Child,
     pub(super) title: String,
     pub(super) dimension: Dimension,
