@@ -52,6 +52,10 @@ pub(crate) struct Container {
     pub(super) is_tabbed: bool,
     pub(super) active_tab: usize,
     pub(super) focused_by: HashSet<ContainerId>,
+    pub(super) freely_sized_horizontal: usize,
+    pub(super) freely_sized_vertical: usize,
+    pub(super) fixed_width: f32,
+    pub(super) fixed_height: f32,
 }
 
 impl Node for Container {
@@ -80,6 +84,10 @@ impl Container {
             is_tabbed: false,
             active_tab: 0,
             focused_by: HashSet::new(),
+            freely_sized_horizontal: 0,
+            freely_sized_vertical: 0,
+            fixed_width: 0.0,
+            fixed_height: 0.0,
         }
     }
 
