@@ -450,7 +450,7 @@ impl Hub {
                         }
                     }
                 };
-                tracing::debug!("Changing focus to: {:?}", window_id);
+                tracing::debug!("Changing focus to {:?} from {:?}", window_id, child);
                 self.focus_window(window_id);
                 return;
             }

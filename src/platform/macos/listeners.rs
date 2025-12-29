@@ -239,6 +239,10 @@ unsafe extern "C-unwind" fn observer_callback(
         } else if let Err(e) = focus_window(context) {
             tracing::warn!("Failed to focus window: {e:#}");
         }
+
+        if let Err(e) = apply_layout(context) {
+            tracing::warn!("Failed to apply layout: {e:#}");
+        }
     } else {
         context.throttle.pending_pids.insert(pid);
         if is_focus_change {
@@ -298,6 +302,10 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
         }
     }
 
+    if let Err(e) = apply_layout(context) {
+        tracing::warn!("Failed to apply layout: {e:#}");
+    }
+
     if !pending_focus_sync {
         if let Err(e) = focus_window(context) {
             tracing::warn!("Failed to focus window: {e:#}");
@@ -344,10 +352,6 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowCon
             let id = context.hub.insert_float(dim, mac_window.title());
             context.registry.borrow_mut().insert_float(id, mac_window);
         }
-    }
-
-    if let Err(e) = apply_layout(context) {
-        tracing::warn!("Failed to apply layout: {e:#}");
     }
 }
 
