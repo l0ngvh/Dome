@@ -175,9 +175,15 @@ impl Hub {
             }
             Parent::Workspace(workspace_id) => {
                 self.workspaces.get_mut(workspace_id).root = None;
-                self.workspaces.get_mut(workspace_id).focused = None;
 
-                if workspace_id != self.current {
+                let ws = self.workspaces.get(workspace_id);
+                let has_floats = !ws.float_windows.is_empty();
+
+                // Set focus to a float if available, otherwise None
+                let new_focus = ws.float_windows.last().map(|&f| Focus::Float(f));
+                self.workspaces.get_mut(workspace_id).focused = new_focus;
+
+                if workspace_id != self.current && !has_floats {
                     self.workspaces.delete(workspace_id);
                 }
             }
@@ -1190,6 +1196,12 @@ impl Hub {
             );
         } else {
             tracing::debug!(%id, %ws, "Detached unfocused float");
+        }
+
+        // Delete workspace if empty and not current
+        let workspace = self.workspaces.get(ws);
+        if ws != self.current && workspace.root.is_none() && workspace.float_windows.is_empty() {
+            self.workspaces.delete(ws);
         }
     }
 }

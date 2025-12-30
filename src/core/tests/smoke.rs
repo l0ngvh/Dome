@@ -60,10 +60,11 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
     let mut floats: Vec<FloatWindowId> = Vec::new();
     let mut history: Vec<String> = Vec::new();
 
-    for _ in 0..ops_per_run {
-        let op = ALL_OPS[rng.random_range(0..ALL_OPS.len())];
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for _ in 0..ops_per_run {
+            let op = ALL_OPS[rng.random_range(0..ALL_OPS.len())];
 
-        let op_str = match op {
+            let op_str = match op {
             Op::InsertTiling => {
                 let id = hub.insert_tiling();
                 windows.push(id);
@@ -151,10 +152,18 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                 "FocusPrevTab".into()
             }
             Op::ToggleFloat => {
-                if let Some((old_win, new_float)) = hub.toggle_float() {
-                    windows.retain(|&w| w != old_win);
-                    floats.push(new_float);
-                    format!("ToggleFloat({old_win} -> {new_float})")
+                if let Some((win_id, float_id)) = hub.toggle_float() {
+                    if windows.contains(&win_id) {
+                        // Tiling -> Float
+                        windows.retain(|&w| w != win_id);
+                        floats.push(float_id);
+                        format!("ToggleFloat({win_id} -> {float_id})")
+                    } else {
+                        // Float -> Tiling
+                        floats.retain(|&f| f != float_id);
+                        windows.push(win_id);
+                        format!("ToggleFloat({float_id} -> {win_id})")
+                    }
                 } else {
                     continue;
                 }
@@ -189,19 +198,20 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
             }
         };
 
-        history.push(op_str);
+            history.push(op_str);
 
-        if let Err(e) =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| validate_hub(&hub)))
-        {
-            eprintln!("=== SMOKE TEST FAILURE ===");
-            eprintln!("Operations:");
-            for (i, op) in history.iter().enumerate() {
-                eprintln!("  {i}: {op}");
-            }
-            eprintln!("\nHub state:\n{}", snapshot_text(&hub));
-            std::panic::resume_unwind(e);
+            validate_hub(&hub);
         }
+    }));
+
+    if let Err(e) = result {
+        eprintln!("=== SMOKE TEST FAILURE ===");
+        eprintln!("Operations:");
+        for (i, op) in history.iter().enumerate() {
+            eprintln!("  {i}: {op}");
+        }
+        eprintln!("\nHub state:\n{}", snapshot_text(&hub));
+        std::panic::resume_unwind(e);
     }
 }
 

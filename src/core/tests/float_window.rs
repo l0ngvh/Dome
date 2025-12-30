@@ -567,3 +567,154 @@ fn toggle_float_to_tiling_with_nested_containers() {
     +------------------------------------------------++------------------------------------------------+**************************************************
     ");
 }
+
+#[test]
+fn workspace_with_only_floats_not_deleted_prematurely() {
+    // Regression test: workspace should not be deleted if it still has floats
+    let mut hub = setup();
+
+    hub.insert_tiling();
+
+    hub.focus_workspace(1);
+    let f0 = hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+
+    // Insert a tiling window on workspace 1
+    let w1 = hub.insert_tiling();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
+      )
+      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
+        Window(id=WindowId(1), parent=WorkspaceId(1), x=1.00, y=1.00, w=148.00, h=28.00)
+        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *        +------------------------------+                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |              F0              |                                 W1                                                                         *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        |                              |                                                                                                            *
+    *        +------------------------------+                                                                                                            *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+
+    hub.focus_workspace(0);
+
+    // Delete the tiling window on workspace 1 (workspace 1 should NOT be deleted because it has a float)
+    hub.delete_window(w1);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
+      )
+      Workspace(id=WorkspaceId(1), name=1, focused=FloatWindowId(0),
+        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+
+    // Now delete the float - this should not panic
+    hub.delete_float(f0);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+}
