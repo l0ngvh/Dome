@@ -24,6 +24,8 @@ pub(crate) struct MacWindow {
     pid: i32,
     running_app: objc2::rc::Retained<NSRunningApplication>,
     screen: Dimension,
+    title: String,
+    app_name: String,
 }
 
 impl MacWindow {
@@ -32,17 +34,29 @@ impl MacWindow {
         app: CFRetained<AXUIElement>,
         pid: i32,
         screen: Dimension,
-    ) -> Self {
-        let running_app =
-            NSRunningApplication::runningApplicationWithProcessIdentifier(pid).unwrap();
+    ) -> Option<Self> {
+        let running_app = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)?;
+        if running_app.isTerminated() {
+            return None;
+        }
 
-        Self {
+        let title = get_attribute::<CFString>(&window, &kAXTitleAttribute())
+            .map(|t| t.to_string())
+            .unwrap_or_else(|_| "Unknown".to_string());
+        let app_name = running_app
+            .localizedName()
+            .map(|name| name.to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        Some(Self {
             window,
             app,
             pid,
             running_app,
             screen,
-        }
+            title,
+            app_name,
+        })
     }
 
     pub(crate) fn cf_hash(&self) -> usize {
@@ -120,10 +134,14 @@ impl MacWindow {
         set_attribute_value(&self.window, &kAXSizeAttribute(), &size)
     }
 
-    pub(crate) fn title(&self) -> String {
-        get_attribute::<CFString>(&self.window, &kAXTitleAttribute())
-            .map(|t| t.to_string())
-            .unwrap_or_else(|_| "Unknown".to_string())
+    pub(crate) fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub(crate) fn update_title(&mut self) {
+        if let Ok(t) = get_attribute::<CFString>(&self.window, &kAXTitleAttribute()) {
+            self.title = t.to_string();
+        }
     }
 
     pub(crate) fn dimension(&self) -> Dimension {
@@ -223,18 +241,10 @@ impl MacWindow {
 
 impl std::fmt::Display for MacWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let app_name = self
-            .running_app
-            .localizedName()
-            .map(|name| name.to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-
         write!(
             f,
             "'{}' from app '{}' (PID: {})",
-            self.title(),
-            app_name,
-            self.pid
+            self.title, self.app_name, self.pid
         )
     }
 }

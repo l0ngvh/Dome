@@ -209,6 +209,11 @@ pub(crate) fn kAXApplicationHiddenNotification() -> CFRetained<CFString> {
 }
 
 #[allow(non_snake_case)]
+pub(crate) fn kAXTitleChangedNotification() -> CFRetained<CFString> {
+    CFString::from_static_str("AXTitleChanged")
+}
+
+#[allow(non_snake_case)]
 pub(crate) fn kAXApplicationShownNotification() -> CFRetained<CFString> {
     CFString::from_static_str("AXApplicationShown")
 }

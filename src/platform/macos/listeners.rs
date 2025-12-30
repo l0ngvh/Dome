@@ -21,13 +21,13 @@ use objc2_core_graphics::{
 };
 use objc2_foundation::{NSNotification, NSOperationQueue};
 
-use super::context::{Observers, WindowContext};
+use super::context::{Observers, RemovedWindow, WindowContext};
 use super::objc2_wrapper::{
     add_observer_notification, create_observer, get_attribute, get_pid,
     kAXApplicationHiddenNotification, kAXApplicationShownNotification, kAXFocusedWindowAttribute,
-    kAXFocusedWindowChangedNotification, kAXResizedNotification, kAXUIElementDestroyedNotification,
-    kAXWindowCreatedNotification, kAXWindowDeminiaturizedNotification,
-    kAXWindowMiniaturizedNotification, kAXWindowsAttribute,
+    kAXFocusedWindowChangedNotification, kAXResizedNotification, kAXTitleChangedNotification,
+    kAXUIElementDestroyedNotification, kAXWindowCreatedNotification,
+    kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification, kAXWindowsAttribute,
 };
 use super::overlay::collect_overlays;
 use super::window::MacWindow;
@@ -110,10 +110,10 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                     context.hub.delete_float(*float_id);
                     tracing::debug!("Float deleted: {float_id}");
                 }
-                if !window_ids.is_empty() || !float_ids.is_empty() {
-                    if let Err(e) = render_workspace(context) {
-                        tracing::warn!("Failed to render workspace after terminating app: {e:#}");
-                    }
+                if (!window_ids.is_empty() || !float_ids.is_empty())
+                    && let Err(e) = render_workspace(context)
+                {
+                    tracing::warn!("Failed to render workspace after terminating app: {e:#}");
                 }
             }),
         );
@@ -215,7 +215,11 @@ unsafe extern "C-unwind" fn observer_callback(
         return;
     };
     let notification = unsafe { CFRetained::retain(notification) };
-    tracing::trace!("Received event: {}", (*notification));
+    let app_name = get_app_name(pid);
+    tracing::trace!(
+        "[{app_name}] (pid: {pid}) Received event: {}",
+        (*notification)
+    );
 
     let is_focus_change = *notification == *kAXFocusedWindowChangedNotification();
 
@@ -306,51 +310,62 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
         tracing::warn!("Failed to apply layout: {e:#}");
     }
 
-    if !pending_focus_sync {
-        if let Err(e) = focus_window(context) {
-            tracing::warn!("Failed to focus window: {e:#}");
-        }
+    if !pending_focus_sync && let Err(e) = focus_window(context) {
+        tracing::warn!("Failed to focus window: {e:#}");
     }
 }
 
-#[tracing::instrument(skip(app, context))]
+#[tracing::instrument(skip(app, context), fields(app_name = get_app_name(pid)))]
 fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
     let Ok(windows) = get_windows(app) else {
+        tracing::debug!("Failed to get windows");
         return;
     };
     let screen = context.hub.screen();
     let active_windows: Vec<_> = windows
         .into_iter()
-        .map(|w| MacWindow::new(w.clone(), app.clone(), pid, screen))
+        .filter_map(|w| MacWindow::new(w.clone(), app.clone(), pid, screen))
         .filter(|w| w.is_manageable())
         .collect();
     let active_hashes: Vec<_> = active_windows.iter().map(|w| w.cf_hash()).collect();
-    let tracked_hashes = context.registry.borrow().hashes_for_pid(pid);
+
+    let mut registry = context.registry.borrow_mut();
+    let tracked_hashes = registry.hashes_for_pid(pid);
 
     for h in tracked_hashes {
         if !active_hashes.contains(&h) {
-            if let Some(id) = context.registry.borrow_mut().remove_tiling_by_hash(h) {
-                context.hub.delete_window(id);
-                tracing::info!("Window deleted: {id}");
-            } else if let Some(id) = context.registry.borrow_mut().remove_float_by_hash(h) {
-                context.hub.delete_float(id);
-                tracing::info!("Float deleted: {id}");
+            match registry.remove_by_hash(h) {
+                Some(RemovedWindow::Tiling(id, window)) => {
+                    let title = window.title();
+                    context.hub.delete_window(id);
+                    tracing::info!(%id, %title, "Tiling window deleted");
+                }
+                Some(RemovedWindow::Float(id, window)) => {
+                    let title = window.title();
+                    context.hub.delete_float(id);
+                    tracing::info!(%id, %title, "Float window deleted");
+                }
+                None => {}
             }
+        } else {
+            registry.update_title(h);
         }
     }
 
     for mac_window in active_windows {
-        if context.registry.borrow().contains(&mac_window) {
+        if registry.contains(&mac_window) {
             continue;
         }
-        tracing::debug!("New window: {mac_window}");
+        let title = mac_window.title();
         if mac_window.should_tile() {
-            let id = context.hub.insert_tiling(mac_window.title());
-            context.registry.borrow_mut().insert_tiling(id, mac_window);
+            let id = context.hub.insert_tiling(title.to_owned());
+            tracing::info!(%id, %title, "New tiling window");
+            registry.insert_tiling(id, mac_window);
         } else {
             let dim = mac_window.dimension();
-            let id = context.hub.insert_float(dim, mac_window.title());
-            context.registry.borrow_mut().insert_float(id, mac_window);
+            let id = context.hub.insert_float(dim, title.to_owned());
+            tracing::info!(%id, %title, "New float window");
+            registry.insert_float(id, mac_window);
         }
     }
 }
@@ -363,9 +378,19 @@ fn sync_focus(app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
     let registry = context.registry.borrow();
     if let Some(id) = registry.get_tiling_by_hash(h) {
         if !context.hub.is_focusing(Child::Window(id)) {
+            let title = registry
+                .get_tiling(id)
+                .map(|w| w.title())
+                .unwrap_or_default();
+            tracing::debug!(%id, %title, "Focus changed to tiling window");
             context.hub.set_focus(id);
         }
     } else if let Some(id) = registry.get_float_by_hash(h) {
+        let title = registry
+            .get_float(id)
+            .map(|w| w.title())
+            .unwrap_or_default();
+        tracing::debug!(%id, %title, "Focus changed to float window");
         context.hub.set_float_focus(id);
     }
 }
@@ -512,6 +537,13 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
     Ok(())
 }
 
+fn get_app_name(pid: i32) -> String {
+    NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+        .and_then(|app| app.localizedName())
+        .map(|name| name.to_string())
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
 fn get_pid_from_notification(notification: NonNull<NSNotification>) -> Option<i32> {
     let notification = unsafe { &*notification.as_ptr() };
     let dict = notification.userInfo()?;
@@ -531,17 +563,19 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
 
     if let Ok(windows) = get_windows(&app) {
         for window in windows {
-            let mac_window = MacWindow::new(window.clone(), app.clone(), pid, screen);
+            let Some(mac_window) = MacWindow::new(window.clone(), app.clone(), pid, screen) else {
+                continue;
+            };
             if mac_window.is_manageable() {
                 if mac_window.should_tile() {
-                    let window_id = context.hub.insert_tiling(mac_window.title());
+                    let window_id = context.hub.insert_tiling(mac_window.title().to_owned());
                     context
                         .registry
                         .borrow_mut()
                         .insert_tiling(window_id, mac_window);
                 } else {
                     let dim = mac_window.dimension();
-                    let float_id = context.hub.insert_float(dim, mac_window.title());
+                    let float_id = context.hub.insert_float(dim, mac_window.title().to_owned());
                     context
                         .registry
                         .borrow_mut()
@@ -566,6 +600,7 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
         kAXFocusedWindowChangedNotification(),
         kAXApplicationHiddenNotification(),
         kAXApplicationShownNotification(),
+        kAXTitleChangedNotification(),
     ] {
         add_observer_notification(&observer, &app, &notification, context_ptr)?;
     }
@@ -575,7 +610,12 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
 
 fn update_overlay(context: &WindowContext) {
     let workspace_id = context.hub.current_workspace();
-    let overlays = collect_overlays(&context.hub, &context.config, workspace_id);
+    let overlays = collect_overlays(
+        &context.hub,
+        &context.config,
+        workspace_id,
+        &context.registry.borrow(),
+    );
     context
         .tiling_overlay
         .set_rects(overlays.tiling_rects, overlays.tiling_labels);
@@ -618,7 +658,12 @@ fn apply_layout(context: &WindowContext) -> Result<()> {
         }
     }
 
-    let overlays = collect_overlays(&context.hub, &context.config, workspace_id);
+    let overlays = collect_overlays(
+        &context.hub,
+        &context.config,
+        workspace_id,
+        &context.registry.borrow(),
+    );
     context
         .tiling_overlay
         .set_rects(overlays.tiling_rects, overlays.tiling_labels);
@@ -656,8 +701,10 @@ fn hide_workspace(context: &WindowContext, workspace_id: WorkspaceId) {
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(window_id) => {
-                if let Some(os_window) = context.registry.borrow().get_tiling(window_id) {
-                    let _ = os_window.hide();
+                if let Some(os_window) = context.registry.borrow().get_tiling(window_id)
+                    && let Err(e) = os_window.hide()
+                {
+                    tracing::warn!("Failed to hide tiling window {window_id}: {e:#}");
                 }
             }
             Child::Container(container_id) => {
@@ -668,8 +715,10 @@ fn hide_workspace(context: &WindowContext, workspace_id: WorkspaceId) {
         }
     }
     for &float_id in workspace.float_windows() {
-        if let Some(os_window) = context.registry.borrow().get_float(float_id) {
-            let _ = os_window.hide();
+        if let Some(os_window) = context.registry.borrow().get_float(float_id)
+            && let Err(e) = os_window.hide()
+        {
+            tracing::warn!("Failed to hide float window {float_id}: {e:#}");
         }
     }
 }

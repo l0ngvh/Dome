@@ -92,10 +92,6 @@ impl Container {
         }
     }
 
-    pub(crate) fn focused(&self) -> Child {
-        self.focused
-    }
-
     pub(crate) fn title(&self) -> &str {
         &self.title
     }

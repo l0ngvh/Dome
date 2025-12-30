@@ -11,6 +11,11 @@ use crate::core::{Dimension, FloatWindowId, Hub, WindowId};
 
 pub(super) type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;
 
+pub(super) enum RemovedWindow {
+    Tiling(WindowId, MacWindow),
+    Float(FloatWindowId, MacWindow),
+}
+
 pub(super) struct ThrottleState {
     pub(super) last_execution: Option<Instant>,
     pub(super) pending_pids: HashSet<i32>,
@@ -64,22 +69,22 @@ impl WindowRegistry {
         self.float_to_window.insert(float_id, window);
     }
 
-    pub(super) fn remove_tiling_by_hash(&mut self, cf_hash: usize) -> Option<WindowId> {
-        let window_id = self.hash_to_tiling.remove(&cf_hash)?;
-        let window = self.tiling_to_window.remove(&window_id)?;
-        if let Some(hashes) = self.pid_to_hashes.get_mut(&window.pid()) {
-            hashes.retain(|&h| h != cf_hash);
+    pub(super) fn remove_by_hash(&mut self, cf_hash: usize) -> Option<RemovedWindow> {
+        if let Some(window_id) = self.hash_to_tiling.remove(&cf_hash) {
+            let window = self.tiling_to_window.remove(&window_id)?;
+            if let Some(hashes) = self.pid_to_hashes.get_mut(&window.pid()) {
+                hashes.retain(|&h| h != cf_hash);
+            }
+            return Some(RemovedWindow::Tiling(window_id, window));
         }
-        Some(window_id)
-    }
-
-    pub(super) fn remove_float_by_hash(&mut self, cf_hash: usize) -> Option<FloatWindowId> {
-        let float_id = self.hash_to_float.remove(&cf_hash)?;
-        let window = self.float_to_window.remove(&float_id)?;
-        if let Some(hashes) = self.pid_to_hashes.get_mut(&window.pid()) {
-            hashes.retain(|&h| h != cf_hash);
+        if let Some(float_id) = self.hash_to_float.remove(&cf_hash) {
+            let window = self.float_to_window.remove(&float_id)?;
+            if let Some(hashes) = self.pid_to_hashes.get_mut(&window.pid()) {
+                hashes.retain(|&h| h != cf_hash);
+            }
+            return Some(RemovedWindow::Float(float_id, window));
         }
-        Some(float_id)
+        None
     }
 
     pub(super) fn toggle_float(&mut self, window_id: WindowId, float_id: FloatWindowId) {
@@ -138,6 +143,18 @@ impl WindowRegistry {
 
     pub(super) fn hashes_for_pid(&self, pid: i32) -> Vec<usize> {
         self.pid_to_hashes.get(&pid).cloned().unwrap_or_default()
+    }
+
+    pub(super) fn update_title(&mut self, cf_hash: usize) {
+        if let Some(window_id) = self.hash_to_tiling.get(&cf_hash) {
+            if let Some(window) = self.tiling_to_window.get_mut(window_id) {
+                window.update_title();
+            }
+        } else if let Some(float_id) = self.hash_to_float.get(&cf_hash) {
+            if let Some(window) = self.float_to_window.get_mut(float_id) {
+                window.update_title();
+            }
+        }
     }
 }
 

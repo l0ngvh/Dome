@@ -12,7 +12,9 @@ use objc2_foundation::{
 };
 
 use crate::config::{Color, Config};
-use crate::core::{Child, Dimension, Direction, Focus, Hub, WorkspaceId};
+use crate::core::{Child, Dimension, Direction, Focus, Hub, WindowId, WorkspaceId};
+
+use super::context::WindowRegistry;
 
 pub(super) fn create_overlay_window(
     mtm: MainThreadMarker,
@@ -209,7 +211,12 @@ pub(super) struct Overlays {
     pub float_rects: Vec<OverlayRect>,
 }
 
-pub(super) fn collect_overlays(hub: &Hub, config: &Config, workspace_id: WorkspaceId) -> Overlays {
+pub(super) fn collect_overlays(
+    hub: &Hub,
+    config: &Config,
+    workspace_id: WorkspaceId,
+    registry: &WindowRegistry,
+) -> Overlays {
     let mut tiling_rects = Vec::new();
     let mut tiling_labels = Vec::new();
     let mut float_rects = Vec::new();
@@ -218,6 +225,13 @@ pub(super) fn collect_overlays(hub: &Hub, config: &Config, workspace_id: Workspa
     let screen = hub.screen();
     let border_size = config.border_size;
     let tab_bar_height = config.tab_bar_height;
+
+    let get_title = |wid: WindowId| -> String {
+        registry
+            .get_tiling(wid)
+            .map(|w| w.title().to_owned())
+            .unwrap_or_else(|| "Unknown".to_owned())
+    };
 
     let mut stack: Vec<Child> = workspace.root().into_iter().collect();
     while let Some(child) = stack.pop() {
@@ -303,8 +317,8 @@ pub(super) fn collect_overlays(hub: &Hub, config: &Config, workspace_id: Workspa
                         }
                         for (i, c) in children.iter().enumerate() {
                             let label = match c {
-                                Child::Window(wid) => hub.get_window(*wid).title().to_string(),
-                                Child::Container(_) => "Container".to_string(),
+                                Child::Window(wid) => get_title(*wid),
+                                Child::Container(_) => "Container".to_owned(),
                             };
                             let is_active = i == active_tab;
                             let display = if is_active {
