@@ -640,8 +640,15 @@ fn apply_layout(context: &WindowContext) -> Result<()> {
                 }
             }
             Child::Container(container_id) => {
-                for &c in context.hub.get_container(container_id).children() {
-                    stack.push(c);
+                let container = context.hub.get_container(container_id);
+                if container.is_tabbed() {
+                    if let Some(&active_child) = container.children().get(container.active_tab()) {
+                        stack.push(active_child);
+                    }
+                } else {
+                    for &c in container.children() {
+                        stack.push(c);
+                    }
                 }
             }
         }
