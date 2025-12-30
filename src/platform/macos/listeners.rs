@@ -51,7 +51,8 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 observers.insert(pid, observer);
             }
             Err(e) => {
-                tracing::info!("Can't create observer for application {pid}: {e:#}");
+                let app_name = get_app_name(pid);
+                tracing::warn!(%pid, %app_name, "Can't create observer: {e:#}");
             }
         }
     }
@@ -74,7 +75,8 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 let observer = match register_app(pid, context_ptr) {
                     Ok(observer) => observer,
                     Err(e) => {
-                        tracing::info!("Can't track application {pid}: {e:#}");
+                        let app_name = get_app_name(pid);
+                        tracing::warn!(%pid, %app_name, "Can't track application: {e:#}");
                         return;
                     }
                 };
@@ -101,14 +103,15 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 tracing::trace!("Received notification for terminating app with pid: {pid:?}");
                 apps.borrow_mut().remove(&pid);
                 let context = &mut *context_ptr;
+                let app_name = get_app_name(pid);
                 let (window_ids, float_ids) = context.registry.borrow_mut().remove_by_pid(pid);
                 for window_id in &window_ids {
                     context.hub.delete_window(*window_id);
-                    tracing::debug!("Window deleted: {window_id}");
+                    tracing::debug!(%window_id, %app_name, "Tiling window deleted");
                 }
                 for float_id in &float_ids {
                     context.hub.delete_float(*float_id);
-                    tracing::debug!("Float deleted: {float_id}");
+                    tracing::debug!(%float_id, %app_name, "Float window deleted");
                 }
                 if (!window_ids.is_empty() || !float_ids.is_empty())
                     && let Err(e) = render_workspace(context)
@@ -150,7 +153,6 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                             }
                         }
                         update_overlay(context);
-                        tracing::debug!("Focus changed to tiling window: {window_id}");
                     }
                 } else if let Some(float_id) = registry.get_float_by_hash(cf_hash) {
                     drop(registry);
@@ -163,7 +165,6 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                         }
                     }
                     update_overlay(context);
-                    tracing::debug!("Focus changed to float window: {float_id}");
                 }
             }),
         );
@@ -315,10 +316,10 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
     }
 }
 
-#[tracing::instrument(skip(app, context), fields(app_name = get_app_name(pid)))]
+#[tracing::instrument(skip_all, fields(app_name = get_app_name(pid)))]
 fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
     let Ok(windows) = get_windows(app) else {
-        tracing::debug!("Failed to get windows");
+        tracing::warn!("Failed to get windows");
         return;
     };
     let screen = context.hub.screen();
@@ -380,16 +381,18 @@ fn sync_focus(app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
         if !context.hub.is_focusing(Child::Window(id)) {
             let title = registry
                 .get_tiling(id)
-                .map(|w| w.title())
+                .map(|w| w.title().to_owned())
                 .unwrap_or_default();
+            drop(registry);
             tracing::debug!(%id, %title, "Focus changed to tiling window");
             context.hub.set_focus(id);
         }
     } else if let Some(id) = registry.get_float_by_hash(h) {
         let title = registry
             .get_float(id)
-            .map(|w| w.title())
+            .map(|w| w.title().to_owned())
             .unwrap_or_default();
+        drop(registry);
         tracing::debug!(%id, %title, "Focus changed to float window");
         context.hub.set_float_focus(id);
     }
@@ -429,21 +432,12 @@ fn handle_mouse_down(context: &mut WindowContext, event: *mut CGEvent) {
     let screen = context.hub.screen();
     let x = location.x as f32;
     let y = screen.y + location.y as f32;
-    tracing::trace!(
-        "Mouse down at ({}, {}) -> hub ({}, {})",
-        location.x,
-        location.y,
-        x,
-        y
-    );
     if let Some(window_id) = context.hub.window_at(x, y) {
         if !context.hub.is_focusing(Child::Window(window_id)) {
-            tracing::info!("Mouse click focused {:?}", window_id);
+            tracing::debug!(%window_id, "Mouse click focused window");
             context.hub.set_focus(window_id);
             update_overlay(context);
         }
-    } else {
-        tracing::debug!("No window at ({}, {})", x, y);
     }
 }
 
@@ -472,8 +466,6 @@ fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
         return false;
     }
 
-    tracing::trace!("Keypress: {keymap:?}, actions: {actions:?}");
-
     for action in actions {
         if let Err(e) = execute_action(context, &action) {
             tracing::warn!("Failed to execute action: {e:#}");
@@ -498,6 +490,7 @@ fn get_key_from_event(event: *mut CGEvent) -> String {
 }
 
 fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
+    tracing::debug!(?action, "Executing action");
     match action {
         Action::Focus(target) => match target {
             FocusTarget::Up => context.hub.focus_up(),
