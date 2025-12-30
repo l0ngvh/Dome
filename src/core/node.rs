@@ -46,7 +46,6 @@ pub(crate) struct Container {
     pub(super) children: Vec<Child>,
     /// The focusing descendant, not just direct child
     pub(super) focused: Child,
-    pub(super) title: String,
     pub(super) dimension: Dimension,
     pub(super) direction: Direction,
     pub(super) spawn_direction: Direction,
@@ -69,14 +68,12 @@ impl Container {
         workspace: WorkspaceId,
         children: Vec<Child>,
         focused: Child,
-        title: String,
         dimension: Dimension,
         direction: Direction,
     ) -> Self {
         Self {
             children,
             focused,
-            title,
             parent,
             workspace,
             dimension,
@@ -90,10 +87,6 @@ impl Container {
             fixed_width: 0.0,
             fixed_height: 0.0,
         }
-    }
-
-    pub(crate) fn title(&self) -> &str {
-        &self.title
     }
 
     pub(crate) fn is_tabbed(&self) -> bool {
@@ -184,7 +177,6 @@ pub(crate) struct Window {
     pub(super) workspace: WorkspaceId,
     pub(super) dimension: Dimension,
     pub(super) spawn_direction: Direction,
-    pub(super) title: String,
     pub(super) focused_by: HashSet<ContainerId>,
 }
 
@@ -193,18 +185,12 @@ impl Node for Window {
 }
 
 impl Window {
-    pub(super) fn new(
-        parent: Parent,
-        workspace: WorkspaceId,
-        spawn_direction: Direction,
-        title: String,
-    ) -> Self {
+    pub(super) fn new(parent: Parent, workspace: WorkspaceId, spawn_direction: Direction) -> Self {
         Self {
             parent,
             workspace,
             dimension: Dimension::default(),
             spawn_direction,
-            title,
             focused_by: HashSet::new(),
         }
     }
@@ -216,17 +202,12 @@ impl Window {
     pub(crate) fn spawn_direction(&self) -> Direction {
         self.spawn_direction
     }
-
-    pub(crate) fn title(&self) -> &str {
-        &self.title
-    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct FloatWindow {
     pub(super) workspace: WorkspaceId,
     pub(super) dimension: Dimension,
-    pub(super) title: String,
 }
 
 impl Node for FloatWindow {
@@ -234,21 +215,15 @@ impl Node for FloatWindow {
 }
 
 impl FloatWindow {
-    pub(super) fn new(workspace: WorkspaceId, dimension: Dimension, title: String) -> Self {
+    pub(super) fn new(workspace: WorkspaceId, dimension: Dimension) -> Self {
         Self {
             workspace,
             dimension,
-            title,
         }
     }
 
     pub(crate) fn dimension(&self) -> Dimension {
         self.dimension
-    }
-
-    #[expect(unused)]
-    pub(crate) fn title(&self) -> &str {
-        &self.title
     }
 }
 

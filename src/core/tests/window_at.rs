@@ -20,7 +20,7 @@ fn setup() -> Hub {
 #[test]
 fn window_at_single_window() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
+    hub.insert_tiling();
 
     // Inside window
     assert_eq!(hub.window_at(50.0, 50.0).unwrap().get(), 0);
@@ -33,8 +33,8 @@ fn window_at_single_window() {
 #[test]
 fn window_at_horizontal_layout() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
 
     // First window
     assert_eq!(hub.window_at(25.0, 50.0).unwrap().get(), 0);
@@ -46,10 +46,10 @@ fn window_at_horizontal_layout() {
 #[test]
 fn window_at_nested_containers() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W2".into());
+    hub.insert_tiling();
 
     // First window (left half)
     assert_eq!(hub.window_at(25.0, 50.0).unwrap().get(), 0);

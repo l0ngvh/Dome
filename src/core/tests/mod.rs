@@ -123,7 +123,7 @@ fn draw_float(hub: &Hub, grid: &mut [Vec<char>], float_id: FloatWindowId, border
         dim.y - border,
         dim.width + 2.0 * border,
         dim.height + 2.0 * border,
-        float.title(),
+        &format!("F{}", float_id.get()),
     );
 }
 
@@ -317,14 +317,8 @@ fn fmt_float_str(hub: &Hub, s: &mut String, float_id: FloatWindowId, indent: usi
     let f = hub.get_float(float_id);
     let dim = f.dimension();
     s.push_str(&format!(
-        "{}Float(id={}, title=\"{}\", x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
-        prefix,
-        float_id,
-        f.title(),
-        dim.x,
-        dim.y,
-        dim.width,
-        dim.height
+        "{}Float(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
+        prefix, float_id, dim.x, dim.y, dim.width, dim.height
     ));
 }
 
@@ -391,16 +385,6 @@ fn validate_hub(hub: &Hub) {
                             "Container {cid} has same direction as parent {parent_cid}"
                         );
                     }
-
-                    let focused_title = match container.focused {
-                        Child::Window(wid) => hub.get_window(wid).title().to_string(),
-                        Child::Container(ccid) => hub.get_container(ccid).title().to_string(),
-                    };
-                    assert_eq!(
-                        container.title(),
-                        focused_title,
-                        "Container {cid} title doesn't match focused child's title"
-                    );
 
                     validate_child_exists(hub, container.focused);
 

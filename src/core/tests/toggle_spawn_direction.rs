@@ -5,10 +5,10 @@ use insta::assert_snapshot;
 fn toggle_spawn_direction_creates_new_container() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W2".into());
+    hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -60,10 +60,10 @@ fn toggle_spawn_direction_creates_new_container() {
 fn delete_window_after_orientation_change() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    let w2 = hub.insert_tiling("W2".into());
+    let w2 = hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
@@ -157,9 +157,9 @@ fn delete_window_after_orientation_change() {
 fn toggle_spawn_direction_in_single_window_workspace_creates_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -208,12 +208,12 @@ fn toggle_spawn_direction_in_single_window_workspace_creates_vertical_container(
 fn toggle_spawn_direction_in_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W2".into());
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W3".into());
+    hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

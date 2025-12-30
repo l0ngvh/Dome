@@ -133,22 +133,21 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_tiling(&mut self, title: String) -> WindowId {
+    pub(crate) fn insert_tiling(&mut self) -> WindowId {
         let window_id = self.windows.allocate(Window::new(
             Parent::Workspace(self.current),
             self.current,
             Direction::default(),
-            title,
         ));
         self.attach_child_to_workspace(Child::Window(window_id), self.current);
         window_id
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_float(&mut self, dimension: Dimension, title: String) -> FloatWindowId {
-        let float_id =
-            self.float_windows
-                .allocate(FloatWindow::new(self.current, dimension, title));
+    pub(crate) fn insert_float(&mut self, dimension: Dimension) -> FloatWindowId {
+        let float_id = self
+            .float_windows
+            .allocate(FloatWindow::new(self.current, dimension));
         self.attach_float_to_workspace(self.current, float_id);
         float_id
     }
@@ -356,16 +355,13 @@ impl Hub {
         let focused = self.workspaces.get(self.current).focused?;
         match focused {
             Focus::Float(float_id) => {
-                let title = self.float_windows.get(float_id).title.clone();
                 self.delete_float(float_id);
-                let window_id = self.insert_tiling(title.clone());
-                tracing::info!("Window {title} is now tiling");
+                let window_id = self.insert_tiling();
+                tracing::info!(%window_id, "Window is now tiling");
                 Some((window_id, float_id))
             }
             Focus::Tiling(Child::Window(window_id)) => {
-                let window = self.windows.get(window_id);
-                let title = window.title.clone();
-                let dim = window.dimension;
+                let dim = self.windows.get(window_id).dimension;
                 self.delete_window(window_id);
                 let dimension = Dimension {
                     width: dim.width,
@@ -373,8 +369,8 @@ impl Hub {
                     x: self.screen.x + (self.screen.width - dim.width) / 2.0,
                     y: self.screen.y + (self.screen.height - dim.height) / 2.0,
                 };
-                let float_id = self.insert_float(dimension, title.clone());
-                tracing::info!("Window {title} is now floating");
+                let float_id = self.insert_float(dimension);
+                tracing::info!(%float_id, "Window is now floating");
                 Some((window_id, float_id))
             }
             Focus::Tiling(Child::Container(_)) => None,
@@ -546,14 +542,12 @@ impl Hub {
                     self.detach_child_from_container(direct_parent_id, child);
                     let root = self.workspaces.get(workspace_id).root.unwrap();
                     let screen = self.workspaces.get(workspace_id).screen;
-                    let title = self.get_title(child).to_string();
 
                     let new_root_id = self.containers.allocate(Container::new(
                         Parent::Workspace(workspace_id),
                         workspace_id,
                         vec![root],
                         root,
-                        title,
                         screen,
                         direction,
                     ));
@@ -664,13 +658,11 @@ impl Hub {
                 let anchor_index = container.window_position(anchor_window_id);
                 if spawn_direction != direction {
                     let anchored_child = Child::Window(anchor_window_id);
-                    let title = self.get_title(anchored_child).to_string();
                     let new_container_id = self.containers.allocate(Container::new(
                         Parent::Container(container_id),
                         workspace_id,
                         vec![anchored_child],
                         anchored_child,
-                        title,
                         dimension,
                         spawn_direction,
                     ));
@@ -687,13 +679,11 @@ impl Hub {
             }
             Parent::Workspace(workspace_id) => {
                 let screen = self.workspaces.get(workspace_id).screen;
-                let title = self.windows.get(anchor_window_id).title().to_string();
                 let parent_id = self.containers.allocate(Container::new(
                     Parent::Workspace(workspace_id),
                     workspace_id,
                     vec![Child::Window(anchor_window_id)],
                     Child::Window(anchor_window_id),
-                    title,
                     screen,
                     spawn_direction,
                 ));
@@ -726,13 +716,11 @@ impl Hub {
                 }
                 Parent::Workspace(workspace_id) => {
                     let focused_child = Child::Container(anchor_container_id);
-                    let title = self.get_title(focused_child).to_string();
                     let new_container_id = self.containers.allocate(Container::new(
                         Parent::Workspace(workspace_id),
                         workspace_id,
                         vec![focused_child],
                         focused_child,
-                        title,
                         dimension,
                         spawn_direction,
                     ));
@@ -1083,13 +1071,6 @@ impl Hub {
         }
     }
 
-    fn get_title(&self, child: Child) -> &str {
-        match child {
-            Child::Window(id) => self.windows.get(id).title(),
-            Child::Container(id) => self.containers.get(id).title(),
-        }
-    }
-
     fn set_parent(&mut self, child: Child, parent: Parent) {
         match child {
             Child::Window(id) => self.windows.get_mut(id).parent = parent,
@@ -1107,7 +1088,6 @@ impl Hub {
 
     /// Update primary focus, i.e. focus of the whole workspace
     fn focus_child(&mut self, child: Child) {
-        let title = self.get_title(child).to_string();
         let mut current = child;
         let mut iterations = 0;
         loop {
@@ -1140,7 +1120,6 @@ impl Hub {
                     }
                     let container = self.containers.get_mut(cid);
                     container.focused = child;
-                    container.title = title.clone();
                     // Update active_tab if this is a tabbed container
                     if container.is_tabbed
                         && let Some(pos) = container.children.iter().position(|c| *c == current)
@@ -1160,7 +1139,6 @@ impl Hub {
     /// Replace all references of old_child, but don't take primary focus unless old_child was the
     /// focus
     fn replace_focus(&mut self, old_child: Child, new_child: Child) {
-        let title = self.get_title(new_child).to_string();
         let (focused_by, workspace_id) = match old_child {
             Child::Window(wid) => {
                 let window = self.windows.get_mut(wid);
@@ -1184,7 +1162,6 @@ impl Hub {
             }
             let container = self.containers.get_mut(cid);
             container.focused = new_child;
-            container.title = title.clone();
         }
         let workspace = self.workspaces.get_mut(workspace_id);
         if workspace.focused == Some(Focus::Tiling(old_child)) {

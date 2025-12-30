@@ -5,9 +5,9 @@ use insta::assert_snapshot;
 fn toggle_tabbed_mode() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
-    hub.insert_tiling("W2".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_container_layout();
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -58,9 +58,9 @@ fn toggle_tabbed_mode() {
 fn focus_prev_next_tab() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
-    hub.insert_tiling("W2".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_container_layout();
     hub.focus_prev_tab();
 
@@ -155,9 +155,9 @@ fn focus_prev_next_tab() {
 fn focus_next_tab_wrapped() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
-    hub.insert_tiling("W2".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_container_layout();
     hub.focus_next_tab();
 
@@ -209,9 +209,9 @@ fn focus_next_tab_wrapped() {
 fn focus_prev_tab_wraps() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
-    hub.insert_tiling("W2".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_container_layout();
     hub.focus_prev_tab();
     hub.focus_prev_tab();
@@ -265,8 +265,8 @@ fn focus_prev_tab_wraps() {
 fn toggle_tabbed_off() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_container_layout();
     hub.toggle_container_layout();
 
@@ -317,11 +317,11 @@ fn toggle_tabbed_off() {
 fn tabbed_container_takes_one_slot() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W2".into());
-    hub.insert_tiling("W3".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
 
     hub.toggle_container_layout();
 
@@ -376,11 +376,11 @@ fn tabbed_container_takes_one_slot() {
 fn vertical_to_tabbed() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W1".into());
-    hub.insert_tiling("W2".into());
-    hub.insert_tiling("W3".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.focus_parent();
     hub.toggle_container_layout();
 
@@ -433,14 +433,14 @@ fn vertical_to_tabbed() {
 fn container_in_tabbed_container() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W2".into());
-    hub.insert_tiling("W3".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
 
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W4".into());
+    hub.insert_tiling();
 
     hub.focus_parent();
     hub.focus_parent();
@@ -554,15 +554,15 @@ fn container_in_tabbed_container() {
 fn change_tab_shows_container_focus() {
     let mut hub = setup();
 
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W2".into());
+    hub.insert_tiling();
     hub.toggle_container_layout();
-    hub.insert_tiling("W3".into());
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W4".into());
-    hub.insert_tiling("W5".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
 
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
@@ -724,9 +724,9 @@ fn change_tab_shows_container_focus() {
 #[test]
 fn set_focus_updates_active_tab() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
-    hub.insert_tiling("W2".into());
+    let w0 = hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_container_layout();
 
     // Focus W0 should update active_tab to 0
@@ -778,9 +778,9 @@ fn set_focus_updates_active_tab() {
 #[test]
 fn delete_active_tab_updates_active_tab() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
-    let w2 = hub.insert_tiling("W2".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
+    let w2 = hub.insert_tiling();
     hub.toggle_container_layout();
 
     // W2 is active (index 2), delete it

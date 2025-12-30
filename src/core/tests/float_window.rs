@@ -5,19 +5,16 @@ use insta::assert_snapshot;
 #[test]
 fn insert_float_window() {
     let mut hub = setup();
-    hub.insert_float(
-        Dimension {
-            x: 10.0,
-            y: 5.0,
-            width: 30.0,
-            height: 20.0,
-        },
-        "Float1".into(),
-    );
-    assert_snapshot!(snapshot(&hub), @r#"
+    hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), title="Float1", x=10.00, y=5.00, w=30.00, h=20.00)
+        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
       )
     )
 
@@ -36,7 +33,7 @@ fn insert_float_window() {
              *                              *                                                                                                             
              *                              *                                                                                                             
              *                              *                                                                                                             
-             *            Float1            *                                                                                                             
+             *              F0              *                                                                                                             
              *                              *                                                                                                             
              *                              *                                                                                                             
              *                              *                                                                                                             
@@ -47,27 +44,24 @@ fn insert_float_window() {
              *                              *                                                                                                             
              *                              *                                                                                                             
              ********************************
-    "#);
+    ");
 }
 
 #[test]
 fn float_window_with_tiling() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
-    hub.insert_float(
-        Dimension {
-            x: 50.0,
-            y: 5.0,
-            width: 40.0,
-            height: 15.0,
-        },
-        "Float1".into(),
-    );
-    assert_snapshot!(snapshot(&hub), @r#"
+    hub.insert_tiling();
+    hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 40.0,
+        height: 15.0,
+    });
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
         Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
-        Float(id=FloatWindowId(0), title="Float1", x=50.00, y=5.00, w=40.00, h=15.00)
+        Float(id=FloatWindowId(0), x=50.00, y=5.00, w=40.00, h=15.00)
       )
     )
 
@@ -84,7 +78,7 @@ fn float_window_with_tiling() {
     |                                                *                                        *                                                          |
     |                                                *                                        *                                                          |
     |                                                *                                        *                                                          |
-    |                                                *                 Float1                 *                                                          |
+    |                                                *                   F0                   *                                                          |
     |                                                *                                        *                                                          |
     |                                                *                        W0              *                                                          |
     |                                                *                                        *                                                          |
@@ -101,22 +95,19 @@ fn float_window_with_tiling() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    "#);
+    ");
 }
 
 #[test]
 fn delete_float_window() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
-    let f0 = hub.insert_float(
-        Dimension {
-            x: 50.0,
-            y: 5.0,
-            width: 40.0,
-            height: 15.0,
-        },
-        "Float1".into(),
-    );
+    hub.insert_tiling();
+    let f0 = hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 40.0,
+        height: 15.0,
+    });
     hub.delete_float(f0);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -161,24 +152,21 @@ fn delete_float_window() {
 #[test]
 fn move_float_to_workspace() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
-    hub.insert_float(
-        Dimension {
-            x: 50.0,
-            y: 5.0,
-            width: 40.0,
-            height: 15.0,
-        },
-        "Float1".into(),
-    );
+    hub.insert_tiling();
+    hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 40.0,
+        height: 15.0,
+    });
     hub.move_focused_to_workspace(1);
-    assert_snapshot!(snapshot(&hub), @r#"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
       )
       Workspace(id=WorkspaceId(1), name=1, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), title="Float1", x=50.00, y=5.00, w=40.00, h=15.00)
+        Float(id=FloatWindowId(0), x=50.00, y=5.00, w=40.00, h=15.00)
       )
     )
 
@@ -212,22 +200,19 @@ fn move_float_to_workspace() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
-    "#);
+    ");
 }
 
 #[test]
 fn focus_falls_back_to_tiling_after_float_delete() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
-    let f0 = hub.insert_float(
-        Dimension {
-            x: 50.0,
-            y: 5.0,
-            width: 40.0,
-            height: 15.0,
-        },
-        "Float1".into(),
-    );
+    hub.insert_tiling();
+    let f0 = hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 40.0,
+        height: 15.0,
+    });
     // Float is focused after insert
     hub.delete_float(f0);
     // Focus should fall back to tiling window
@@ -274,22 +259,19 @@ fn focus_falls_back_to_tiling_after_float_delete() {
 #[test]
 fn focus_falls_back_to_container_focus_after_float_delete() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
-    hub.insert_tiling("W2".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
 
     // Focus W1 (middle window)
     hub.focus_left();
 
-    let f0 = hub.insert_float(
-        Dimension {
-            x: 50.0,
-            y: 5.0,
-            width: 40.0,
-            height: 15.0,
-        },
-        "Float0".into(),
-    );
+    let f0 = hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 40.0,
+        height: 15.0,
+    });
 
     hub.delete_float(f0);
 
@@ -341,31 +323,25 @@ fn focus_falls_back_to_container_focus_after_float_delete() {
 #[test]
 fn focus_falls_back_to_last_float() {
     let mut hub = setup();
-    hub.insert_float(
-        Dimension {
-            x: 10.0,
-            y: 5.0,
-            width: 30.0,
-            height: 10.0,
-        },
-        "Float0".into(),
-    );
-    let f1 = hub.insert_float(
-        Dimension {
-            x: 50.0,
-            y: 5.0,
-            width: 30.0,
-            height: 10.0,
-        },
-        "Float1".into(),
-    );
+    hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 10.0,
+    });
+    let f1 = hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 30.0,
+        height: 10.0,
+    });
     // f1 is focused
     hub.delete_float(f1);
     // Focus should fall back to f0
-    assert_snapshot!(snapshot(&hub), @r#"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), title="Float0", x=10.00, y=5.00, w=30.00, h=10.00)
+        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=10.00)
       )
     )
 
@@ -379,24 +355,24 @@ fn focus_falls_back_to_last_float() {
              *                              *                                                                                                             
              *                              *                                                                                                             
              *                              *                                                                                                             
-             *            Float0            *                                                                                                             
+             *              F0              *                                                                                                             
              *                              *                                                                                                             
              *                              *                                                                                                             
              *                              *                                                                                                             
              *                              *                                                                                                             
              ********************************
-    "#);
+    ");
 }
 
 #[test]
 fn toggle_tiling_to_float() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
+    hub.insert_tiling();
     hub.toggle_float();
-    assert_snapshot!(snapshot(&hub), @r#"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), title="W0", x=1.00, y=1.00, w=148.00, h=28.00)
+        Float(id=FloatWindowId(0), x=1.00, y=1.00, w=148.00, h=28.00)
       )
     )
 
@@ -415,7 +391,7 @@ fn toggle_tiling_to_float() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
+    *                                                                         F0                                                                         *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
@@ -430,21 +406,18 @@ fn toggle_tiling_to_float() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
-    "#);
+    ");
 }
 
 #[test]
 fn toggle_float_to_tiling() {
     let mut hub = setup();
-    hub.insert_float(
-        Dimension {
-            x: 50.0,
-            y: 5.0,
-            width: 40.0,
-            height: 15.0,
-        },
-        "Float1".into(),
-    );
+    hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 40.0,
+        height: 15.0,
+    });
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -489,14 +462,14 @@ fn toggle_float_to_tiling() {
 #[test]
 fn toggle_tiling_to_float_with_existing_tiling() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
+    hub.insert_tiling();
     hub.toggle_float();
-    assert_snapshot!(snapshot(&hub), @r#"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
         Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
-        Float(id=FloatWindowId(0), title="W1", x=38.50, y=1.00, w=73.00, h=28.00)
+        Float(id=FloatWindowId(0), x=38.50, y=1.00, w=73.00, h=28.00)
       )
     )
 
@@ -515,7 +488,7 @@ fn toggle_tiling_to_float_with_existing_tiling() {
     |                                     *                                                                         *                                    |
     |                                     *                                                                         *                                    |
     |                                     *                                                                         *                                    |
-    |                                     *                                   W1                                    *                                    |
+    |                                     *                                   F0                                    *                                    |
     |                                     *                                                                         *                                    |
     |                                     *                                                                         *                                    |
     |                                     *                                                                         *                                    |
@@ -530,26 +503,23 @@ fn toggle_tiling_to_float_with_existing_tiling() {
     |                                     *                                                                         *                                    |
     |                                     *                                                                         *                                    |
     +-------------------------------------***************************************************************************------------------------------------+
-    "#);
+    ");
 }
 
 #[test]
 fn toggle_float_to_tiling_with_nested_containers() {
     let mut hub = setup();
-    hub.insert_tiling("W0".into());
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W1".into());
+    hub.insert_tiling();
     hub.toggle_spawn_direction();
-    hub.insert_tiling("W2".into());
-    hub.insert_float(
-        Dimension {
-            x: 50.0,
-            y: 5.0,
-            width: 40.0,
-            height: 15.0,
-        },
-        "Float1".into(),
-    );
+    hub.insert_tiling();
+    hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 40.0,
+        height: 15.0,
+    });
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

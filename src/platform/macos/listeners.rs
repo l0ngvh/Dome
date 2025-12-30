@@ -358,12 +358,12 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowCon
         }
         let title = mac_window.title();
         if mac_window.should_tile() {
-            let id = context.hub.insert_tiling(title.to_owned());
+            let id = context.hub.insert_tiling();
             tracing::info!(%id, %title, "New tiling window");
             registry.insert_tiling(id, mac_window);
         } else {
             let dim = mac_window.dimension();
-            let id = context.hub.insert_float(dim, title.to_owned());
+            let id = context.hub.insert_float(dim);
             tracing::info!(%id, %title, "New float window");
             registry.insert_float(id, mac_window);
         }
@@ -568,14 +568,14 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
             };
             if mac_window.is_manageable() {
                 if mac_window.should_tile() {
-                    let window_id = context.hub.insert_tiling(mac_window.title().to_owned());
+                    let window_id = context.hub.insert_tiling();
                     context
                         .registry
                         .borrow_mut()
                         .insert_tiling(window_id, mac_window);
                 } else {
                     let dim = mac_window.dimension();
-                    let float_id = context.hub.insert_float(dim, mac_window.title().to_owned());
+                    let float_id = context.hub.insert_float(dim);
                     context
                         .registry
                         .borrow_mut()
