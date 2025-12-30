@@ -534,6 +534,7 @@ impl Hub {
                     );
                     self.detach_child_from_container(direct_parent_id, child);
                     self.attach_child_to_container(child, container_id, Some(insert_pos));
+                    self.focus_child(child);
                     self.balance_workspace(self.current);
                     return;
                 }
@@ -543,21 +544,23 @@ impl Hub {
                     let root = self.workspaces.get(workspace_id).root.unwrap();
                     let screen = self.workspaces.get(workspace_id).screen;
 
-                    let new_root_id = self.containers.allocate(Container::new(
+                    let children = if forward {
+                        vec![root, child]
+                    } else {
+                        vec![child, root]
+                    };
+                    let new_root_id = self.create_container_with_children(
+                        children,
+                        root,
                         Parent::Workspace(workspace_id),
                         workspace_id,
-                        vec![root],
-                        root,
                         screen,
                         direction,
-                    ));
-                    self.set_parent(root, Parent::Container(new_root_id));
+                    );
                     self.workspaces.get_mut(workspace_id).root =
                         Some(Child::Container(new_root_id));
 
-                    let insert_pos = if forward { 1 } else { 0 };
-                    self.attach_child_to_container(child, new_root_id, Some(insert_pos));
-
+                    self.focus_child(child);
                     self.balance_workspace(workspace_id);
                     return;
                 }
@@ -623,6 +626,7 @@ impl Hub {
                 self.attach_child_to_matching_container_closest_to(child, container_id)
             }
         }
+        self.focus_child(child);
         self.balance_workspace(workspace_id);
     }
 
@@ -658,38 +662,34 @@ impl Hub {
                 let anchor_index = container.window_position(anchor_window_id);
                 if spawn_direction != direction {
                     let anchored_child = Child::Window(anchor_window_id);
-                    let new_container_id = self.containers.allocate(Container::new(
+                    let new_container_id = self.create_container_with_children(
+                        vec![anchored_child, child],
+                        anchored_child,
                         Parent::Container(container_id),
                         workspace_id,
-                        vec![anchored_child],
-                        anchored_child,
                         dimension,
                         spawn_direction,
-                    ));
+                    );
                     self.containers.get_mut(container_id).replace_child(
                         Child::Window(anchor_window_id),
                         Child::Container(new_container_id),
                     );
-                    self.windows.get_mut(anchor_window_id).parent =
-                        Parent::Container(new_container_id);
-                    self.attach_child_to_container(child, new_container_id, None);
                 } else {
                     self.attach_child_to_container(child, container_id, Some(anchor_index + 1));
                 }
             }
             Parent::Workspace(workspace_id) => {
                 let screen = self.workspaces.get(workspace_id).screen;
-                let parent_id = self.containers.allocate(Container::new(
+                let anchor_child = Child::Window(anchor_window_id);
+                let parent_id = self.create_container_with_children(
+                    vec![anchor_child, child],
+                    anchor_child,
                     Parent::Workspace(workspace_id),
                     workspace_id,
-                    vec![Child::Window(anchor_window_id)],
-                    Child::Window(anchor_window_id),
                     screen,
                     spawn_direction,
-                ));
-                self.windows.get_mut(anchor_window_id).parent = Parent::Container(parent_id);
+                );
                 self.workspaces.get_mut(workspace_id).root = Some(Child::Container(parent_id));
-                self.attach_child_to_container(child, parent_id, None);
             }
         }
     }
@@ -715,25 +715,72 @@ impl Hub {
                     self.attach_child_to_container(child, parent_id, Some(anchor_index + 1));
                 }
                 Parent::Workspace(workspace_id) => {
-                    let focused_child = Child::Container(anchor_container_id);
-                    let new_container_id = self.containers.allocate(Container::new(
+                    let anchor_child = Child::Container(anchor_container_id);
+                    let new_container_id = self.create_container_with_children(
+                        vec![anchor_child, child],
+                        child,
                         Parent::Workspace(workspace_id),
                         workspace_id,
-                        vec![focused_child],
-                        focused_child,
                         dimension,
                         spawn_direction,
-                    ));
-                    self.containers.get_mut(anchor_container_id).parent =
-                        Parent::Container(new_container_id);
+                    );
                     self.workspaces.get_mut(workspace_id).root =
                         Some(Child::Container(new_container_id));
-                    self.attach_child_to_container(child, new_container_id, None);
                 }
             }
         } else {
             self.attach_child_to_container(child, anchor_container_id, None);
         }
+    }
+
+    fn toggle_direction(&mut self, container_id: ContainerId) {
+        let mut stack = vec![container_id];
+        for _ in 0..10000 {
+            let Some(id) = stack.pop() else {
+                return;
+            };
+            self.containers.get_mut(id).toggle_direction();
+            for &child in &self.containers.get(id).children {
+                if let Child::Container(child_id) = child {
+                    stack.push(child_id);
+                }
+            }
+        }
+        panic!("cycle detected");
+    }
+
+    fn create_container_with_children(
+        &mut self,
+        children: Vec<Child>,
+        focused: Child,
+        parent: Parent,
+        workspace_id: WorkspaceId,
+        dimension: Dimension,
+        direction: Direction,
+    ) -> ContainerId {
+        let container_id = self.containers.allocate(Container::new(
+            parent,
+            workspace_id,
+            children.clone(),
+            focused,
+            dimension,
+            direction,
+        ));
+        for child in children {
+            match child {
+                Child::Window(wid) => {
+                    self.windows.get_mut(wid).spawn_direction = direction;
+                    self.windows.get_mut(wid).parent = Parent::Container(container_id);
+                }
+                Child::Container(cid) => {
+                    if self.containers.get(cid).direction == direction {
+                        self.toggle_direction(cid);
+                    }
+                    self.containers.get_mut(cid).parent = Parent::Container(container_id);
+                }
+            }
+        }
+        container_id
     }
 
     fn attach_child_to_container(
@@ -743,61 +790,24 @@ impl Hub {
         insert_pos: Option<usize>,
     ) {
         let parent_direction = self.containers.get(container_id).direction;
-        let focus_target = match child {
-            Child::Window(_) => child,
-            Child::Container(id) => self.containers.get(id).focused,
-        };
         match child {
-            Child::Window(insert_id) => {
-                let window = self.windows.get_mut(insert_id);
-                window.spawn_direction = parent_direction;
-                window.parent = Parent::Container(container_id);
-                let parent = self.containers.get_mut(container_id);
-                if let Some(insert_pos) = insert_pos {
-                    parent.children.insert(insert_pos, child);
-                } else {
-                    parent.children.push(child);
-                }
+            Child::Window(wid) => {
+                self.windows.get_mut(wid).spawn_direction = parent_direction;
+                self.windows.get_mut(wid).parent = Parent::Container(container_id);
             }
-            Child::Container(insert_id) => {
-                if parent_direction == self.containers.get(insert_id).direction {
-                    // Collapsing container since direction matches
-                    let mut children: Vec<_> = self
-                        .containers
-                        .get_mut(insert_id)
-                        .children
-                        .drain(..)
-                        .collect();
-                    for &c in &children {
-                        self.unfocus(c, insert_id);
-                        self.set_parent(c, Parent::Container(container_id));
-                    }
-                    self.containers.delete(insert_id);
-                    if let Some(insert_pos) = insert_pos {
-                        self.containers
-                            .get_mut(container_id)
-                            .children
-                            .splice(insert_pos..insert_pos, children);
-                    } else {
-                        self.containers
-                            .get_mut(container_id)
-                            .children
-                            .append(&mut children);
-                    }
-                } else {
-                    self.containers.get_mut(insert_id).parent = Parent::Container(container_id);
-                    if let Some(anchor_index) = insert_pos {
-                        self.containers
-                            .get_mut(container_id)
-                            .children
-                            .insert(anchor_index, child);
-                    } else {
-                        self.containers.get_mut(container_id).children.push(child);
-                    }
+            Child::Container(cid) => {
+                if parent_direction == self.containers.get(cid).direction {
+                    self.toggle_direction(cid);
                 }
+                self.containers.get_mut(cid).parent = Parent::Container(container_id);
             }
         }
-        self.focus_child(focus_target);
+        let parent = self.containers.get_mut(container_id);
+        if let Some(pos) = insert_pos {
+            parent.children.insert(pos, child);
+        } else {
+            parent.children.push(child);
+        }
     }
 
     fn balance_workspace(&mut self, workspace_id: WorkspaceId) {

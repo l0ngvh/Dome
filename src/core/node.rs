@@ -137,6 +137,13 @@ impl Container {
             self.children[pos] = new;
         }
     }
+
+    pub(super) fn toggle_direction(&mut self) {
+        self.direction = match self.direction {
+            Direction::Horizontal => Direction::Vertical,
+            Direction::Vertical => Direction::Horizontal,
+        };
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
