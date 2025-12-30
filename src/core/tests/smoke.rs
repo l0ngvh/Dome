@@ -65,141 +65,153 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
             let op = ALL_OPS[rng.random_range(0..ALL_OPS.len())];
 
             let op_str = match op {
-            Op::InsertTiling => {
-                let id = hub.insert_tiling();
-                windows.push(id);
-                format!("InsertTiling -> {id}")
-            }
-            Op::DeleteWindow => {
-                if windows.is_empty() {
-                    continue;
+                Op::InsertTiling => {
+                    let id = hub.insert_tiling();
+                    windows.push(id);
+                    format!("InsertTiling -> {id}")
                 }
-                let idx = rng.random_range(0..windows.len());
-                let id = windows.remove(idx);
-                hub.delete_window(id);
-                format!("DeleteWindow({id})")
-            }
-            Op::InsertFloat => {
-                let dim = Dimension {
-                    x: rng.random_range(0.0..100.0),
-                    y: rng.random_range(0.0..20.0),
-                    width: rng.random_range(10.0..50.0),
-                    height: rng.random_range(5.0..15.0),
-                };
-                let id = hub.insert_float(dim);
-                floats.push(id);
-                format!("InsertFloat -> {id}")
-            }
-            Op::DeleteFloat => {
-                if floats.is_empty() {
-                    continue;
-                }
-                let idx = rng.random_range(0..floats.len());
-                let id = floats.remove(idx);
-                hub.delete_float(id);
-                format!("DeleteFloat({id})")
-            }
-            Op::FocusLeft => {
-                hub.focus_left();
-                "FocusLeft".into()
-            }
-            Op::FocusRight => {
-                hub.focus_right();
-                "FocusRight".into()
-            }
-            Op::FocusUp => {
-                hub.focus_up();
-                "FocusUp".into()
-            }
-            Op::FocusDown => {
-                hub.focus_down();
-                "FocusDown".into()
-            }
-            Op::MoveLeft => {
-                hub.move_left();
-                "MoveLeft".into()
-            }
-            Op::MoveRight => {
-                hub.move_right();
-                "MoveRight".into()
-            }
-            Op::MoveUp => {
-                hub.move_up();
-                "MoveUp".into()
-            }
-            Op::MoveDown => {
-                hub.move_down();
-                "MoveDown".into()
-            }
-            Op::ToggleSpawnDirection => {
-                hub.toggle_spawn_direction();
-                "ToggleSpawnDirection".into()
-            }
-            Op::FocusParent => {
-                hub.focus_parent();
-                "FocusParent".into()
-            }
-            Op::ToggleContainerLayout => {
-                hub.toggle_container_layout();
-                "ToggleContainerLayout".into()
-            }
-            Op::FocusNextTab => {
-                hub.focus_next_tab();
-                "FocusNextTab".into()
-            }
-            Op::FocusPrevTab => {
-                hub.focus_prev_tab();
-                "FocusPrevTab".into()
-            }
-            Op::ToggleFloat => {
-                if let Some((win_id, float_id)) = hub.toggle_float() {
-                    if windows.contains(&win_id) {
-                        // Tiling -> Float
-                        windows.retain(|&w| w != win_id);
-                        floats.push(float_id);
-                        format!("ToggleFloat({win_id} -> {float_id})")
-                    } else {
-                        // Float -> Tiling
-                        floats.retain(|&f| f != float_id);
-                        windows.push(win_id);
-                        format!("ToggleFloat({float_id} -> {win_id})")
+                Op::DeleteWindow => {
+                    if windows.is_empty() {
+                        continue;
                     }
-                } else {
-                    continue;
+                    let idx = rng.random_range(0..windows.len());
+                    let id = windows.remove(idx);
+                    hub.delete_window(id);
+                    format!("DeleteWindow({id})")
                 }
-            }
-            Op::MoveToWorkspace => {
-                let ws = rng.random_range(0..5);
-                hub.move_focused_to_workspace(ws);
-                format!("MoveToWorkspace({ws})")
-            }
-            Op::FocusWorkspace => {
-                let ws = rng.random_range(0..5);
-                hub.focus_workspace(ws);
-                format!("FocusWorkspace({ws})")
-            }
-            Op::SetFocus => {
-                if windows.is_empty() {
-                    continue;
+                Op::InsertFloat => {
+                    let dim = Dimension {
+                        x: rng.random_range(0.0..100.0),
+                        y: rng.random_range(0.0..20.0),
+                        width: rng.random_range(10.0..50.0),
+                        height: rng.random_range(5.0..15.0),
+                    };
+                    let id = hub.insert_float(dim);
+                    floats.push(id);
+                    format!("InsertFloat -> {id}")
                 }
-                let idx = rng.random_range(0..windows.len());
-                let id = windows[idx];
-                hub.set_focus(id);
-                format!("SetFocus({id})")
-            }
-            Op::SetFloatFocus => {
-                if floats.is_empty() {
-                    continue;
+                Op::DeleteFloat => {
+                    if floats.is_empty() {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..floats.len());
+                    let id = floats.remove(idx);
+                    hub.delete_float(id);
+                    format!("DeleteFloat({id})")
                 }
-                let idx = rng.random_range(0..floats.len());
-                let id = floats[idx];
-                hub.set_float_focus(id);
-                format!("SetFloatFocus({id})")
-            }
-        };
+                Op::FocusLeft => {
+                    hub.focus_left();
+                    "FocusLeft".into()
+                }
+                Op::FocusRight => {
+                    hub.focus_right();
+                    "FocusRight".into()
+                }
+                Op::FocusUp => {
+                    hub.focus_up();
+                    "FocusUp".into()
+                }
+                Op::FocusDown => {
+                    hub.focus_down();
+                    "FocusDown".into()
+                }
+                Op::MoveLeft => {
+                    hub.move_left();
+                    "MoveLeft".into()
+                }
+                Op::MoveRight => {
+                    hub.move_right();
+                    "MoveRight".into()
+                }
+                Op::MoveUp => {
+                    hub.move_up();
+                    "MoveUp".into()
+                }
+                Op::MoveDown => {
+                    hub.move_down();
+                    "MoveDown".into()
+                }
+                Op::ToggleSpawnDirection => {
+                    hub.toggle_spawn_direction();
+                    "ToggleSpawnDirection".into()
+                }
+                Op::FocusParent => {
+                    hub.focus_parent();
+                    "FocusParent".into()
+                }
+                Op::ToggleContainerLayout => {
+                    hub.toggle_container_layout();
+                    "ToggleContainerLayout".into()
+                }
+                Op::FocusNextTab => {
+                    hub.focus_next_tab();
+                    "FocusNextTab".into()
+                }
+                Op::FocusPrevTab => {
+                    hub.focus_prev_tab();
+                    "FocusPrevTab".into()
+                }
+                Op::ToggleFloat => {
+                    if let Some((win_id, float_id)) = hub.toggle_float() {
+                        if windows.contains(&win_id) {
+                            // Tiling -> Float
+                            windows.retain(|&w| w != win_id);
+                            floats.push(float_id);
+                            format!("ToggleFloat({win_id} -> {float_id})")
+                        } else {
+                            // Float -> Tiling
+                            floats.retain(|&f| f != float_id);
+                            windows.push(win_id);
+                            format!("ToggleFloat({float_id} -> {win_id})")
+                        }
+                    } else {
+                        continue;
+                    }
+                }
+                Op::MoveToWorkspace => {
+                    let ws = rng.random_range(0..5);
+                    hub.move_focused_to_workspace(ws);
+                    format!("MoveToWorkspace({ws})")
+                }
+                Op::FocusWorkspace => {
+                    let ws = rng.random_range(0..5);
+                    hub.focus_workspace(ws);
+                    format!("FocusWorkspace({ws})")
+                }
+                Op::SetFocus => {
+                    if windows.is_empty() {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..windows.len());
+                    let id = windows[idx];
+                    hub.set_focus(id);
+                    format!("SetFocus({id})")
+                }
+                Op::SetFloatFocus => {
+                    if floats.is_empty() {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..floats.len());
+                    let id = floats[idx];
+                    hub.set_float_focus(id);
+                    format!("SetFloatFocus({id})")
+                }
+            };
 
             history.push(op_str);
 
+            validate_hub(&hub);
+        }
+
+        // Exhaust all windows and floats to ensure none are in a dangling state
+        for id in floats.drain(..) {
+            history.push(format!("Cleanup: DeleteFloat({id})"));
+            hub.delete_float(id);
+            validate_hub(&hub);
+        }
+        for id in windows.drain(..) {
+            history.push(format!("Cleanup: DeleteWindow({id})"));
+            hub.delete_window(id);
             validate_hub(&hub);
         }
     }));

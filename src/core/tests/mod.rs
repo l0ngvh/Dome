@@ -333,6 +333,23 @@ fn validate_hub(hub: &Hub) {
         if let Some(Focus::Tiling(child)) = workspace.focused() {
             validate_child_exists(hub, child);
         }
+        if let Some(Focus::Float(fid)) = workspace.focused() {
+            hub.get_float(fid); // Validate float exists
+            assert!(
+                workspace.float_windows().contains(&fid),
+                "Workspace {workspace_id} focused on float {fid} but float not in workspace"
+            );
+        }
+
+        // Validate all floats in workspace
+        for &fid in workspace.float_windows() {
+            let float = hub.get_float(fid);
+            assert_eq!(
+                float.workspace, workspace_id,
+                "Float {fid} has wrong workspace"
+            );
+        }
+
         let Some(root) = workspace.root() else {
             continue;
         };

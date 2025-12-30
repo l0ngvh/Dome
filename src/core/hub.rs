@@ -212,6 +212,17 @@ impl Hub {
         // If this container was being focused, changing focus to last_child regardless of whether
         // it's a container makes sense. Don't need to focus just window here
         self.replace_focus(Child::Container(container_id), last_child);
+
+        // When promoting a container to grandparent, ensure direction invariant is maintained
+        if let (Child::Container(child_cid), Parent::Container(gp_cid)) = (last_child, grandparent)
+        {
+            let child_dir = self.containers.get(child_cid).direction;
+            let gp_dir = self.containers.get(gp_cid).direction;
+            if child_dir == gp_dir {
+                self.toggle_direction(child_cid);
+            }
+        }
+
         self.set_parent(last_child, grandparent);
         let focused = self.containers.get(container_id).focused;
         self.unfocus(focused, container_id);
