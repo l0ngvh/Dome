@@ -198,6 +198,35 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
+    pub(crate) fn toggle_direction(&mut self) {
+        let Some(Focus::Tiling(child)) = self.workspaces.get(self.current).focused else {
+            return;
+        };
+        let mut root_id = match child {
+            Child::Container(id) => id,
+            Child::Window(_) => {
+                let Parent::Container(id) = self.get_parent(child) else {
+                    return;
+                };
+                id
+            }
+        };
+        let mut i = 0;
+        loop {
+            if i >= 10000 {
+                panic!("cycle detected");
+            }
+            let Parent::Container(parent_id) = self.containers.get(root_id).parent else {
+                break;
+            };
+            root_id = parent_id;
+            i += 1;
+        }
+        self.toggle_container_direction(root_id);
+        self.balance_workspace(self.current);
+    }
+
+    #[tracing::instrument(skip(self))]
     pub(crate) fn focus_parent(&mut self) {
         let Some(Focus::Tiling(child)) = self.workspaces.get(self.current).focused else {
             return;
@@ -567,7 +596,7 @@ impl Hub {
         }
     }
 
-    fn toggle_direction(&mut self, container_id: ContainerId) {
+    fn toggle_container_direction(&mut self, container_id: ContainerId) {
         let mut stack = vec![container_id];
         for _ in 0..10000 {
             let Some(id) = stack.pop() else {
@@ -611,7 +640,7 @@ impl Hub {
                 }
                 Child::Container(cid) => {
                     if self.containers.get(cid).direction == direction {
-                        self.toggle_direction(cid);
+                        self.toggle_container_direction(cid);
                     }
                     self.containers.get_mut(cid).parent = Parent::Container(container_id);
                 }
@@ -636,7 +665,7 @@ impl Hub {
             }
             Child::Container(cid) => {
                 if parent_direction == self.containers.get(cid).direction {
-                    self.toggle_direction(cid);
+                    self.toggle_container_direction(cid);
                 }
                 self.containers.get_mut(cid).parent = Parent::Container(container_id);
             }
@@ -955,7 +984,7 @@ impl Hub {
             let child_dir = self.containers.get(child_cid).direction;
             let gp_dir = self.containers.get(gp_cid).direction;
             if child_dir == gp_dir {
-                self.toggle_direction(child_cid);
+                self.toggle_container_direction(child_cid);
             }
         }
 

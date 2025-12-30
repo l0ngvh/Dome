@@ -18,6 +18,7 @@ enum Op {
     MoveUp,
     MoveDown,
     ToggleSpawnDirection,
+    ToggleDirection,
     FocusParent,
     ToggleContainerLayout,
     FocusNextTab,
@@ -43,6 +44,7 @@ const ALL_OPS: &[Op] = &[
     Op::MoveUp,
     Op::MoveDown,
     Op::ToggleSpawnDirection,
+    Op::ToggleDirection,
     Op::FocusParent,
     Op::ToggleContainerLayout,
     Op::FocusNextTab,
@@ -134,6 +136,10 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                 Op::ToggleSpawnDirection => {
                     hub.toggle_spawn_direction();
                     "ToggleSpawnDirection".into()
+                }
+                Op::ToggleDirection => {
+                    hub.toggle_direction();
+                    "ToggleDirection".into()
                 }
                 Op::FocusParent => {
                     hub.focus_parent();

@@ -507,6 +507,7 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
         },
         Action::Toggle(target) => match target {
             ToggleTarget::SpawnDirection => context.hub.toggle_spawn_direction(),
+            ToggleTarget::Direction => context.hub.toggle_direction(),
             ToggleTarget::Layout => context.hub.toggle_container_layout(),
             ToggleTarget::Float => {
                 if let Some((window_id, float_id)) = context.hub.toggle_float() {

@@ -34,6 +34,7 @@ pub enum MoveTarget {
 #[derive(Debug, Clone)]
 pub enum ToggleTarget {
     SpawnDirection,
+    Direction,
     Layout,
     Float,
 }
@@ -74,6 +75,7 @@ impl FromStr for Action {
             ["move", "right"] => Ok(Action::Move(MoveTarget::Right)),
             ["move", "workspace", n] => Ok(Action::Move(MoveTarget::Workspace(n.parse()?))),
             ["toggle", "spawn_direction"] => Ok(Action::Toggle(ToggleTarget::SpawnDirection)),
+            ["toggle", "direction"] => Ok(Action::Toggle(ToggleTarget::Direction)),
             ["toggle", "layout"] => Ok(Action::Toggle(ToggleTarget::Layout)),
             ["toggle", "float"] => Ok(Action::Toggle(ToggleTarget::Float)),
             _ => Err(anyhow!("Unknown action: {}", s)),
@@ -128,6 +130,13 @@ fn default_keymaps() -> HashMap<Keymap, Vec<Action>> {
             modifiers: Modifiers::CMD,
         },
         vec![Action::Toggle(ToggleTarget::SpawnDirection)],
+    );
+    keymaps.insert(
+        Keymap {
+            key: "d".into(),
+            modifiers: Modifiers::CMD,
+        },
+        vec![Action::Toggle(ToggleTarget::Direction)],
     );
     keymaps.insert(
         Keymap {

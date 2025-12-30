@@ -12,6 +12,7 @@ mod move_to_workspace;
 mod set_focus;
 mod smoke;
 mod tabbed;
+mod toggle_direction;
 mod toggle_spawn_direction;
 mod window_at;
 

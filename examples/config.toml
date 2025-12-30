@@ -35,6 +35,7 @@ active_tab_background_color = "#4d4d66"
 "cmd+shift+8" = ["move workspace 8"]
 "cmd+shift+9" = ["move workspace 9"]
 "cmd+e" = ["toggle spawn_direction"]
+"cmd+d" = ["toggle direction"]
 "cmd+b" = ["toggle layout"]
 "cmd+p" = ["focus parent"]
 "cmd+h" = ["focus left"]
