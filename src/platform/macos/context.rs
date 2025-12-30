@@ -146,14 +146,14 @@ impl WindowRegistry {
     }
 
     pub(super) fn update_title(&mut self, cf_hash: usize) {
-        if let Some(window_id) = self.hash_to_tiling.get(&cf_hash) {
-            if let Some(window) = self.tiling_to_window.get_mut(window_id) {
-                window.update_title();
-            }
-        } else if let Some(float_id) = self.hash_to_float.get(&cf_hash) {
-            if let Some(window) = self.float_to_window.get_mut(float_id) {
-                window.update_title();
-            }
+        if let Some(window_id) = self.hash_to_tiling.get(&cf_hash)
+            && let Some(window) = self.tiling_to_window.get_mut(window_id)
+        {
+            window.update_title();
+        } else if let Some(float_id) = self.hash_to_float.get(&cf_hash)
+            && let Some(window) = self.float_to_window.get_mut(float_id)
+        {
+            window.update_title();
         }
     }
 }
@@ -162,11 +162,18 @@ pub(super) struct WindowContext {
     pub(super) hub: Hub,
     pub(super) tiling_overlay: Retained<OverlayView>,
     pub(super) float_overlay: Retained<OverlayView>,
+    // To be used in block2, as it only allows Fn, not FnMut
     pub(super) registry: RefCell<WindowRegistry>,
     pub(super) config: Config,
     pub(super) event_tap: Option<CFRetained<objc2_core_foundation::CFMachPort>>,
     pub(super) throttle: ThrottleState,
-    pub(super) displayed_windows: RefCell<HashSet<usize>>,
+    pub(super) displayed_windows: HashSet<usize>,
+    /// Suspend on sleep/lock screen.
+    /// There is a subtle race condition here, when we receive sleep/lock screen notification, but
+    /// it's queued after other callback notifications. If these notifications take too long too be
+    /// processed, screen will be locked and AX API will be unavailable before we are able turn on
+    /// this flag.
+    pub(super) is_suspended: bool,
 }
 
 impl WindowContext {
@@ -191,7 +198,8 @@ impl WindowContext {
                 pending_focus_sync: false,
                 timer: None,
             },
-            displayed_windows: RefCell::new(HashSet::new()),
+            displayed_windows: HashSet::new(),
+            is_suspended: false,
         }
     }
 }

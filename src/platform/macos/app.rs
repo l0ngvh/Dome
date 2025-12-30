@@ -87,7 +87,7 @@ define_class!(
 
             let apps = setup_app_observers(context_ptr);
 
-            let context = unsafe { &*context_ptr };
+            let context = unsafe { &mut *context_ptr };
             if let Err(e) = render_workspace(context) {
                 tracing::warn!("Failed to render workspace after initialization: {e:#}");
             }

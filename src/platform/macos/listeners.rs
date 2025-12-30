@@ -9,7 +9,8 @@ use objc2::rc::Retained;
 use objc2_app_kit::{
     NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
     NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
-    NSWorkspaceDidTerminateApplicationNotification,
+    NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceScreensDidSleepNotification,
+    NSWorkspaceWillSleepNotification,
 };
 use objc2_application_services::{AXObserver, AXUIElement};
 use objc2_core_foundation::{
@@ -20,7 +21,9 @@ use objc2_core_graphics::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventTapProxy, CGEventType,
 };
-use objc2_foundation::{NSNotification, NSOperationQueue};
+use objc2_foundation::{
+    NSDistributedNotificationCenter, NSNotification, NSOperationQueue, NSString,
+};
 
 use super::context::{Observers, RemovedWindow, WindowContext};
 use super::objc2_wrapper::{
@@ -72,11 +75,11 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                     tracing::trace!("Launched application doesn't have a pid");
                     return;
                 };
-                tracing::trace!("Received notification for launching app with pid: {pid:?}");
+                let app_name = get_app_name(pid);
+                tracing::trace!(%pid, %app_name, "App launched");
                 let observer = match register_app(pid, context_ptr) {
                     Ok(observer) => observer,
                     Err(e) => {
-                        let app_name = get_app_name(pid);
                         tracing::warn!(%pid, %app_name, "Can't track application: {e:#}");
                         return;
                     }
@@ -101,10 +104,10 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                     tracing::trace!("Terminated application doesn't have a pid");
                     return;
                 };
-                tracing::trace!("Received notification for terminating app with pid: {pid:?}");
+                let app_name = get_app_name(pid);
+                tracing::trace!(%pid, %app_name, "App terminated");
                 apps.borrow_mut().remove(&pid);
                 let context = &mut *context_ptr;
-                let app_name = get_app_name(pid);
                 let (window_ids, float_ids) = context.registry.borrow_mut().remove_by_pid(pid);
                 for window_id in &window_ids {
                     context.hub.delete_window(*window_id);
@@ -132,7 +135,8 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 let Some(pid) = get_pid_from_notification(notification) else {
                     return;
                 };
-                tracing::trace!("App activated with pid: {pid}");
+                let app_name = get_app_name(pid);
+                tracing::trace!(%pid, %app_name, "App activated");
                 let app = AXUIElement::new_application(pid);
                 let Ok(focused_window) =
                     get_attribute::<AXUIElement>(&app, &kAXFocusedWindowAttribute())
@@ -157,6 +161,66 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                         tracing::warn!("Failed to render workspace: {e:#}");
                     }
                 }
+            }),
+        );
+    }
+
+    // Suspend on system sleep, screen sleep, or lock, as AX APIs are unusable while under these
+    // conditions
+    // Resume ONLY on unlock, as screen can wake while locked, AX APIs are still unusable while
+    // locked
+    unsafe {
+        notification_center.addObserverForName_object_queue_usingBlock(
+            Some(NSWorkspaceWillSleepNotification),
+            None,
+            Some(&NSOperationQueue::mainQueue()),
+            &RcBlock::new(move |_: NonNull<NSNotification>| {
+                tracing::info!("System will sleep, suspending window management");
+                let context = &mut *context_ptr;
+                context.is_suspended = true;
+            }),
+        );
+    }
+
+    unsafe {
+        notification_center.addObserverForName_object_queue_usingBlock(
+            Some(NSWorkspaceScreensDidSleepNotification),
+            None,
+            Some(&NSOperationQueue::mainQueue()),
+            &RcBlock::new(move |_: NonNull<NSNotification>| {
+                tracing::info!("Screen did sleep, suspending window management");
+                let context = &mut *context_ptr;
+                context.is_suspended = true;
+            }),
+        );
+    }
+
+    let distributed_center = NSDistributedNotificationCenter::defaultCenter();
+    let lock_name = NSString::from_str("com.apple.screenIsLocked");
+    let unlock_name = NSString::from_str("com.apple.screenIsUnlocked");
+
+    unsafe {
+        distributed_center.addObserverForName_object_queue_usingBlock(
+            Some(lock_name.as_ref()),
+            None,
+            Some(&NSOperationQueue::mainQueue()),
+            &RcBlock::new(move |_: NonNull<NSNotification>| {
+                tracing::info!("Screen locked, suspending window management");
+                let context = &mut *context_ptr;
+                context.is_suspended = true;
+            }),
+        );
+    }
+
+    unsafe {
+        distributed_center.addObserverForName_object_queue_usingBlock(
+            Some(unlock_name.as_ref()),
+            None,
+            Some(&NSOperationQueue::mainQueue()),
+            &RcBlock::new(move |_: NonNull<NSNotification>| {
+                tracing::info!("Screen unlocked, resuming window management");
+                let context = &mut *context_ptr;
+                context.is_suspended = false;
             }),
         );
     }
@@ -205,6 +269,12 @@ unsafe extern "C-unwind" fn observer_callback(
     // can be fired when focused change, so calling render_workspace can cause an infinite loop
     // of focus changes
     let context = unsafe { &mut *(refcon as *mut WindowContext) };
+
+    // Skip processing when suspended (sleep/lock)
+    if context.is_suspended {
+        return;
+    }
+
     let element = unsafe { CFRetained::retain(element) };
     let Ok(pid) = get_pid(&element) else {
         return;
@@ -290,6 +360,14 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
     // throttling version of observer callback
     let context = unsafe { &mut *(info as *mut WindowContext) };
     context.throttle.timer = None;
+
+    // Skip processing when suspended (sleep/lock)
+    if context.is_suspended {
+        context.throttle.pending_pids.clear();
+        context.throttle.pending_focus_sync = false;
+        return;
+    }
+
     context.throttle.last_execution = Some(Instant::now());
 
     let pids: Vec<_> = context.throttle.pending_pids.drain().collect();
@@ -462,6 +540,13 @@ fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
         return false;
     }
 
+    // Event tap is disabled while locked.
+    // If we receive hotkeys event, it must be unlocked
+    if context.is_suspended {
+        tracing::info!("Received keymap action, resuming window management");
+        context.is_suspended = false;
+    }
+
     for action in actions {
         if let Err(e) = execute_action(context, &action) {
             tracing::warn!("Failed to execute action: {e:#}");
@@ -614,13 +699,13 @@ fn update_overlay(context: &WindowContext) {
         .set_rects(overlays.float_rects, vec![]);
 }
 
-pub(super) fn render_workspace(context: &WindowContext) -> Result<()> {
+pub(super) fn render_workspace(context: &mut WindowContext) -> Result<()> {
     apply_layout(context)?;
     focus_window(context)?;
     Ok(())
 }
 
-fn apply_layout(context: &WindowContext) -> Result<()> {
+fn apply_layout(context: &mut WindowContext) -> Result<()> {
     let workspace_id = context.hub.current_workspace();
     let workspace = context.hub.get_workspace(workspace_id);
     let registry = context.registry.borrow();
@@ -665,7 +750,6 @@ fn apply_layout(context: &WindowContext) -> Result<()> {
     // Hide windows that shouldn't be displayed
     let to_hide: Vec<usize> = context
         .displayed_windows
-        .borrow()
         .difference(&workspace_windows)
         .copied()
         .collect();
@@ -707,7 +791,7 @@ fn apply_layout(context: &WindowContext) -> Result<()> {
         .set_rects(overlays.float_rects, vec![]);
 
     // Update displayed set
-    *context.displayed_windows.borrow_mut() = workspace_windows;
+    context.displayed_windows = workspace_windows;
 
     Ok(())
 }
