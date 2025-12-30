@@ -10,6 +10,7 @@ mod insert_window;
 mod move_in_direction;
 mod move_to_workspace;
 mod set_focus;
+mod smoke;
 mod tabbed;
 mod toggle_spawn_direction;
 mod window_at;
@@ -25,41 +26,7 @@ const TAB_BAR_HEIGHT: f32 = 2.0;
 
 pub(super) fn snapshot(hub: &Hub) -> String {
     validate_hub(hub);
-    let mut s = format!(
-        "Hub(focused={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
-        hub.current_workspace(),
-        hub.screen().x,
-        hub.screen().y,
-        hub.screen().width,
-        hub.screen().height
-    );
-    for (workspace_id, workspace) in hub.all_workspaces() {
-        let focused = if let Some(current) = workspace.focused {
-            format!(", focused={}", current)
-        } else {
-            String::new()
-        };
-        let has_content = workspace.root().is_some() || !workspace.float_windows().is_empty();
-        if !has_content {
-            s.push_str(&format!(
-                "  Workspace(id={}, name={}{})\n",
-                workspace_id, workspace.name, focused
-            ));
-        } else {
-            s.push_str(&format!(
-                "  Workspace(id={}, name={}{},\n",
-                workspace_id, workspace.name, focused
-            ));
-            if let Some(root) = workspace.root() {
-                fmt_child_str(hub, &mut s, root, 2);
-            }
-            for &float_id in workspace.float_windows() {
-                fmt_float_str(hub, &mut s, float_id, 2);
-            }
-            s.push_str("  )\n");
-        }
-    }
-    s.push_str(")\n");
+    let mut s = snapshot_text(hub);
 
     // ASCII visualization
     let mut grid = vec![vec![' '; ASCII_WIDTH]; ASCII_HEIGHT];
@@ -111,6 +78,45 @@ pub(super) fn snapshot(hub: &Hub) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
     );
+    s
+}
+
+pub(super) fn snapshot_text(hub: &Hub) -> String {
+    let mut s = format!(
+        "Hub(focused={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
+        hub.current_workspace(),
+        hub.screen().x,
+        hub.screen().y,
+        hub.screen().width,
+        hub.screen().height
+    );
+    for (workspace_id, workspace) in hub.all_workspaces() {
+        let focused = if let Some(current) = workspace.focused {
+            format!(", focused={}", current)
+        } else {
+            String::new()
+        };
+        let has_content = workspace.root().is_some() || !workspace.float_windows().is_empty();
+        if !has_content {
+            s.push_str(&format!(
+                "  Workspace(id={}, name={}{})\n",
+                workspace_id, workspace.name, focused
+            ));
+        } else {
+            s.push_str(&format!(
+                "  Workspace(id={}, name={}{},\n",
+                workspace_id, workspace.name, focused
+            ));
+            if let Some(root) = workspace.root() {
+                fmt_child_str(hub, &mut s, root, 2);
+            }
+            for &float_id in workspace.float_windows() {
+                fmt_float_str(hub, &mut s, float_id, 2);
+            }
+            s.push_str("  )\n");
+        }
+    }
+    s.push_str(")\n");
     s
 }
 
