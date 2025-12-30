@@ -1,6 +1,6 @@
 // Invariances:
 // 1. All containers must have at least 2 children.
-// 2. Parent container and child container must differ in direction
+// 2. Parent container and child container must differ in direction, unless one of them are tabbed
 // 3. Container's focus must be equal to, be parent of, or don't belong to children's focus nodes' descendant.
 // 4. Container's title must be equal to focused child's title
 use super::allocator::Allocator;
@@ -219,6 +219,9 @@ impl Hub {
             let Parent::Container(parent_id) = self.containers.get(root_id).parent else {
                 break;
             };
+            if self.containers.get(parent_id).is_tabbed {
+                break;
+            }
             root_id = parent_id;
             i += 1;
         }
@@ -259,11 +262,34 @@ impl Hub {
         };
         let container = self.containers.get_mut(container_id);
         container.is_tabbed = !container.is_tabbed;
-        tracing::debug!(%container_id, is_tabbed = container.is_tabbed, "Toggled container layout");
-        if container.is_tabbed
-            && let Some(pos) = container.children.iter().position(|c| *c == child)
-        {
-            container.active_tab = pos;
+        let is_tabbed = container.is_tabbed;
+        let parent = container.parent;
+        let mut direction = container.direction;
+        let children = container.children.clone();
+        tracing::debug!(%container_id, is_tabbed, "Toggled container layout");
+        if is_tabbed {
+            let container = self.containers.get_mut(container_id);
+            if let Some(pos) = container.children.iter().position(|c| *c == child) {
+                container.active_tab = pos;
+            }
+        } else {
+            // When toggling from tabbed to non-tabbed, ensure direction differs from parent and
+            // children
+            if let Parent::Container(parent_cid) = parent {
+                let parent_container = self.containers.get(parent_cid);
+                if !parent_container.is_tabbed && parent_container.direction == direction {
+                    self.containers.get_mut(container_id).toggle_direction();
+                    direction = self.containers.get(container_id).direction;
+                }
+            }
+            for c in &children {
+                if let Child::Container(child_cid) = c {
+                    let child_container = self.containers.get(*child_cid);
+                    if !child_container.is_tabbed && child_container.direction == direction {
+                        self.toggle_container_direction(*child_cid);
+                    }
+                }
+            }
         }
         self.balance_workspace(self.current);
     }
@@ -604,7 +630,9 @@ impl Hub {
             };
             self.containers.get_mut(id).toggle_direction();
             for &child in &self.containers.get(id).children {
-                if let Child::Container(child_id) = child {
+                if let Child::Container(child_id) = child
+                    && !self.containers.get(child_id).is_tabbed
+                {
                     stack.push(child_id);
                 }
             }

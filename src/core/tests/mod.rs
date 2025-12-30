@@ -404,10 +404,12 @@ fn validate_hub(hub: &Hub) {
 
                     if let Parent::Container(parent_cid) = expected_parent {
                         let parent = hub.get_container(parent_cid);
-                        assert_ne!(
-                            parent.direction, container.direction,
-                            "Container {cid} has same direction as parent {parent_cid}"
-                        );
+                        if !parent.is_tabbed() && !container.is_tabbed() {
+                            assert_ne!(
+                                parent.direction, container.direction,
+                                "Container {cid} has same direction as parent {parent_cid}"
+                            );
+                        }
                     }
 
                     validate_child_exists(hub, container.focused);
