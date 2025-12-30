@@ -20,6 +20,7 @@ tracing-subscriber = "0.3.20"
 toml = "0.9.8"
 serde = { version = "1.0", features = ["derive"] }
 bitflags = "2.10.0"
+csscolorparser = { version = "0.8.1", features = ["serde"] }
 
 [dev-dependencies]
 insta = "1.44.3"

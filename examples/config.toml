@@ -2,32 +2,16 @@
 border_size = 5.0
 
 # Focused window border color (default: light blue)
-[focused_color]
-r = 0.4
-g = 0.6
-b = 1.0
-a = 1.0
+focused_color = "#6699ff"
 
 # Unfocused window border color (default: gray)
-[border_color]
-r = 0.3
-g = 0.3
-b = 0.3
-a = 1.0
+border_color = "#4d4d4d"
 
 # Tab bar background color (default: dark blue-gray)
-[tab_bar_background_color]
-r = 0.15
-g = 0.15
-b = 0.2
-a = 1.0
+tab_bar_background_color = "#262633"
 
 # Active tab background color
-[active_tab_background_color]
-r = 0.3
-g = 0.3
-b = 0.4
-a = 1.0
+active_tab_background_color = "#4d4d66"
 
 [keymaps]
 "cmd+0" = ["focus workspace 0"]

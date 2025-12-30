@@ -243,12 +243,30 @@ where
     Ok(keymaps)
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Color {
     pub r: f32,
     pub g: f32,
     pub b: f32,
     pub a: f32,
+}
+
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let c = s
+            .parse::<csscolorparser::Color>()
+            .map_err(serde::de::Error::custom)?;
+        Ok(Color {
+            r: c.r as f32,
+            g: c.g as f32,
+            b: c.b as f32,
+            a: c.a as f32,
+        })
+    }
 }
 
 fn default_focused_color() -> Color {
