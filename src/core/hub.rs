@@ -56,6 +56,7 @@ impl Hub {
             None => self.workspaces.allocate(Workspace::new(self.screen, name)),
         };
 
+        tracing::debug!(name, %workspace_id, "Focusing workspace");
         self.current = workspace_id
     }
 
@@ -64,16 +65,15 @@ impl Hub {
     }
 
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
-        let workspace_id = match self.windows.get(window_id).parent {
-            Parent::Container(c) => self.get_containing_workspace(c),
-            Parent::Workspace(w) => w,
-        };
+        let workspace_id = self.windows.get(window_id).workspace;
+        tracing::debug!(%window_id, %workspace_id, "Setting focus to window");
         self.current = workspace_id;
         self.focus_window(window_id);
     }
 
     pub(crate) fn set_float_focus(&mut self, float_id: FloatWindowId) {
         let workspace_id = self.float_windows.get(float_id).workspace;
+        tracing::debug!(%float_id, %workspace_id, "Setting focus to float");
         self.current = workspace_id;
         self.workspaces.get_mut(workspace_id).focused = Some(Focus::Float(float_id));
     }
@@ -168,7 +168,7 @@ impl Hub {
         let parent = self.get_parent(child);
         match parent {
             Parent::Container(parent_id) => {
-                let workspace_id = self.get_containing_workspace(parent_id);
+                let workspace_id = self.containers.get(parent_id).workspace;
 
                 self.detach_child_from_container(parent_id, child);
                 self.balance_workspace(workspace_id);
@@ -185,7 +185,7 @@ impl Hub {
     }
 
     fn detach_child_from_container(&mut self, container_id: ContainerId, child: Child) {
-        tracing::trace!("Detaching {child} from {container_id}");
+        tracing::debug!(%child, %container_id, "Detaching child from container");
         // Focus preceded/following sibling if detaching focused window
         let new_focus = sibling_window(&self.containers, container_id, child);
         self.replace_focus(child, Child::Window(new_focus));
@@ -202,7 +202,7 @@ impl Hub {
             .children
             .pop()
             .unwrap();
-        tracing::debug!("{container_id} only have one child left ({last_child}). Cleaning");
+        tracing::debug!(%container_id, %last_child, "Container has one child left, cleaning up");
         // If this container was being focused, changing focus to last_child regardless of whether
         // it's a container makes sense. Don't need to focus just window here
         self.replace_focus(Child::Container(container_id), last_child);
@@ -245,9 +245,10 @@ impl Hub {
                     Direction::Horizontal => Direction::Vertical,
                     Direction::Vertical => Direction::Horizontal,
                 };
-                tracing::info!(
-                    "Toggling spawn direction for {container_id} to {}",
-                    container.spawn_direction
+                tracing::debug!(
+                    %container_id,
+                    direction = ?container.spawn_direction,
+                    "Toggled spawn direction"
                 );
             }
             Child::Window(window_id) => {
@@ -256,9 +257,10 @@ impl Hub {
                     Direction::Horizontal => Direction::Vertical,
                     Direction::Vertical => Direction::Horizontal,
                 };
-                tracing::info!(
-                    "Toggling spawn direction for {window_id} to {}",
-                    window.spawn_direction
+                tracing::debug!(
+                    %window_id,
+                    direction = ?window.spawn_direction,
+                    "Toggled spawn direction"
                 );
             }
         }
@@ -270,7 +272,7 @@ impl Hub {
             return;
         };
         let Parent::Container(container_id) = self.get_parent(child) else {
-            tracing::info!("Cannot focus parent workspace, ignoring");
+            tracing::debug!("Cannot focus parent of workspace root, ignoring");
             return;
         };
         self.focus_container(container_id);
@@ -305,6 +307,7 @@ impl Hub {
             Child::Window(_) => child,
             Child::Container(id) => self.containers.get(id).focused,
         };
+        tracing::debug!(forward, %container_id, new_tab, ?focus_target, "Focusing tab");
         self.focus_child(focus_target);
         self.balance_workspace(self.current);
     }
@@ -342,6 +345,7 @@ impl Hub {
         };
         let container = self.containers.get_mut(container_id);
         container.is_tabbed = !container.is_tabbed;
+        tracing::debug!(%container_id, is_tabbed = container.is_tabbed, "Toggled container layout");
         if container.is_tabbed
             && let Some(pos) = container.children.iter().position(|c| *c == child)
         {
@@ -357,7 +361,7 @@ impl Hub {
             Focus::Float(float_id) => {
                 self.delete_float(float_id);
                 let window_id = self.insert_tiling();
-                tracing::info!(%window_id, "Window is now tiling");
+                tracing::debug!(%window_id, "Window is now tiling");
                 Some((window_id, float_id))
             }
             Focus::Tiling(Child::Window(window_id)) => {
@@ -370,7 +374,7 @@ impl Hub {
                     y: self.screen.y + (self.screen.height - dim.height) / 2.0,
                 };
                 let float_id = self.insert_float(dimension);
-                tracing::info!(%float_id, "Window is now floating");
+                tracing::debug!(%float_id, "Window is now floating");
                 Some((window_id, float_id))
             }
             Focus::Tiling(Child::Container(_)) => None,
@@ -378,22 +382,18 @@ impl Hub {
     }
 
     pub(crate) fn focus_left(&mut self) {
-        tracing::info!("Focusing left");
         self.focus_in_direction(Direction::Horizontal, false);
     }
 
     pub(crate) fn focus_right(&mut self) {
-        tracing::info!("Focusing right");
         self.focus_in_direction(Direction::Horizontal, true);
     }
 
     pub(crate) fn focus_up(&mut self) {
-        tracing::info!("Focusing up");
         self.focus_in_direction(Direction::Vertical, false);
     }
 
     pub(crate) fn focus_down(&mut self) {
-        tracing::info!("Focusing down");
         self.focus_in_direction(Direction::Vertical, true);
     }
 
@@ -440,7 +440,7 @@ impl Hub {
                     Child::Window(id) => Child::Window(id),
                     Child::Container(id) => self.containers.get(id).focused,
                 };
-                tracing::debug!("Changing focus to {:?} from {:?}", focus_target, child);
+                tracing::debug!(?direction, forward, from = ?child, to = ?focus_target, "Changing focus");
                 self.focus_child(focus_target);
                 return;
             }
@@ -491,7 +491,7 @@ impl Hub {
             };
             if target_pos != pos && target_pos < direct_parent.children.len() {
                 tracing::debug!(
-                    "Swapping {child:?} from pos {pos} to {target_pos} in {direct_parent_id:?}"
+                    ?child, from = pos, to = target_pos, %direct_parent_id, "Swapping child position"
                 );
                 self.containers
                     .get_mut(direct_parent_id)
@@ -530,7 +530,7 @@ impl Hub {
                     let insert_pos = if forward { pos + 1 } else { pos };
 
                     tracing::debug!(
-                        "Moving {child:?} from {direct_parent_id:?} to {container_id:?} at pos {insert_pos}"
+                        ?child, from = %direct_parent_id, to = %container_id, insert_pos, "Moving child to ancestor"
                     );
                     self.detach_child_from_container(direct_parent_id, child);
                     self.attach_child_to_container(child, container_id, Some(insert_pos));
@@ -538,7 +538,7 @@ impl Hub {
                     return;
                 }
                 Parent::Workspace(workspace_id) => {
-                    tracing::debug!("Moving {child:?} to new root container in {workspace_id:?}");
+                    tracing::debug!(?child, %workspace_id, "Moving child to new root container");
                     self.detach_child_from_container(direct_parent_id, child);
                     let root = self.workspaces.get(workspace_id).root.unwrap();
                     let screen = self.workspaces.get(workspace_id).screen;
@@ -584,7 +584,7 @@ impl Hub {
             self.detach_float_from_workspace(float_id);
             self.float_windows.get_mut(float_id).workspace = target_workspace_id;
             self.attach_float_to_workspace(target_workspace_id, float_id);
-            tracing::info!("Moved {focused:?} to workspace {target_workspace}");
+            tracing::debug!(?focused, target_workspace, "Moved to workspace");
             return Some(focused);
         }
 
@@ -594,7 +594,7 @@ impl Hub {
 
         self.detach_child_from_its_parent(child);
         self.attach_child_to_workspace(child, target_workspace_id);
-        tracing::info!("Moved {focused:?} to workspace {target_workspace}");
+        tracing::debug!(?focused, target_workspace, "Moved to workspace");
         Some(focused)
     }
 
@@ -800,7 +800,6 @@ impl Hub {
         self.focus_child(focus_target);
     }
 
-    #[tracing::instrument(skip(self))]
     fn balance_workspace(&mut self, workspace_id: WorkspaceId) {
         let workspace = self.workspaces.get(workspace_id);
         let Some(root) = workspace.root else {
@@ -828,7 +827,6 @@ impl Hub {
         }
     }
 
-    #[tracing::instrument(skip(self))]
     fn distribute_available_space(
         &mut self,
         root: Child,
@@ -875,9 +873,6 @@ impl Hub {
                         continue;
                     }
 
-                    tracing::debug!(
-                        "Number of freely resized nodes: horizontal: {free_horizontal}, {free_vertical}"
-                    );
                     let mut actual_width = 0.0;
                     let mut actual_height: f32 = 0.0;
 
@@ -939,24 +934,6 @@ impl Hub {
             }
         }
         panic!("distribute_available_space: too many iterations");
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn get_containing_workspace(&self, container_id: ContainerId) -> WorkspaceId {
-        let mut parent = self.containers.get(container_id).parent;
-        let mut counter = 0;
-        loop {
-            counter += 1;
-            if counter > 1000 {
-                panic!("Cycle detected in parent hierarchy");
-            }
-            match parent {
-                Parent::Workspace(workspace_id) => return workspace_id,
-                Parent::Container(container_id) => {
-                    parent = self.containers.get(container_id).parent;
-                }
-            }
-        }
     }
 
     fn update_container_structure(&mut self, root_id: ContainerId) {
@@ -1062,6 +1039,14 @@ impl Hub {
             container.fixed_width = fixed_width;
             container.fixed_height = fixed_height;
         }
+
+        let root = self.containers.get(root_id);
+        tracing::debug!(
+            %root_id,
+            free_horizontal = root.freely_sized_horizontal,
+            free_vertical = root.freely_sized_vertical,
+            "Updated container structure"
+        );
     }
 
     fn get_parent(&self, child: Child) -> Parent {
@@ -1174,7 +1159,6 @@ impl Hub {
         self.workspaces.get_mut(ws).focused = Some(Focus::Float(id));
     }
 
-    #[tracing::instrument(skip(self))]
     fn detach_float_from_workspace(&mut self, id: FloatWindowId) {
         let ws = self.float_windows.get(id).workspace;
         let workspace = self.workspaces.get_mut(ws);
@@ -1192,13 +1176,10 @@ impl Hub {
                     None => None,
                 });
             tracing::debug!(
-                "Removed {:?} from {:?} while focused, focus changed to {:?}",
-                id,
-                ws,
-                workspace.focused
+                %id, %ws, new_focus = ?workspace.focused, "Detached focused float, focus changed"
             );
         } else {
-            tracing::debug!("Removed {:?} from {:?} while not focused", id, ws);
+            tracing::debug!(%id, %ws, "Detached unfocused float");
         }
     }
 }
