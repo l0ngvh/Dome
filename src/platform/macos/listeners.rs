@@ -1,5 +1,6 @@
 use std::{
-    cell::RefCell, collections::HashMap, ptr::NonNull, rc::Rc, time::Duration, time::Instant,
+    cell::RefCell, collections::HashMap, collections::HashSet, ptr::NonNull, rc::Rc,
+    time::Duration, time::Instant,
 };
 
 use anyhow::Result;
@@ -32,7 +33,7 @@ use super::objc2_wrapper::{
 use super::overlay::collect_overlays;
 use super::window::MacWindow;
 use crate::config::{Action, FocusTarget, Keymap, Modifiers, MoveTarget, ToggleTarget};
-use crate::core::{Child, Focus, WorkspaceId};
+use crate::core::{Child, Focus};
 
 const THROTTLE_DURATION: Duration = Duration::from_millis(20);
 
@@ -144,27 +145,17 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 if let Some(window_id) = registry.get_tiling_by_hash(cf_hash) {
                     if !context.hub.is_focusing(Child::Window(window_id)) {
                         drop(registry);
-                        let old_workspace = context.hub.current_workspace();
                         context.hub.set_focus(window_id);
-                        if old_workspace != context.hub.current_workspace() {
-                            hide_workspace(context, old_workspace);
-                            if let Err(e) = render_workspace(context) {
-                                tracing::warn!("Failed to render workspace: {e:#}");
-                            }
-                        }
-                        update_overlay(context);
-                    }
-                } else if let Some(float_id) = registry.get_float_by_hash(cf_hash) {
-                    drop(registry);
-                    let old_workspace = context.hub.current_workspace();
-                    context.hub.set_float_focus(float_id);
-                    if old_workspace != context.hub.current_workspace() {
-                        hide_workspace(context, old_workspace);
                         if let Err(e) = render_workspace(context) {
                             tracing::warn!("Failed to render workspace: {e:#}");
                         }
                     }
-                    update_overlay(context);
+                } else if let Some(float_id) = registry.get_float_by_hash(cf_hash) {
+                    drop(registry);
+                    context.hub.set_float_focus(float_id);
+                    if let Err(e) = render_workspace(context) {
+                        tracing::warn!("Failed to render workspace: {e:#}");
+                    }
                 }
             }),
         );
@@ -210,6 +201,9 @@ unsafe extern "C-unwind" fn observer_callback(
     notification: NonNull<CFString>,
     refcon: *mut std::ffi::c_void,
 ) {
+    // Should not call render_workspace here, as that also set focused window. This callback
+    // can be fired when focused change, so calling render_workspace can cause an infinite loop
+    // of focus changes
     let context = unsafe { &mut *(refcon as *mut WindowContext) };
     let element = unsafe { CFRetained::retain(element) };
     let Ok(pid) = get_pid(&element) else {
@@ -292,6 +286,8 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
     _timer: *mut CFRunLoopTimer,
     info: *mut std::ffi::c_void,
 ) {
+    // Similar to observer callback, we should not call render_workspace here, as this is just the
+    // throttling version of observer callback
     let context = unsafe { &mut *(info as *mut WindowContext) };
     context.throttle.timer = None;
     context.throttle.last_execution = Some(Instant::now());
@@ -432,12 +428,12 @@ fn handle_mouse_down(context: &mut WindowContext, event: *mut CGEvent) {
     let screen = context.hub.screen();
     let x = location.x as f32;
     let y = screen.y + location.y as f32;
-    if let Some(window_id) = context.hub.window_at(x, y) {
-        if !context.hub.is_focusing(Child::Window(window_id)) {
-            tracing::debug!(%window_id, "Mouse click focused window");
-            context.hub.set_focus(window_id);
-            update_overlay(context);
-        }
+    if let Some(window_id) = context.hub.window_at(x, y)
+        && !context.hub.is_focusing(Child::Window(window_id))
+    {
+        tracing::debug!(%window_id, "Mouse click focused window");
+        context.hub.set_focus(window_id);
+        update_overlay(context);
     }
 }
 
@@ -498,12 +494,12 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
             FocusTarget::Left => context.hub.focus_left(),
             FocusTarget::Right => context.hub.focus_right(),
             FocusTarget::Parent => context.hub.focus_parent(),
-            FocusTarget::Workspace(n) => return focus_workspace(context, *n),
+            FocusTarget::Workspace(n) => context.hub.focus_workspace(*n),
             FocusTarget::NextTab => context.hub.focus_next_tab(),
             FocusTarget::PrevTab => context.hub.focus_prev_tab(),
         },
         Action::Move(target) => match target {
-            MoveTarget::Workspace(n) => return move_to_workspace(context, *n),
+            MoveTarget::Workspace(n) => context.hub.move_focused_to_workspace(*n),
             MoveTarget::Up => context.hub.move_up(),
             MoveTarget::Down => context.hub.move_down(),
             MoveTarget::Left => context.hub.move_left(),
@@ -626,14 +622,21 @@ pub(super) fn render_workspace(context: &WindowContext) -> Result<()> {
 fn apply_layout(context: &WindowContext) -> Result<()> {
     let workspace_id = context.hub.current_workspace();
     let workspace = context.hub.get_workspace(workspace_id);
+    let registry = context.registry.borrow();
+
+    // Collect all windows that should be displayed with their dimensions
+    let mut workspace_windows = HashSet::new();
+    let mut tiling_layouts = Vec::new();
+    let mut float_layouts = Vec::new();
 
     let mut stack: Vec<Child> = workspace.root().into_iter().collect();
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(window_id) => {
-                if let Some(os_window) = context.registry.borrow().get_tiling(window_id) {
+                if let Some(os_window) = registry.get_tiling(window_id) {
+                    workspace_windows.insert(os_window.cf_hash());
                     let dim = context.hub.get_window(window_id).dimension();
-                    os_window.set_dimension(dim)?;
+                    tiling_layouts.push((window_id, dim));
                 }
             }
             Child::Container(container_id) => {
@@ -643,26 +646,60 @@ fn apply_layout(context: &WindowContext) -> Result<()> {
             }
         }
     }
-
     for &float_id in workspace.float_windows() {
-        if let Some(os_window) = context.registry.borrow().get_float(float_id) {
+        if let Some(os_window) = registry.get_float(float_id) {
+            workspace_windows.insert(os_window.cf_hash());
             let dim = context.hub.get_float(float_id).dimension();
+            float_layouts.push((float_id, dim));
+        }
+    }
+
+    // Hide windows that shouldn't be displayed
+    let to_hide: Vec<usize> = context
+        .displayed_windows
+        .borrow()
+        .difference(&workspace_windows)
+        .copied()
+        .collect();
+
+    for cf_hash in to_hide {
+        if let Some(window_id) = registry.get_tiling_by_hash(cf_hash) {
+            if let Some(os_window) = registry.get_tiling(window_id)
+                && let Err(e) = os_window.hide()
+            {
+                tracing::warn!("Failed to hide tiling window {window_id}: {e:#}");
+            }
+        } else if let Some(float_id) = registry.get_float_by_hash(cf_hash)
+            && let Some(os_window) = registry.get_float(float_id)
+            && let Err(e) = os_window.hide()
+        {
+            tracing::warn!("Failed to hide float window {float_id}: {e:#}");
+        }
+    }
+
+    // Apply layout
+    for (window_id, dim) in tiling_layouts {
+        if let Some(os_window) = registry.get_tiling(window_id) {
+            os_window.set_dimension(dim)?;
+        }
+    }
+    for (float_id, dim) in float_layouts {
+        if let Some(os_window) = registry.get_float(float_id) {
             os_window.set_dimension(dim)?;
         }
     }
 
-    let overlays = collect_overlays(
-        &context.hub,
-        &context.config,
-        workspace_id,
-        &context.registry.borrow(),
-    );
+    let overlays = collect_overlays(&context.hub, &context.config, workspace_id, &registry);
+
     context
         .tiling_overlay
         .set_rects(overlays.tiling_rects, overlays.tiling_labels);
     context
         .float_overlay
         .set_rects(overlays.float_rects, vec![]);
+
+    // Update displayed set
+    *context.displayed_windows.borrow_mut() = workspace_windows;
 
     Ok(())
 }
@@ -686,78 +723,4 @@ fn focus_window(context: &WindowContext) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn hide_workspace(context: &WindowContext, workspace_id: WorkspaceId) {
-    let workspace = context.hub.get_workspace(workspace_id);
-    let mut stack: Vec<Child> = workspace.root().into_iter().collect();
-    while let Some(child) = stack.pop() {
-        match child {
-            Child::Window(window_id) => {
-                if let Some(os_window) = context.registry.borrow().get_tiling(window_id)
-                    && let Err(e) = os_window.hide()
-                {
-                    tracing::warn!("Failed to hide tiling window {window_id}: {e:#}");
-                }
-            }
-            Child::Container(container_id) => {
-                for &c in context.hub.get_container(container_id).children() {
-                    stack.push(c);
-                }
-            }
-        }
-    }
-    for &float_id in workspace.float_windows() {
-        if let Some(os_window) = context.registry.borrow().get_float(float_id)
-            && let Err(e) = os_window.hide()
-        {
-            tracing::warn!("Failed to hide float window {float_id}: {e:#}");
-        }
-    }
-}
-
-fn focus_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
-    let old_workspace_id = context.hub.current_workspace();
-    context.hub.focus_workspace(name);
-    let new_workspace_id = context.hub.current_workspace();
-    if old_workspace_id == new_workspace_id {
-        return Ok(());
-    }
-
-    hide_workspace(context, old_workspace_id);
-    render_workspace(context)
-}
-
-fn move_to_workspace(context: &mut WindowContext, name: usize) -> Result<()> {
-    match context.hub.move_focused_to_workspace(name) {
-        Some(Focus::Tiling(Child::Window(window_id))) => {
-            if let Some(os_window) = context.registry.borrow().get_tiling(window_id) {
-                os_window.hide()?;
-            }
-        }
-        Some(Focus::Tiling(Child::Container(container_id))) => {
-            let mut stack = vec![Child::Container(container_id)];
-            while let Some(child) = stack.pop() {
-                match child {
-                    Child::Window(window_id) => {
-                        if let Some(os_window) = context.registry.borrow().get_tiling(window_id) {
-                            os_window.hide()?;
-                        }
-                    }
-                    Child::Container(cid) => {
-                        for &c in context.hub.get_container(cid).children() {
-                            stack.push(c);
-                        }
-                    }
-                }
-            }
-        }
-        Some(Focus::Float(float_id)) => {
-            if let Some(os_window) = context.registry.borrow().get_float(float_id) {
-                os_window.hide()?;
-            }
-        }
-        None => {}
-    }
-    render_workspace(context)
 }

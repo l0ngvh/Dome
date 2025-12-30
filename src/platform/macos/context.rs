@@ -166,6 +166,7 @@ pub(super) struct WindowContext {
     pub(super) config: Config,
     pub(super) event_tap: Option<CFRetained<objc2_core_foundation::CFMachPort>>,
     pub(super) throttle: ThrottleState,
+    pub(super) displayed_windows: RefCell<HashSet<usize>>,
 }
 
 impl WindowContext {
@@ -190,6 +191,7 @@ impl WindowContext {
                 pending_focus_sync: false,
                 timer: None,
             },
+            displayed_windows: RefCell::new(HashSet::new()),
         }
     }
 }

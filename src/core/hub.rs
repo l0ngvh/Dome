@@ -298,8 +298,10 @@ impl Hub {
         self.move_in_direction(Direction::Vertical, true);
     }
 
-    pub(crate) fn move_focused_to_workspace(&mut self, target_workspace: usize) -> Option<Focus> {
-        let focused = self.workspaces.get(self.current).focused?;
+    pub(crate) fn move_focused_to_workspace(&mut self, target_workspace: usize) {
+        let Some(focused) = self.workspaces.get(self.current).focused else {
+            return;
+        };
 
         let current_workspace_id = self.current;
         let target_workspace_id = match self.workspaces.find(|w| w.name == target_workspace) {
@@ -309,7 +311,7 @@ impl Hub {
                 .allocate(Workspace::new(self.screen, target_workspace)),
         };
         if current_workspace_id == target_workspace_id {
-            return None;
+            return;
         }
 
         // Handle float window move
@@ -318,17 +320,16 @@ impl Hub {
             self.float_windows.get_mut(float_id).workspace = target_workspace_id;
             self.attach_float_to_workspace(target_workspace_id, float_id);
             tracing::debug!(?focused, target_workspace, "Moved to workspace");
-            return Some(focused);
+            return;
         }
 
         let Focus::Tiling(child) = focused else {
-            return None;
+            return;
         };
 
         self.detach_child_from_its_parent(child);
         self.attach_child_to_workspace(child, target_workspace_id);
         tracing::debug!(?focused, target_workspace, "Moved to workspace");
-        Some(focused)
     }
 
     pub(crate) fn is_focusing(&self, child: Child) -> bool {
