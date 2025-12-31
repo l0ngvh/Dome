@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
-    NSBackingStoreType, NSBezierPath, NSColor, NSEvent, NSFont, NSFontAttributeName,
+    NSBackingStoreType, NSBezierPath, NSColor, NSFont, NSFontAttributeName,
     NSForegroundColorAttributeName, NSResponder, NSStringDrawing, NSView, NSWindow,
     NSWindowCollectionBehavior, NSWindowStyleMask,
 };
@@ -93,12 +93,6 @@ define_class!(
                     );
                 }
             }
-        }
-
-        #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, event: &NSEvent) {
-            let location = event.locationInWindow();
-            tracing::debug!("Overlay clicked at: ({}, {})", location.x, location.y);
         }
     }
 );

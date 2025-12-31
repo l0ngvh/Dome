@@ -14,7 +14,6 @@ mod smoke;
 mod tabbed;
 mod toggle_direction;
 mod toggle_spawn_direction;
-mod window_at;
 
 use crate::core::allocator::NodeId;
 use crate::core::hub::Hub;

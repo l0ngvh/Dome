@@ -230,7 +230,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
 
 pub(super) fn listen_to_input_devices(context_ptr: *mut WindowContext) -> Result<()> {
     let run_loop = CFRunLoop::current().unwrap();
-    let event_mask = (1u64 << CGEventType::KeyDown.0) | (1u64 << CGEventType::LeftMouseDown.0);
+    let event_mask = 1u64 << CGEventType::KeyDown.0;
     let Some(match_port) = (unsafe {
         CGEvent::tap_create(
             CGEventTapLocation::SessionEventTap,
@@ -488,8 +488,6 @@ unsafe extern "C-unwind" fn event_tap_callback(
             tracing::debug!("Event tap disabled, re-enabling");
             CGEvent::tap_enable(tap, true);
         }
-    } else if event_type == CGEventType::LeftMouseDown {
-        handle_mouse_down(context, event);
     } else if event_type == CGEventType::KeyDown {
         if handle_keyboard(context, event) {
             return std::ptr::null_mut();
@@ -499,20 +497,6 @@ unsafe extern "C-unwind" fn event_tap_callback(
     }
 
     event
-}
-
-fn handle_mouse_down(context: &mut WindowContext, event: *mut CGEvent) {
-    let location = CGEvent::location(Some(unsafe { &*event }));
-    let screen = context.hub.screen();
-    let x = location.x as f32;
-    let y = screen.y + location.y as f32;
-    if let Some(window_id) = context.hub.window_at(x, y)
-        && !context.hub.is_focusing(Child::Window(window_id))
-    {
-        tracing::debug!(%window_id, "Mouse click focused window");
-        context.hub.set_focus(window_id);
-        update_overlay(context);
-    }
 }
 
 fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
@@ -681,22 +665,6 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
     }
 
     Ok(observer)
-}
-
-fn update_overlay(context: &WindowContext) {
-    let workspace_id = context.hub.current_workspace();
-    let overlays = collect_overlays(
-        &context.hub,
-        &context.config,
-        workspace_id,
-        &context.registry.borrow(),
-    );
-    context
-        .tiling_overlay
-        .set_rects(overlays.tiling_rects, overlays.tiling_labels);
-    context
-        .float_overlay
-        .set_rects(overlays.float_rects, vec![]);
 }
 
 pub(super) fn render_workspace(context: &mut WindowContext) -> Result<()> {
