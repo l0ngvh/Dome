@@ -547,3 +547,112 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     +----------------------------++----------------------------++----------------------------++----------------------------++----------------------------+
     ");
 }
+
+#[test]
+fn toggle_direction_on_empty_workspace() {
+    let mut hub = setup();
+
+    hub.toggle_direction();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0)
+    )
+    ");
+}
+
+#[test]
+fn toggle_direction_with_float_focused() {
+    use crate::core::node::Dimension;
+    let mut hub = setup();
+
+    hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.toggle_direction();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
+        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+      )
+    )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+             ********************************                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *              F0              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             ********************************
+    ");
+}
+
+#[test]
+fn toggle_direction_on_single_window() {
+    let mut hub = setup();
+
+    hub.insert_tiling();
+    hub.toggle_direction();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+}

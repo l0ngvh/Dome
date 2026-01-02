@@ -208,11 +208,10 @@ impl Container {
     }
 
     pub(super) fn remove_child(&mut self, child: Child) {
-        if let Some(pos) = self.children.iter().position(|c| *c == child) {
-            self.children.remove(pos);
-            if self.is_tabbed && pos <= self.active_tab_index {
-                self.active_tab_index = self.active_tab_index.saturating_sub(1);
-            }
+        let pos = self.children.iter().position(|c| *c == child).unwrap();
+        self.children.remove(pos);
+        if self.is_tabbed && pos <= self.active_tab_index {
+            self.active_tab_index = self.active_tab_index.saturating_sub(1);
         }
     }
 

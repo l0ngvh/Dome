@@ -798,3 +798,349 @@ fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     +-------------------------------------------------------------------------+***************************************************************************
     ");
 }
+
+#[test]
+fn promote_child_to_tabbed_grandparent() {
+    let mut hub = setup();
+
+    // Create 3 nested containers: tabbed grandparent > split parent > split child
+    // tabbed: [W0] [[W1] [W2 W3]]
+    hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+
+    // Make grandparent tabbed
+    hub.focus_parent();
+    hub.focus_parent();
+    hub.focus_parent();
+    hub.toggle_container_layout();
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
+            Window(id=WindowId(1), parent=ContainerId(1), x=1.00, y=3.00, w=148.00, h=12.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=0.00, y=16.00, w=150.00, h=14.00, direction=Horizontal,
+              Window(id=WindowId(2), parent=ContainerId(2), x=1.00, y=17.00, w=73.00, h=12.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=17.00, w=73.00, h=12.00)
+            )
+          )
+        )
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                   W0                                     |                                 [C1]                                    *
+    *----------------------------------------------------------------------------------------------------------------------------------------------------*
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W1                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *----------------------------------------------------------------------------------------------------------------------------------------------------*
+    *-------------------------------------------------------------------------++-------------------------------------------------------------------------*
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                    W2                                   ||                                    W3                                   *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    ******************************************************************************************************************************************************
+    ");
+
+    // Delete W1 - parent container cleaned up, child container promoted to tabbed grandparent
+    hub.delete_window(w1);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Container(id=ContainerId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, direction=Horizontal,
+            Window(id=WindowId(2), parent=ContainerId(2), x=1.00, y=3.00, w=73.00, h=26.00)
+            Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=3.00, w=73.00, h=26.00)
+          )
+        )
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                   W0                                     |                                 [C2]                                    *
+    *-------------------------------------------------------------------------++-------------------------------------------------------------------------*
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                    W2                                   ||                                    W3                                   *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    ******************************************************************************************************************************************************
+    ");
+}
+
+#[test]
+fn promote_child_from_tabbed_parent_to_split_grandparent_does_nothing_when_direction_differ() {
+    let mut hub = setup();
+
+    // Create 3 nested containers: split grandparent > tabbed parent > split child
+    // [W0] [tabbed: [W1] [W2 W3]]
+    hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    let w2 = hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+
+    // Make parent tabbed
+    hub.focus_parent();
+    hub.focus_parent();
+    hub.toggle_container_layout();
+
+    // Toggle child direction
+    hub.set_focus(w2);
+    hub.toggle_direction();
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
+            Window(id=WindowId(1), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00, direction=Vertical,
+              Window(id=WindowId(2), parent=ContainerId(2), x=76.00, y=3.00, w=73.00, h=12.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=17.00, w=73.00, h=12.00)
+            )
+          )
+        )
+      )
+    )
+
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    |                                                                         ||                W1                  |               [C2]                 |
+    |                                                                         |***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                    W2                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W0                                   |***************************************************************************
+    |                                                                         |+-------------------------------------------------------------------------+
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                    W3                                   |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    ");
+
+    // Delete W1 - tabbed parent cleaned up, child container promoted to split grandparent
+    hub.delete_window(w1);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Container(id=ContainerId(2), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(2), parent=ContainerId(2), x=76.00, y=1.00, w=73.00, h=13.00)
+            Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=16.00, w=73.00, h=13.00)
+          )
+        )
+      )
+    )
+
+    +-------------------------------------------------------------------------+***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                    W2                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |***************************************************************************
+    |                                    W0                                   |+-------------------------------------------------------------------------+
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                    W3                                   |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    ");
+}
+
+#[test]
+fn promote_tabbed_child_to_split_grandparent() {
+    let mut hub = setup();
+
+    // Create 3 nested containers: split grandparent > split parent > tabbed child
+    // [W0] [[W1] [tabbed: W2 W3]]
+    hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+
+    // Make child tabbed
+    hub.focus_parent();
+    hub.toggle_container_layout();
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(2),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(1), parent=ContainerId(1), x=76.00, y=1.00, w=73.00, h=13.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=15.00, w=75.00, h=15.00, tabbed=true, active_tab=1,
+              Window(id=WindowId(2), parent=ContainerId(2), x=76.00, y=18.00, w=73.00, h=11.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=18.00, w=73.00, h=11.00)
+            )
+          )
+        )
+      )
+    )
+
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                    W1                                   |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         |+-------------------------------------------------------------------------+
+    |                                    W0                                   |***************************************************************************
+    |                                                                         |*                W2                  |               [W3]                 *
+    |                                                                         |*-------------------------------------------------------------------------*
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                    W3                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
+
+    // Delete W1 - parent cleaned up, tabbed child promoted to split grandparent
+    hub.delete_window(w1);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(2),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Container(id=ContainerId(2), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
+            Window(id=WindowId(2), parent=ContainerId(2), x=76.00, y=3.00, w=73.00, h=26.00)
+            Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=3.00, w=73.00, h=26.00)
+          )
+        )
+      )
+    )
+
+    +-------------------------------------------------------------------------+***************************************************************************
+    |                                                                         |*                W2                  |               [W3]                 *
+    |                                                                         |*-------------------------------------------------------------------------*
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W0                                   |*                                                                         *
+    |                                                                         |*                                    W3                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}

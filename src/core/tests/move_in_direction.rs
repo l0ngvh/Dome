@@ -1,4 +1,5 @@
 use super::{setup, snapshot};
+use insta::assert_snapshot;
 
 #[test]
 fn move_left_from_vertical_container_to_horizontal_parent() {
@@ -1304,5 +1305,74 @@ fn move_container_left_toggles_direction_when_matching_parent() {
     |                                                |*                                                *|                                                |
     |                                                |*                                                *|                                                |
     +------------------------------------------------+**************************************************+------------------------------------------------+
+    ");
+}
+
+#[test]
+fn move_in_direction_on_empty_workspace() {
+    let mut hub = setup();
+
+    hub.move_left();
+    hub.move_right();
+    hub.move_up();
+    hub.move_down();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0)
+    )
+    ");
+}
+
+#[test]
+fn move_in_direction_with_float_focused() {
+    use crate::core::node::Dimension;
+    let mut hub = setup();
+
+    hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+
+    hub.move_left();
+    hub.move_right();
+    hub.move_up();
+    hub.move_down();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
+        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+      )
+    )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+             ********************************                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *              F0              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             *                              *                                                                                                             
+             ********************************
     ");
 }

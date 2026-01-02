@@ -239,22 +239,9 @@ impl Hub {
             let tabbed_container = self.containers.get(container_id);
 
             let active_tab = if Child::Container(container_id) == focused {
-                // A container's focus must either match a child's focus or point directly to a child
-                tabbed_container
-                    .children()
-                    .iter()
-                    .find(|&&child| {
-                        if let Child::Container(child_container) = child
-                            && self.containers.get(child_container).focused
-                                == tabbed_container.focused
-                        {
-                            true
-                        } else {
-                            child == tabbed_container.focused
-                        }
-                    })
-                    .copied()
-                    .unwrap()
+                // `tabbed_container`'s focused at this moment must be a direct child, since the
+                // only way to focus a container is by calling focus_parent from a direct child
+                tabbed_container.focused
             } else {
                 focused
             };
@@ -340,21 +327,18 @@ impl Hub {
             return;
         }
 
-        // Handle float window move
-        if let Focus::Float(float_id) = focused {
-            self.detach_float_from_workspace(float_id);
-            self.float_windows.get_mut(float_id).workspace = target_workspace_id;
-            self.attach_float_to_workspace(target_workspace_id, float_id);
-            tracing::debug!(?focused, target_workspace, "Moved to workspace");
-            return;
+        match focused {
+            Focus::Tiling(child) => {
+                self.detach_child_from_its_parent(child);
+                self.attach_child_to_workspace(child, target_workspace_id);
+            }
+            Focus::Float(float_id) => {
+                self.detach_float_from_workspace(float_id);
+                self.float_windows.get_mut(float_id).workspace = target_workspace_id;
+                self.attach_float_to_workspace(target_workspace_id, float_id);
+            }
         }
 
-        let Focus::Tiling(child) = focused else {
-            return;
-        };
-
-        self.detach_child_from_its_parent(child);
-        self.attach_child_to_workspace(child, target_workspace_id);
         tracing::debug!(?focused, target_workspace, "Moved to workspace");
     }
 
@@ -1052,7 +1036,7 @@ impl Hub {
                 Parent::Workspace(_) => return None,
             }
         }
-        None
+        unreachable!()
     }
 
     fn focus_in_direction(&mut self, direction: Direction, forward: bool) {
@@ -1082,9 +1066,11 @@ impl Hub {
                 continue;
             }
             let container = self.containers.get(container_id);
-            let Some(pos) = container.children.iter().position(|c| *c == current) else {
-                return;
-            };
+            let pos = container
+                .children
+                .iter()
+                .position(|c| *c == current)
+                .unwrap();
             let has_sibling = if forward {
                 pos + 1 < container.children.len()
             } else {

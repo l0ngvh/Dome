@@ -362,3 +362,54 @@ fn move_container_to_workspace_with_container_direction_matching_workspace_spawn
     )
     ");
 }
+
+#[test]
+fn move_focused_to_workspace_on_empty_workspace() {
+    let mut hub = setup();
+
+    hub.move_focused_to_workspace(1);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0)
+    )
+    ");
+}
+
+#[test]
+fn move_container_to_tabbed_workspace() {
+    let mut hub = setup();
+
+    // Create container with 2 windows on workspace 0
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.focus_parent();
+
+    // Create tabbed container on workspace 1
+    hub.focus_workspace(1);
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.toggle_container_layout();
+    hub.toggle_spawn_mode();
+    hub.toggle_spawn_mode();
+
+    // Go back and move container to workspace 1
+    hub.focus_workspace(0);
+    hub.move_focused_to_workspace(1);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0)
+      Workspace(id=WorkspaceId(1), name=1, focused=ContainerId(0),
+        Container(id=ContainerId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
+          Window(id=WindowId(2), parent=ContainerId(1), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(3), parent=ContainerId(1), x=1.00, y=3.00, w=148.00, h=26.00)
+          Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, direction=Horizontal,
+            Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=73.00, h=26.00)
+            Window(id=WindowId(1), parent=ContainerId(0), x=76.00, y=3.00, w=73.00, h=26.00)
+          )
+        )
+      )
+    )
+    ");
+}

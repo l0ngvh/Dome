@@ -718,3 +718,219 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     ******************************************************************************************************************************************************
     ");
 }
+
+#[test]
+fn toggle_float_with_container_focused() {
+    let mut hub = setup();
+
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.focus_parent();
+    hub.toggle_float();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=76.00, y=1.00, w=73.00, h=28.00)
+        )
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                    W0                                   ||                                    W1                                   *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    *                                                                         ||                                                                         *
+    ******************************************************************************************************************************************************
+    ");
+}
+
+#[test]
+fn delete_unfocused_float_window() {
+    use crate::core::node::Dimension;
+    let mut hub = setup();
+
+    let f0 = hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.insert_tiling();
+
+    hub.delete_float(f0);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
+      )
+    )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+}
+
+#[test]
+fn delete_float_keeps_current_workspace() {
+    use crate::core::node::Dimension;
+    let mut hub = setup();
+
+    // Delete float on current workspace - workspace should remain
+    let f0 = hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.delete_float(f0);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0)
+    )
+    ");
+}
+
+#[test]
+fn delete_float_keeps_workspace_with_tiling() {
+    use crate::core::node::Dimension;
+    let mut hub = setup();
+
+    // Create float and tiling on workspace 1, then switch away
+    hub.focus_workspace(1);
+    hub.insert_tiling();
+    let f0 = hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.focus_workspace(0);
+
+    // Delete float - workspace 1 should remain because it has tiling
+    hub.delete_float(f0);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0)
+      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(1), x=1.00, y=1.00, w=148.00, h=28.00)
+      )
+    )
+    ");
+}
+
+#[test]
+fn delete_float_keeps_workspace_with_other_floats() {
+    use crate::core::node::Dimension;
+    let mut hub = setup();
+
+    // Create two floats on workspace 1, then switch away
+    hub.focus_workspace(1);
+    let f0 = hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.focus_workspace(0);
+
+    // Delete one float - workspace 1 should remain because it has another float
+    hub.delete_float(f0);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0)
+      Workspace(id=WorkspaceId(1), name=1, focused=FloatWindowId(1),
+        Float(id=FloatWindowId(1), x=50.00, y=5.00, w=30.00, h=20.00)
+      )
+    )
+    ");
+}
+
+#[test]
+fn delete_float_removes_empty_non_current_workspace() {
+    use crate::core::node::Dimension;
+    let mut hub = setup();
+
+    // Create float on workspace 1, then switch away
+    hub.focus_workspace(1);
+    let f0 = hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.focus_workspace(0);
+
+    // Delete float - workspace 1 should be removed (empty and not current)
+    hub.delete_float(f0);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0)
+    )
+    ");
+}
