@@ -455,18 +455,16 @@ fn sync_focus(app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
         if !context.hub.is_focusing(Child::Window(id)) {
             let title = registry
                 .get_tiling(id)
-                .map(|w| w.title().to_owned())
+                .map(|w| w.to_string())
                 .unwrap_or_default();
-            drop(registry);
             tracing::debug!(%id, %title, "Focus changed to tiling window");
             context.hub.set_focus(id);
         }
     } else if let Some(id) = registry.get_float_by_hash(h) {
         let title = registry
             .get_float(id)
-            .map(|w| w.title().to_owned())
+            .map(|w| w.to_string())
             .unwrap_or_default();
-        drop(registry);
         tracing::debug!(%id, %title, "Focus changed to float window");
         context.hub.set_float_focus(id);
     }
@@ -673,6 +671,9 @@ pub(super) fn render_workspace(context: &mut WindowContext) -> Result<()> {
     Ok(())
 }
 
+/// Sync window state to actual macOS windows.
+/// Some windows report incorrect AX attributes and can't actually be managed.
+/// Layout failures for such windows are logged at trace level and ignored.
 fn apply_layout(context: &mut WindowContext) -> Result<()> {
     let workspace_id = context.hub.current_workspace();
     let workspace = context.hub.get_workspace(workspace_id);
@@ -737,13 +738,17 @@ fn apply_layout(context: &mut WindowContext) -> Result<()> {
 
     // Apply layout
     for (window_id, dim) in tiling_layouts {
-        if let Some(os_window) = registry.get_tiling(window_id) {
-            os_window.set_dimension(dim)?;
+        if let Some(os_window) = registry.get_tiling(window_id)
+            && let Err(e) = os_window.set_dimension(dim)
+        {
+            tracing::trace!(%window_id, error = %format!("{e:#}"), "Failed to set dimension");
         }
     }
     for (float_id, dim) in float_layouts {
-        if let Some(os_window) = registry.get_float(float_id) {
-            os_window.set_dimension(dim)?;
+        if let Some(os_window) = registry.get_float(float_id)
+            && let Err(e) = os_window.set_dimension(dim)
+        {
+            tracing::trace!(%float_id, error = %format!("{e:#}"), "Failed to set dimension");
         }
     }
 

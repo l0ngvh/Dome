@@ -148,22 +148,8 @@ impl MacWindow {
     }
 
     pub(crate) fn dimension(&self) -> Dimension {
-        let (x, y) = get_attribute::<AXValue>(&self.window, &kAXPositionAttribute())
-            .map(|v| {
-                let mut pos = CGPoint::new(0.0, 0.0);
-                let ptr = NonNull::new(&mut pos as *mut _ as *mut _).unwrap();
-                unsafe { v.value(AXValueType::CGPoint, ptr) };
-                (pos.x as f32, pos.y as f32)
-            })
-            .unwrap_or((0.0, 0.0));
-        let (width, height) = get_attribute::<AXValue>(&self.window, &kAXSizeAttribute())
-            .map(|v| {
-                let mut size = CGSize::new(0.0, 0.0);
-                let ptr = NonNull::new(&mut size as *mut _ as *mut _).unwrap();
-                unsafe { v.value(AXValueType::CGSize, ptr) };
-                (size.width as f32, size.height as f32)
-            })
-            .unwrap_or((0.0, 0.0));
+        let (x, y) = self.position();
+        let (width, height) = self.size();
         Dimension {
             x,
             y,
@@ -195,6 +181,7 @@ impl MacWindow {
             && is_valid_subrole
             && self.is_root()
             && self.can_move()
+            && self.can_focus()
             && !self.is_minimized()
             && !self.is_hidden()
     }
@@ -239,6 +226,32 @@ impl MacWindow {
 
     fn is_hidden(&self) -> bool {
         self.running_app.isHidden()
+    }
+
+    fn can_focus(&self) -> bool {
+        is_attribute_settable(&self.window, &kAXMainAttribute())
+    }
+
+    fn position(&self) -> (f32, f32) {
+        get_attribute::<AXValue>(&self.window, &kAXPositionAttribute())
+            .map(|v| {
+                let mut pos = CGPoint::new(0.0, 0.0);
+                let ptr = NonNull::new(&mut pos as *mut _ as *mut _).unwrap();
+                unsafe { v.value(AXValueType::CGPoint, ptr) };
+                (pos.x as f32, pos.y as f32)
+            })
+            .unwrap_or((0.0, 0.0))
+    }
+
+    fn size(&self) -> (f32, f32) {
+        get_attribute::<AXValue>(&self.window, &kAXSizeAttribute())
+            .map(|v| {
+                let mut size = CGSize::new(0.0, 0.0);
+                let ptr = NonNull::new(&mut size as *mut _ as *mut _).unwrap();
+                unsafe { v.value(AXValueType::CGSize, ptr) };
+                (size.width as f32, size.height as f32)
+            })
+            .unwrap_or((0.0, 0.0))
     }
 }
 
