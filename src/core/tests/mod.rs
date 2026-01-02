@@ -485,9 +485,9 @@ fn validate_child_exists(hub: &Hub, child: Child) {
 }
 
 fn setup_logger() {
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .try_init();
+    use tracing_subscriber::EnvFilter;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
