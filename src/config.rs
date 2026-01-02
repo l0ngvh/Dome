@@ -270,10 +270,10 @@ impl<'de> Deserialize<'de> for Color {
             .parse::<csscolorparser::Color>()
             .map_err(serde::de::Error::custom)?;
         Ok(Color {
-            r: c.r as f32,
-            g: c.g as f32,
-            b: c.b as f32,
-            a: c.a as f32,
+            r: c.r,
+            g: c.g,
+            b: c.b,
+            a: c.a,
         })
     }
 }

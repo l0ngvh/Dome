@@ -39,17 +39,17 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
         self.storage
             .get(id.get())
             // TODO: dump everything here?
-            .expect(format!("Node {id:?} not found").as_str())
+            .unwrap_or_else(|| panic!("Node {id:?} not found"))
             .as_ref()
-            .expect(format!("Node {id:?} was deleted").as_str())
+            .unwrap_or_else(|| panic!("Node {id:?} was deleted"))
     }
 
     pub(super) fn get_mut(&mut self, id: T::Id) -> &mut T {
         self.storage
             .get_mut(id.get())
-            .expect(format!("Node {id:?} not found").as_str())
+            .unwrap_or_else(|| panic!("Node {id:?} not found"))
             .as_mut()
-            .expect(format!("Node {id:?} was deleted").as_str())
+            .unwrap_or_else(|| panic!("Node {id:?} was deleted"))
     }
 
     #[cfg(test)]
