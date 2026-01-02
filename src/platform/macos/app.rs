@@ -9,8 +9,9 @@ use objc2_core_foundation::kCFBooleanTrue;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 
 use super::context::{Observers, WindowContext};
+use super::handler::render_workspace;
 use super::ipc;
-use super::listeners::{listen_to_input_devices, render_workspace, setup_app_observers};
+use super::listeners::{listen_to_input_devices, setup_app_observers};
 use super::overlay::{OverlayView, create_overlay_window};
 use crate::config::Config;
 use crate::core::Dimension;

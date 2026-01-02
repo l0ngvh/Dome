@@ -17,7 +17,7 @@ mod toggle_spawn_mode;
 
 use crate::core::allocator::NodeId;
 use crate::core::hub::Hub;
-use crate::core::node::{Child, ContainerId, FloatWindowId, Focus, Parent};
+use crate::core::node::{Child, FloatWindowId, Focus, Parent};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;

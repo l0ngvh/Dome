@@ -3,41 +3,7 @@ use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::str::FromStr;
 
-#[derive(Debug, Clone)]
-pub enum Action {
-    Focus(FocusTarget),
-    Move(MoveTarget),
-    Toggle(ToggleTarget),
-}
-
-#[derive(Debug, Clone)]
-pub enum FocusTarget {
-    Up,
-    Down,
-    Left,
-    Right,
-    Parent,
-    Workspace(usize),
-    NextTab,
-    PrevTab,
-}
-
-#[derive(Debug, Clone)]
-pub enum MoveTarget {
-    Up,
-    Down,
-    Left,
-    Right,
-    Workspace(usize),
-}
-
-#[derive(Debug, Clone)]
-pub enum ToggleTarget {
-    SpawnDirection,
-    Direction,
-    Layout,
-    Float,
-}
+use crate::action::{Action, FocusTarget, MoveTarget, ToggleTarget};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,34 +19,6 @@ bitflags::bitflags! {
 pub struct Keymap {
     pub key: String,
     pub modifiers: Modifiers,
-}
-
-impl FromStr for Action {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        let parts: Vec<&str> = s.split_whitespace().collect();
-        match parts.as_slice() {
-            ["focus", "up"] => Ok(Action::Focus(FocusTarget::Up)),
-            ["focus", "down"] => Ok(Action::Focus(FocusTarget::Down)),
-            ["focus", "left"] => Ok(Action::Focus(FocusTarget::Left)),
-            ["focus", "right"] => Ok(Action::Focus(FocusTarget::Right)),
-            ["focus", "parent"] => Ok(Action::Focus(FocusTarget::Parent)),
-            ["focus", "workspace", n] => Ok(Action::Focus(FocusTarget::Workspace(n.parse()?))),
-            ["focus", "next_tab"] => Ok(Action::Focus(FocusTarget::NextTab)),
-            ["focus", "prev_tab"] => Ok(Action::Focus(FocusTarget::PrevTab)),
-            ["move", "up"] => Ok(Action::Move(MoveTarget::Up)),
-            ["move", "down"] => Ok(Action::Move(MoveTarget::Down)),
-            ["move", "left"] => Ok(Action::Move(MoveTarget::Left)),
-            ["move", "right"] => Ok(Action::Move(MoveTarget::Right)),
-            ["move", "workspace", n] => Ok(Action::Move(MoveTarget::Workspace(n.parse()?))),
-            ["toggle", "spawn_direction"] => Ok(Action::Toggle(ToggleTarget::SpawnDirection)),
-            ["toggle", "direction"] => Ok(Action::Toggle(ToggleTarget::Direction)),
-            ["toggle", "layout"] => Ok(Action::Toggle(ToggleTarget::Layout)),
-            ["toggle", "float"] => Ok(Action::Toggle(ToggleTarget::Float)),
-            _ => Err(anyhow!("Unknown action: {}", s)),
-        }
-    }
 }
 
 impl FromStr for Keymap {
@@ -114,14 +52,18 @@ fn default_keymaps() -> HashMap<Keymap, Vec<Action>> {
                 key: i.to_string(),
                 modifiers: Modifiers::CMD,
             },
-            vec![Action::Focus(FocusTarget::Workspace(i))],
+            vec![Action::Focus {
+                target: FocusTarget::Workspace { index: i },
+            }],
         );
         keymaps.insert(
             Keymap {
                 key: i.to_string(),
                 modifiers: Modifiers::CMD | Modifiers::SHIFT,
             },
-            vec![Action::Move(MoveTarget::Workspace(i))],
+            vec![Action::Move {
+                target: MoveTarget::Workspace { index: i },
+            }],
         );
     }
     keymaps.insert(
@@ -129,105 +71,135 @@ fn default_keymaps() -> HashMap<Keymap, Vec<Action>> {
             key: "e".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Toggle(ToggleTarget::SpawnDirection)],
+        vec![Action::Toggle {
+            target: ToggleTarget::SpawnDirection,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "d".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Toggle(ToggleTarget::Direction)],
+        vec![Action::Toggle {
+            target: ToggleTarget::Direction,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "b".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Toggle(ToggleTarget::Layout)],
+        vec![Action::Toggle {
+            target: ToggleTarget::Layout,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "p".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Focus(FocusTarget::Parent)],
+        vec![Action::Focus {
+            target: FocusTarget::Parent,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "h".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Focus(FocusTarget::Left)],
+        vec![Action::Focus {
+            target: FocusTarget::Left,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "j".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Focus(FocusTarget::Down)],
+        vec![Action::Focus {
+            target: FocusTarget::Down,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "k".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Focus(FocusTarget::Up)],
+        vec![Action::Focus {
+            target: FocusTarget::Up,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "l".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Focus(FocusTarget::Right)],
+        vec![Action::Focus {
+            target: FocusTarget::Right,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "[".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Focus(FocusTarget::PrevTab)],
+        vec![Action::Focus {
+            target: FocusTarget::PrevTab,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "]".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Focus(FocusTarget::NextTab)],
+        vec![Action::Focus {
+            target: FocusTarget::NextTab,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "h".into(),
             modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
-        vec![Action::Move(MoveTarget::Left)],
+        vec![Action::Move {
+            target: MoveTarget::Left,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "j".into(),
             modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
-        vec![Action::Move(MoveTarget::Down)],
+        vec![Action::Move {
+            target: MoveTarget::Down,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "k".into(),
             modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
-        vec![Action::Move(MoveTarget::Up)],
+        vec![Action::Move {
+            target: MoveTarget::Up,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "l".into(),
             modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
-        vec![Action::Move(MoveTarget::Right)],
+        vec![Action::Move {
+            target: MoveTarget::Right,
+        }],
     );
     keymaps.insert(
         Keymap {
             key: "f".into(),
             modifiers: Modifiers::CMD,
         },
-        vec![Action::Toggle(ToggleTarget::Float)],
+        vec![Action::Toggle {
+            target: ToggleTarget::Float,
+        }],
     );
     keymaps
 }

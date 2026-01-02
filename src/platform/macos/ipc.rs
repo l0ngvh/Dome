@@ -9,7 +9,10 @@ use objc2_core_foundation::{
     CFRunLoop, kCFRunLoopDefaultMode,
 };
 
+use crate::action::Action;
+
 use super::context::WindowContext;
+use super::handler::execute_action;
 
 const K_CF_FILE_DESCRIPTOR_READ_CALL_BACK: CFOptionFlags = 1;
 
@@ -40,19 +43,26 @@ fn handle_client(mut stream: UnixStream, context: &mut WindowContext) {
     let mut line = String::new();
 
     if reader.read_line(&mut line).is_ok() {
-        let cmd = line.trim();
-        let response = match handle_command(cmd, context) {
-            Ok(()) => "ok\n".to_string(),
-            Err(e) => format!("error:{e}\n"),
+        let response = match serde_json::from_str::<Action>(line.trim()) {
+            Ok(action) => match handle_action(&action, context) {
+                Ok(()) => "ok\n".to_string(),
+                Err(e) => {
+                    tracing::warn!(?action, "IPC action failed: {e}");
+                    format!("error:{e}\n")
+                }
+            },
+            Err(e) => {
+                tracing::warn!("Invalid IPC message: {e}");
+                format!("error:invalid action: {e}\n")
+            }
         };
         let _ = stream.write_all(response.as_bytes());
     }
 }
 
-fn handle_command(cmd: &str, _context: &mut WindowContext) -> Result<(), String> {
-    // TODO: dispatch to hub/core
-    tracing::info!("Received IPC command: {cmd}");
-    Ok(())
+fn handle_action(action: &Action, context: &mut WindowContext) -> Result<(), String> {
+    tracing::debug!(?action, "IPC action");
+    execute_action(context, action).map_err(|e| e.to_string())
 }
 
 pub(super) fn register_with_runloop(context: *mut WindowContext) -> anyhow::Result<()> {
@@ -80,6 +90,9 @@ pub(super) fn register_with_runloop(context: *mut WindowContext) -> anyhow::Resu
         .add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
 
     std::mem::forget(fd_ref);
+
+    let path = socket_path();
+    tracing::info!(path = %path.display(), "IPC server listening");
     Ok(())
 }
 
@@ -97,4 +110,14 @@ pub(super) fn try_bind() -> anyhow::Result<UnixListener> {
         }
         Err(e) => Err(e.into()),
     }
+}
+
+pub fn send_action(action: &Action) -> std::io::Result<String> {
+    let mut stream = UnixStream::connect(socket_path())?;
+    let json = serde_json::to_string(action).map_err(std::io::Error::other)?;
+    writeln!(stream, "{json}")?;
+
+    let mut response = String::new();
+    BufReader::new(&stream).read_line(&mut response)?;
+    Ok(response.trim().to_string())
 }
