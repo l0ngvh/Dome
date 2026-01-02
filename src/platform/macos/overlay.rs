@@ -349,6 +349,11 @@ pub(super) fn collect_overlays(
             let dim = window.dimension();
             let spawn_mode = window.spawn_mode();
             let y = screen.y + screen.height - dim.y - dim.height;
+            let top = if spawn_mode.is_tab() {
+                spawn_color
+            } else {
+                color
+            };
             let bottom = if spawn_mode.is_vertical() {
                 spawn_color
             } else {
@@ -368,7 +373,7 @@ pub(super) fn collect_overlays(
                 },
                 border_size,
                 false,
-                [color, bottom, color, right],
+                [top, bottom, color, right],
             ));
         }
         Some(Focus::Tiling(Child::Container(container_id))) => {
@@ -378,6 +383,11 @@ pub(super) fn collect_overlays(
             let dim = container.dimension();
             let spawn_mode = container.spawn_mode();
             let y = screen.y + screen.height - dim.y - dim.height;
+            let top = if spawn_mode.is_tab() {
+                spawn_color
+            } else {
+                color
+            };
             let bottom = if spawn_mode.is_vertical() {
                 spawn_color
             } else {
@@ -397,7 +407,7 @@ pub(super) fn collect_overlays(
                 },
                 border_size,
                 true,
-                [color, bottom, color, right],
+                [top, bottom, color, right],
             ));
         }
         _ => {}
