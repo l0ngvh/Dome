@@ -134,10 +134,10 @@ fn clean_up_parent_container_when_only_child_is_container() {
     let w0 = hub.insert_tiling();
     hub.insert_tiling();
     // Create new child container
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     // Should be inserted in the root container
     let w3 = hub.insert_tiling();
     hub.delete_window(w0);
@@ -292,10 +292,10 @@ fn delete_focused_window_change_focus_to_next_window() {
 fn delete_focused_window_focus_last_window_of_preceding_container() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     let w2 = hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -386,13 +386,12 @@ fn delete_focused_window_focus_last_window_of_preceding_container() {
 }
 
 #[test]
-fn delete_focused_window_focus_first_window_of_following_container() {
+fn delete_focused_window_focus_following_container_focused_node() {
     let mut hub = setup();
     let w0 = hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.focus_left();
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -441,7 +440,7 @@ fn delete_focused_window_focus_first_window_of_following_container() {
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
         Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(1), parent=ContainerId(1), x=1.00, y=1.00, w=148.00, h=13.00)
           Window(id=WindowId(2), parent=ContainerId(1), x=1.00, y=16.00, w=148.00, h=13.00)
@@ -449,21 +448,6 @@ fn delete_focused_window_focus_first_window_of_following_container() {
       )
     )
 
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W1                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
     |                                                                                                                                                    |
@@ -472,13 +456,28 @@ fn delete_focused_window_focus_first_window_of_following_container() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
-    |                                                                         W2                                                                         |
+    |                                                                         W1                                                                         |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W2                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
     ");
 }
 
@@ -535,56 +534,11 @@ fn container_replaced_by_child_keeps_position_in_parent() {
     // Create: [w0] [w1, w2] [w3]
     hub.insert_tiling();
     let w1 = hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=51.00, y=1.00, w=48.00, h=13.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=51.00, y=16.00, w=48.00, h=13.00)
-          )
-          Window(id=WindowId(3), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=28.00)
-        )
-      )
-    )
-
-    +------------------------------------------------++------------------------------------------------+**************************************************
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                       W1                       |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                |+------------------------------------------------+*                                                *
-    |                       W0                       |+------------------------------------------------+*                       W3                       *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                       W2                       |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    +------------------------------------------------++------------------------------------------------+**************************************************
-    ");
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -636,7 +590,7 @@ fn delete_window_focus_sibling_containers_last_window() {
 
     let w0 = hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
 
     // Delete W0, container collapses, should focus W2 (last window of sibling container)
@@ -690,11 +644,10 @@ fn delete_window_focus_sibling_container_if_last_focused_container() {
 
     let w0 = hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
 
-    // Delete W0, container collapses, should focus W2 (last window of sibling container)
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -744,11 +697,11 @@ fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     let mut hub = setup();
 
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     let w1 = hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

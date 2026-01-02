@@ -5,7 +5,7 @@ fn move_left_from_vertical_container_to_horizontal_parent() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -62,7 +62,7 @@ fn move_right_from_vertical_container_to_horizontal_parent() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -118,9 +118,9 @@ fn move_right_from_vertical_container_to_horizontal_parent() {
 fn move_up_from_horizontal_container_to_vertical_parent() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -176,9 +176,9 @@ fn move_up_from_horizontal_container_to_vertical_parent() {
 fn move_down_from_horizontal_container_to_vertical_parent() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -234,7 +234,7 @@ fn move_down_from_horizontal_container_to_vertical_parent() {
 fn move_left_from_vertical_container_creates_new_root_container() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -291,7 +291,7 @@ fn move_left_from_vertical_container_creates_new_root_container() {
 fn move_left_from_vertical_container_replaces_new_root_container() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
 
     hub.move_left();
@@ -342,7 +342,7 @@ fn move_left_from_vertical_container_replaces_new_root_container() {
 fn move_right_from_vertical_container_creates_new_root_container() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -397,7 +397,7 @@ fn move_right_from_vertical_container_creates_new_root_container() {
 fn move_right_from_vertical_container_replaces_new_root_container() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
 
     hub.move_right();
@@ -657,9 +657,9 @@ fn move_right_at_edge_goes_to_horizontal_grandparent() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -719,9 +719,9 @@ fn move_left_at_edge_goes_to_horizontal_grandparent() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.focus_left();
@@ -782,11 +782,11 @@ fn move_left_at_edge_goes_to_horizontal_grandparent() {
 fn move_down_at_edge_goes_to_vertical_grandparent() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -845,11 +845,11 @@ fn move_down_at_edge_goes_to_vertical_grandparent() {
 fn move_up_at_edge_goes_to_vertical_grandparent() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.focus_up();
@@ -1023,7 +1023,7 @@ fn swap_right_in_horizontal_container() {
 fn swap_up_in_vertical_container() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
 
     hub.move_up();
@@ -1074,7 +1074,7 @@ fn swap_up_in_vertical_container() {
 fn swap_down_in_vertical_container() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_up();
 
@@ -1127,7 +1127,7 @@ fn move_from_tabbed_parent_goes_to_grandparent() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_container_layout();
@@ -1184,12 +1184,12 @@ fn move_from_tabbed_parent_goes_to_grandparent() {
 fn move_container_up_toggles_direction_when_matching_parent() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
 
@@ -1249,10 +1249,10 @@ fn move_container_left_toggles_direction_when_matching_parent() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
 

@@ -575,7 +575,7 @@ fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
             MoveTarget::Right => context.hub.move_right(),
         },
         Action::Toggle(target) => match target {
-            ToggleTarget::SpawnDirection => context.hub.toggle_spawn_direction(),
+            ToggleTarget::SpawnDirection => context.hub.toggle_spawn_mode(),
             ToggleTarget::Direction => context.hub.toggle_direction(),
             ToggleTarget::Layout => context.hub.toggle_container_layout(),
             ToggleTarget::Float => {
@@ -695,10 +695,8 @@ fn apply_layout(context: &mut WindowContext) -> Result<()> {
             }
             Child::Container(container_id) => {
                 let container = context.hub.get_container(container_id);
-                if container.is_tabbed() {
-                    if let Some(&active_child) = container.children().get(container.active_tab()) {
-                        stack.push(active_child);
-                    }
+                if let Some(active_tab) = container.active_tab() {
+                    stack.push(active_tab);
                 } else {
                     for &c in container.children() {
                         stack.push(c);

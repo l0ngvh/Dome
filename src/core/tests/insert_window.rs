@@ -48,7 +48,7 @@ fn initial_window_cover_full_screen() {
 #[test]
 fn split_window_evenly() {
     let mut hub = setup();
-    for i in 0..4 {
+    for _ in 0..4 {
         hub.insert_tiling();
     }
     assert_snapshot!(snapshot(&hub), @r"
@@ -104,7 +104,7 @@ fn new_container_preserves_wrapped_window_position() {
     hub.insert_tiling();
     // Focus w1 (middle)
     hub.focus_left();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     // New container wrapping w1 should be in the middle position
     assert_snapshot!(snapshot(&hub), @r"
@@ -215,15 +215,16 @@ fn insert_window_after_focused_container_with_same_new_window_direction() {
     // Create: [w0] [w1, w2] [w3]
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     // Focus the middle container and toggle back spawn direction
     hub.focus_left();
     hub.focus_parent();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     // w4 should be inserted right after the focused container, not at the end
     assert_snapshot!(snapshot(&hub), @r"
@@ -281,7 +282,7 @@ fn insert_to_new_container_when_focused_container_window_insert_direction_differ
     hub.insert_tiling();
     hub.insert_tiling();
     hub.focus_parent();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -338,10 +339,10 @@ fn insert_to_parent_when_focused_container_window_insert_direction_differ_but_ha
     hub.insert_tiling();
     hub.insert_tiling();
     hub.focus_left();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     // Should be inserted in the root container
     hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"

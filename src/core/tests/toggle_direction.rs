@@ -110,7 +110,7 @@ fn toggle_direction_on_window_nested() {
 
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.toggle_direction();
 
@@ -167,11 +167,11 @@ fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
     hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_container_layout();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -289,11 +289,11 @@ fn toggle_direction_skips_nested_tabbed_container() {
     hub.insert_tiling();
     let w1 = hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_container_layout();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.set_focus(w1);
 
@@ -408,19 +408,19 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     let w1 = hub.insert_tiling();
     hub.insert_tiling();
     hub.set_focus(w1);
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_container_layout();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     let w6 = hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_container_layout();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.set_focus(w6);

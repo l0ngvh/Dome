@@ -13,11 +13,11 @@ mod set_focus;
 mod smoke;
 mod tabbed;
 mod toggle_direction;
-mod toggle_spawn_direction;
+mod toggle_spawn_mode;
 
 use crate::core::allocator::NodeId;
 use crate::core::hub::Hub;
-use crate::core::node::{Child, ContainerId, FloatWindowId, Focus, Parent, WorkspaceId};
+use crate::core::node::{Child, ContainerId, FloatWindowId, Focus, Parent};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
@@ -158,9 +158,16 @@ fn draw_windows(hub: &Hub, grid: &mut [Vec<char>], child: Child, border: f32) {
                         Child::Container(cid) => format!("C{}", cid.get()),
                     })
                     .collect();
-                draw_tab_bar(grid, dim.x, dim.y, dim.width, &tab_labels, c.active_tab());
+                draw_tab_bar(
+                    grid,
+                    dim.x,
+                    dim.y,
+                    dim.width,
+                    &tab_labels,
+                    c.active_tab_index(),
+                );
 
-                if let Some(&active) = c.children().get(c.active_tab()) {
+                if let Some(&active) = c.children().get(c.active_tab_index()) {
                     draw_windows(hub, grid, active, border);
                 }
             } else {
@@ -294,10 +301,10 @@ fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
         }
         Child::Container(id) => {
             let c = hub.get_container(id);
-            let layout_info = if c.is_tabbed() {
-                format!("tabbed=true, active_tab={}", c.active_tab())
+            let layout_info = if let Some(dir) = c.direction() {
+                format!("direction={:?}", dir)
             } else {
-                format!("direction={:?}", c.direction)
+                format!("tabbed=true, active_tab={}", c.active_tab_index())
             };
             s.push_str(&format!(
                 "{}Container(id={}, parent={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}, {},\n",
@@ -332,6 +339,23 @@ fn validate_hub(hub: &Hub) {
     for (workspace_id, workspace) in hub.all_workspaces() {
         if let Some(Focus::Tiling(child)) = workspace.focused() {
             validate_child_exists(hub, child);
+            if let Some(root) = workspace.root() {
+                match root {
+                    Child::Window(_) => {
+                        assert_eq!(
+                            child, root,
+                            "Workspace {workspace_id} focus ({child:?}) doesn't match root ({root:?})"
+                        );
+                    }
+                    Child::Container(cid) => {
+                        let root_focus = hub.get_container(cid).focused;
+                        assert!(
+                            child == root || child == root_focus,
+                            "Workspace {workspace_id} focus ({child:?}) doesn't match root ({root:?}) or root's focus ({root_focus:?})"
+                        );
+                    }
+                }
+            }
         }
         if let Some(Focus::Float(fid)) = workspace.focused() {
             hub.get_float(fid); // Validate float exists
@@ -354,12 +378,10 @@ fn validate_hub(hub: &Hub) {
             continue;
         };
         let mut stack = vec![(root, Parent::Workspace(workspace_id))];
-        let mut iterations = 0;
-        while let Some((child, expected_parent)) = stack.pop() {
-            iterations += 1;
-            if iterations > 10000 {
-                panic!("validate_hub: cycle detected");
-            }
+        for _ in super::bounded_loop() {
+            let Some((child, expected_parent)) = stack.pop() else {
+                break;
+            };
             match child {
                 Child::Window(wid) => {
                     let window = hub.get_window(wid);
@@ -371,13 +393,6 @@ fn validate_hub(hub: &Hub) {
                         window.workspace, workspace_id,
                         "Window {wid} has wrong workspace"
                     );
-                    for &cid in &window.focused_by {
-                        let container = hub.get_container(cid);
-                        assert_eq!(
-                            container.focused, child,
-                            "Window {wid} focused_by {cid} but container doesn't focus it"
-                        );
-                    }
                 }
                 Child::Container(cid) => {
                     let container = hub.get_container(cid);
@@ -396,30 +411,58 @@ fn validate_hub(hub: &Hub) {
 
                     if container.is_tabbed() {
                         assert!(
-                            container.active_tab() < container.children().len(),
+                            container.active_tab_index() < container.children().len(),
                             "Container {cid} active_tab out of bounds"
                         );
-                    }
-
-                    if let Parent::Container(parent_cid) = expected_parent {
-                        let parent = hub.get_container(parent_cid);
-                        if !parent.is_tabbed() && !container.is_tabbed() {
-                            assert_ne!(
-                                parent.direction, container.direction,
-                                "Container {cid} has same direction as parent {parent_cid}"
-                            );
+                        let active_tab = container.children()[container.active_tab_index()];
+                        match active_tab {
+                            Child::Window(_) => {
+                                assert_eq!(
+                                    container.focused, active_tab,
+                                    "Container {cid} focused {:?} doesn't match active_tab {:?}",
+                                    container.focused, active_tab
+                                );
+                            }
+                            Child::Container(child_cid) => {
+                                let child_focused = hub.get_container(child_cid).focused;
+                                assert!(
+                                    container.focused == child_focused
+                                        || container.focused == active_tab,
+                                    "Container {cid} focused {:?} doesn't match active_tab {:?} or its focused {:?}",
+                                    container.focused,
+                                    active_tab,
+                                    child_focused
+                                );
+                            }
                         }
                     }
 
-                    validate_child_exists(hub, container.focused);
-
-                    for &cid_focusing in &container.focused_by {
-                        let c = hub.get_container(cid_focusing);
-                        assert_eq!(
-                            c.focused, child,
-                            "Container {cid} focused_by {cid_focusing} but that container doesn't focus it"
+                    if let Parent::Container(parent_cid) = expected_parent
+                        && let Some(parent_dir) = hub.get_container(parent_cid).direction()
+                        && let Some(child_dir) = container.direction()
+                    {
+                        assert_ne!(
+                            parent_dir, child_dir,
+                            "Container {cid} has same direction as parent {parent_cid}"
                         );
                     }
+
+                    // A container's focus must either match a child's focus or point directly to a child
+                    let focused = container.focused;
+                    let is_direct_child = container.children().contains(&focused);
+                    let matches_child_focus = container.children().iter().any(|&c| {
+                        if let Child::Container(child_cid) = c {
+                            hub.get_container(child_cid).focused == focused
+                        } else {
+                            false
+                        }
+                    });
+                    assert!(
+                        is_direct_child || matches_child_focus,
+                        "Container {cid} focus {focused:?} is neither a direct child nor matches a child's focus"
+                    );
+
+                    validate_child_exists(hub, container.focused);
 
                     for &c in container.children() {
                         stack.push((c, Parent::Container(cid)));

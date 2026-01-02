@@ -510,9 +510,9 @@ fn toggle_tiling_to_float_with_existing_tiling() {
 fn toggle_float_to_tiling_with_nested_containers() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_float(Dimension {
         x: 50.0,

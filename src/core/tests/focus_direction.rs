@@ -103,7 +103,7 @@ fn focus_up_down_in_vertical_container() {
     let mut hub = setup();
 
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -202,10 +202,10 @@ fn focus_right_selects_first_child_of_next_container() {
 
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_up();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
 
     // Focus w0
@@ -315,10 +315,10 @@ fn focus_left_selects_last_child_of_previous_container() {
 
     // Create: [w0, w1] [w2]
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -421,9 +421,9 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     // Create: [w0, [w1, [w2, w3]]]
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
 
     hub.focus_left();
@@ -529,15 +529,14 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
 fn focus_down_from_nested_container_goes_to_grandparent_next() {
     let mut hub = setup();
 
-    // Create: [[[w0, w1], w2], w3]
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_up();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_left();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -643,10 +642,10 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
 
     // Create: [w0, w1] [w2]
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
 
     // Focus w1 (last in nested container)
@@ -750,9 +749,9 @@ fn focus_down_into_horizontal_nested_container() {
     let mut hub = setup();
 
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -963,7 +962,7 @@ fn focus_up_at_boundary_does_nothing() {
     let mut hub = setup();
 
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_up();
     hub.focus_up(); // Already at topmost
@@ -1016,7 +1015,7 @@ fn focus_down_at_boundary_does_nothing() {
     let mut hub = setup();
 
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_down(); // Already at bottommost
 
@@ -1068,7 +1067,7 @@ fn focus_from_inside_tabbed_parent_goes_to_parent_sibling() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_container_layout();
@@ -1127,7 +1126,7 @@ fn focus_into_container_uses_container_focus() {
 
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
 

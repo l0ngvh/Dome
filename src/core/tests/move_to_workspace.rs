@@ -183,7 +183,7 @@ fn move_container_to_workspace() {
 
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
     hub.move_focused_to_workspace(1);
@@ -301,7 +301,7 @@ fn move_vertical_container_to_workspace_with_one_window() {
     let mut hub = setup();
 
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
 
@@ -332,14 +332,14 @@ fn move_container_to_workspace_with_container_direction_matching_workspace_spawn
     let mut hub = setup();
 
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.focus_parent();
 
     hub.focus_workspace(1);
     hub.insert_tiling();
     hub.insert_tiling();
-    hub.toggle_spawn_direction();
+    hub.toggle_spawn_mode();
 
     hub.focus_workspace(0);
     hub.move_focused_to_workspace(1);

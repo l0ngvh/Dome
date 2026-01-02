@@ -12,7 +12,7 @@ use objc2_foundation::{
 };
 
 use crate::config::{Color, Config};
-use crate::core::{Child, Dimension, Direction, Focus, Hub, WindowId, WorkspaceId};
+use crate::core::{Child, Dimension, Focus, Hub, WindowId, WorkspaceId};
 
 use super::context::WindowRegistry;
 
@@ -288,7 +288,7 @@ pub(super) fn collect_overlays(
                     let children = container.children();
                     if !children.is_empty() {
                         let tab_width = dim.width / children.len() as f32;
-                        let active_tab = container.active_tab();
+                        let active_tab = container.active_tab_index();
                         // Active tab background
                         let active_x = dim.x + active_tab as f32 * tab_width;
                         tiling_rects.push(OverlayRect {
@@ -347,14 +347,14 @@ pub(super) fn collect_overlays(
             let spawn_color = config.spawn_indicator_color;
             let window = hub.get_window(window_id);
             let dim = window.dimension();
-            let direction = window.spawn_direction();
+            let spawn_mode = window.spawn_mode();
             let y = screen.y + screen.height - dim.y - dim.height;
-            let bottom = if direction == Direction::Vertical {
+            let bottom = if spawn_mode.is_vertical() {
                 spawn_color
             } else {
                 color
             };
-            let right = if direction == Direction::Horizontal {
+            let right = if spawn_mode.is_horizontal() {
                 spawn_color
             } else {
                 color
@@ -376,14 +376,14 @@ pub(super) fn collect_overlays(
             let spawn_color = config.spawn_indicator_color;
             let container = hub.get_container(container_id);
             let dim = container.dimension();
-            let direction = container.spawn_direction();
+            let spawn_mode = container.spawn_mode();
             let y = screen.y + screen.height - dim.y - dim.height;
-            let bottom = if direction == Direction::Vertical {
+            let bottom = if spawn_mode.is_vertical() {
                 spawn_color
             } else {
                 color
             };
-            let right = if direction == Direction::Horizontal {
+            let right = if spawn_mode.is_horizontal() {
                 spawn_color
             } else {
                 color

@@ -5,4 +5,12 @@ mod node;
 mod tests;
 
 pub(crate) use hub::Hub;
-pub(crate) use node::{Child, Dimension, Direction, FloatWindowId, Focus, WindowId, WorkspaceId};
+pub(crate) use node::{Child, Dimension, FloatWindowId, Focus, WindowId, WorkspaceId};
+
+const MAX_ITERATIONS: usize = 10000;
+
+fn bounded_loop() -> impl Iterator<Item = usize> {
+    (0..MAX_ITERATIONS).chain(std::iter::once_with(|| {
+        panic!("exceeded {MAX_ITERATIONS} iterations")
+    }))
+}
