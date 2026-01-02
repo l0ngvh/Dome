@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::ptr::NonNull;
 
 use objc2_app_kit::NSRunningApplication;
@@ -73,6 +73,7 @@ impl MacWindow {
             self.set_position(dim.x, dim.y)?;
             self.set_size(dim.width, dim.height)
         })
+        .with_context(|| format!("set_dimension for {self}"))
     }
 
     pub(crate) fn focus(&self) -> Result<()> {
@@ -82,6 +83,7 @@ impl MacWindow {
         set_attribute_value(&self.window, &kAXMainAttribute(), unsafe {
             kCFBooleanTrue.unwrap()
         })
+        .with_context(|| format!("focus for {self}"))
     }
 
     /// Hide the window by moving it offscreen
@@ -98,6 +100,7 @@ impl MacWindow {
                 self.screen.y + self.screen.height - 1.0,
             )
         })
+        .with_context(|| format!("hide for {self}"))
     }
 
     /// Without this the windows move in a janky way
