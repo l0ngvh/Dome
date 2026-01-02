@@ -1,3 +1,4 @@
+use std::os::unix::net::UnixListener;
 use std::{cell::RefCell, collections::HashMap, collections::HashSet, rc::Rc, time::Instant};
 
 use objc2::rc::Retained;
@@ -174,6 +175,7 @@ pub(super) struct WindowContext {
     /// processed, screen will be locked and AX API will be unavailable before we are able turn on
     /// this flag.
     pub(super) is_suspended: bool,
+    pub(super) listener: UnixListener,
 }
 
 impl WindowContext {
@@ -182,6 +184,7 @@ impl WindowContext {
         float_overlay: Retained<OverlayView>,
         screen: Dimension,
         config: Config,
+        listener: UnixListener,
     ) -> Self {
         let hub = Hub::new(screen, config.border_size, config.tab_bar_height);
 
@@ -200,6 +203,7 @@ impl WindowContext {
             },
             displayed_windows: HashSet::new(),
             is_suspended: false,
+            listener,
         }
     }
 }

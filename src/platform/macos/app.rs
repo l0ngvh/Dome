@@ -9,6 +9,7 @@ use objc2_core_foundation::kCFBooleanTrue;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 
 use super::context::{Observers, WindowContext};
+use super::ipc;
 use super::listeners::{listen_to_input_devices, render_workspace, setup_app_observers};
 use super::overlay::{OverlayView, create_overlay_window};
 use crate::config::Config;
@@ -57,6 +58,15 @@ define_class!(
             tracing::info!("Application did finish launching");
             let mtm = self.mtm();
 
+            let listener = match ipc::try_bind() {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::error!("{e}");
+                    NSApplication::sharedApplication(mtm).terminate(None);
+                    return;
+                }
+            };
+
             let config = Config::load();
             let screen = get_main_screen();
             let frame = NSRect::new(
@@ -79,7 +89,12 @@ define_class!(
                 float_overlay,
                 screen,
                 config,
+                listener,
             )));
+
+            if let Err(e) = ipc::register_with_runloop(context_ptr) {
+                tracing::error!("Failed to setup IPC: {e:#}");
+            }
 
             if let Err(e) = listen_to_input_devices(context_ptr) {
                 tracing::error!("Failed to setup keyboard listener: {e:#}");
