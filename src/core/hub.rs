@@ -172,7 +172,8 @@ impl Hub {
             }
             root_id = parent_id;
         }
-        self.toggle_container_direction(root_id);
+        self.containers.get_mut(root_id).toggle_direction();
+        self.maintain_direction_invariance(root_id);
         self.balance_container(root_id);
     }
 
@@ -210,23 +211,14 @@ impl Hub {
         let container = self.containers.get_mut(container_id);
         let direction = container.direction();
         container.is_tabbed = !container.is_tabbed;
-        let children = container.children.clone();
         tracing::debug!(%container_id, from = ?direction, "Toggled container layout");
-        if let Some(mut direction) = container.direction() {
+        if container.direction().is_some() {
             // When toggling from tabbed to split, ensure direction differs from parent and
             // children
             if let Parent::Container(parent_cid) = container.parent {
-                let parent_container = self.containers.get(parent_cid);
-                if parent_container.has_direction(direction) {
-                    direction = self.containers.get_mut(container_id).toggle_direction();
-                }
-            }
-            for c in children {
-                if let Child::Container(child_cid) = c
-                    && self.containers.get(child_cid).has_direction(direction)
-                {
-                    self.toggle_container_direction(child_cid);
-                }
+                self.maintain_direction_invariance(parent_cid);
+            } else {
+                self.maintain_direction_invariance(container_id);
             }
         } else {
             // Toggled from split to tabbed
@@ -555,17 +547,23 @@ impl Hub {
         self.workspaces.get_mut(workspace_id).root = Some(Child::Container(new_container_id));
     }
 
-    fn toggle_container_direction(&mut self, container_id: ContainerId) {
+    /// Ensures all child containers have different direction than their parent.
+    /// Skips tabbed containers.
+    fn maintain_direction_invariance(&mut self, container_id: ContainerId) {
         let mut stack = vec![container_id];
         for _ in super::bounded_loop() {
             let Some(id) = stack.pop() else {
                 return;
             };
-            self.containers.get_mut(id).toggle_direction();
-            for &child in &self.containers.get(id).children {
-                if let Child::Container(child_id) = child
-                    && !self.containers.get(child_id).is_tabbed
-                {
+            let Some(direction) = self.containers.get(id).direction() else {
+                continue; // Tabbed container, no invariant needed
+            };
+
+            for &child in &self.containers.get(id).children.clone() {
+                if let Child::Container(child_id) = child {
+                    if self.containers.get(child_id).has_direction(direction) {
+                        self.containers.get_mut(child_id).toggle_direction();
+                    }
                     stack.push(child_id);
                 }
             }
@@ -607,11 +605,7 @@ impl Hub {
                         window.parent = Parent::Container(container_id);
                     }
                     Child::Container(cid) => {
-                        let container = self.containers.get_mut(cid);
-                        container.parent = Parent::Container(container_id);
-                        if container.has_direction(direction) {
-                            self.toggle_container_direction(cid);
-                        }
+                        self.containers.get_mut(cid).parent = Parent::Container(container_id);
                     }
                 }
             }
@@ -638,12 +632,12 @@ impl Hub {
             }
             container_id
         };
+        self.maintain_direction_invariance(container_id);
         self.balance_container(container_id);
         container_id
     }
 
-    /// Attach child to existing container. Ensures direction invariant (child containers
-    /// toggle if same direction as parent). Does not change focus.
+    /// Attach child to existing container. Does not change focus.
     fn attach_child_to_container(
         &mut self,
         child: Child,
@@ -664,18 +658,10 @@ impl Hub {
                 self.windows.get_mut(wid).parent = Parent::Container(container_id);
             }
             Child::Container(cid) => {
-                let parent_direction = parent.direction();
-                if parent_direction.is_some_and(|d| {
-                    self.containers
-                        .get(cid)
-                        .direction()
-                        .is_some_and(|c_d| d == c_d)
-                }) {
-                    self.toggle_container_direction(cid);
-                }
                 self.containers.get_mut(cid).parent = Parent::Container(container_id);
             }
         }
+        self.maintain_direction_invariance(container_id);
         self.balance_container(container_id);
     }
 
@@ -873,24 +859,14 @@ impl Hub {
             Parent::Workspace(ws) => self.workspaces.get_mut(ws).root = Some(last_child),
         }
 
-        // When promoting a container to grandparent, ensure direction invariant is maintained
-        if let (Child::Container(child_cid), Parent::Container(gp_cid)) = (last_child, grandparent)
-            && let (Some(child_dir), Some(gp_dir)) = (
-                self.containers.get(child_cid).direction(),
-                self.containers.get(gp_cid).direction(),
-            )
-            && child_dir == gp_dir
-        {
-            self.toggle_container_direction(child_cid);
-        }
-
         // If this container was being focused, changing focus to last_child regardless of whether
         // it's a container makes sense. Don't need to focus just window here
         self.replace_focus(Child::Container(container_id), last_child);
         self.containers.delete(container_id);
 
-        // Rebalance to react to direction change
+        // When promoting a container to grandparent, ensure direction invariant is maintained
         if let Parent::Container(gp) = grandparent {
+            self.maintain_direction_invariance(gp);
             self.balance_container(gp);
         }
     }
