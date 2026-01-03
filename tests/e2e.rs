@@ -5,11 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use dome::{Action, FocusTarget, MoveTarget, ToggleTarget, send_action};
-
 fn spawn_server() -> Child {
     Command::new(env!("CARGO_BIN_EXE_dome"))
-        .arg("launch")
+        .args(["launch", "--config", "examples/config.toml"])
         .spawn()
         .expect("failed to start server")
 }
@@ -24,6 +22,14 @@ fn wait_for_server(timeout: Duration) -> bool {
         thread::sleep(Duration::from_millis(50));
     }
     false
+}
+
+fn dome(args: &[&str]) -> bool {
+    Command::new(env!("CARGO_BIN_EXE_dome"))
+        .args(args)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 #[cfg(target_os = "macos")]
@@ -85,7 +91,7 @@ impl TestEnv {
     }
 
     fn shutdown(mut self) {
-        send_action(&Action::Exit).ok();
+        dome(&["exit"]);
         self.server.wait().unwrap();
         kill_test_app();
     }
@@ -97,18 +103,8 @@ fn test_horizontal_navigation() {
     spawn_test_window();
     spawn_test_window();
 
-    assert!(
-        send_action(&Action::Focus {
-            target: FocusTarget::Left
-        })
-        .is_ok()
-    );
-    assert!(
-        send_action(&Action::Focus {
-            target: FocusTarget::Right
-        })
-        .is_ok()
-    );
+    assert!(dome(&["focus", "left"]));
+    assert!(dome(&["focus", "right"]));
 
     env.shutdown();
 }
@@ -117,26 +113,11 @@ fn test_horizontal_navigation() {
 fn test_vertical_navigation() {
     let env = TestEnv::new();
     spawn_test_window();
-    assert!(
-        send_action(&Action::Toggle {
-            target: ToggleTarget::Direction
-        })
-        .is_ok()
-    );
+    assert!(dome(&["toggle", "direction"]));
     spawn_test_window();
 
-    assert!(
-        send_action(&Action::Focus {
-            target: FocusTarget::Up
-        })
-        .is_ok()
-    );
-    assert!(
-        send_action(&Action::Focus {
-            target: FocusTarget::Down
-        })
-        .is_ok()
-    );
+    assert!(dome(&["focus", "up"]));
+    assert!(dome(&["focus", "down"]));
 
     env.shutdown();
 }
@@ -146,24 +127,9 @@ fn test_move_to_workspace() {
     let env = TestEnv::new();
     spawn_test_window();
 
-    assert!(
-        send_action(&Action::Move {
-            target: MoveTarget::Workspace { index: 1 }
-        })
-        .is_ok()
-    );
-    assert!(
-        send_action(&Action::Focus {
-            target: FocusTarget::Workspace { index: 1 }
-        })
-        .is_ok()
-    );
-    assert!(
-        send_action(&Action::Focus {
-            target: FocusTarget::Workspace { index: 0 }
-        })
-        .is_ok()
-    );
+    assert!(dome(&["move", "workspace", "1"]));
+    assert!(dome(&["focus", "workspace", "1"]));
+    assert!(dome(&["focus", "workspace", "0"]));
 
     env.shutdown();
 }
@@ -174,18 +140,8 @@ fn test_move_window_position() {
     spawn_test_window();
     spawn_test_window();
 
-    assert!(
-        send_action(&Action::Move {
-            target: MoveTarget::Left
-        })
-        .is_ok()
-    );
-    assert!(
-        send_action(&Action::Move {
-            target: MoveTarget::Right
-        })
-        .is_ok()
-    );
+    assert!(dome(&["move", "left"]));
+    assert!(dome(&["move", "right"]));
 
     env.shutdown();
 }
@@ -195,18 +151,8 @@ fn test_float_toggle() {
     let env = TestEnv::new();
     spawn_test_window();
 
-    assert!(
-        send_action(&Action::Toggle {
-            target: ToggleTarget::Float
-        })
-        .is_ok()
-    );
-    assert!(
-        send_action(&Action::Toggle {
-            target: ToggleTarget::Float
-        })
-        .is_ok()
-    );
+    assert!(dome(&["toggle", "float"]));
+    assert!(dome(&["toggle", "float"]));
 
     env.shutdown();
 }
@@ -216,25 +162,10 @@ fn test_tabbed_navigation() {
     let env = TestEnv::new();
     spawn_test_window();
     spawn_test_window();
-    assert!(
-        send_action(&Action::Toggle {
-            target: ToggleTarget::Layout
-        })
-        .is_ok()
-    );
+    assert!(dome(&["toggle", "layout"]));
 
-    assert!(
-        send_action(&Action::Focus {
-            target: FocusTarget::PrevTab
-        })
-        .is_ok()
-    );
-    assert!(
-        send_action(&Action::Focus {
-            target: FocusTarget::NextTab
-        })
-        .is_ok()
-    );
+    assert!(dome(&["focus", "prev-tab"]));
+    assert!(dome(&["focus", "next-tab"]));
 
     env.shutdown();
 }
@@ -245,12 +176,7 @@ fn test_focus_parent() {
     spawn_test_window();
     spawn_test_window();
 
-    assert!(
-        send_action(&Action::Focus {
-            target: FocusTarget::Parent
-        })
-        .is_ok()
-    );
+    assert!(dome(&["focus", "parent"]));
 
     env.shutdown();
 }

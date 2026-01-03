@@ -346,8 +346,18 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load() -> Self {
-        match std::fs::read_to_string("config.toml") {
+    pub fn load(path: Option<&str>) -> Self {
+        let path = path.map(|p| p.to_string()).unwrap_or_else(|| {
+            let config_dir = std::env::var("XDG_CONFIG_HOME")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| {
+                    let home = std::env::var("HOME").unwrap_or_default();
+                    format!("{home}/.config")
+                });
+            format!("{config_dir}/dome/config.toml")
+        });
+        match std::fs::read_to_string(&path) {
             Ok(content) => match toml::from_str(&content) {
                 Ok(config) => config,
                 Err(e) => {
@@ -356,7 +366,7 @@ impl Config {
                 }
             },
             Err(e) => {
-                tracing::warn!("Failed to load config: {e}, using defaults");
+                tracing::warn!("Failed to load config from {path}: {e}, using defaults");
                 Config::default()
             }
         }

@@ -1,5 +1,6 @@
 #!/bin/bash
 # Run all tests with coverage.
+# Should be run a new macOS space
 # Report: target/llvm-cov/html/index.html
 set -e
 export RUSTUP_TOOLCHAIN=nightly-2026-01-01

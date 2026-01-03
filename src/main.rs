@@ -13,7 +13,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    Launch,
+    Launch {
+        #[arg(short, long)]
+        config: Option<String>,
+    },
     #[command(flatten)]
     Action(Action),
 }
@@ -22,7 +25,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        None | Some(Command::Launch) => {
+        None => {
             tracing_subscriber::registry()
                 .with(fmt::layer())
                 .with(ErrorLayer::default())
@@ -32,7 +35,19 @@ fn main() {
                 tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
             }));
 
-            run_app();
+            run_app(None);
+        }
+        Some(Command::Launch { config }) => {
+            tracing_subscriber::registry()
+                .with(fmt::layer())
+                .with(ErrorLayer::default())
+                .init();
+            std::panic::set_hook(Box::new(|panic_info| {
+                let backtrace = backtrace::Backtrace::new();
+                tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
+            }));
+
+            run_app(config);
         }
         Some(Command::Action(action)) => match dome::send_action(&action) {
             Ok(response) => println!("{response}"),
