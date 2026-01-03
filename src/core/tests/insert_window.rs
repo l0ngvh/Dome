@@ -8,7 +8,7 @@ fn initial_window_cover_full_screen() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -55,10 +55,10 @@ fn split_window_evenly() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=35.50, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=38.50, y=1.00, w=35.50, h=28.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=76.00, y=1.00, w=35.50, h=28.00)
-          Window(id=WindowId(3), parent=ContainerId(0), x=113.50, y=1.00, w=35.50, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=37.50, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=37.50, y=0.00, w=37.50, h=30.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=75.00, y=0.00, w=37.50, h=30.00)
+          Window(id=WindowId(3), parent=ContainerId(0), x=112.50, y=0.00, w=37.50, h=30.00)
         )
       )
     )
@@ -111,12 +111,12 @@ fn new_container_preserves_wrapped_window_position() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=51.00, y=1.00, w=48.00, h=13.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=51.00, y=16.00, w=48.00, h=13.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=0.00, w=50.00, h=15.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=15.00, w=50.00, h=15.00)
           )
-          Window(id=WindowId(2), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -168,10 +168,10 @@ fn insert_window_after_focused_window() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=35.50, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=38.50, y=1.00, w=35.50, h=28.00)
-          Window(id=WindowId(3), parent=ContainerId(0), x=76.00, y=1.00, w=35.50, h=28.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=113.50, y=1.00, w=35.50, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=37.50, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=37.50, y=0.00, w=37.50, h=30.00)
+          Window(id=WindowId(3), parent=ContainerId(0), x=75.00, y=0.00, w=37.50, h=30.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=112.50, y=0.00, w=37.50, h=30.00)
         )
       )
     )
@@ -231,13 +231,13 @@ fn insert_window_after_focused_container_with_same_new_window_direction() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=51.00, y=1.00, w=48.00, h=8.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=51.00, y=11.00, w=48.00, h=8.00)
-            Window(id=WindowId(4), parent=ContainerId(1), x=51.00, y=21.00, w=48.00, h=8.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=0.00, w=50.00, h=10.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=50.00, y=10.00, w=50.00, h=10.00)
+            Window(id=WindowId(4), parent=ContainerId(1), x=50.00, y=20.00, w=50.00, h=10.00)
           )
-          Window(id=WindowId(3), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(3), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -289,11 +289,11 @@ fn insert_to_new_container_when_focused_container_window_insert_direction_differ
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=0.00, w=150.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=13.00)
-            Window(id=WindowId(1), parent=ContainerId(0), x=51.00, y=1.00, w=48.00, h=13.00)
-            Window(id=WindowId(2), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=13.00)
+            Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=15.00)
+            Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=15.00)
+            Window(id=WindowId(2), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=15.00)
           )
-          Window(id=WindowId(3), parent=ContainerId(1), x=1.00, y=16.00, w=148.00, h=13.00)
+          Window(id=WindowId(3), parent=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00)
         )
       )
     )
@@ -349,13 +349,13 @@ fn insert_to_parent_when_focused_container_window_insert_direction_differ_but_ha
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=35.50, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=37.50, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=37.50, y=0.00, w=37.50, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=38.50, y=1.00, w=35.50, h=13.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=38.50, y=16.00, w=35.50, h=13.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=37.50, y=0.00, w=37.50, h=15.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=37.50, y=15.00, w=37.50, h=15.00)
           )
-          Window(id=WindowId(4), parent=ContainerId(0), x=76.00, y=1.00, w=35.50, h=28.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=113.50, y=1.00, w=35.50, h=28.00)
+          Window(id=WindowId(4), parent=ContainerId(0), x=75.00, y=0.00, w=37.50, h=30.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=112.50, y=0.00, w=37.50, h=30.00)
         )
       )
     )

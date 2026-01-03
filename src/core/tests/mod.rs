@@ -1,6 +1,5 @@
 #![allow(clippy::needless_range_loop)]
 
-mod border;
 mod delete_window;
 mod float_window;
 mod focus_direction;
@@ -21,7 +20,6 @@ use crate::core::node::{Child, FloatWindowId, Focus, Parent};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
-const BORDER: f32 = 1.0;
 const TAB_BAR_HEIGHT: f32 = 2.0;
 
 pub(super) fn snapshot(hub: &Hub) -> String {
@@ -34,24 +32,18 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     let focused = workspace.focused();
 
     if let Some(root) = workspace.root() {
-        draw_windows(hub, &mut grid, root, BORDER);
+        draw_windows(hub, &mut grid, root);
     }
 
     // Draw float windows
     for &float_id in workspace.float_windows() {
-        draw_float(hub, &mut grid, float_id, BORDER);
+        draw_float(hub, &mut grid, float_id);
     }
 
     match focused {
         Some(Focus::Tiling(Child::Window(id))) => {
             let dim = hub.get_window(id).dimension();
-            draw_focused_border(
-                &mut grid,
-                dim.x - BORDER,
-                dim.y - BORDER,
-                dim.width + 2.0 * BORDER,
-                dim.height + 2.0 * BORDER,
-            );
+            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
         }
         Some(Focus::Tiling(Child::Container(id))) => {
             let dim = hub.get_container(id).dimension();
@@ -59,13 +51,7 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         }
         Some(Focus::Float(id)) => {
             let dim = hub.get_float(id).dimension();
-            draw_focused_border(
-                &mut grid,
-                dim.x - BORDER,
-                dim.y - BORDER,
-                dim.width + 2.0 * BORDER,
-                dim.height + 2.0 * BORDER,
-            );
+            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
         }
         None => {}
     }
@@ -120,29 +106,29 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     s
 }
 
-fn draw_float(hub: &Hub, grid: &mut [Vec<char>], float_id: FloatWindowId, border: f32) {
+fn draw_float(hub: &Hub, grid: &mut [Vec<char>], float_id: FloatWindowId) {
     let float = hub.get_float(float_id);
     let dim = float.dimension();
     draw_rect(
         grid,
-        dim.x - border,
-        dim.y - border,
-        dim.width + 2.0 * border,
-        dim.height + 2.0 * border,
+        dim.x,
+        dim.y,
+        dim.width,
+        dim.height,
         &format!("F{}", float_id.get()),
     );
 }
 
-fn draw_windows(hub: &Hub, grid: &mut [Vec<char>], child: Child, border: f32) {
+fn draw_windows(hub: &Hub, grid: &mut [Vec<char>], child: Child) {
     match child {
         Child::Window(id) => {
             let dim = hub.get_window(id).dimension();
             draw_rect(
                 grid,
-                dim.x - border,
-                dim.y - border,
-                dim.width + 2.0 * border,
-                dim.height + 2.0 * border,
+                dim.x,
+                dim.y,
+                dim.width,
+                dim.height,
                 &format!("W{}", id.get()),
             );
         }
@@ -168,11 +154,11 @@ fn draw_windows(hub: &Hub, grid: &mut [Vec<char>], child: Child, border: f32) {
                 );
 
                 if let Some(&active) = c.children().get(c.active_tab_index()) {
-                    draw_windows(hub, grid, active, border);
+                    draw_windows(hub, grid, active);
                 }
             } else {
                 for &child in c.children() {
-                    draw_windows(hub, grid, child, border);
+                    draw_windows(hub, grid, child);
                 }
             }
         }
@@ -504,7 +490,6 @@ pub(super) fn setup() -> Hub {
             width: ASCII_WIDTH as f32,
             height: ASCII_HEIGHT as f32,
         },
-        BORDER,
         TAB_BAR_HEIGHT,
         false,
     )

@@ -14,9 +14,9 @@ fn toggle_tabbed_mode() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -68,9 +68,9 @@ fn toggle_tabbed_mode_focus_currently_focused_node() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -122,9 +122,9 @@ fn focus_prev_next_tab() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -165,9 +165,9 @@ fn focus_prev_next_tab() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -219,9 +219,9 @@ fn focus_next_tab_wrapped() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -275,9 +275,9 @@ fn focus_prev_tab_wraps() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -329,9 +329,9 @@ fn focus_tab_change_workspace_focus_to_active_tab_window() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -387,11 +387,11 @@ fn focus_tab_change_workspace_focus_to_active_tab_container_focused() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=1.00, y=3.00, w=148.00, h=7.33)
-            Window(id=WindowId(2), parent=ContainerId(1), x=1.00, y=12.33, w=148.00, h=7.33)
-            Window(id=WindowId(3), parent=ContainerId(1), x=1.00, y=21.67, w=148.00, h=7.33)
+            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=2.00, w=150.00, h=9.33)
+            Window(id=WindowId(2), parent=ContainerId(1), x=0.00, y=11.33, w=150.00, h=9.33)
+            Window(id=WindowId(3), parent=ContainerId(1), x=0.00, y=20.67, w=150.00, h=9.33)
           )
         )
       )
@@ -449,11 +449,11 @@ fn focus_tab_change_workspace_focus_to_tabbed_container_active_tab_focused() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(1), parent=ContainerId(1), x=1.00, y=5.00, w=148.00, h=24.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=1.00, y=5.00, w=148.00, h=24.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=1.00, y=5.00, w=148.00, h=24.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=4.00, w=150.00, h=26.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=0.00, y=4.00, w=150.00, h=26.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=0.00, y=4.00, w=150.00, h=26.00)
           )
         )
       )
@@ -505,8 +505,8 @@ fn toggle_tabbed_off() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=76.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -560,11 +560,11 @@ fn tabbed_container_takes_one_slot() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
           )
         )
       )
@@ -619,10 +619,10 @@ fn vertical_to_tabbed() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=3,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(3), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(3), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -682,13 +682,13 @@ fn container_in_tabbed_container() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
-              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=3.00, w=35.50, h=26.00)
-              Window(id=WindowId(4), parent=ContainerId(2), x=113.50, y=3.00, w=35.50, h=26.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=75.00, y=2.00, w=37.50, h=28.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=112.50, y=2.00, w=37.50, h=28.00)
             )
           )
         )
@@ -733,13 +733,13 @@ fn container_in_tabbed_container() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00, tabbed=true, active_tab=1,
-              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=5.00, w=73.00, h=24.00)
-              Window(id=WindowId(4), parent=ContainerId(2), x=76.00, y=5.00, w=73.00, h=24.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=75.00, y=4.00, w=75.00, h=26.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=75.00, y=4.00, w=75.00, h=26.00)
             )
           )
         )
@@ -798,14 +798,14 @@ fn change_tab_shows_container_focus() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
-              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=3.00, w=23.00, h=26.00)
-              Window(id=WindowId(4), parent=ContainerId(2), x=101.00, y=3.00, w=23.00, h=26.00)
-              Window(id=WindowId(5), parent=ContainerId(2), x=126.00, y=3.00, w=23.00, h=26.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=75.00, y=2.00, w=25.00, h=28.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=100.00, y=2.00, w=25.00, h=28.00)
+              Window(id=WindowId(5), parent=ContainerId(2), x=125.00, y=2.00, w=25.00, h=28.00)
             )
           )
         )
@@ -850,14 +850,14 @@ fn change_tab_shows_container_focus() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=0,
-            Window(id=WindowId(1), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
-              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=3.00, w=23.00, h=26.00)
-              Window(id=WindowId(4), parent=ContainerId(2), x=101.00, y=3.00, w=23.00, h=26.00)
-              Window(id=WindowId(5), parent=ContainerId(2), x=126.00, y=3.00, w=23.00, h=26.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=75.00, y=2.00, w=25.00, h=28.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=100.00, y=2.00, w=25.00, h=28.00)
+              Window(id=WindowId(5), parent=ContainerId(2), x=125.00, y=2.00, w=25.00, h=28.00)
             )
           )
         )
@@ -903,14 +903,14 @@ fn change_tab_shows_container_focus() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=76.00, y=3.00, w=73.00, h=26.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
-              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=3.00, w=23.00, h=26.00)
-              Window(id=WindowId(4), parent=ContainerId(2), x=101.00, y=3.00, w=23.00, h=26.00)
-              Window(id=WindowId(5), parent=ContainerId(2), x=126.00, y=3.00, w=23.00, h=26.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=75.00, y=2.00, w=25.00, h=28.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=100.00, y=2.00, w=25.00, h=28.00)
+              Window(id=WindowId(5), parent=ContainerId(2), x=125.00, y=2.00, w=25.00, h=28.00)
             )
           )
         )
@@ -964,9 +964,9 @@ fn set_focus_updates_active_tab() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -1018,8 +1018,8 @@ fn delete_active_tab_updates_active_tab() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -1078,14 +1078,14 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent_and_children() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=148.00, h=8.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=11.00, w=148.00, h=8.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=10.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=10.00, w=150.00, h=10.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=20.00, w=150.00, h=10.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(2), parent=ContainerId(1), x=1.00, y=23.00, w=148.00, h=6.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=1.00, y=23.00, w=148.00, h=6.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=0.00, y=22.00, w=150.00, h=8.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=0.00, y=22.00, w=150.00, h=8.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=0.00, y=22.00, w=150.00, h=8.00, direction=Horizontal,
-              Window(id=WindowId(4), parent=ContainerId(2), x=1.00, y=23.00, w=73.00, h=6.00)
-              Window(id=WindowId(5), parent=ContainerId(2), x=76.00, y=23.00, w=73.00, h=6.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=0.00, y=22.00, w=75.00, h=8.00)
+              Window(id=WindowId(5), parent=ContainerId(2), x=75.00, y=22.00, w=75.00, h=8.00)
             )
           )
         )
@@ -1129,14 +1129,14 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent_and_children() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=148.00, h=8.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=11.00, w=148.00, h=8.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=10.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=10.00, w=150.00, h=10.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=20.00, w=150.00, h=10.00, direction=Horizontal,
-            Window(id=WindowId(2), parent=ContainerId(1), x=1.00, y=21.00, w=48.00, h=8.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=51.00, y=21.00, w=48.00, h=8.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=0.00, y=20.00, w=50.00, h=10.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=20.00, w=50.00, h=10.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=100.00, y=20.00, w=50.00, h=10.00, direction=Vertical,
-              Window(id=WindowId(4), parent=ContainerId(2), x=101.00, y=21.00, w=48.00, h=3.00)
-              Window(id=WindowId(5), parent=ContainerId(2), x=101.00, y=26.00, w=48.00, h=3.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=100.00, y=20.00, w=50.00, h=5.00)
+              Window(id=WindowId(5), parent=ContainerId(2), x=100.00, y=25.00, w=50.00, h=5.00)
             )
           )
         )
@@ -1199,16 +1199,16 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_children() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=51.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(2), parent=ContainerId(1), x=101.00, y=3.00, w=48.00, h=26.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=101.00, y=3.00, w=48.00, h=26.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=100.00, y=2.00, w=50.00, h=28.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=2.00, w=50.00, h=28.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=100.00, y=2.00, w=50.00, h=28.00, direction=Vertical,
-              Window(id=WindowId(4), parent=ContainerId(2), x=101.00, y=3.00, w=48.00, h=5.00)
-              Window(id=WindowId(5), parent=ContainerId(2), x=101.00, y=10.00, w=48.00, h=5.00)
-              Window(id=WindowId(6), parent=ContainerId(2), x=101.00, y=17.00, w=48.00, h=5.00)
-              Window(id=WindowId(7), parent=ContainerId(2), x=101.00, y=24.00, w=48.00, h=5.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=100.00, y=2.00, w=50.00, h=7.00)
+              Window(id=WindowId(5), parent=ContainerId(2), x=100.00, y=9.00, w=50.00, h=7.00)
+              Window(id=WindowId(6), parent=ContainerId(2), x=100.00, y=16.00, w=50.00, h=7.00)
+              Window(id=WindowId(7), parent=ContainerId(2), x=100.00, y=23.00, w=50.00, h=7.00)
             )
           )
         )
@@ -1253,16 +1253,16 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_children() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=51.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(2), parent=ContainerId(1), x=101.00, y=1.00, w=48.00, h=8.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=101.00, y=11.00, w=48.00, h=8.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=100.00, y=0.00, w=50.00, h=10.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=10.00, w=50.00, h=10.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=100.00, y=20.00, w=50.00, h=10.00, direction=Horizontal,
-              Window(id=WindowId(4), parent=ContainerId(2), x=101.00, y=21.00, w=10.50, h=8.00)
-              Window(id=WindowId(5), parent=ContainerId(2), x=113.50, y=21.00, w=10.50, h=8.00)
-              Window(id=WindowId(6), parent=ContainerId(2), x=126.00, y=21.00, w=10.50, h=8.00)
-              Window(id=WindowId(7), parent=ContainerId(2), x=138.50, y=21.00, w=10.50, h=8.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=100.00, y=20.00, w=12.50, h=10.00)
+              Window(id=WindowId(5), parent=ContainerId(2), x=112.50, y=20.00, w=12.50, h=10.00)
+              Window(id=WindowId(6), parent=ContainerId(2), x=125.00, y=20.00, w=12.50, h=10.00)
+              Window(id=WindowId(7), parent=ContainerId(2), x=137.50, y=20.00, w=12.50, h=10.00)
             )
           )
         )
@@ -1332,26 +1332,26 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(6),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=3,
-            Window(id=WindowId(1), parent=ContainerId(1), x=51.00, y=3.00, w=48.00, h=26.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=51.00, y=3.00, w=48.00, h=26.00)
-            Window(id=WindowId(4), parent=ContainerId(1), x=51.00, y=3.00, w=48.00, h=26.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00)
+            Window(id=WindowId(4), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00)
             Container(id=ContainerId(2), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00, direction=Vertical,
-              Window(id=WindowId(5), parent=ContainerId(2), x=51.00, y=3.00, w=48.00, h=7.33)
-              Window(id=WindowId(6), parent=ContainerId(2), x=51.00, y=12.33, w=48.00, h=7.33)
+              Window(id=WindowId(5), parent=ContainerId(2), x=50.00, y=2.00, w=50.00, h=9.33)
+              Window(id=WindowId(6), parent=ContainerId(2), x=50.00, y=11.33, w=50.00, h=9.33)
               Container(id=ContainerId(3), parent=ContainerId(2), x=50.00, y=20.67, w=50.00, h=9.33, tabbed=true, active_tab=2,
-                Window(id=WindowId(7), parent=ContainerId(3), x=51.00, y=23.67, w=48.00, h=5.33)
-                Window(id=WindowId(8), parent=ContainerId(3), x=51.00, y=23.67, w=48.00, h=5.33)
+                Window(id=WindowId(7), parent=ContainerId(3), x=50.00, y=22.67, w=50.00, h=7.33)
+                Window(id=WindowId(8), parent=ContainerId(3), x=50.00, y=22.67, w=50.00, h=7.33)
                 Container(id=ContainerId(4), parent=ContainerId(3), x=50.00, y=22.67, w=50.00, h=7.33, direction=Horizontal,
-                  Window(id=WindowId(9), parent=ContainerId(4), x=51.00, y=23.67, w=14.67, h=5.33)
-                  Window(id=WindowId(10), parent=ContainerId(4), x=67.67, y=23.67, w=14.67, h=5.33)
-                  Window(id=WindowId(11), parent=ContainerId(4), x=84.33, y=23.67, w=14.67, h=5.33)
+                  Window(id=WindowId(9), parent=ContainerId(4), x=50.00, y=22.67, w=16.67, h=7.33)
+                  Window(id=WindowId(10), parent=ContainerId(4), x=66.67, y=22.67, w=16.67, h=7.33)
+                  Window(id=WindowId(11), parent=ContainerId(4), x=83.33, y=22.67, w=16.67, h=7.33)
                 )
               )
             )
           )
-          Window(id=WindowId(2), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -1394,26 +1394,26 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=51.00, y=1.00, w=48.00, h=5.50)
-            Window(id=WindowId(3), parent=ContainerId(1), x=51.00, y=8.50, w=48.00, h=5.50)
-            Window(id=WindowId(4), parent=ContainerId(1), x=51.00, y=16.00, w=48.00, h=5.50)
+            Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=0.00, w=50.00, h=7.50)
+            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=7.50, w=50.00, h=7.50)
+            Window(id=WindowId(4), parent=ContainerId(1), x=50.00, y=15.00, w=50.00, h=7.50)
             Container(id=ContainerId(2), parent=ContainerId(1), x=50.00, y=22.50, w=50.00, h=7.50, direction=Horizontal,
-              Window(id=WindowId(5), parent=ContainerId(2), x=51.00, y=23.50, w=14.67, h=5.50)
-              Window(id=WindowId(6), parent=ContainerId(2), x=67.67, y=23.50, w=14.67, h=5.50)
+              Window(id=WindowId(5), parent=ContainerId(2), x=50.00, y=22.50, w=16.67, h=7.50)
+              Window(id=WindowId(6), parent=ContainerId(2), x=66.67, y=22.50, w=16.67, h=7.50)
               Container(id=ContainerId(3), parent=ContainerId(2), x=83.33, y=22.50, w=16.67, h=7.50, tabbed=true, active_tab=2,
-                Window(id=WindowId(7), parent=ContainerId(3), x=84.33, y=25.50, w=14.67, h=3.50)
-                Window(id=WindowId(8), parent=ContainerId(3), x=84.33, y=25.50, w=14.67, h=3.50)
+                Window(id=WindowId(7), parent=ContainerId(3), x=83.33, y=24.50, w=16.67, h=5.50)
+                Window(id=WindowId(8), parent=ContainerId(3), x=83.33, y=24.50, w=16.67, h=5.50)
                 Container(id=ContainerId(4), parent=ContainerId(3), x=83.33, y=24.50, w=16.67, h=5.50, direction=Horizontal,
-                  Window(id=WindowId(9), parent=ContainerId(4), x=84.33, y=25.50, w=3.56, h=3.50)
-                  Window(id=WindowId(10), parent=ContainerId(4), x=89.89, y=25.50, w=3.56, h=3.50)
-                  Window(id=WindowId(11), parent=ContainerId(4), x=95.44, y=25.50, w=3.56, h=3.50)
+                  Window(id=WindowId(9), parent=ContainerId(4), x=83.33, y=24.50, w=5.56, h=5.50)
+                  Window(id=WindowId(10), parent=ContainerId(4), x=88.89, y=24.50, w=5.56, h=5.50)
+                  Window(id=WindowId(11), parent=ContainerId(4), x=94.44, y=24.50, w=5.56, h=5.50)
                 )
               )
             )
           )
-          Window(id=WindowId(2), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -1478,12 +1478,12 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=51.00, y=1.00, w=48.00, h=13.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=51.00, y=16.00, w=48.00, h=13.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=0.00, w=50.00, h=15.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=15.00, w=50.00, h=15.00)
           )
-          Window(id=WindowId(2), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -1537,12 +1537,12 @@ fn replace_focus_should_not_change_active_tab_when_not_replacing_focused() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=1.00, y=3.00, w=148.00, h=12.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=1.00, y=17.00, w=148.00, h=12.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=2.00, w=150.00, h=14.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=0.00, y=16.00, w=150.00, h=14.00)
           )
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -1585,9 +1585,9 @@ fn replace_focus_should_not_change_active_tab_when_not_replacing_focused() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=1.00, y=3.00, w=148.00, h=26.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -1668,28 +1668,27 @@ fn focus_tab_with_float_focused() {
                                                                                                                                                           
                                                                                                                                                           
                                                                                                                                                           
-             ********************************                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *              F0              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             ********************************
+                                                                                                                                                          
+              ******************************                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *             F0             *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              ******************************
     ");
 
     hub.focus_prev_tab();
@@ -1704,28 +1703,27 @@ fn focus_tab_with_float_focused() {
                                                                                                                                                           
                                                                                                                                                           
                                                                                                                                                           
-             ********************************                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *              F0              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             ********************************
+                                                                                                                                                          
+              ******************************                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *             F0             *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              ******************************
     ");
 }
 
@@ -1741,8 +1739,8 @@ fn focus_tab_without_tabbed_ancestor() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=76.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -1784,8 +1782,8 @@ fn focus_tab_without_tabbed_ancestor() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=76.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -1846,7 +1844,7 @@ fn toggle_container_layout_on_single_window() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=1.00, y=1.00, w=148.00, h=28.00)
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -1907,27 +1905,26 @@ fn toggle_container_layout_with_float_focused() {
                                                                                                                                                           
                                                                                                                                                           
                                                                                                                                                           
-             ********************************                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *              F0              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             ********************************
+                                                                                                                                                          
+              ******************************                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *             F0             *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              ******************************
     ");
 }

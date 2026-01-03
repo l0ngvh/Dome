@@ -18,10 +18,10 @@ fn focus_parent_twice_nested_containers() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=76.00, y=1.00, w=73.00, h=13.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=76.00, y=16.00, w=73.00, h=13.00)
+            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=0.00, w=75.00, h=15.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=15.00, w=75.00, h=15.00)
           )
         )
       )
@@ -74,8 +74,8 @@ fn focus_parent_twice_single_container() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=73.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=76.00, y=1.00, w=73.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -126,9 +126,9 @@ fn insert_window_after_focusing_parent() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=48.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=51.00, y=1.00, w=48.00, h=28.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=101.00, y=1.00, w=48.00, h=28.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -203,27 +203,26 @@ fn focus_parent_with_float_focused() {
                                                                                                                                                           
                                                                                                                                                           
                                                                                                                                                           
-             ********************************                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *              F0              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             *                              *                                                                                                             
-             ********************************
+                                                                                                                                                          
+              ******************************                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *             F0             *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              ******************************
     ");
 }

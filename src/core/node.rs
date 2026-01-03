@@ -37,7 +37,7 @@ impl Workspace {
     }
 }
 
-/// Contain the windows, dimension including borders
+/// Contain the windows
 /// Must maintain these invariants:
 /// 1. All containers must have at least 2 children.
 /// 2. Parent container and child container must differ in direction, unless one of them are tabbed
@@ -360,7 +360,7 @@ impl std::fmt::Display for Parent {
     }
 }
 
-/// Represents a single application window, dimension doesn't account for border
+/// Represents a single application window
 #[derive(Debug, Clone)]
 pub(crate) struct Window {
     pub(super) parent: Parent,

@@ -8,7 +8,6 @@ use super::node::{
 pub(crate) struct Hub {
     screen: Dimension,
     current: WorkspaceId,
-    border_size: f32,
     tab_bar_height: f32,
     auto_tile: bool,
 
@@ -19,12 +18,7 @@ pub(crate) struct Hub {
 }
 
 impl Hub {
-    pub(crate) fn new(
-        screen: Dimension,
-        border_size: f32,
-        tab_bar_height: f32,
-        auto_tile: bool,
-    ) -> Self {
+    pub(crate) fn new(screen: Dimension, tab_bar_height: f32, auto_tile: bool) -> Self {
         let mut workspace_allocator: Allocator<Workspace> = Allocator::new();
         let window_allocator: Allocator<Window> = Allocator::new();
         let float_window_allocator: Allocator<FloatWindow> = Allocator::new();
@@ -37,7 +31,6 @@ impl Hub {
             current: initial_workspace,
             workspaces: workspace_allocator,
             screen,
-            border_size,
             tab_bar_height,
             auto_tile,
             windows: window_allocator,
@@ -458,10 +451,10 @@ impl Hub {
             match child {
                 Child::Window(wid) => {
                     self.windows.get_mut(wid).dimension = Dimension {
-                        x: screen.x + self.border_size,
-                        y: screen.y + self.border_size,
-                        width: screen.width - 2.0 * self.border_size,
-                        height: screen.height - 2.0 * self.border_size,
+                        x: screen.x,
+                        y: screen.y,
+                        width: screen.width,
+                        height: screen.height,
                     };
                 }
                 Child::Container(cid) => {
@@ -581,7 +574,6 @@ impl Hub {
 
     /// Replace anchor with a new container containing children.
     /// Gets parent, workspace, and dimension from anchor.
-    /// Adds border back for window anchors to get container dimension.
     fn replace_anchor_with_container(
         &mut self,
         children: Vec<Child>,
@@ -591,13 +583,7 @@ impl Hub {
         let (parent, workspace_id, dimension) = match anchor {
             Child::Window(wid) => {
                 let w = self.windows.get(wid);
-                let dim = Dimension {
-                    x: w.dimension.x - self.border_size,
-                    y: w.dimension.y - self.border_size,
-                    width: w.dimension.width + 2.0 * self.border_size,
-                    height: w.dimension.height + 2.0 * self.border_size,
-                };
-                (w.parent, w.workspace, dim)
+                (w.parent, w.workspace, w.dimension)
             }
             Child::Container(cid) => {
                 let c = self.containers.get(cid);
@@ -719,10 +705,10 @@ impl Hub {
                             Child::Window(wid) => {
                                 let w = self.windows.get_mut(wid);
                                 w.dimension = Dimension {
-                                    x: x + self.border_size,
-                                    y: dim.y + self.border_size,
-                                    width: child_width - 2.0 * self.border_size,
-                                    height: dim.height - 2.0 * self.border_size,
+                                    x,
+                                    y: dim.y,
+                                    width: child_width,
+                                    height: dim.height,
                                 };
                                 if self.auto_tile && !w.spawn_mode().is_tab() {
                                     w.set_spawn_mode(spawn_mode);
@@ -757,10 +743,10 @@ impl Hub {
                             Child::Window(wid) => {
                                 let w = self.windows.get_mut(wid);
                                 w.dimension = Dimension {
-                                    x: dim.x + self.border_size,
-                                    y: y + self.border_size,
-                                    width: dim.width - 2.0 * self.border_size,
-                                    height: child_height - 2.0 * self.border_size,
+                                    x: dim.x,
+                                    y,
+                                    width: dim.width,
+                                    height: child_height,
                                 };
                                 if self.auto_tile && !w.spawn_mode().is_tab() {
                                     w.set_spawn_mode(spawn_mode);
@@ -795,10 +781,10 @@ impl Hub {
                             Child::Window(wid) => {
                                 let w = self.windows.get_mut(wid);
                                 w.dimension = Dimension {
-                                    x: dim.x + self.border_size,
-                                    y: content_y + self.border_size,
-                                    width: dim.width - 2.0 * self.border_size,
-                                    height: content_height - 2.0 * self.border_size,
+                                    x: dim.x,
+                                    y: content_y,
+                                    width: dim.width,
+                                    height: content_height,
                                 };
                                 if self.auto_tile && !w.spawn_mode().is_tab() {
                                     w.set_spawn_mode(spawn_mode);
@@ -903,9 +889,7 @@ impl Hub {
         self.replace_focus(Child::Container(container_id), last_child);
         self.containers.delete(container_id);
 
-        // Theoretically, we can just balance parent once, and if it has only one child, we can
-        // safely replace with that child. However, given that windows and containers handle
-        // borders differently, we need to update the container size to account for the border
+        // Rebalance to react to direction change
         if let Parent::Container(gp) = grandparent {
             self.balance_container(gp);
         }

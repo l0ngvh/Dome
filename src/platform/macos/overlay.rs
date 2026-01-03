@@ -128,75 +128,37 @@ pub(super) struct OverlayLabel {
     pub(super) bold: bool,
 }
 
-fn border_rects(
-    dim: Dimension,
-    border_size: f32,
-    inset: bool,
-    colors: [Color; 4],
-) -> [OverlayRect; 4] {
-    if inset {
-        [
-            OverlayRect {
-                x: dim.x,
-                y: dim.y + dim.height - border_size,
-                width: dim.width,
-                height: border_size,
-                color: colors[0],
-            },
-            OverlayRect {
-                x: dim.x,
-                y: dim.y,
-                width: dim.width,
-                height: border_size,
-                color: colors[1],
-            },
-            OverlayRect {
-                x: dim.x,
-                y: dim.y + border_size,
-                width: border_size,
-                height: dim.height - 2.0 * border_size,
-                color: colors[2],
-            },
-            OverlayRect {
-                x: dim.x + dim.width - border_size,
-                y: dim.y + border_size,
-                width: border_size,
-                height: dim.height - 2.0 * border_size,
-                color: colors[3],
-            },
-        ]
-    } else {
-        [
-            OverlayRect {
-                x: dim.x - border_size,
-                y: dim.y + dim.height,
-                width: dim.width + border_size * 2.0,
-                height: border_size,
-                color: colors[0],
-            },
-            OverlayRect {
-                x: dim.x - border_size,
-                y: dim.y - border_size,
-                width: dim.width + border_size * 2.0,
-                height: border_size,
-                color: colors[1],
-            },
-            OverlayRect {
-                x: dim.x - border_size,
-                y: dim.y,
-                width: border_size,
-                height: dim.height,
-                color: colors[2],
-            },
-            OverlayRect {
-                x: dim.x + dim.width,
-                y: dim.y,
-                width: border_size,
-                height: dim.height,
-                color: colors[3],
-            },
-        ]
-    }
+fn border_rects(dim: Dimension, border_size: f32, colors: [Color; 4]) -> [OverlayRect; 4] {
+    [
+        OverlayRect {
+            x: dim.x,
+            y: dim.y + dim.height - border_size,
+            width: dim.width,
+            height: border_size,
+            color: colors[0],
+        },
+        OverlayRect {
+            x: dim.x,
+            y: dim.y,
+            width: dim.width,
+            height: border_size,
+            color: colors[1],
+        },
+        OverlayRect {
+            x: dim.x,
+            y: dim.y + border_size,
+            width: border_size,
+            height: dim.height - 2.0 * border_size,
+            color: colors[2],
+        },
+        OverlayRect {
+            x: dim.x + dim.width - border_size,
+            y: dim.y + border_size,
+            width: border_size,
+            height: dim.height - 2.0 * border_size,
+            color: colors[3],
+        },
+    ]
 }
 
 pub(super) struct Overlays {
@@ -245,8 +207,7 @@ pub(super) fn collect_overlays(
                         height: dim.height,
                     },
                     border_size,
-                    false,
-                    [color, color, color, color],
+                    [color; 4],
                 ));
             }
             Child::Container(container_id) => {
@@ -271,19 +232,14 @@ pub(super) fn collect_overlays(
                         height: tab_bar_height,
                         color: config.tab_bar_background_color,
                     });
-                    // Tab bar border (inset)
+                    // Tab bar border
                     let tab_dim = Dimension {
                         x: dim.x,
                         y,
                         width: dim.width,
                         height: tab_bar_height,
                     };
-                    tiling_rects.extend(border_rects(
-                        tab_dim,
-                        border_size,
-                        true,
-                        [tab_border_color; 4],
-                    ));
+                    tiling_rects.extend(border_rects(tab_dim, border_size, [tab_border_color; 4]));
 
                     let children = container.children();
                     if !children.is_empty() {
@@ -372,7 +328,6 @@ pub(super) fn collect_overlays(
                     height: dim.height,
                 },
                 border_size,
-                false,
                 [top, bottom, color, right],
             ));
         }
@@ -406,7 +361,6 @@ pub(super) fn collect_overlays(
                     height: dim.height,
                 },
                 border_size,
-                true,
                 [top, bottom, color, right],
             ));
         }
@@ -429,7 +383,6 @@ pub(super) fn collect_overlays(
                 height: dim.height,
             },
             border_size,
-            false,
             [color; 4],
         ));
     }

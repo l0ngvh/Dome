@@ -5,7 +5,7 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::NSApplication;
 
 use crate::action::{Action, FocusTarget, MoveTarget, ToggleTarget};
-use crate::core::{Child, Focus};
+use crate::core::{Child, Dimension, Focus};
 
 use super::context::WindowContext;
 use super::overlay::collect_overlays;
@@ -127,17 +127,31 @@ pub(super) fn apply_layout(context: &mut WindowContext) -> Result<()> {
     }
 
     for (window_id, dim) in tiling_layouts {
-        if let Some(os_window) = registry.get_tiling(window_id)
-            && let Err(e) = os_window.set_dimension(dim)
-        {
-            tracing::trace!(%window_id, error = %format!("{e:#}"), "Failed to set dimension");
+        if let Some(os_window) = registry.get_tiling(window_id) {
+            let border = context.config.border_size;
+            let inset_dim = Dimension {
+                x: dim.x + border,
+                y: dim.y + border,
+                width: dim.width - 2.0 * border,
+                height: dim.height - 2.0 * border,
+            };
+            if let Err(e) = os_window.set_dimension(inset_dim) {
+                tracing::trace!(%window_id, error = %format!("{e:#}"), "Failed to set dimension");
+            }
         }
     }
     for (float_id, dim) in float_layouts {
-        if let Some(os_window) = registry.get_float(float_id)
-            && let Err(e) = os_window.set_dimension(dim)
-        {
-            tracing::trace!(%float_id, error = %format!("{e:#}"), "Failed to set dimension");
+        if let Some(os_window) = registry.get_float(float_id) {
+            let border = context.config.border_size;
+            let inset_dim = Dimension {
+                x: dim.x + border,
+                y: dim.y + border,
+                width: dim.width - 2.0 * border,
+                height: dim.height - 2.0 * border,
+            };
+            if let Err(e) = os_window.set_dimension(inset_dim) {
+                tracing::trace!(%float_id, error = %format!("{e:#}"), "Failed to set dimension");
+            }
         }
     }
 
