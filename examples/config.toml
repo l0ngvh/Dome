@@ -1,6 +1,9 @@
 # Border size in pixels (default: 2.0)
 border_size = 5.0
 
+# Automatic tiling - automatically determine split direction based on window dimensions (default: true)
+automatic_tiling = true
+
 # Focused window border color (default: light blue)
 focused_color = "#6699ff"
 

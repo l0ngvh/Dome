@@ -506,5 +506,6 @@ pub(super) fn setup() -> Hub {
         },
         BORDER,
         TAB_BAR_HEIGHT,
+        false,
     )
 }

@@ -310,6 +310,8 @@ pub struct Config {
     pub border_size: f32,
     #[serde(default = "default_tab_bar_height")]
     pub tab_bar_height: f32,
+    #[serde(default = "default_automatic_tiling")]
+    pub automatic_tiling: bool,
     #[serde(default = "default_focused_color")]
     pub focused_color: Color,
     #[serde(default = "default_spawn_indicator_color")]
@@ -330,12 +332,17 @@ fn default_tab_bar_height() -> f32 {
     24.0
 }
 
+fn default_automatic_tiling() -> bool {
+    true
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
             keymaps: default_keymaps(),
             border_size: default_border_size(),
             tab_bar_height: default_tab_bar_height(),
+            automatic_tiling: default_automatic_tiling(),
             focused_color: default_focused_color(),
             spawn_indicator_color: default_spawn_indicator_color(),
             border_color: default_border_color(),

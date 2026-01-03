@@ -56,10 +56,6 @@ pub(crate) struct Container {
     spawn_mode: SpawnMode,
     pub(super) is_tabbed: bool,
     pub(super) active_tab_index: usize,
-    pub(super) freely_sized_horizontal: usize,
-    pub(super) freely_sized_vertical: usize,
-    pub(super) fixed_width: f32,
-    pub(super) fixed_height: f32,
 }
 
 impl Node for Container {
@@ -89,10 +85,6 @@ impl Container {
             spawn_mode,
             is_tabbed: false,
             active_tab_index: 0,
-            freely_sized_horizontal: 0,
-            freely_sized_vertical: 0,
-            fixed_width: 0.0,
-            fixed_height: 0.0,
         }
     }
 
@@ -113,10 +105,6 @@ impl Container {
             spawn_mode: SpawnMode::tabbed(),
             is_tabbed: true,
             active_tab_index: 0,
-            freely_sized_horizontal: 0,
-            freely_sized_vertical: 0,
-            fixed_width: 0.0,
-            fixed_height: 0.0,
         }
     }
 

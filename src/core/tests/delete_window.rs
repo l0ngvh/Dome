@@ -707,12 +707,12 @@ fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=148.00, h=8.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=10.00, w=150.00, h=20.00, direction=Horizontal,
-            Window(id=WindowId(1), parent=ContainerId(1), x=1.00, y=11.00, w=73.00, h=18.00)
-            Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=10.00, w=75.00, h=20.00, direction=Vertical,
-              Window(id=WindowId(2), parent=ContainerId(2), x=76.00, y=11.00, w=73.00, h=8.00)
-              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=21.00, w=73.00, h=8.00)
+          Window(id=WindowId(0), parent=ContainerId(0), x=1.00, y=1.00, w=148.00, h=13.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=15.00, w=150.00, h=15.00, direction=Horizontal,
+            Window(id=WindowId(1), parent=ContainerId(1), x=1.00, y=16.00, w=73.00, h=13.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=15.00, w=75.00, h=15.00, direction=Vertical,
+              Window(id=WindowId(2), parent=ContainerId(2), x=76.00, y=16.00, w=73.00, h=5.50)
+              Window(id=WindowId(3), parent=ContainerId(2), x=76.00, y=23.50, w=73.00, h=5.50)
             )
           )
         )
@@ -724,7 +724,12 @@ fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
     |                                                                         W0                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
@@ -733,19 +738,14 @@ fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     |                                                                         ||                                                                         |
     |                                                                         ||                                                                         |
     |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
     |                                                                         ||                                    W2                                   |
-    |                                                                         ||                                                                         |
     |                                                                         ||                                                                         |
     |                                                                         ||                                                                         |
     |                                                                         |+-------------------------------------------------------------------------+
     |                                    W1                                   |***************************************************************************
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
     |                                                                         |*                                    W3                                   *
-    |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************

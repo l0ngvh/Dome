@@ -186,7 +186,12 @@ impl WindowContext {
         config: Config,
         listener: UnixListener,
     ) -> Self {
-        let hub = Hub::new(screen, config.border_size, config.tab_bar_height);
+        let hub = Hub::new(
+            screen,
+            config.border_size,
+            config.tab_bar_height,
+            config.automatic_tiling,
+        );
 
         Self {
             hub,

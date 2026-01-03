@@ -10,6 +10,7 @@ pub(crate) struct Hub {
     current: WorkspaceId,
     border_size: f32,
     tab_bar_height: f32,
+    auto_tile: bool,
 
     workspaces: Allocator<Workspace>,
     windows: Allocator<Window>,
@@ -18,7 +19,12 @@ pub(crate) struct Hub {
 }
 
 impl Hub {
-    pub(crate) fn new(screen: Dimension, border_size: f32, tab_bar_height: f32) -> Self {
+    pub(crate) fn new(
+        screen: Dimension,
+        border_size: f32,
+        tab_bar_height: f32,
+        auto_tile: bool,
+    ) -> Self {
         let mut workspace_allocator: Allocator<Workspace> = Allocator::new();
         let window_allocator: Allocator<Window> = Allocator::new();
         let float_window_allocator: Allocator<FloatWindow> = Allocator::new();
@@ -33,6 +39,7 @@ impl Hub {
             screen,
             border_size,
             tab_bar_height,
+            auto_tile,
             windows: window_allocator,
             float_windows: float_window_allocator,
             containers: container_allocator,
@@ -173,7 +180,7 @@ impl Hub {
             root_id = parent_id;
         }
         self.toggle_container_direction(root_id);
-        self.balance_workspace(self.current);
+        self.balance_container(root_id);
     }
 
     #[tracing::instrument(skip(self))]
@@ -249,7 +256,7 @@ impl Hub {
                 .get_mut(container_id)
                 .set_active_tab(active_tab);
         }
-        self.balance_workspace(self.current);
+        self.balance_container(container_id);
     }
 
     #[tracing::instrument(skip(self))]
@@ -375,7 +382,7 @@ impl Hub {
                     .get_mut(direct_parent_id)
                     .children
                     .swap(pos, target_pos);
-                self.balance_workspace(self.current);
+                self.balance_container(direct_parent_id);
                 return;
             }
             // At edge, fall through to find ancestor
@@ -407,33 +414,27 @@ impl Hub {
                     self.detach_child_from_container(direct_parent_id, child);
                     self.attach_child_to_container(child, container_id, Some(insert_pos));
                     self.focus_child(child);
-                    self.balance_workspace(self.current);
                     return;
                 }
                 Parent::Workspace(workspace_id) => {
                     tracing::debug!(?child, %workspace_id, "Moving child to new root container");
                     self.detach_child_from_container(direct_parent_id, child);
                     let root = self.workspaces.get(workspace_id).root.unwrap();
-                    let screen = self.workspaces.get(workspace_id).screen;
 
                     let children = if forward {
                         vec![root, child]
                     } else {
                         vec![child, root]
                     };
-                    let new_root_id = self.create_container_with_children(
+                    let new_root_id = self.replace_anchor_with_container(
                         children,
                         root,
-                        Parent::Workspace(workspace_id),
-                        workspace_id,
-                        screen,
                         SpawnMode::from_direction(direction),
                     );
                     self.workspaces.get_mut(workspace_id).root =
                         Some(Child::Container(new_root_id));
 
                     self.focus_child(child);
-                    self.balance_workspace(workspace_id);
                     return;
                 }
             }
@@ -453,7 +454,26 @@ impl Hub {
             self.workspaces.get_mut(workspace_id).root = Some(child);
             self.set_parent(child, Parent::Workspace(workspace_id));
             self.workspaces.get_mut(workspace_id).focused = Some(Focus::Tiling(child));
-            self.balance_workspace(workspace_id);
+            let screen = self.workspaces.get(workspace_id).screen;
+            match child {
+                Child::Window(wid) => {
+                    self.windows.get_mut(wid).dimension = Dimension {
+                        x: screen.x + self.border_size,
+                        y: screen.y + self.border_size,
+                        width: screen.width - 2.0 * self.border_size,
+                        height: screen.height - 2.0 * self.border_size,
+                    };
+                }
+                Child::Container(cid) => {
+                    self.containers.get_mut(cid).dimension = Dimension {
+                        x: screen.x,
+                        y: screen.y,
+                        width: screen.width,
+                        height: screen.height,
+                    };
+                    self.balance_container(cid);
+                }
+            }
             return;
         };
 
@@ -487,7 +507,6 @@ impl Hub {
         }
 
         self.focus_child(child);
-        self.balance_workspace(workspace_id);
     }
 
     fn set_workspace(&mut self, child: Child, workspace_id: WorkspaceId) {
@@ -519,20 +538,12 @@ impl Hub {
             Child::Window(id) => self.windows.get(id).spawn_mode(),
         };
         let parent_container = self.containers.get(container_id);
-        let dimension = parent_container.dimension;
         if parent_container.can_accomodate(spawn_mode) {
             let anchor_index = self.containers.get(container_id).position_of(anchor);
             self.attach_child_to_container(child, container_id, Some(anchor_index + 1));
         } else {
-            let workspace_id = parent_container.workspace;
-            let new_container_id = self.create_container_with_children(
-                vec![anchor, child],
-                anchor,
-                Parent::Container(container_id),
-                workspace_id,
-                dimension,
-                spawn_mode,
-            );
+            let new_container_id =
+                self.replace_anchor_with_container(vec![anchor, child], anchor, spawn_mode);
             self.containers
                 .get_mut(container_id)
                 .replace_child(anchor, Child::Container(new_container_id));
@@ -546,15 +557,8 @@ impl Hub {
             Child::Container(id) => self.containers.get(id).spawn_mode(),
             Child::Window(id) => self.windows.get(id).spawn_mode(),
         };
-        let screen = ws.screen;
-        let new_container_id = self.create_container_with_children(
-            vec![anchor, child],
-            child,
-            Parent::Workspace(workspace_id),
-            workspace_id,
-            screen,
-            spawn_mode,
-        );
+        let new_container_id =
+            self.replace_anchor_with_container(vec![anchor, child], anchor, spawn_mode);
         self.workspaces.get_mut(workspace_id).root = Some(Child::Container(new_container_id));
     }
 
@@ -575,25 +579,37 @@ impl Hub {
         }
     }
 
-    /// Create a container with children. Use this instead of Container constructors directly
-    /// to ensure direction invariant (child containers toggle if same direction as parent).
-    /// If spawn_mode is Tab, creates a tabbed container.
-    /// Does not change workspace focus - pass the previously focused child as `focused`.
-    fn create_container_with_children(
+    /// Replace anchor with a new container containing children.
+    /// Gets parent, workspace, and dimension from anchor.
+    /// Adds border back for window anchors to get container dimension.
+    fn replace_anchor_with_container(
         &mut self,
         children: Vec<Child>,
-        focused: Child,
-        parent: Parent,
-        workspace_id: WorkspaceId,
-        dimension: Dimension,
+        anchor: Child,
         spawn_mode: SpawnMode,
     ) -> ContainerId {
-        if let Some(direction) = spawn_mode.as_direction() {
+        let (parent, workspace_id, dimension) = match anchor {
+            Child::Window(wid) => {
+                let w = self.windows.get(wid);
+                let dim = Dimension {
+                    x: w.dimension.x - self.border_size,
+                    y: w.dimension.y - self.border_size,
+                    width: w.dimension.width + 2.0 * self.border_size,
+                    height: w.dimension.height + 2.0 * self.border_size,
+                };
+                (w.parent, w.workspace, dim)
+            }
+            Child::Container(cid) => {
+                let c = self.containers.get(cid);
+                (c.parent, c.workspace, c.dimension)
+            }
+        };
+        let container_id = if let Some(direction) = spawn_mode.as_direction() {
             let container_id = self.containers.allocate(Container::split(
                 parent,
                 workspace_id,
                 children.clone(),
-                focused,
+                anchor,
                 dimension,
                 direction,
             ));
@@ -619,7 +635,7 @@ impl Hub {
                 parent,
                 workspace_id,
                 children.clone(),
-                focused,
+                anchor,
                 dimension,
             ));
             for child in children {
@@ -635,7 +651,9 @@ impl Hub {
                 }
             }
             container_id
-        }
+        };
+        self.balance_container(container_id);
+        container_id
     }
 
     /// Attach child to existing container. Ensures direction invariant (child containers
@@ -672,251 +690,145 @@ impl Hub {
                 self.containers.get_mut(cid).parent = Parent::Container(container_id);
             }
         }
+        self.balance_container(container_id);
     }
 
-    fn balance_workspace(&mut self, workspace_id: WorkspaceId) {
-        let workspace = self.workspaces.get(workspace_id);
-        let Some(root) = workspace.root else {
-            return;
-        };
-        let screen = workspace.screen;
-        match root {
-            Child::Window(window_id) => {
-                let window = self.windows.get_mut(window_id);
-                window.dimension.x = screen.x + self.border_size;
-                window.dimension.y = screen.y + self.border_size;
-                window.dimension.width = screen.width - 2.0 * self.border_size;
-                window.dimension.height = screen.height - 2.0 * self.border_size;
-            }
-            Child::Container(container_id) => {
-                self.update_container_structure(container_id);
-                self.distribute_available_space(
-                    Child::Container(container_id),
-                    screen.x,
-                    screen.y,
-                    screen.width,
-                    screen.height,
-                );
-            }
-        }
-    }
-
-    fn distribute_available_space(
-        &mut self,
-        root: Child,
-        root_x: f32,
-        root_y: f32,
-        root_width: f32,
-        root_height: f32,
-    ) {
-        let mut stack = vec![(root, root_x, root_y, root_width, root_height)];
-
-        for _ in super::bounded_loop() {
-            let Some((child, x, y, available_width, available_height)) = stack.pop() else {
-                return;
-            };
-
-            match child {
-                Child::Window(window_id) => {
-                    let window = self.windows.get_mut(window_id);
-                    window.dimension.x = x + self.border_size;
-                    window.dimension.y = y + self.border_size;
-                    window.dimension.width = available_width - 2.0 * self.border_size;
-                    window.dimension.height = available_height - 2.0 * self.border_size;
-                }
-                Child::Container(container_id) => {
-                    let container = self.containers.get(container_id);
-                    let children = container.children.clone();
-                    let direction = container.direction();
-                    let free_horizontal = container.freely_sized_horizontal;
-                    let free_vertical = container.freely_sized_vertical;
-
-                    let mut actual_width = 0.0;
-                    let mut actual_height: f32 = 0.0;
-
-                    match direction {
-                        Some(Direction::Horizontal) => {
-                            let column_width = if free_horizontal > 0 {
-                                available_width / free_horizontal as f32
-                            } else {
-                                0.0
-                            };
-                            let mut current_x = x;
-                            for child_id in children {
-                                let child_width = match child_id {
-                                    Child::Window(_) => column_width,
-                                    Child::Container(c) => {
-                                        let child_free_horizontal =
-                                            self.containers.get(c).freely_sized_horizontal;
-                                        column_width * child_free_horizontal as f32
-                                    }
-                                };
-                                stack.push((child_id, current_x, y, child_width, available_height));
-                                current_x += child_width;
-                            }
-                            actual_width = current_x - x;
-                            actual_height = available_height;
-                        }
-                        Some(Direction::Vertical) => {
-                            let row_height = if free_vertical > 0 {
-                                available_height / free_vertical as f32
-                            } else {
-                                0.0
-                            };
-                            let mut current_y = y;
-                            for child_id in children {
-                                let child_height = match child_id {
-                                    Child::Window(_) => row_height,
-                                    Child::Container(c) => {
-                                        let child_free_vertical =
-                                            self.containers.get(c).freely_sized_vertical;
-                                        row_height * child_free_vertical as f32
-                                    }
-                                };
-                                stack.push((child_id, x, current_y, available_width, child_height));
-                                current_y += child_height;
-                            }
-                            actual_width = available_width;
-                            actual_height = current_y - y;
-                        }
-                        None => {
-                            let content_y = y + self.tab_bar_height;
-                            let content_height = available_height - self.tab_bar_height;
-                            for child in children {
-                                stack.push((child, x, content_y, available_width, content_height));
-                            }
-                            actual_height = available_height;
-                            actual_width = available_width;
-                        }
-                    }
-
-                    let container = self.containers.get_mut(container_id);
-                    container.dimension = Dimension {
-                        x,
-                        y,
-                        width: actual_width,
-                        height: actual_height,
-                    };
-                }
-            }
-        }
-    }
-
-    fn update_container_structure(&mut self, root_id: ContainerId) {
+    fn balance_container(&mut self, root_id: ContainerId) {
         let mut stack = vec![root_id];
-        let mut post_order = Vec::new();
-
-        // Build post-order traversal (children before parents)
         for _ in super::bounded_loop() {
             let Some(container_id) = stack.pop() else {
-                break;
+                return;
             };
-            post_order.push(container_id);
-            for &child in &self.containers.get(container_id).children {
-                if let Child::Container(child_id) = child {
-                    stack.push(child_id);
-                }
-            }
-        }
-
-        // Process in reverse (children first)
-        for container_id in post_order.into_iter().rev() {
             let container = self.containers.get(container_id);
+            let dim = container.dimension;
             let children = container.children.clone();
             let direction = container.direction();
-
-            let mut free_horizontal = 0;
-            let mut free_vertical = 0;
-            let mut fixed_width = 0.0;
-            let mut fixed_height = 0.0;
+            let child_count = children.len();
 
             match direction {
                 Some(Direction::Horizontal) => {
-                    for child in children {
+                    let child_width = dim.width / child_count as f32;
+                    for (i, child) in children.into_iter().enumerate() {
+                        let x = dim.x + child_width * i as f32;
+                        let spawn_mode = if child_width >= dim.height {
+                            SpawnMode::horizontal()
+                        } else {
+                            SpawnMode::vertical()
+                        };
                         match child {
-                            Child::Window(_) => {
-                                free_horizontal += 1;
-                                free_vertical = free_vertical.max(1);
-                            }
-                            Child::Container(child_id) => {
-                                let child_container = self.containers.get(child_id);
-                                free_horizontal += child_container.freely_sized_horizontal;
-                                fixed_width += child_container.fixed_width;
-                                if child_container.fixed_height > fixed_height {
-                                    free_vertical = child_container.freely_sized_vertical;
-                                    fixed_height = child_container.fixed_height;
-                                } else if child_container.fixed_height == fixed_height {
-                                    free_vertical =
-                                        free_vertical.max(child_container.freely_sized_vertical);
+                            Child::Window(wid) => {
+                                let w = self.windows.get_mut(wid);
+                                w.dimension = Dimension {
+                                    x: x + self.border_size,
+                                    y: dim.y + self.border_size,
+                                    width: child_width - 2.0 * self.border_size,
+                                    height: dim.height - 2.0 * self.border_size,
+                                };
+                                if self.auto_tile && !w.spawn_mode().is_tab() {
+                                    w.set_spawn_mode(spawn_mode);
                                 }
+                            }
+                            Child::Container(cid) => {
+                                let c = self.containers.get_mut(cid);
+                                c.dimension = Dimension {
+                                    x,
+                                    y: dim.y,
+                                    width: child_width,
+                                    height: dim.height,
+                                };
+                                if self.auto_tile && !c.spawn_mode().is_tab() {
+                                    c.set_spawn_mode(spawn_mode);
+                                }
+                                stack.push(cid);
                             }
                         }
                     }
                 }
                 Some(Direction::Vertical) => {
-                    for child in children {
+                    let child_height = dim.height / child_count as f32;
+                    for (i, child) in children.into_iter().enumerate() {
+                        let y = dim.y + child_height * i as f32;
+                        let spawn_mode = if dim.width >= child_height {
+                            SpawnMode::horizontal()
+                        } else {
+                            SpawnMode::vertical()
+                        };
                         match child {
-                            Child::Window(_) => {
-                                free_vertical += 1;
-                                free_horizontal = free_horizontal.max(1);
-                            }
-                            Child::Container(child_id) => {
-                                let child_container = self.containers.get(child_id);
-                                free_vertical += child_container.freely_sized_vertical;
-                                fixed_height += child_container.fixed_height;
-                                if child_container.fixed_width > fixed_width {
-                                    free_horizontal = free_horizontal
-                                        .max(child_container.freely_sized_horizontal);
-                                    fixed_width = child_container.fixed_width;
-                                } else if child_container.fixed_width == fixed_width {
-                                    free_horizontal = free_horizontal
-                                        .max(child_container.freely_sized_horizontal);
+                            Child::Window(wid) => {
+                                let w = self.windows.get_mut(wid);
+                                w.dimension = Dimension {
+                                    x: dim.x + self.border_size,
+                                    y: y + self.border_size,
+                                    width: dim.width - 2.0 * self.border_size,
+                                    height: child_height - 2.0 * self.border_size,
+                                };
+                                if self.auto_tile && !w.spawn_mode().is_tab() {
+                                    w.set_spawn_mode(spawn_mode);
                                 }
+                            }
+                            Child::Container(cid) => {
+                                let c = self.containers.get_mut(cid);
+                                c.dimension = Dimension {
+                                    x: dim.x,
+                                    y,
+                                    width: dim.width,
+                                    height: child_height,
+                                };
+                                if self.auto_tile && !c.spawn_mode().is_tab() {
+                                    c.set_spawn_mode(spawn_mode);
+                                }
+                                stack.push(cid);
                             }
                         }
                     }
                 }
                 None => {
-                    free_horizontal = 1;
-                    free_vertical = 1;
-                    fixed_width = 0.0;
-                    fixed_height = 0.0;
+                    let content_y = dim.y + self.tab_bar_height;
+                    let content_height = dim.height - self.tab_bar_height;
+                    let spawn_mode = if dim.width >= content_height {
+                        SpawnMode::horizontal()
+                    } else {
+                        SpawnMode::vertical()
+                    };
                     for child in children {
-                        if let Child::Container(child_id) = child {
-                            let child_container = self.containers.get(child_id);
-                            free_horizontal =
-                                free_horizontal.max(child_container.freely_sized_horizontal);
-                            free_vertical =
-                                free_vertical.max(child_container.freely_sized_vertical);
+                        match child {
+                            Child::Window(wid) => {
+                                let w = self.windows.get_mut(wid);
+                                w.dimension = Dimension {
+                                    x: dim.x + self.border_size,
+                                    y: content_y + self.border_size,
+                                    width: dim.width - 2.0 * self.border_size,
+                                    height: content_height - 2.0 * self.border_size,
+                                };
+                                if self.auto_tile && !w.spawn_mode().is_tab() {
+                                    w.set_spawn_mode(spawn_mode);
+                                }
+                            }
+                            Child::Container(cid) => {
+                                let c = self.containers.get_mut(cid);
+                                c.dimension = Dimension {
+                                    x: dim.x,
+                                    y: content_y,
+                                    width: dim.width,
+                                    height: content_height,
+                                };
+                                if self.auto_tile && !c.spawn_mode().is_tab() {
+                                    c.set_spawn_mode(spawn_mode);
+                                }
+                                stack.push(cid);
+                            }
                         }
                     }
                 }
             }
-
-            let container = self.containers.get_mut(container_id);
-            container.freely_sized_horizontal = free_horizontal;
-            container.freely_sized_vertical = free_vertical;
-            container.fixed_width = fixed_width;
-            container.fixed_height = fixed_height;
         }
-
-        let root = self.containers.get(root_id);
-        tracing::debug!(
-            %root_id,
-            free_horizontal = root.freely_sized_horizontal,
-            free_vertical = root.freely_sized_vertical,
-            "Updated container structure"
-        );
     }
 
     fn detach_child_from_its_parent(&mut self, child: Child) {
         let parent = self.get_parent(child);
         match parent {
             Parent::Container(parent_id) => {
-                let workspace_id = self.containers.get(parent_id).workspace;
-
                 self.detach_child_from_container(parent_id, child);
-                self.balance_workspace(workspace_id);
             }
             Parent::Workspace(workspace_id) => {
                 self.workspaces.get_mut(workspace_id).root = None;
@@ -954,6 +866,7 @@ impl Hub {
         self.replace_focus(child, new_focus);
 
         self.containers.get_mut(container_id).remove_child(child);
+        self.balance_container(container_id);
         if self.containers.get(container_id).children.len() != 1 {
             return;
         }
@@ -989,6 +902,13 @@ impl Hub {
         // it's a container makes sense. Don't need to focus just window here
         self.replace_focus(Child::Container(container_id), last_child);
         self.containers.delete(container_id);
+
+        // Theoretically, we can just balance parent once, and if it has only one child, we can
+        // safely replace with that child. However, given that windows and containers handle
+        // borders differently, we need to update the container size to account for the border
+        if let Parent::Container(gp) = grandparent {
+            self.balance_container(gp);
+        }
     }
 
     fn get_parent(&self, child: Child) -> Parent {
@@ -1020,7 +940,7 @@ impl Hub {
         };
         tracing::debug!(forward, %container_id, ?focus_target, "Focusing tab");
         self.focus_child(focus_target);
-        self.balance_workspace(self.current);
+        self.balance_container(container_id);
     }
 
     fn find_tabbed_ancestor(&self, child: Child) -> Option<ContainerId> {
