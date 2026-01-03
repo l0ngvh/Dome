@@ -173,8 +173,8 @@ impl Hub {
             root_id = parent_id;
         }
         self.containers.get_mut(root_id).toggle_direction();
-        self.maintain_direction_invariance(root_id);
-        self.balance_container(root_id);
+        self.maintain_direction_invariance(Parent::Container(root_id));
+        self.adjust_children_dimension_of(Parent::Container(root_id));
     }
 
     #[tracing::instrument(skip(self))]
@@ -210,17 +210,10 @@ impl Hub {
         };
         let container = self.containers.get_mut(container_id);
         let direction = container.direction();
+        let parent = container.parent;
         container.is_tabbed = !container.is_tabbed;
         tracing::debug!(%container_id, from = ?direction, "Toggled container layout");
-        if container.direction().is_some() {
-            // When toggling from tabbed to split, ensure direction differs from parent and
-            // children
-            if let Parent::Container(parent_cid) = container.parent {
-                self.maintain_direction_invariance(parent_cid);
-            } else {
-                self.maintain_direction_invariance(container_id);
-            }
-        } else {
+        if container.direction().is_none() {
             // Toggled from split to tabbed
             tracing::info!(
                 "Focused: {} {} {}",
@@ -241,7 +234,8 @@ impl Hub {
                 .get_mut(container_id)
                 .set_active_tab(active_tab);
         }
-        self.balance_container(container_id);
+        self.maintain_direction_invariance(parent);
+        self.adjust_children_dimension_of(parent);
     }
 
     #[tracing::instrument(skip(self))]
@@ -367,7 +361,7 @@ impl Hub {
                     .get_mut(direct_parent_id)
                     .children
                     .swap(pos, target_pos);
-                self.balance_container(direct_parent_id);
+                self.adjust_children_dimension_of(Parent::Container(direct_parent_id));
                 return;
             }
             // At edge, fall through to find ancestor
@@ -439,26 +433,7 @@ impl Hub {
             self.workspaces.get_mut(workspace_id).root = Some(child);
             self.set_parent(child, Parent::Workspace(workspace_id));
             self.workspaces.get_mut(workspace_id).focused = Some(Focus::Tiling(child));
-            let screen = self.workspaces.get(workspace_id).screen;
-            match child {
-                Child::Window(wid) => {
-                    self.windows.get_mut(wid).dimension = Dimension {
-                        x: screen.x,
-                        y: screen.y,
-                        width: screen.width,
-                        height: screen.height,
-                    };
-                }
-                Child::Container(cid) => {
-                    self.containers.get_mut(cid).dimension = Dimension {
-                        x: screen.x,
-                        y: screen.y,
-                        width: screen.width,
-                        height: screen.height,
-                    };
-                    self.balance_container(cid);
-                }
-            }
+            self.adjust_children_dimension_of(Parent::Workspace(workspace_id));
             return;
         };
 
@@ -549,7 +524,14 @@ impl Hub {
 
     /// Ensures all child containers have different direction than their parent.
     /// Skips tabbed containers.
-    fn maintain_direction_invariance(&mut self, container_id: ContainerId) {
+    fn maintain_direction_invariance(&mut self, parent: Parent) {
+        let container_id = match parent {
+            Parent::Container(id) => id,
+            Parent::Workspace(ws_id) => match self.workspaces.get(ws_id).root {
+                Some(Child::Container(id)) => id,
+                _ => return,
+            },
+        };
         let mut stack = vec![container_id];
         for _ in super::bounded_loop() {
             let Some(id) = stack.pop() else {
@@ -632,8 +614,8 @@ impl Hub {
             }
             container_id
         };
-        self.maintain_direction_invariance(container_id);
-        self.balance_container(container_id);
+        self.maintain_direction_invariance(Parent::Container(container_id));
+        self.adjust_children_dimension_of(Parent::Container(container_id));
         container_id
     }
 
@@ -661,11 +643,28 @@ impl Hub {
                 self.containers.get_mut(cid).parent = Parent::Container(container_id);
             }
         }
-        self.maintain_direction_invariance(container_id);
-        self.balance_container(container_id);
+        self.maintain_direction_invariance(Parent::Container(container_id));
+        self.adjust_children_dimension_of(Parent::Container(container_id));
     }
 
-    fn balance_container(&mut self, root_id: ContainerId) {
+    fn adjust_children_dimension_of(&mut self, parent: Parent) {
+        let root_id = match parent {
+            Parent::Container(id) => id,
+            Parent::Workspace(ws_id) => {
+                let ws = self.workspaces.get(ws_id);
+                match ws.root {
+                    Some(Child::Container(cid)) => {
+                        self.containers.get_mut(cid).dimension = ws.screen;
+                        cid
+                    }
+                    Some(Child::Window(wid)) => {
+                        self.windows.get_mut(wid).dimension = ws.screen;
+                        return;
+                    }
+                    None => return,
+                }
+            }
+        };
         let mut stack = vec![root_id];
         for _ in super::bounded_loop() {
             let Some(container_id) = stack.pop() else {
@@ -838,7 +837,7 @@ impl Hub {
         self.replace_focus(child, new_focus);
 
         self.containers.get_mut(container_id).remove_child(child);
-        self.balance_container(container_id);
+        self.adjust_children_dimension_of(Parent::Container(container_id));
         if self.containers.get(container_id).children.len() != 1 {
             return;
         }
@@ -865,10 +864,8 @@ impl Hub {
         self.containers.delete(container_id);
 
         // When promoting a container to grandparent, ensure direction invariant is maintained
-        if let Parent::Container(gp) = grandparent {
-            self.maintain_direction_invariance(gp);
-            self.balance_container(gp);
-        }
+        self.maintain_direction_invariance(grandparent);
+        self.adjust_children_dimension_of(grandparent);
     }
 
     fn get_parent(&self, child: Child) -> Parent {
@@ -900,7 +897,6 @@ impl Hub {
         };
         tracing::debug!(forward, %container_id, ?focus_target, "Focusing tab");
         self.focus_child(focus_target);
-        self.balance_container(container_id);
     }
 
     fn find_tabbed_ancestor(&self, child: Child) -> Option<ContainerId> {
