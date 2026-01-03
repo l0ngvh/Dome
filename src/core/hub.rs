@@ -680,117 +680,63 @@ impl Hub {
                 Some(Direction::Horizontal) => {
                     let child_width = dim.width / child_count as f32;
                     for (i, child) in children.into_iter().enumerate() {
-                        let x = dim.x + child_width * i as f32;
-                        let spawn_mode = if child_width >= dim.height {
-                            SpawnMode::horizontal()
-                        } else {
-                            SpawnMode::vertical()
+                        let child_dim = Dimension {
+                            x: dim.x + child_width * i as f32,
+                            y: dim.y,
+                            width: child_width,
+                            height: dim.height,
                         };
-                        match child {
-                            Child::Window(wid) => {
-                                let w = self.windows.get_mut(wid);
-                                w.dimension = Dimension {
-                                    x,
-                                    y: dim.y,
-                                    width: child_width,
-                                    height: dim.height,
-                                };
-                                if self.auto_tile && !w.spawn_mode().is_tab() {
-                                    w.set_spawn_mode(spawn_mode);
-                                }
-                            }
-                            Child::Container(cid) => {
-                                let c = self.containers.get_mut(cid);
-                                c.dimension = Dimension {
-                                    x,
-                                    y: dim.y,
-                                    width: child_width,
-                                    height: dim.height,
-                                };
-                                if self.auto_tile && !c.spawn_mode().is_tab() {
-                                    c.set_spawn_mode(spawn_mode);
-                                }
-                                stack.push(cid);
-                            }
-                        }
+                        self.set_child_dimension(child, child_dim, &mut stack);
                     }
                 }
                 Some(Direction::Vertical) => {
                     let child_height = dim.height / child_count as f32;
                     for (i, child) in children.into_iter().enumerate() {
-                        let y = dim.y + child_height * i as f32;
-                        let spawn_mode = if dim.width >= child_height {
-                            SpawnMode::horizontal()
-                        } else {
-                            SpawnMode::vertical()
+                        let child_dim = Dimension {
+                            x: dim.x,
+                            y: dim.y + child_height * i as f32,
+                            width: dim.width,
+                            height: child_height,
                         };
-                        match child {
-                            Child::Window(wid) => {
-                                let w = self.windows.get_mut(wid);
-                                w.dimension = Dimension {
-                                    x: dim.x,
-                                    y,
-                                    width: dim.width,
-                                    height: child_height,
-                                };
-                                if self.auto_tile && !w.spawn_mode().is_tab() {
-                                    w.set_spawn_mode(spawn_mode);
-                                }
-                            }
-                            Child::Container(cid) => {
-                                let c = self.containers.get_mut(cid);
-                                c.dimension = Dimension {
-                                    x: dim.x,
-                                    y,
-                                    width: dim.width,
-                                    height: child_height,
-                                };
-                                if self.auto_tile && !c.spawn_mode().is_tab() {
-                                    c.set_spawn_mode(spawn_mode);
-                                }
-                                stack.push(cid);
-                            }
-                        }
+                        self.set_child_dimension(child, child_dim, &mut stack);
                     }
                 }
                 None => {
-                    let content_y = dim.y + self.tab_bar_height;
-                    let content_height = dim.height - self.tab_bar_height;
-                    let spawn_mode = if dim.width >= content_height {
-                        SpawnMode::horizontal()
-                    } else {
-                        SpawnMode::vertical()
+                    let child_dim = Dimension {
+                        x: dim.x,
+                        y: dim.y + self.tab_bar_height,
+                        width: dim.width,
+                        height: dim.height - self.tab_bar_height,
                     };
                     for child in children {
-                        match child {
-                            Child::Window(wid) => {
-                                let w = self.windows.get_mut(wid);
-                                w.dimension = Dimension {
-                                    x: dim.x,
-                                    y: content_y,
-                                    width: dim.width,
-                                    height: content_height,
-                                };
-                                if self.auto_tile && !w.spawn_mode().is_tab() {
-                                    w.set_spawn_mode(spawn_mode);
-                                }
-                            }
-                            Child::Container(cid) => {
-                                let c = self.containers.get_mut(cid);
-                                c.dimension = Dimension {
-                                    x: dim.x,
-                                    y: content_y,
-                                    width: dim.width,
-                                    height: content_height,
-                                };
-                                if self.auto_tile && !c.spawn_mode().is_tab() {
-                                    c.set_spawn_mode(spawn_mode);
-                                }
-                                stack.push(cid);
-                            }
-                        }
+                        self.set_child_dimension(child, child_dim, &mut stack);
                     }
                 }
+            }
+        }
+    }
+
+    fn set_child_dimension(&mut self, child: Child, dim: Dimension, stack: &mut Vec<ContainerId>) {
+        let spawn_mode = if dim.width >= dim.height {
+            SpawnMode::horizontal()
+        } else {
+            SpawnMode::vertical()
+        };
+        match child {
+            Child::Window(wid) => {
+                let w = self.windows.get_mut(wid);
+                w.dimension = dim;
+                if self.auto_tile && !w.spawn_mode().is_tab() {
+                    w.set_spawn_mode(spawn_mode);
+                }
+            }
+            Child::Container(cid) => {
+                let c = self.containers.get_mut(cid);
+                c.dimension = dim;
+                if self.auto_tile && !c.spawn_mode().is_tab() {
+                    c.set_spawn_mode(spawn_mode);
+                }
+                stack.push(cid);
             }
         }
     }

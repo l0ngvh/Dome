@@ -1,5 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
+mod auto_tile;
 mod delete_window;
 mod float_window;
 mod focus_direction;
@@ -492,5 +493,20 @@ pub(super) fn setup() -> Hub {
         },
         TAB_BAR_HEIGHT,
         false,
+    )
+}
+
+pub(super) fn setup_with_auto_tile() -> Hub {
+    setup_logger();
+    use crate::core::node::Dimension;
+    Hub::new(
+        Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: ASCII_WIDTH as f32,
+            height: ASCII_HEIGHT as f32,
+        },
+        TAB_BAR_HEIGHT,
+        true,
     )
 }
