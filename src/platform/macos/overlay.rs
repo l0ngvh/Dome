@@ -212,11 +212,10 @@ pub(super) fn collect_overlays(
             }
             Child::Container(container_id) => {
                 let container = hub.get_container(container_id);
-                for c in container.children() {
-                    stack.push(*c);
-                }
-
                 if container.is_tabbed() {
+                    if let Some(active) = container.active_tab() {
+                        stack.push(active);
+                    }
                     let dim = container.dimension();
                     let y = screen.y + screen.height - dim.y - tab_bar_height;
                     let is_focused = focused == Some(Focus::Tiling(Child::Container(container_id)));
@@ -291,6 +290,10 @@ pub(super) fn collect_overlays(
                                 bold: is_active,
                             });
                         }
+                    }
+                } else {
+                    for c in container.children() {
+                        stack.push(*c);
                     }
                 }
             }
