@@ -925,12 +925,6 @@ impl Hub {
         };
 
         let mut current = child;
-        // If direct parent is tabbed, start from the tabbed container itself
-        if let Parent::Container(cid) = self.get_parent(child)
-            && self.containers.get(cid).is_tabbed
-        {
-            current = Child::Container(cid);
-        }
 
         for _ in super::bounded_loop() {
             let Parent::Container(container_id) = self.get_parent(current) else {
@@ -940,7 +934,7 @@ impl Hub {
                 .containers
                 .get(container_id)
                 .direction()
-                .is_some_and(|d| d != direction)
+                .is_none_or(|d| d != direction)
             {
                 current = Child::Container(container_id);
                 continue;

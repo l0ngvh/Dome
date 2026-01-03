@@ -1132,24 +1132,25 @@ fn move_from_tabbed_parent_goes_to_grandparent() {
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_container_layout();
+    hub.focus_prev_tab();
 
     hub.move_right();
     insta::assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
         Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=1,
+          Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=0,
             Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00)
           )
-          Window(id=WindowId(3), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
 
     +------------------------------------------------++------------------------------------------------+**************************************************
-    |                                                ||          W1            |        [W2]           |*                                                *
+    |                                                ||         [W1]           |         W3            |*                                                *
     |                                                |+------------------------------------------------+*                                                *
     |                                                ||                                                |*                                                *
     |                                                ||                                                |*                                                *
@@ -1163,7 +1164,117 @@ fn move_from_tabbed_parent_goes_to_grandparent() {
     |                                                ||                                                |*                                                *
     |                                                ||                                                |*                                                *
     |                                                ||                                                |*                                                *
-    |                       W0                       ||                                                |*                       W3                       *
+    |                       W0                       ||                                                |*                       W2                       *
+    |                                                ||                       W1                       |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    +------------------------------------------------++------------------------------------------------+**************************************************
+    ");
+}
+
+#[test]
+fn move_from_nested_container_skip_tabbed_grandparent() {
+    let mut hub = setup();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.toggle_container_layout();
+    hub.focus_prev_tab();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+    insta::assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
+            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
+              Window(id=WindowId(2), parent=ContainerId(2), x=75.00, y=2.00, w=37.50, h=28.00)
+              Window(id=WindowId(4), parent=ContainerId(2), x=112.50, y=2.00, w=37.50, h=28.00)
+            )
+            Window(id=WindowId(3), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+          )
+        )
+      )
+    )
+
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    |                                                                         ||          W1            |        [C2]           |          W3            |
+    |                                                                         |+------------------------------------+*************************************
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                    W0                                   ||                                    |*                                   *
+    |                                                                         ||                 W2                 |*                W4                 *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    |                                                                         ||                                    |*                                   *
+    +-------------------------------------------------------------------------++------------------------------------+*************************************
+    ");
+
+    hub.move_right();
+    insta::assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=1,
+            Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=2.00, w=50.00, h=28.00)
+          )
+          Window(id=WindowId(4), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
+        )
+      )
+    )
+
+    +------------------------------------------------++------------------------------------------------+**************************************************
+    |                                                ||      W1        |    [W2]       |     W3        |*                                                *
+    |                                                |+------------------------------------------------+*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                       W0                       ||                                                |*                       W4                       *
     |                                                ||                       W2                       |*                                                *
     |                                                ||                                                |*                                                *
     |                                                ||                                                |*                                                *
