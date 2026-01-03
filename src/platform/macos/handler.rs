@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
+use objc2::MainThreadMarker;
+use objc2_app_kit::NSApplication;
 
 use crate::action::{Action, FocusTarget, MoveTarget, ToggleTarget};
 use crate::core::{Child, Focus};
@@ -11,6 +13,11 @@ use super::overlay::collect_overlays;
 pub(super) fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
     tracing::debug!(?action, "Executing action");
     match action {
+        Action::Exit => {
+            let mtm = MainThreadMarker::new().unwrap();
+            NSApplication::sharedApplication(mtm).terminate(None);
+            return Ok(());
+        }
         Action::Focus { target } => match target {
             FocusTarget::Up => context.hub.focus_up(),
             FocusTarget::Down => context.hub.focus_down(),

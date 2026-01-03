@@ -201,6 +201,13 @@ fn default_keymaps() -> HashMap<Keymap, Vec<Action>> {
             target: ToggleTarget::Float,
         }],
     );
+    keymaps.insert(
+        Keymap {
+            key: "q".into(),
+            modifiers: Modifiers::CMD | Modifiers::SHIFT,
+        },
+        vec![Action::Exit],
+    );
     keymaps
 }
 

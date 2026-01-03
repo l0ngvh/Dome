@@ -17,6 +17,7 @@ pub enum Action {
         #[command(subcommand)]
         target: ToggleTarget,
     },
+    Exit,
 }
 
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
@@ -105,6 +106,7 @@ impl FromStr for Action {
             ["toggle", "float"] => Ok(Action::Toggle {
                 target: ToggleTarget::Float,
             }),
+            ["exit"] => Ok(Action::Exit),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
     }

@@ -49,3 +49,4 @@ active_tab_background_color = "#4d4d66"
 "cmd+shift+k" = ["move up"]
 "cmd+shift+l" = ["move right"]
 "cmd+f" = ["toggle float"]
+"cmd+shift+q" = ["exit"]

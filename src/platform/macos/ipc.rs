@@ -43,7 +43,11 @@ fn handle_client(mut stream: UnixStream, context: &mut WindowContext) {
     let mut line = String::new();
 
     if reader.read_line(&mut line).is_ok() {
-        let response = match serde_json::from_str::<Action>(line.trim()) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let response = match serde_json::from_str::<Action>(trimmed) {
             Ok(action) => match handle_action(&action, context) {
                 Ok(()) => "ok\n".to_string(),
                 Err(e) => {
@@ -52,7 +56,7 @@ fn handle_client(mut stream: UnixStream, context: &mut WindowContext) {
                 }
             },
             Err(e) => {
-                tracing::warn!("Invalid IPC message: {e}");
+                tracing::warn!(message = trimmed, "Invalid IPC message: {e}");
                 format!("error:invalid action: {e}\n")
             }
         };
