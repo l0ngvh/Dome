@@ -51,7 +51,7 @@ active_tab_background_color = "#4d4d66"
 "cmd+shift+j" = ["move down"]
 "cmd+shift+k" = ["move up"]
 "cmd+shift+l" = ["move right"]
-"cmd+f" = ["toggle float"]
+"cmd+shift+f" = ["toggle float"]
 "cmd+shift+q" = ["exit"]
 
 # Window rules to force manage or ignore windows

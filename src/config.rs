@@ -195,7 +195,7 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
     keymaps.insert(
         Keymap {
             key: "f".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
         Actions::new(vec![Action::Toggle {
             target: ToggleTarget::Float,
