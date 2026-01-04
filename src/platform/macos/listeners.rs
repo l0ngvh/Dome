@@ -40,20 +40,14 @@ const THROTTLE_DURATION: Duration = Duration::from_millis(20);
 
 pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers {
     let mut observers = HashMap::new();
-    for app in NSWorkspace::sharedWorkspace().runningApplications() {
-        if app.activationPolicy() != NSApplicationActivationPolicy::Regular {
-            continue;
-        }
-        let pid = app.processIdentifier();
-        if pid == -1 {
-            continue;
-        }
+    for pid in running_app_pids() {
+        let app_name = get_app_name(pid);
         match register_app(pid, context_ptr) {
             Ok(observer) => {
+                tracing::info!(%pid, %app_name, "Registered app on startup");
                 observers.insert(pid, observer);
             }
             Err(e) => {
-                let app_name = get_app_name(pid);
                 tracing::warn!(%pid, %app_name, "Can't create observer: {e:#}");
             }
         }
@@ -76,7 +70,10 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 let app_name = get_app_name(pid);
                 tracing::trace!(%pid, %app_name, "App launched");
                 let observer = match register_app(pid, context_ptr) {
-                    Ok(observer) => observer,
+                    Ok(observer) => {
+                        tracing::info!(%pid, %app_name, "Registered app on launch");
+                        observer
+                    }
                     Err(e) => {
                         tracing::warn!(%pid, %app_name, "Can't track application: {e:#}");
                         return;
@@ -211,6 +208,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
     }
 
     unsafe {
+        let apps = apps.clone();
         distributed_center.addObserverForName_object_queue_usingBlock(
             Some(unlock_name.as_ref()),
             None,
@@ -219,6 +217,10 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 tracing::info!("Screen unlocked, resuming window management");
                 let context = &mut *context_ptr;
                 context.is_suspended = false;
+                scan_all_apps(&apps, context_ptr);
+                if let Err(e) = render_workspace(context) {
+                    tracing::warn!("Failed to render workspace after unlock: {e:#}");
+                }
             }),
         );
     }
@@ -619,4 +621,35 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
     }
 
     Ok(observer)
+}
+
+fn scan_all_apps(apps: &Observers, context_ptr: *mut WindowContext) {
+    let context = unsafe { &mut *context_ptr };
+    let mut apps = apps.borrow_mut();
+    for pid in running_app_pids() {
+        if let std::collections::hash_map::Entry::Vacant(e) = apps.entry(pid) {
+            let app_name = get_app_name(pid);
+            match register_app(pid, context_ptr) {
+                Ok(observer) => {
+                    tracing::info!(%pid, %app_name, "Registered app on unlock");
+                    e.insert(observer);
+                }
+                Err(err) => {
+                    tracing::warn!(%pid, %app_name, "Can't register app on unlock: {err:#}");
+                }
+            }
+        } else {
+            let ax_app = unsafe { AXUIElement::new_application(pid) };
+            sync_windows(pid, &ax_app, context);
+        }
+    }
+}
+
+fn running_app_pids() -> impl Iterator<Item = i32> {
+    NSWorkspace::sharedWorkspace()
+        .runningApplications()
+        .into_iter()
+        .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
+        .map(|app| app.processIdentifier())
+        .filter(|&pid| pid != -1)
 }
