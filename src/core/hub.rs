@@ -98,6 +98,8 @@ impl Hub {
         self.float_windows.get(id)
     }
 
+    /// Insert a new window as tiling to the current workspace.
+    /// Update workspace focus to the newly inserted window.
     #[tracing::instrument(skip(self))]
     pub(crate) fn insert_tiling(&mut self) -> WindowId {
         let window_id = self.windows.allocate(Window::new(
@@ -109,6 +111,8 @@ impl Hub {
         window_id
     }
 
+    /// Insert a new window as float to the current workspace.
+    /// Update workspace focus to the newly inserted window.
     #[tracing::instrument(skip(self))]
     pub(crate) fn insert_float(&mut self, dimension: Dimension) -> FloatWindowId {
         let float_id = self

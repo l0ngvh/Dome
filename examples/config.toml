@@ -71,3 +71,11 @@ active_tab_background_color = "#4d4d66"
 # bundle_id = "com.apple.finder"
 # title = "Trash"
 # manage = false
+
+# [[window_rules]]
+# app = "Slack"
+# run = ["move workspace 3"]
+
+# [[window_rules]]
+# app = "Safari"
+# run = ["toggle float"]

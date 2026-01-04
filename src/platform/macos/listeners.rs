@@ -25,7 +25,7 @@ use objc2_foundation::{
 };
 
 use super::context::{Observers, RemovedWindow, WindowContext};
-use super::handler::{apply_layout, execute_action, focus_window, render_workspace};
+use super::handler::{apply_layout, execute_actions, focus_window, render_workspace};
 use super::objc2_wrapper::{
     add_observer_notification, create_observer, get_attribute, get_pid,
     kAXApplicationHiddenNotification, kAXApplicationShownNotification, kAXFocusedWindowAttribute,
@@ -236,7 +236,26 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 tracing::info!("Screen unlocked, resuming window management");
                 let context = &mut *context_ptr;
                 context.is_suspended = false;
-                scan_all_apps(&apps, context_ptr);
+
+                let mut apps = apps.borrow_mut();
+                for pid in running_app_pids() {
+                    if let std::collections::hash_map::Entry::Vacant(e) = apps.entry(pid) {
+                        let app_name = get_app_name(pid);
+                        match register_app(pid, context_ptr) {
+                            Ok(observer) => {
+                                tracing::info!(%pid, %app_name, "Registered app on unlock");
+                                e.insert(observer);
+                            }
+                            Err(err) => {
+                                tracing::warn!(%pid, %app_name, "Can't register app on unlock: {err:#}");
+                            }
+                        }
+                    } else {
+                        let ax_app = AXUIElement::new_application(pid);
+                        sync_windows(pid, &ax_app, context);
+                    }
+                }
+                ;
                 if let Err(e) = render_workspace(context) {
                     tracing::warn!("Failed to render workspace after unlock: {e:#}");
                 }
@@ -448,10 +467,15 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowCon
         }
     }
 
-    for mac_window in active_windows {
-        if registry.contains(&mac_window) {
-            continue;
-        }
+    let new_windows: Vec<_> = active_windows
+        .into_iter()
+        .filter(|w| !registry.contains(w))
+        .collect();
+    drop(registry);
+
+    for mac_window in new_windows {
+        let rule = match_rule(&mac_window, &context.config.window_rules);
+        let mut registry = context.registry.borrow_mut();
         if mac_window.should_tile() {
             let id = context.hub.insert_tiling();
             let _span = tracing::info_span!("sync_windows", %id, window = %mac_window).entered();
@@ -463,6 +487,9 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowCon
             let _span = tracing::info_span!("sync_windows", %id, window = %mac_window).entered();
             tracing::info!("New float window");
             registry.insert_float(id, mac_window);
+        }
+        if let Some(r) = rule {
+            execute_actions(&mut context.hub, &mut registry, &r.run);
         }
     }
 }
@@ -551,10 +578,13 @@ fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
         context.is_suspended = false;
     }
 
-    for action in actions {
-        if let Err(e) = execute_action(context, &action) {
-            tracing::warn!("Failed to execute action: {e:#}");
-        }
+    execute_actions(
+        &mut context.hub,
+        &mut context.registry.borrow_mut(),
+        &actions,
+    );
+    if let Err(e) = render_workspace(context) {
+        tracing::warn!("Failed to render workspace: {e:#}");
     }
     true
 }
@@ -607,6 +637,7 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
             if !should_manage(&mac_window, rules) {
                 continue;
             }
+            let rule = match_rule(&mac_window, rules);
             let mut registry = context.registry.borrow_mut();
             if mac_window.should_tile() {
                 let window_id = context.hub.insert_tiling();
@@ -617,6 +648,9 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
                 let float_id = context.hub.insert_float(dim);
                 tracing::debug!(%float_id, window = %mac_window, "Managing as float");
                 registry.insert_float(float_id, mac_window);
+            }
+            if let Some(r) = rule {
+                execute_actions(&mut context.hub, &mut registry, &r.run);
             }
         }
     }
@@ -644,28 +678,6 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
     Ok(observer)
 }
 
-fn scan_all_apps(apps: &Observers, context_ptr: *mut WindowContext) {
-    let context = unsafe { &mut *context_ptr };
-    let mut apps = apps.borrow_mut();
-    for pid in running_app_pids() {
-        if let std::collections::hash_map::Entry::Vacant(e) = apps.entry(pid) {
-            let app_name = get_app_name(pid);
-            match register_app(pid, context_ptr) {
-                Ok(observer) => {
-                    tracing::info!(%pid, %app_name, "Registered app on unlock");
-                    e.insert(observer);
-                }
-                Err(err) => {
-                    tracing::warn!(%pid, %app_name, "Can't register app on unlock: {err:#}");
-                }
-            }
-        } else {
-            let ax_app = unsafe { AXUIElement::new_application(pid) };
-            sync_windows(pid, &ax_app, context);
-        }
-    }
-}
-
 fn running_app_pids() -> impl Iterator<Item = i32> {
     NSWorkspace::sharedWorkspace()
         .runningApplications()
@@ -675,7 +687,7 @@ fn running_app_pids() -> impl Iterator<Item = i32> {
         .filter(|&pid| pid != -1)
 }
 
-fn should_manage(window: &MacWindow, rules: &[WindowRule]) -> bool {
+fn match_rule<'a>(window: &MacWindow, rules: &'a [WindowRule]) -> Option<&'a WindowRule> {
     for rule in rules {
         if let Some(app) = &rule.app
             && !pattern_matches(app, window.app_name())
@@ -693,10 +705,14 @@ fn should_manage(window: &MacWindow, rules: &[WindowRule]) -> bool {
             continue;
         }
         if rule.app.is_some() || rule.bundle_id.is_some() || rule.title.is_some() {
-            return rule.manage;
+            return Some(rule);
         }
     }
-    window.is_manageable()
+    None
+}
+
+fn should_manage(window: &MacWindow, rules: &[WindowRule]) -> bool {
+    match_rule(window, rules).map_or_else(|| window.is_manageable(), |r| r.manage)
 }
 
 fn pattern_matches(pattern: &str, text: &str) -> bool {

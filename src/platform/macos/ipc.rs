@@ -9,10 +9,10 @@ use objc2_core_foundation::{
     CFRunLoop, kCFRunLoopDefaultMode,
 };
 
-use crate::action::Action;
+use crate::action::{Action, Actions};
 
 use super::context::WindowContext;
-use super::handler::execute_action;
+use super::handler::{execute_actions, render_workspace};
 
 const K_CF_FILE_DESCRIPTOR_READ_CALL_BACK: CFOptionFlags = 1;
 
@@ -48,7 +48,7 @@ fn handle_client(mut stream: UnixStream, context: &mut WindowContext) {
             return;
         }
         let response = match serde_json::from_str::<Action>(trimmed) {
-            Ok(action) => match handle_action(&action, context) {
+            Ok(action) => match handle_action(action, context) {
                 Ok(()) => "ok\n".to_string(),
                 Err(e) => {
                     tracing::warn!(?action, "IPC action failed: {e}");
@@ -64,9 +64,15 @@ fn handle_client(mut stream: UnixStream, context: &mut WindowContext) {
     }
 }
 
-fn handle_action(action: &Action, context: &mut WindowContext) -> Result<(), String> {
+fn handle_action(action: Action, context: &mut WindowContext) -> Result<(), String> {
     tracing::debug!(?action, "IPC action");
-    execute_action(context, action).map_err(|e| e.to_string())
+    let actions = Actions::new(vec![action]);
+    execute_actions(
+        &mut context.hub,
+        &mut context.registry.borrow_mut(),
+        &actions,
+    );
+    render_workspace(context).map_err(|e| e.to_string())
 }
 
 pub(super) fn register_with_runloop(context: *mut WindowContext) -> anyhow::Result<()> {

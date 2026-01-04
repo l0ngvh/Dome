@@ -4,57 +4,49 @@ use anyhow::Result;
 use objc2::MainThreadMarker;
 use objc2_app_kit::NSApplication;
 
-use crate::action::{Action, FocusTarget, MoveTarget, ToggleTarget};
-use crate::core::{Child, Dimension, Focus};
+use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
+use crate::core::{Child, Dimension, Focus, Hub};
 
-use super::context::WindowContext;
+use super::context::{WindowContext, WindowRegistry};
 use super::overlay::collect_overlays;
 
-#[tracing::instrument(skip(context))]
-pub(super) fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
-    match action {
-        Action::Exit => {
-            let mtm = MainThreadMarker::new().unwrap();
-            NSApplication::sharedApplication(mtm).terminate(None);
-            return Ok(());
-        }
-        Action::Focus { target } => match target {
-            FocusTarget::Up => context.hub.focus_up(),
-            FocusTarget::Down => context.hub.focus_down(),
-            FocusTarget::Left => context.hub.focus_left(),
-            FocusTarget::Right => context.hub.focus_right(),
-            FocusTarget::Parent => context.hub.focus_parent(),
-            FocusTarget::Workspace { index } => context.hub.focus_workspace(*index),
-            FocusTarget::NextTab => context.hub.focus_next_tab(),
-            FocusTarget::PrevTab => context.hub.focus_prev_tab(),
-        },
-        Action::Move { target } => match target {
-            MoveTarget::Workspace { index } => context.hub.move_focused_to_workspace(*index),
-            MoveTarget::Up => context.hub.move_up(),
-            MoveTarget::Down => context.hub.move_down(),
-            MoveTarget::Left => context.hub.move_left(),
-            MoveTarget::Right => context.hub.move_right(),
-        },
-        Action::Toggle { target } => match target {
-            ToggleTarget::SpawnDirection => context.hub.toggle_spawn_mode(),
-            ToggleTarget::Direction => context.hub.toggle_direction(),
-            ToggleTarget::Layout => context.hub.toggle_container_layout(),
-            ToggleTarget::Float => {
-                if let Some((window_id, float_id)) = context.hub.toggle_float() {
-                    context
-                        .registry
-                        .borrow_mut()
-                        .toggle_float(window_id, float_id);
-                }
+#[tracing::instrument(skip(hub, registry), fields(actions = %actions))]
+pub(super) fn execute_actions(hub: &mut Hub, registry: &mut WindowRegistry, actions: &Actions) {
+    for action in actions {
+        match action {
+            Action::Exit => {
+                let mtm = MainThreadMarker::new().unwrap();
+                NSApplication::sharedApplication(mtm).terminate(None);
             }
-        },
+            Action::Focus { target } => match target {
+                FocusTarget::Up => hub.focus_up(),
+                FocusTarget::Down => hub.focus_down(),
+                FocusTarget::Left => hub.focus_left(),
+                FocusTarget::Right => hub.focus_right(),
+                FocusTarget::Parent => hub.focus_parent(),
+                FocusTarget::Workspace { index } => hub.focus_workspace(*index),
+                FocusTarget::NextTab => hub.focus_next_tab(),
+                FocusTarget::PrevTab => hub.focus_prev_tab(),
+            },
+            Action::Move { target } => match target {
+                MoveTarget::Workspace { index } => hub.move_focused_to_workspace(*index),
+                MoveTarget::Up => hub.move_up(),
+                MoveTarget::Down => hub.move_down(),
+                MoveTarget::Left => hub.move_left(),
+                MoveTarget::Right => hub.move_right(),
+            },
+            Action::Toggle { target } => match target {
+                ToggleTarget::SpawnDirection => hub.toggle_spawn_mode(),
+                ToggleTarget::Direction => hub.toggle_direction(),
+                ToggleTarget::Layout => hub.toggle_container_layout(),
+                ToggleTarget::Float => {
+                    if let Some((window_id, float_id)) = hub.toggle_float() {
+                        registry.toggle_float(window_id, float_id);
+                    }
+                }
+            },
+        }
     }
-
-    if let Err(e) = render_workspace(context) {
-        tracing::warn!("Failed to render workspace after action: {e:#}");
-    }
-
-    Ok(())
 }
 
 pub(super) fn render_workspace(context: &mut WindowContext) -> Result<()> {
