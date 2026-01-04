@@ -10,8 +10,8 @@ use crate::core::{Child, Dimension, Focus};
 use super::context::WindowContext;
 use super::overlay::collect_overlays;
 
+#[tracing::instrument(skip(context))]
 pub(super) fn execute_action(context: &mut WindowContext, action: &Action) -> Result<()> {
-    tracing::debug!(?action, "Executing action");
     match action {
         Action::Exit => {
             let mtm = MainThreadMarker::new().unwrap();

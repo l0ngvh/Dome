@@ -48,7 +48,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 observers.insert(pid, observer);
             }
             Err(e) => {
-                tracing::warn!(%pid, %app_name, "Can't create observer: {e:#}");
+                tracing::warn!(%pid, %app_name, "Can't register app on startup: {e:#}");
             }
         }
     }
@@ -99,20 +99,39 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                     tracing::trace!("Terminated application doesn't have a pid");
                     return;
                 };
-                let app_name = get_app_name(pid);
-                tracing::trace!(%pid, %app_name, "App terminated");
                 apps.borrow_mut().remove(&pid);
                 let context = &mut *context_ptr;
-                let (window_ids, float_ids) = context.registry.borrow_mut().remove_by_pid(pid);
-                for window_id in &window_ids {
-                    context.hub.delete_window(*window_id);
-                    tracing::debug!(%window_id, %app_name, "Tiling window deleted");
+                let (tiling_windows, float_windows) =
+                    context.registry.borrow_mut().remove_by_pid(pid);
+                for (id, window) in &tiling_windows {
+                    let title = window.title();
+                    let app_name = window.app_name();
+                    let _span = tracing::debug_span!(
+                        "app_terminated_delete_tiling",
+                        %pid,
+                        %id,
+                        %title,
+                        %app_name
+                    )
+                    .entered();
+                    context.hub.delete_window(*id);
+                    tracing::debug!("Tiling window deleted");
                 }
-                for float_id in &float_ids {
-                    context.hub.delete_float(*float_id);
-                    tracing::debug!(%float_id, %app_name, "Float window deleted");
+                for (id, window) in &float_windows {
+                    let title = window.title();
+                    let app_name = window.app_name();
+                    let _span = tracing::debug_span!(
+                        "app_terminated_delete_float",
+                        %pid,
+                        %id,
+                        %title,
+                        %app_name
+                    )
+                    .entered();
+                    context.hub.delete_float(*id);
+                    tracing::debug!("Float window deleted");
                 }
-                if (!window_ids.is_empty() || !float_ids.is_empty())
+                if (!tiling_windows.is_empty() || !float_windows.is_empty())
                     && let Err(e) = render_workspace(context)
                 {
                     tracing::warn!("Failed to render workspace after terminating app: {e:#}");
@@ -390,7 +409,6 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
     }
 }
 
-#[tracing::instrument(skip_all, fields(app_name = get_app_name(pid)))]
 fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
     let Ok(windows) = get_windows(app) else {
         tracing::warn!("Failed to get windows");
@@ -411,14 +429,16 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowCon
         if !active_hashes.contains(&h) {
             match registry.remove_by_hash(h) {
                 Some(RemovedWindow::Tiling(id, window)) => {
-                    let title = window.title();
+                    let _span =
+                        tracing::info_span!("sync_windows", %id, window = %window).entered();
                     context.hub.delete_window(id);
-                    tracing::info!(%id, %title, "Tiling window deleted");
+                    tracing::info!("Tiling window deleted");
                 }
                 Some(RemovedWindow::Float(id, window)) => {
-                    let title = window.title();
+                    let _span =
+                        tracing::info_span!("sync_windows", %id, window = %window).entered();
                     context.hub.delete_float(id);
-                    tracing::info!(%id, %title, "Float window deleted");
+                    tracing::info!("Float window deleted");
                 }
                 None => {}
             }
@@ -433,12 +453,14 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowCon
         }
         if mac_window.should_tile() {
             let id = context.hub.insert_tiling();
-            tracing::info!(%id, window = %mac_window, "New tiling window");
+            let _span = tracing::info_span!("sync_windows", %id, window = %mac_window).entered();
+            tracing::info!("New tiling window");
             registry.insert_tiling(id, mac_window);
         } else {
             let dim = mac_window.dimension();
             let id = context.hub.insert_float(dim);
-            tracing::info!(%id, window = %mac_window, "New float window");
+            let _span = tracing::info_span!("sync_windows", %id, window = %mac_window).entered();
+            tracing::info!("New float window");
             registry.insert_float(id, mac_window);
         }
     }

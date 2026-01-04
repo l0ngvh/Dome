@@ -141,6 +141,10 @@ impl MacWindow {
         &self.title
     }
 
+    pub(crate) fn app_name(&self) -> &str {
+        &self.app_name
+    }
+
     pub(crate) fn update_title(&mut self) {
         if let Ok(t) = get_attribute::<CFString>(&self.window, &kAXTitleAttribute()) {
             self.title = t.to_string();

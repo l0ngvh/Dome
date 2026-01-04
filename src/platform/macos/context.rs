@@ -102,20 +102,26 @@ impl WindowRegistry {
         }
     }
 
-    pub(super) fn remove_by_pid(&mut self, pid: i32) -> (Vec<WindowId>, Vec<FloatWindowId>) {
+    #[allow(clippy::type_complexity)]
+    pub(super) fn remove_by_pid(
+        &mut self,
+        pid: i32,
+    ) -> (Vec<(WindowId, MacWindow)>, Vec<(FloatWindowId, MacWindow)>) {
         let Some(hashes) = self.pid_to_hashes.remove(&pid) else {
             return (Vec::new(), Vec::new());
         };
         let mut removed_tiling = Vec::new();
         let mut removed_float = Vec::new();
         for cf_hash in hashes {
-            if let Some(window_id) = self.hash_to_tiling.remove(&cf_hash) {
-                self.tiling_to_window.remove(&window_id);
-                removed_tiling.push(window_id);
+            if let Some(window_id) = self.hash_to_tiling.remove(&cf_hash)
+                && let Some(window) = self.tiling_to_window.remove(&window_id)
+            {
+                removed_tiling.push((window_id, window));
             }
-            if let Some(float_id) = self.hash_to_float.remove(&cf_hash) {
-                self.float_to_window.remove(&float_id);
-                removed_float.push(float_id);
+            if let Some(float_id) = self.hash_to_float.remove(&cf_hash)
+                && let Some(window) = self.float_to_window.remove(&float_id)
+            {
+                removed_float.push((float_id, window));
             }
         }
         (removed_tiling, removed_float)

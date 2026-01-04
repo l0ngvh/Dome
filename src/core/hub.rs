@@ -215,12 +215,6 @@ impl Hub {
         tracing::debug!(%container_id, from = ?direction, "Toggled container layout");
         if container.direction().is_none() {
             // Toggled from split to tabbed
-            tracing::info!(
-                "Focused: {} {} {}",
-                container.focused,
-                focused,
-                container_id
-            );
             let tabbed_container = self.containers.get(container_id);
 
             let active_tab = if Child::Container(container_id) == focused {
