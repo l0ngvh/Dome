@@ -34,7 +34,7 @@ use super::objc2_wrapper::{
     kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification, kAXWindowsAttribute,
 };
 use super::window::MacWindow;
-use crate::config::{Keymap, Modifiers};
+use crate::config::{Keymap, Modifiers, WindowRule};
 
 const THROTTLE_DURATION: Duration = Duration::from_millis(20);
 
@@ -415,10 +415,11 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowCon
         return;
     };
     let screen = context.hub.screen();
+    let rules = &context.config.window_rules;
     let active_windows: Vec<_> = windows
         .into_iter()
         .filter_map(|w| MacWindow::new(w.clone(), app.clone(), pid, screen))
-        .filter(|w| w.is_manageable())
+        .filter(|w| should_manage(w, rules))
         .collect();
     let active_hashes: Vec<_> = active_windows.iter().map(|w| w.cf_hash()).collect();
 
@@ -596,13 +597,14 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
     let context = unsafe { &mut *context_ptr };
     let screen = context.hub.screen();
     let app = unsafe { AXUIElement::new_application(pid) };
+    let rules = &context.config.window_rules;
 
     if let Ok(windows) = get_windows(&app) {
         for window in windows {
             let Some(mac_window) = MacWindow::new(window.clone(), app.clone(), pid, screen) else {
                 continue;
             };
-            if !mac_window.is_manageable() {
+            if !should_manage(&mac_window, rules) {
                 continue;
             }
             let mut registry = context.registry.borrow_mut();
@@ -671,4 +673,38 @@ fn running_app_pids() -> impl Iterator<Item = i32> {
         .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
         .map(|app| app.processIdentifier())
         .filter(|&pid| pid != -1)
+}
+
+fn should_manage(window: &MacWindow, rules: &[WindowRule]) -> bool {
+    for rule in rules {
+        if let Some(app) = &rule.app
+            && !pattern_matches(app, window.app_name())
+        {
+            continue;
+        }
+        if let Some(b) = &rule.bundle_id
+            && window.bundle_id() != Some(b.as_str())
+        {
+            continue;
+        }
+        if let Some(t) = &rule.title
+            && !pattern_matches(t, window.title())
+        {
+            continue;
+        }
+        if rule.app.is_some() || rule.bundle_id.is_some() || rule.title.is_some() {
+            return rule.manage;
+        }
+    }
+    window.is_manageable()
+}
+
+fn pattern_matches(pattern: &str, text: &str) -> bool {
+    if let Some(regex_pattern) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/')) {
+        regex::Regex::new(regex_pattern)
+            .map(|r| r.is_match(text))
+            .unwrap_or(false)
+    } else {
+        pattern == text
+    }
 }

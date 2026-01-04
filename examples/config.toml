@@ -53,3 +53,21 @@ active_tab_background_color = "#4d4d66"
 "cmd+shift+l" = ["move right"]
 "cmd+f" = ["toggle float"]
 "cmd+shift+q" = ["exit"]
+
+# Window rules to force manage or ignore windows
+# All specified fields must match (AND logic)
+# First matching rule wins
+# Use /pattern/ for regex matching on app and title
+
+# [[window_rules]]
+# app = "System Preferences"
+# manage = false
+
+# [[window_rules]]
+# app = "/.*Preferences/"
+# manage = false
+
+# [[window_rules]]
+# bundle_id = "com.apple.finder"
+# title = "Trash"
+# manage = false

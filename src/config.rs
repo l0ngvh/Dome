@@ -302,6 +302,17 @@ fn default_active_tab_background_color() -> Color {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct WindowRule {
+    #[serde(default)]
+    pub app: Option<String>,
+    #[serde(default)]
+    pub bundle_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    pub manage: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default = "default_keymaps", deserialize_with = "deserialize_keymaps")]
@@ -322,6 +333,8 @@ pub struct Config {
     pub tab_bar_background_color: Color,
     #[serde(default = "default_active_tab_background_color")]
     pub active_tab_background_color: Color,
+    #[serde(default)]
+    pub window_rules: Vec<WindowRule>,
 }
 
 fn default_border_size() -> f32 {
@@ -348,6 +361,7 @@ impl Default for Config {
             border_color: default_border_color(),
             tab_bar_background_color: default_tab_bar_background_color(),
             active_tab_background_color: default_active_tab_background_color(),
+            window_rules: vec![],
         }
     }
 }

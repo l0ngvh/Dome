@@ -26,6 +26,7 @@ pub(crate) struct MacWindow {
     screen: Dimension,
     title: String,
     app_name: String,
+    bundle_id: Option<String>,
 }
 
 impl MacWindow {
@@ -47,6 +48,7 @@ impl MacWindow {
             .localizedName()
             .map(|name| name.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
+        let bundle_id = running_app.bundleIdentifier().map(|id| id.to_string());
 
         Some(Self {
             window,
@@ -56,6 +58,7 @@ impl MacWindow {
             screen,
             title,
             app_name,
+            bundle_id,
         })
     }
 
@@ -143,6 +146,10 @@ impl MacWindow {
 
     pub(crate) fn app_name(&self) -> &str {
         &self.app_name
+    }
+
+    pub(crate) fn bundle_id(&self) -> Option<&str> {
+        self.bundle_id.as_deref()
     }
 
     pub(crate) fn update_title(&mut self) {
