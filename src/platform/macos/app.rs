@@ -16,7 +16,7 @@ use super::overlay::{OverlayView, create_overlay_window};
 use crate::config::Config;
 use crate::core::Dimension;
 
-pub fn run_app(config_path: Option<String>) {
+pub fn run_app(config: Config) {
     use objc2_application_services::kAXTrustedCheckOptionPrompt;
     use objc2_core_foundation::CFDictionary;
 
@@ -31,7 +31,7 @@ pub fn run_app(config_path: Option<String>) {
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
-    let delegate = AppDelegate::new(mtm, config_path);
+    let delegate = AppDelegate::new(mtm, config);
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
     app.run();
@@ -39,7 +39,7 @@ pub fn run_app(config_path: Option<String>) {
 
 #[derive(Default)]
 struct AppDelegateIvars {
-    config_path: Option<String>,
+    config: Config,
     context: std::cell::OnceCell<*mut WindowContext>,
     observers: std::cell::OnceCell<Observers>,
     tiling_overlay_window: std::cell::OnceCell<Retained<objc2_app_kit::NSWindow>>,
@@ -69,7 +69,7 @@ define_class!(
                 }
             };
 
-            let config = Config::load(self.ivars().config_path.as_deref());
+            let config = self.ivars().config.clone();
             let screen = get_main_screen();
             let frame = NSRect::new(
                 NSPoint::new(screen.x as f64, 0.0),
@@ -131,9 +131,9 @@ define_class!(
 );
 
 impl AppDelegate {
-    fn new(mtm: MainThreadMarker, config_path: Option<String>) -> Retained<Self> {
+    fn new(mtm: MainThreadMarker, config: Config) -> Retained<Self> {
         let ivars = AppDelegateIvars {
-            config_path,
+            config,
             ..Default::default()
         };
         let this = Self::alloc(mtm).set_ivars(ivars);

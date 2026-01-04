@@ -335,6 +335,8 @@ pub struct Config {
     pub active_tab_background_color: Color,
     #[serde(default)]
     pub window_rules: Vec<WindowRule>,
+    #[serde(default)]
+    pub log_level: Option<String>,
 }
 
 fn default_border_size() -> f32 {
@@ -362,6 +364,7 @@ impl Default for Config {
             tab_bar_background_color: default_tab_bar_background_color(),
             active_tab_background_color: default_active_tab_background_color(),
             window_rules: vec![],
+            log_level: None,
         }
     }
 }
