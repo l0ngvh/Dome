@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 use objc2::{DefinedClass, MainThreadMarker};
 use objc2_app_kit::NSApplication;
+use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::Config;
@@ -78,7 +79,7 @@ pub(super) fn apply_layout(
     hub: &Hub,
     registry: &WindowRegistry,
     config: &Config,
-    displayed_windows: &mut HashSet<usize>,
+    displayed_windows: &mut HashSet<CGWindowID>,
     tiling_overlay: &OverlayView,
     float_overlay: &OverlayView,
 ) -> Result<()> {
@@ -94,7 +95,7 @@ pub(super) fn apply_layout(
         match child {
             Child::Window(window_id) => {
                 if let Some(os_window) = registry.get_tiling(window_id) {
-                    workspace_windows.insert(os_window.cf_hash());
+                    workspace_windows.insert(os_window.window_id());
                     let dim = hub.get_window(window_id).dimension();
                     tiling_layouts.push((window_id, dim));
                 }
@@ -113,25 +114,25 @@ pub(super) fn apply_layout(
     }
     for &float_id in workspace.float_windows() {
         if let Some(os_window) = registry.get_float(float_id) {
-            workspace_windows.insert(os_window.cf_hash());
+            workspace_windows.insert(os_window.window_id());
             let dim = hub.get_float(float_id).dimension();
             float_layouts.push((float_id, dim));
         }
     }
 
-    let to_hide: Vec<usize> = displayed_windows
+    let to_hide: Vec<_> = displayed_windows
         .difference(&workspace_windows)
         .copied()
         .collect();
 
-    for cf_hash in to_hide {
-        if let Some(window_id) = registry.get_tiling_by_hash(cf_hash) {
-            if let Some(os_window) = registry.get_tiling(window_id)
+    for window_id in to_hide {
+        if let Some(tiling_id) = registry.get_tiling_by_window_id(window_id) {
+            if let Some(os_window) = registry.get_tiling(tiling_id)
                 && let Err(e) = os_window.hide()
             {
-                tracing::warn!("Failed to hide tiling window {window_id}: {e:#}");
+                tracing::warn!("Failed to hide tiling window {tiling_id}: {e:#}");
             }
-        } else if let Some(float_id) = registry.get_float_by_hash(cf_hash)
+        } else if let Some(float_id) = registry.get_float_by_window_id(window_id)
             && let Some(os_window) = registry.get_float(float_id)
             && let Err(e) = os_window.hide()
         {

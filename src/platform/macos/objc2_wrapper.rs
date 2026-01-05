@@ -1,8 +1,10 @@
+use std::collections::HashSet;
 use std::ptr::NonNull;
 
 use anyhow::Result;
 use objc2_application_services::{AXError, AXObserver, AXObserverCallback, AXUIElement};
-use objc2_core_foundation::{CFRetained, CFString, CFType};
+use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFRetained, CFString, CFType};
+use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
 
 pub(crate) fn get_attribute<T: objc2_core_foundation::Type>(
     element: &AXUIElement,
@@ -213,6 +215,11 @@ pub(crate) fn kAXFocusedWindowAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXFocusedWindow")
 }
 
+#[allow(non_snake_case)]
+pub(crate) fn kCGWindowNumber() -> CFRetained<CFString> {
+    CFString::from_static_str("kCGWindowNumber")
+}
+
 pub(crate) fn is_attribute_settable(element: &AXUIElement, attribute: &CFString) -> bool {
     let mut settable: u8 = 0;
     let settable_ptr = NonNull::new(&mut settable as *mut u8).unwrap();
@@ -251,4 +258,42 @@ pub(crate) fn decorate_ax_error_message(error: AXError) -> String {
         _ => "Unknown AXError",
     };
     format!("{} (code: {})", description, error.0)
+}
+
+pub(crate) fn get_cg_window_id(element: &AXUIElement) -> Option<CGWindowID> {
+    unsafe extern "C" {
+        fn _AXUIElementGetWindow(element: &AXUIElement, out: *mut CGWindowID) -> AXError;
+    }
+    let mut window_id: CGWindowID = 0;
+    let res = unsafe { _AXUIElementGetWindow(element, &mut window_id) };
+    // 0 is kCGNullWindowID
+    if res == AXError::Success && window_id != 0 {
+        Some(window_id)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn list_cg_window_ids() -> HashSet<CGWindowID> {
+    let Some(window_list) = CGWindowListCopyWindowInfo(CGWindowListOption::OptionAll, 0) else {
+        return HashSet::new();
+    };
+    let window_list: &CFArray<CFDictionary<CFString, CFType>> =
+        unsafe { window_list.cast_unchecked() };
+
+    let mut ids = HashSet::new();
+    let key = kCGWindowNumber();
+    for dict in window_list {
+        // window id is a required attribute
+        // https://developer.apple.com/documentation/coregraphics/kcgwindownumber?language=objc
+        let id = dict
+            .get(&key)
+            .unwrap()
+            .downcast::<CFNumber>()
+            .unwrap()
+            .as_i64()
+            .unwrap();
+        ids.insert(id as CGWindowID);
+    }
+    ids
 }

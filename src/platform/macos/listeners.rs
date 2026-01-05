@@ -1,4 +1,6 @@
-use std::{collections::HashMap, ptr::NonNull, time::Duration, time::Instant};
+use std::collections::{HashMap, HashSet};
+use std::ptr::NonNull;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use block2::RcBlock;
@@ -12,7 +14,7 @@ use objc2_app_kit::{
 };
 use objc2_application_services::{AXObserver, AXUIElement};
 use objc2_core_foundation::{
-    CFAbsoluteTimeGetCurrent, CFArray, CFHash, CFMachPort, CFRetained, CFRunLoop, CFRunLoopTimer,
+    CFAbsoluteTimeGetCurrent, CFArray, CFMachPort, CFRetained, CFRunLoop, CFRunLoopTimer,
     CFRunLoopTimerContext, CFString, kCFAllocatorDefault, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
@@ -27,11 +29,12 @@ use super::app::AppDelegate;
 use super::context::{RemovedWindow, WindowRegistry};
 use super::handler::{apply_layout, execute_actions, focus_window, render_workspace};
 use super::objc2_wrapper::{
-    add_observer_notification, create_observer, get_attribute, get_pid,
+    add_observer_notification, create_observer, get_attribute, get_cg_window_id, get_pid,
     kAXApplicationHiddenNotification, kAXApplicationShownNotification, kAXFocusedWindowAttribute,
     kAXFocusedWindowChangedNotification, kAXResizedNotification, kAXTitleChangedNotification,
     kAXUIElementDestroyedNotification, kAXWindowCreatedNotification,
     kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification, kAXWindowsAttribute,
+    list_cg_window_ids,
 };
 use super::window::MacWindow;
 use crate::config::{Keymap, Modifiers, WindowRule};
@@ -159,19 +162,21 @@ pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
                 else {
                     return;
                 };
-                let cf_hash = CFHash(Some(&focused_window));
+                let Some(window_id) = get_cg_window_id(&focused_window) else {
+                    return;
+                };
                 let registry = delegate.ivars().registry.borrow();
                 let mut hub = delegate.ivars().hub.borrow_mut();
-                if let Some(window_id) = registry.get_tiling_by_hash(cf_hash) {
-                    if !hub.is_focusing(window_id) {
+                if let Some(tiling_id) = registry.get_tiling_by_window_id(window_id) {
+                    if !hub.is_focusing(tiling_id) {
                         drop(registry);
-                        hub.set_focus(window_id);
+                        hub.set_focus(tiling_id);
                         drop(hub);
                         if let Err(e) = render_workspace(delegate) {
                             tracing::warn!("Failed to render workspace: {e:#}");
                         }
                     }
-                } else if let Some(float_id) = registry.get_float_by_hash(cf_hash) {
+                } else if let Some(float_id) = registry.get_float_by_window_id(window_id) {
                     drop(registry);
                     hub.set_float_focus(float_id);
                     drop(hub);
@@ -474,15 +479,21 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, delegate: &'static AppD
         .filter_map(|w| MacWindow::new(w.clone(), app.clone(), pid, screen))
         .filter(|w| should_manage(w, rules))
         .collect();
-    let active_hashes: Vec<_> = active_windows.iter().map(|w| w.cf_hash()).collect();
+    let active_window_ids: HashSet<_> = active_windows.iter().map(|w| w.window_id()).collect();
 
     let mut registry = delegate.ivars().registry.borrow_mut();
-    let tracked_hashes = registry.hashes_for_pid(pid);
+    let tracked_window_ids = registry.window_ids_for_pid(pid);
+
+    let cg_window_ids = list_cg_window_ids();
 
     let mut hub = delegate.ivars().hub.borrow_mut();
-    for h in tracked_hashes {
-        if !active_hashes.contains(&h) {
-            match registry.remove_by_hash(h) {
+    for window_id in tracked_window_ids {
+        if !active_window_ids.contains(&window_id) {
+            // Window not in AX list - check if it still exists in CG list (might be in another space)
+            if cg_window_ids.contains(&window_id) {
+                continue;
+            }
+            match registry.remove_by_window_id(window_id) {
                 Some(RemovedWindow::Tiling(id, window)) => {
                     let _span =
                         tracing::info_span!("sync_windows", %id, window = %window).entered();
@@ -498,7 +509,7 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, delegate: &'static AppD
                 None => {}
             }
         } else {
-            registry.update_title(h);
+            registry.update_title(window_id);
         }
     }
 
@@ -531,23 +542,25 @@ fn sync_focus(app: &CFRetained<AXUIElement>, hub: &mut Hub, registry: &WindowReg
     let Ok(focused) = get_attribute::<AXUIElement>(app, &kAXFocusedWindowAttribute()) else {
         return;
     };
-    let h = CFHash(Some(&focused));
-    if let Some(id) = registry.get_tiling_by_hash(h) {
-        if !hub.is_focusing(id) {
+    let Some(window_id) = get_cg_window_id(&focused) else {
+        return;
+    };
+    if let Some(tiling_id) = registry.get_tiling_by_window_id(window_id) {
+        if !hub.is_focusing(tiling_id) {
             let title = registry
-                .get_tiling(id)
+                .get_tiling(tiling_id)
                 .map(|w| w.to_string())
                 .unwrap_or_default();
-            tracing::debug!(%id, %title, "Focus changed to tiling window");
-            hub.set_focus(id);
+            tracing::debug!(%tiling_id, %title, "Focus changed to tiling window");
+            hub.set_focus(tiling_id);
         }
-    } else if let Some(id) = registry.get_float_by_hash(h) {
+    } else if let Some(float_id) = registry.get_float_by_window_id(window_id) {
         let title = registry
-            .get_float(id)
+            .get_float(float_id)
             .map(|w| w.to_string())
             .unwrap_or_default();
-        tracing::debug!(%id, %title, "Focus changed to float window");
-        hub.set_float_focus(id);
+        tracing::debug!(%float_id, %title, "Focus changed to float window");
+        hub.set_float_focus(float_id);
     }
 }
 
@@ -747,7 +760,7 @@ fn match_rule<'a>(window: &MacWindow, rules: &'a [WindowRule]) -> Option<&'a Win
 }
 
 fn should_manage(window: &MacWindow, rules: &[WindowRule]) -> bool {
-    !match_rule(window, rules).is_some_and(|r| !r.manage) && window.is_manageable()
+    match_rule(window, rules).is_none_or(|r| r.manage) && window.is_manageable()
 }
 
 fn pattern_matches(pattern: &str, text: &str) -> bool {

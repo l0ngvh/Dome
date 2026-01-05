@@ -11,6 +11,7 @@ use objc2_app_kit::{
 };
 use objc2_application_services::AXIsProcessTrustedWithOptions;
 use objc2_core_foundation::{CFMachPort, CFRetained, kCFBooleanTrue};
+use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 
 use super::context::{Observers, ThrottleState, WindowRegistry};
@@ -47,7 +48,7 @@ pub(super) struct AppDelegateIvars {
     pub(super) hub: RefCell<Hub>,
     pub(super) registry: RefCell<WindowRegistry>,
     pub(super) throttle: RefCell<ThrottleState>,
-    pub(super) displayed_windows: RefCell<HashSet<usize>>,
+    pub(super) displayed_windows: RefCell<HashSet<CGWindowID>>,
     pub(super) observers: Observers,
     pub(super) tiling_overlay_window: OnceCell<Retained<NSWindow>>,
     pub(super) tiling_overlay: OnceCell<Retained<OverlayView>>,

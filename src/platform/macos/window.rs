@@ -4,15 +4,16 @@ use std::ptr::NonNull;
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFBoolean, CFEqual, CFHash, CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse,
-    kCFBooleanTrue,
+    CFBoolean, CFEqual, CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse, kCFBooleanTrue,
 };
+use objc2_core_graphics::CGWindowID;
 
 use super::objc2_wrapper::{
-    get_attribute, is_attribute_settable, kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute,
-    kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute, kAXParentAttribute,
-    kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole,
-    kAXSubroleAttribute, kAXTitleAttribute, kAXWindowRole, set_attribute_value,
+    get_attribute, get_cg_window_id, is_attribute_settable, kAXEnhancedUserInterfaceAttribute,
+    kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute,
+    kAXParentAttribute, kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute,
+    kAXStandardWindowSubrole, kAXSubroleAttribute, kAXTitleAttribute, kAXWindowRole,
+    set_attribute_value,
 };
 use crate::core::Dimension;
 
@@ -20,6 +21,7 @@ use crate::core::Dimension;
 pub(crate) struct MacWindow {
     window: CFRetained<AXUIElement>,
     app: CFRetained<AXUIElement>,
+    cg_window_id: CGWindowID,
     pid: i32,
     running_app: objc2::rc::Retained<NSRunningApplication>,
     screen: Dimension,
@@ -35,6 +37,7 @@ impl MacWindow {
         pid: i32,
         screen: Dimension,
     ) -> Option<Self> {
+        let cg_window_id = get_cg_window_id(&window)?;
         let running_app = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)?;
         if running_app.isTerminated() {
             return None;
@@ -52,6 +55,7 @@ impl MacWindow {
         Some(Self {
             window,
             app,
+            cg_window_id,
             pid,
             running_app,
             screen,
@@ -61,8 +65,8 @@ impl MacWindow {
         })
     }
 
-    pub(crate) fn cf_hash(&self) -> usize {
-        CFHash(Some(&self.window))
+    pub(crate) fn window_id(&self) -> CGWindowID {
+        self.cg_window_id
     }
 
     pub(crate) fn pid(&self) -> i32 {
