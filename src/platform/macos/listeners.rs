@@ -14,12 +14,13 @@ use objc2_app_kit::{
 };
 use objc2_application_services::{AXObserver, AXUIElement};
 use objc2_core_foundation::{
-    CFAbsoluteTimeGetCurrent, CFArray, CFMachPort, CFRetained, CFRunLoop, CFRunLoopTimer,
-    CFRunLoopTimerContext, CFString, kCFAllocatorDefault, kCFRunLoopDefaultMode,
+    CFAbsoluteTimeGetCurrent, CFArray, CFDictionary, CFMachPort, CFNumber, CFRetained, CFRunLoop,
+    CFRunLoopTimer, CFRunLoopTimerContext, CFString, CFType, kCFAllocatorDefault,
+    kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-    CGEventTapProxy, CGEventType,
+    CGEventTapProxy, CGEventType, CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption,
 };
 use objc2_foundation::{
     NSDistributedNotificationCenter, NSNotification, NSOperationQueue, NSString,
@@ -34,11 +35,11 @@ use super::objc2_wrapper::{
     kAXFocusedWindowChangedNotification, kAXResizedNotification, kAXTitleChangedNotification,
     kAXUIElementDestroyedNotification, kAXWindowCreatedNotification,
     kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification, kAXWindowsAttribute,
-    list_cg_window_ids,
 };
 use super::window::MacWindow;
 use crate::config::{Keymap, Modifiers, WindowRule};
 use crate::core::Hub;
+use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 
 const THROTTLE_DURATION: Duration = Duration::from_millis(20);
 
@@ -488,9 +489,14 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, delegate: &'static AppD
 
     let mut hub = delegate.ivars().hub.borrow_mut();
     for window_id in tracked_window_ids {
+        // Can happen when another app go fullscreen, which open a new space
         if !active_window_ids.contains(&window_id) {
-            // Window not in AX list - check if it still exists in CG list (might be in another space)
-            if cg_window_ids.contains(&window_id) {
+            if cg_window_ids.contains(&window_id)
+                && registry
+                    .get_by_window_id(window_id)
+                    // CGWindowID can be reused after a window is deleted
+                    .is_some_and(|w| w.is_valid())
+            {
                 continue;
             }
             match registry.remove_by_window_id(window_id) {
@@ -665,8 +671,9 @@ fn get_pid_from_notification(notification: NonNull<NSNotification>) -> Option<i3
     Some(app.processIdentifier())
 }
 
-fn get_windows(app: &AXUIElement) -> Result<CFRetained<CFArray<AXUIElement>>> {
-    get_attribute(app, &kAXWindowsAttribute())
+/// Returns list of windows for this app in current space
+fn get_windows(app: &AXUIElement) -> anyhow::Result<CFRetained<CFArray<AXUIElement>>> {
+    Ok(get_attribute(app, &kAXWindowsAttribute())?)
 }
 
 fn register_app(pid: i32, delegate: &'static AppDelegate) -> Result<CFRetained<AXObserver>> {
@@ -771,4 +778,28 @@ fn pattern_matches(pattern: &str, text: &str) -> bool {
     } else {
         pattern == text
     }
+}
+
+fn list_cg_window_ids() -> HashSet<CGWindowID> {
+    let Some(window_list) = CGWindowListCopyWindowInfo(CGWindowListOption::OptionAll, 0) else {
+        return HashSet::new();
+    };
+    let window_list: &CFArray<CFDictionary<CFString, CFType>> =
+        unsafe { window_list.cast_unchecked() };
+
+    let mut ids = HashSet::new();
+    let key = kCGWindowNumber();
+    for dict in window_list {
+        // window id is a required attribute
+        // https://developer.apple.com/documentation/coregraphics/kcgwindownumber?language=objc
+        let id = dict
+            .get(&key)
+            .unwrap()
+            .downcast::<CFNumber>()
+            .unwrap()
+            .as_i64()
+            .unwrap();
+        ids.insert(id as CGWindowID);
+    }
+    ids
 }

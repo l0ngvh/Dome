@@ -9,11 +9,11 @@ use objc2_core_foundation::{
 use objc2_core_graphics::CGWindowID;
 
 use super::objc2_wrapper::{
-    get_attribute, get_cg_window_id, is_attribute_settable, kAXEnhancedUserInterfaceAttribute,
-    kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute,
-    kAXParentAttribute, kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute,
-    kAXStandardWindowSubrole, kAXSubroleAttribute, kAXTitleAttribute, kAXWindowRole,
-    set_attribute_value,
+    AXError, get_attribute, get_cg_window_id, is_attribute_settable,
+    kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute, kAXFullScreenAttribute,
+    kAXMainAttribute, kAXMinimizedAttribute, kAXParentAttribute, kAXPositionAttribute,
+    kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
+    kAXTitleAttribute, kAXWindowRole, set_attribute_value,
 };
 use crate::core::Dimension;
 
@@ -67,6 +67,13 @@ impl MacWindow {
 
     pub(crate) fn window_id(&self) -> CGWindowID {
         self.cg_window_id
+    }
+
+    pub(crate) fn is_valid(&self) -> bool {
+        !matches!(
+            get_attribute::<CFString>(&self.window, &kAXRoleAttribute()),
+            Err(AXError::InvalidUIElement)
+        )
     }
 
     pub(crate) fn pid(&self) -> i32 {
@@ -129,18 +136,26 @@ impl MacWindow {
         result
     }
 
-    fn set_position(&self, x: f32, y: f32) -> Result<()> {
+    fn set_position(&self, x: f32, y: f32) -> anyhow::Result<()> {
         let pos_ptr: *mut CGPoint = &mut CGPoint::new(x as f64, y as f64);
         let pos_ptr = NonNull::new(pos_ptr.cast()).unwrap();
         let pos_ptr = unsafe { AXValue::new(AXValueType::CGPoint, pos_ptr) }.unwrap();
-        set_attribute_value(&self.window, &kAXPositionAttribute(), &pos_ptr)
+        Ok(set_attribute_value(
+            &self.window,
+            &kAXPositionAttribute(),
+            &pos_ptr,
+        )?)
     }
 
-    fn set_size(&self, width: f32, height: f32) -> Result<()> {
+    fn set_size(&self, width: f32, height: f32) -> anyhow::Result<()> {
         let size_ptr: *mut CGSize = &mut CGSize::new(width as f64, height as f64);
         let size = NonNull::new(size_ptr.cast()).unwrap();
         let size = unsafe { AXValue::new(AXValueType::CGSize, size) }.unwrap();
-        set_attribute_value(&self.window, &kAXSizeAttribute(), &size)
+        Ok(set_attribute_value(
+            &self.window,
+            &kAXSizeAttribute(),
+            &size,
+        )?)
     }
 
     pub(crate) fn title(&self) -> &str {

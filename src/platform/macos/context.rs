@@ -161,6 +161,17 @@ impl WindowRegistry {
         self.window_id_to_float.get(&window_id).copied()
     }
 
+    pub(super) fn get_by_window_id(&self, window_id: CGWindowID) -> Option<&MacWindow> {
+        self.window_id_to_tiling
+            .get(&window_id)
+            .and_then(|id| self.tiling_to_window.get(id))
+            .or_else(|| {
+                self.window_id_to_float
+                    .get(&window_id)
+                    .and_then(|id| self.float_to_window.get(id))
+            })
+    }
+
     pub(super) fn window_ids_for_pid(&self, pid: i32) -> Vec<CGWindowID> {
         self.pid_to_window_ids
             .get(&pid)

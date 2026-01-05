@@ -1,26 +1,56 @@
-use std::collections::HashSet;
+use std::fmt;
 use std::ptr::NonNull;
 
-use anyhow::Result;
-use objc2_application_services::{AXError, AXObserver, AXObserverCallback, AXUIElement};
-use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFRetained, CFString, CFType};
-use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
+use objc2_application_services::{AXObserver, AXObserverCallback, AXUIElement};
+use objc2_core_foundation::{CFRetained, CFString, CFType};
+use objc2_core_graphics::CGWindowID;
+
+type RawAXError = objc2_application_services::AXError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AXError {
+    InvalidUIElement,
+    Other(RawAXError),
+}
+
+impl From<RawAXError> for AXError {
+    fn from(err: RawAXError) -> Self {
+        if err == RawAXError::InvalidUIElement {
+            AXError::InvalidUIElement
+        } else {
+            AXError::Other(err)
+        }
+    }
+}
+
+impl fmt::Display for AXError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AXError::InvalidUIElement => {
+                write!(
+                    f,
+                    "The AXUIElementRef passed to the function is invalid (code: {})",
+                    RawAXError::InvalidUIElement.0
+                )
+            }
+            AXError::Other(err) => write!(f, "{}", decorate_raw_ax_error(*err)),
+        }
+    }
+}
+
+impl std::error::Error for AXError {}
 
 pub(crate) fn get_attribute<T: objc2_core_foundation::Type>(
     element: &AXUIElement,
     attribute: &CFString,
-) -> Result<CFRetained<T>> {
+) -> Result<CFRetained<T>, AXError> {
     let mut value: *const CFType = std::ptr::null();
     let value_ptr = NonNull::new(&mut value as *mut *const CFType).unwrap();
 
     let res = unsafe { element.copy_attribute_value(attribute, value_ptr) };
     // TODO: return no value error as None
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to get value for attribute {}: {}",
-            attribute,
-            decorate_ax_error_message(res)
-        ));
+    if res != RawAXError::Success {
+        return Err(res.into());
     }
     let value = unsafe { *value_ptr.as_ptr() as *mut T };
     // Safety: value shouldn't be null as copy attribute call success
@@ -33,27 +63,20 @@ pub(crate) fn set_attribute_value(
     element: &AXUIElement,
     attribute: &CFString,
     value: &CFType,
-) -> Result<()> {
+) -> Result<(), AXError> {
     let res = unsafe { element.set_attribute_value(attribute, value) };
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to set attribute {}: {}",
-            attribute,
-            decorate_ax_error_message(res)
-        ));
+    if res != RawAXError::Success {
+        return Err(res.into());
     }
     Ok(())
 }
 
-pub(crate) fn get_pid(element: &AXUIElement) -> Result<i32> {
+pub(crate) fn get_pid(element: &AXUIElement) -> Result<i32, AXError> {
     let mut pid = 0;
     let value_ptr = NonNull::new(&mut pid as *mut i32).unwrap();
     let res = unsafe { element.pid(value_ptr) };
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to get pid for element: {}",
-            decorate_ax_error_message(res)
-        ));
+    if res != RawAXError::Success {
+        return Err(res.into());
     }
     Ok(pid)
 }
@@ -61,15 +84,12 @@ pub(crate) fn get_pid(element: &AXUIElement) -> Result<i32> {
 pub(crate) fn create_observer(
     pid: i32,
     callback: AXObserverCallback,
-) -> Result<CFRetained<AXObserver>> {
+) -> Result<CFRetained<AXObserver>, AXError> {
     let mut observer: *mut AXObserver = std::ptr::null_mut();
     let observer_ptr = NonNull::new(&mut observer as *mut *mut AXObserver).unwrap();
     let res = unsafe { AXObserver::create(pid, callback, observer_ptr) };
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to create of server for pid {pid}: {}",
-            decorate_ax_error_message(res)
-        ));
+    if res != RawAXError::Success {
+        return Err(res.into());
     }
     let observer = unsafe { *observer_ptr.as_ptr() };
     // Safety: value shouldn't be null as copy attribute call success
@@ -83,14 +103,10 @@ pub(crate) fn add_observer_notification(
     element: &AXUIElement,
     notification: &CFString,
     refcon: *mut std::ffi::c_void,
-) -> Result<()> {
+) -> Result<(), AXError> {
     let res = unsafe { observer.add_notification(element, notification, refcon) };
-    if res != AXError::Success {
-        return Err(anyhow::anyhow!(
-            "Failed to add {} notification: {}",
-            notification,
-            decorate_ax_error_message(res)
-        ));
+    if res != RawAXError::Success {
+        return Err(res.into());
     }
     Ok(())
 }
@@ -224,37 +240,37 @@ pub(crate) fn is_attribute_settable(element: &AXUIElement, attribute: &CFString)
     let mut settable: u8 = 0;
     let settable_ptr = NonNull::new(&mut settable as *mut u8).unwrap();
     let res = unsafe { element.is_attribute_settable(attribute, settable_ptr) };
-    res == AXError::Success && settable != 0
+    res == RawAXError::Success && settable != 0
 }
 
-pub(crate) fn decorate_ax_error_message(error: AXError) -> String {
+fn decorate_raw_ax_error(error: RawAXError) -> String {
     let description = match error {
-        AXError::Success => "No error occurred",
-        AXError::Failure => "A system error occurred, such as the failure to allocate an object",
-        AXError::IllegalArgument => "An illegal argument was passed to the function",
-        AXError::InvalidUIElement => "The AXUIElementRef passed to the function is invalid",
-        AXError::InvalidUIElementObserver => {
+        RawAXError::Success => "No error occurred",
+        RawAXError::Failure => "A system error occurred, such as the failure to allocate an object",
+        RawAXError::IllegalArgument => "An illegal argument was passed to the function",
+        RawAXError::InvalidUIElement => "The AXUIElementRef passed to the function is invalid",
+        RawAXError::InvalidUIElementObserver => {
             "The AXObserverRef passed to the function is not a valid observer"
         }
-        AXError::CannotComplete => {
+        RawAXError::CannotComplete => {
             "The function cannot complete because messaging failed or the application is busy/unresponsive"
         }
-        AXError::AttributeUnsupported => "The attribute is not supported by the AXUIElementRef",
-        AXError::ActionUnsupported => "The action is not supported by the AXUIElementRef",
-        AXError::NotificationUnsupported => {
+        RawAXError::AttributeUnsupported => "The attribute is not supported by the AXUIElementRef",
+        RawAXError::ActionUnsupported => "The action is not supported by the AXUIElementRef",
+        RawAXError::NotificationUnsupported => {
             "The notification is not supported by the AXUIElementRef"
         }
-        AXError::NotImplemented => "The function or method is not implemented",
-        AXError::NotificationAlreadyRegistered => {
+        RawAXError::NotImplemented => "The function or method is not implemented",
+        RawAXError::NotificationAlreadyRegistered => {
             "This notification has already been registered for"
         }
-        AXError::NotificationNotRegistered => "The notification is not registered yet",
-        AXError::APIDisabled => "The accessibility API is disabled",
-        AXError::NoValue => "The requested value or AXUIElementRef does not exist",
-        AXError::ParameterizedAttributeUnsupported => {
+        RawAXError::NotificationNotRegistered => "The notification is not registered yet",
+        RawAXError::APIDisabled => "The accessibility API is disabled",
+        RawAXError::NoValue => "The requested value or AXUIElementRef does not exist",
+        RawAXError::ParameterizedAttributeUnsupported => {
             "The parameterized attribute is not supported by the AXUIElementRef"
         }
-        AXError::NotEnoughPrecision => "Not enough precision",
+        RawAXError::NotEnoughPrecision => "Not enough precision",
         _ => "Unknown AXError",
     };
     format!("{} (code: {})", description, error.0)
@@ -262,38 +278,14 @@ pub(crate) fn decorate_ax_error_message(error: AXError) -> String {
 
 pub(crate) fn get_cg_window_id(element: &AXUIElement) -> Option<CGWindowID> {
     unsafe extern "C" {
-        fn _AXUIElementGetWindow(element: &AXUIElement, out: *mut CGWindowID) -> AXError;
+        fn _AXUIElementGetWindow(element: &AXUIElement, out: *mut CGWindowID) -> RawAXError;
     }
     let mut window_id: CGWindowID = 0;
     let res = unsafe { _AXUIElementGetWindow(element, &mut window_id) };
     // 0 is kCGNullWindowID
-    if res == AXError::Success && window_id != 0 {
+    if res == RawAXError::Success && window_id != 0 {
         Some(window_id)
     } else {
         None
     }
-}
-
-pub(crate) fn list_cg_window_ids() -> HashSet<CGWindowID> {
-    let Some(window_list) = CGWindowListCopyWindowInfo(CGWindowListOption::OptionAll, 0) else {
-        return HashSet::new();
-    };
-    let window_list: &CFArray<CFDictionary<CFString, CFType>> =
-        unsafe { window_list.cast_unchecked() };
-
-    let mut ids = HashSet::new();
-    let key = kCGWindowNumber();
-    for dict in window_list {
-        // window id is a required attribute
-        // https://developer.apple.com/documentation/coregraphics/kcgwindownumber?language=objc
-        let id = dict
-            .get(&key)
-            .unwrap()
-            .downcast::<CFNumber>()
-            .unwrap()
-            .as_i64()
-            .unwrap();
-        ids.insert(id as CGWindowID);
-    }
-    ids
 }
