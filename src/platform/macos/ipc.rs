@@ -4,6 +4,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 
+use objc2::DefinedClass;
 use objc2_core_foundation::{
     CFFileDescriptor, CFFileDescriptorContext, CFFileDescriptorNativeDescriptor, CFOptionFlags,
     CFRunLoop, kCFRunLoopDefaultMode,
@@ -11,7 +12,7 @@ use objc2_core_foundation::{
 
 use crate::action::{Action, Actions};
 
-use super::context::WindowContext;
+use super::app::AppDelegate;
 use super::handler::{execute_actions, render_workspace};
 
 const K_CF_FILE_DESCRIPTOR_READ_CALL_BACK: CFOptionFlags = 1;
@@ -26,10 +27,12 @@ unsafe extern "C-unwind" fn socket_callback(
     info: *mut c_void,
 ) {
     unsafe {
-        let context = &mut *(info as *mut WindowContext);
+        // Safety: AppDelegate lives until the end of the app
+        let delegate: &'static AppDelegate = &*(info as *const AppDelegate);
+        let listener = delegate.ivars().listener.get().unwrap();
 
-        if let Ok((stream, _)) = context.listener.accept() {
-            handle_client(stream, context);
+        if let Ok((stream, _)) = listener.accept() {
+            handle_client(stream, delegate);
         }
 
         if let Some(fd_ref) = fd_ref.as_ref() {
@@ -38,7 +41,7 @@ unsafe extern "C-unwind" fn socket_callback(
     }
 }
 
-fn handle_client(mut stream: UnixStream, context: &mut WindowContext) {
+fn handle_client(mut stream: UnixStream, delegate: &'static AppDelegate) {
     let mut reader = BufReader::new(&stream);
     let mut line = String::new();
 
@@ -48,7 +51,7 @@ fn handle_client(mut stream: UnixStream, context: &mut WindowContext) {
             return;
         }
         let response = match serde_json::from_str::<Action>(trimmed) {
-            Ok(action) => match handle_action(action, context) {
+            Ok(action) => match handle_action(action, delegate) {
                 Ok(()) => "ok\n".to_string(),
                 Err(e) => {
                     tracing::warn!(?action, "IPC action failed: {e}");
@@ -64,23 +67,24 @@ fn handle_client(mut stream: UnixStream, context: &mut WindowContext) {
     }
 }
 
-fn handle_action(action: Action, context: &mut WindowContext) -> Result<(), String> {
+fn handle_action(action: Action, delegate: &'static AppDelegate) -> Result<(), String> {
     tracing::debug!(?action, "IPC action");
     let actions = Actions::new(vec![action]);
     execute_actions(
-        &mut context.hub,
-        &mut context.registry.borrow_mut(),
+        &mut delegate.ivars().hub.borrow_mut(),
+        &mut delegate.ivars().registry.borrow_mut(),
         &actions,
     );
-    render_workspace(context).map_err(|e| e.to_string())
+    render_workspace(delegate).map_err(|e| e.to_string())
 }
 
-pub(super) fn register_with_runloop(context: *mut WindowContext) -> anyhow::Result<()> {
-    let fd = unsafe { (*context).listener.as_raw_fd() as CFFileDescriptorNativeDescriptor };
+pub(super) fn register_with_runloop(delegate: &'static AppDelegate) -> anyhow::Result<()> {
+    let listener = delegate.ivars().listener.get().unwrap();
+    let fd = listener.as_raw_fd() as CFFileDescriptorNativeDescriptor;
 
     let cf_context = CFFileDescriptorContext {
         version: 0,
-        info: context as *mut c_void,
+        info: delegate as *const AppDelegate as *mut c_void,
         retain: None,
         release: None,
         copyDescription: None,

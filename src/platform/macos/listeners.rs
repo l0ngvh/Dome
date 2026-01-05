@@ -1,9 +1,8 @@
-use std::{
-    cell::RefCell, collections::HashMap, ptr::NonNull, rc::Rc, time::Duration, time::Instant,
-};
+use std::{collections::HashMap, ptr::NonNull, time::Duration, time::Instant};
 
 use anyhow::Result;
 use block2::RcBlock;
+use objc2::DefinedClass;
 use objc2::rc::Retained;
 use objc2_app_kit::{
     NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
@@ -24,7 +23,8 @@ use objc2_foundation::{
     NSDistributedNotificationCenter, NSNotification, NSOperationQueue, NSString,
 };
 
-use super::context::{Observers, RemovedWindow, WindowContext};
+use super::app::AppDelegate;
+use super::context::{RemovedWindow, WindowRegistry};
 use super::handler::{apply_layout, execute_actions, focus_window, render_workspace};
 use super::objc2_wrapper::{
     add_observer_notification, create_observer, get_attribute, get_pid,
@@ -35,14 +35,15 @@ use super::objc2_wrapper::{
 };
 use super::window::MacWindow;
 use crate::config::{Keymap, Modifiers, WindowRule};
+use crate::core::Hub;
 
 const THROTTLE_DURATION: Duration = Duration::from_millis(20);
 
-pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers {
+pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
     let mut observers = HashMap::new();
     for pid in running_app_pids() {
         let app_name = get_app_name(pid);
-        match register_app(pid, context_ptr) {
+        match register_app(pid, delegate) {
             Ok(observer) => {
                 tracing::info!(%pid, %app_name, "Registered app on startup");
                 observers.insert(pid, observer);
@@ -53,7 +54,8 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
         }
     }
 
-    let apps = Rc::new(RefCell::new(observers));
+    *delegate.ivars().observers.borrow_mut() = observers;
+    let apps = delegate.ivars().observers.clone();
     let notification_center = NSWorkspace::sharedWorkspace().notificationCenter();
 
     unsafe {
@@ -69,7 +71,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                 };
                 let app_name = get_app_name(pid);
                 tracing::trace!(%pid, %app_name, "App launched");
-                let observer = match register_app(pid, context_ptr) {
+                let observer = match register_app(pid, delegate) {
                     Ok(observer) => {
                         tracing::info!(%pid, %app_name, "Registered app on launch");
                         observer
@@ -79,8 +81,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                         return;
                     }
                 };
-                let context = &mut *context_ptr;
-                if let Err(e) = render_workspace(context) {
+                if let Err(e) = render_workspace(delegate) {
                     tracing::warn!("Failed to render workspace after app launch: {e:#}");
                 }
                 apps.borrow_mut().insert(pid, observer);
@@ -100,9 +101,9 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                     return;
                 };
                 apps.borrow_mut().remove(&pid);
-                let context = &mut *context_ptr;
                 let (tiling_windows, float_windows) =
-                    context.registry.borrow_mut().remove_by_pid(pid);
+                    delegate.ivars().registry.borrow_mut().remove_by_pid(pid);
+                let mut hub = delegate.ivars().hub.borrow_mut();
                 for (id, window) in &tiling_windows {
                     let title = window.title();
                     let app_name = window.app_name();
@@ -114,7 +115,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                         %app_name
                     )
                     .entered();
-                    context.hub.delete_window(*id);
+                    hub.delete_window(*id);
                     tracing::debug!("Tiling window deleted");
                 }
                 for (id, window) in &float_windows {
@@ -128,11 +129,12 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                         %app_name
                     )
                     .entered();
-                    context.hub.delete_float(*id);
+                    hub.delete_float(*id);
                     tracing::debug!("Float window deleted");
                 }
+                drop(hub);
                 if (!tiling_windows.is_empty() || !float_windows.is_empty())
-                    && let Err(e) = render_workspace(context)
+                    && let Err(e) = render_workspace(delegate)
                 {
                     tracing::warn!("Failed to render workspace after terminating app: {e:#}");
                 }
@@ -158,20 +160,22 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                     return;
                 };
                 let cf_hash = CFHash(Some(&focused_window));
-                let context = &mut *context_ptr;
-                let registry = context.registry.borrow();
+                let registry = delegate.ivars().registry.borrow();
+                let mut hub = delegate.ivars().hub.borrow_mut();
                 if let Some(window_id) = registry.get_tiling_by_hash(cf_hash) {
-                    if !context.hub.is_focusing(window_id) {
+                    if !hub.is_focusing(window_id) {
                         drop(registry);
-                        context.hub.set_focus(window_id);
-                        if let Err(e) = render_workspace(context) {
+                        hub.set_focus(window_id);
+                        drop(hub);
+                        if let Err(e) = render_workspace(delegate) {
                             tracing::warn!("Failed to render workspace: {e:#}");
                         }
                     }
                 } else if let Some(float_id) = registry.get_float_by_hash(cf_hash) {
                     drop(registry);
-                    context.hub.set_float_focus(float_id);
-                    if let Err(e) = render_workspace(context) {
+                    hub.set_float_focus(float_id);
+                    drop(hub);
+                    if let Err(e) = render_workspace(delegate) {
                         tracing::warn!("Failed to render workspace: {e:#}");
                     }
                 }
@@ -190,8 +194,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 tracing::info!("System will sleep, suspending window management");
-                let context = &mut *context_ptr;
-                context.is_suspended = true;
+                delegate.ivars().is_suspended.set(true);
             }),
         );
     }
@@ -203,8 +206,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 tracing::info!("Screen did sleep, suspending window management");
-                let context = &mut *context_ptr;
-                context.is_suspended = true;
+                delegate.ivars().is_suspended.set(true);
             }),
         );
     }
@@ -220,8 +222,7 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 tracing::info!("Screen locked, suspending window management");
-                let context = &mut *context_ptr;
-                context.is_suspended = true;
+                delegate.ivars().is_suspended.set(true);
             }),
         );
     }
@@ -234,14 +235,13 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 tracing::info!("Screen unlocked, resuming window management");
-                let context = &mut *context_ptr;
-                context.is_suspended = false;
+                delegate.ivars().is_suspended.set(false);
 
                 let mut apps = apps.borrow_mut();
                 for pid in running_app_pids() {
                     if let std::collections::hash_map::Entry::Vacant(e) = apps.entry(pid) {
                         let app_name = get_app_name(pid);
-                        match register_app(pid, context_ptr) {
+                        match register_app(pid, delegate) {
                             Ok(observer) => {
                                 tracing::info!(%pid, %app_name, "Registered app on unlock");
                                 e.insert(observer);
@@ -252,23 +252,21 @@ pub(super) fn setup_app_observers(context_ptr: *mut WindowContext) -> Observers 
                         }
                     } else {
                         let ax_app = AXUIElement::new_application(pid);
-                        sync_windows(pid, &ax_app, context);
+                        sync_windows(pid, &ax_app, delegate);
                     }
                 }
-                ;
-                if let Err(e) = render_workspace(context) {
+                if let Err(e) = render_workspace(delegate) {
                     tracing::warn!("Failed to render workspace after unlock: {e:#}");
                 }
             }),
         );
     }
-
-    apps
 }
 
-pub(super) fn listen_to_input_devices(context_ptr: *mut WindowContext) -> Result<()> {
+pub(super) fn listen_to_input_devices(delegate: &'static AppDelegate) -> Result<()> {
     let run_loop = CFRunLoop::current().unwrap();
     let event_mask = 1u64 << CGEventType::KeyDown.0;
+    let delegate_ptr = delegate as *const AppDelegate as *mut std::ffi::c_void;
     let Some(match_port) = (unsafe {
         CGEvent::tap_create(
             CGEventTapLocation::SessionEventTap,
@@ -276,14 +274,13 @@ pub(super) fn listen_to_input_devices(context_ptr: *mut WindowContext) -> Result
             CGEventTapOptions::Default,
             event_mask,
             Some(event_tap_callback),
-            context_ptr as *mut std::ffi::c_void,
+            delegate_ptr,
         )
     }) else {
         return Err(anyhow::anyhow!("Failed to create event tap"));
     };
 
-    let context = unsafe { &mut *context_ptr };
-    context.event_tap = Some(match_port.clone());
+    delegate.ivars().event_tap.set(match_port.clone()).unwrap();
 
     let Some(run_loop_source) =
         CFMachPort::new_run_loop_source(unsafe { kCFAllocatorDefault }, Some(&match_port), 0)
@@ -306,10 +303,12 @@ unsafe extern "C-unwind" fn observer_callback(
     // Should not call render_workspace here, as that also set focused window. This callback
     // can be fired when focused change, so calling render_workspace can cause an infinite loop
     // of focus changes
-    let context = unsafe { &mut *(refcon as *mut WindowContext) };
+    // Safety: AppDelegate lives until the end of the app
+    let delegate: &'static AppDelegate = unsafe { &*(refcon as *const AppDelegate) };
+    let ivars = delegate.ivars();
 
     // Skip processing when suspended (sleep/lock)
-    if context.is_suspended {
+    if ivars.is_suspended.get() {
         return;
     }
 
@@ -327,46 +326,61 @@ unsafe extern "C-unwind" fn observer_callback(
     let is_focus_change = *notification == *kAXFocusedWindowChangedNotification();
 
     let now = Instant::now();
-    let should_execute = context
-        .throttle
+    let mut throttle = ivars.throttle.borrow_mut();
+    let should_execute = throttle
         .last_execution
         .map(|last| now.duration_since(last) >= THROTTLE_DURATION)
         .unwrap_or(true);
 
     if should_execute {
-        context.throttle.reset();
-        let app = unsafe { AXUIElement::new_application(pid) };
+        throttle.reset();
+        drop(throttle);
+        let ax_app = unsafe { AXUIElement::new_application(pid) };
         // AX notifications are unreliable, when new windows are being rapidly created and deleted,
         // macOS may decide skip sending notifications.
         // So we are basically polling as much as possible to keep the state in sync
         // https://github.com/nikitabobko/AeroSpace/issues/445
-        sync_windows(pid, &app, context);
+        sync_windows(pid, &ax_app, delegate);
+
+        let mut hub = ivars.hub.borrow_mut();
+        let registry = ivars.registry.borrow();
         if is_focus_change {
-            sync_focus(&app, context);
-        } else if let Err(e) = focus_window(context) {
+            sync_focus(&ax_app, &mut hub, &registry);
+        } else if let Err(e) = focus_window(&hub, &registry) {
             tracing::warn!("Failed to focus window: {e:#}");
         }
 
-        if let Err(e) = apply_layout(context) {
+        let mut displayed_windows = ivars.displayed_windows.borrow_mut();
+        let tiling_overlay = ivars.tiling_overlay.get().unwrap();
+        let float_overlay = ivars.float_overlay.get().unwrap();
+        if let Err(e) = apply_layout(
+            &hub,
+            &registry,
+            &ivars.config,
+            &mut displayed_windows,
+            tiling_overlay,
+            float_overlay,
+        ) {
             tracing::warn!("Failed to apply layout: {e:#}");
         }
     } else {
-        context.throttle.pending_pids.insert(pid);
+        throttle.pending_pids.insert(pid);
         if is_focus_change {
-            context.throttle.pending_focus_sync = true;
+            throttle.pending_focus_sync = true;
         }
-        if context.throttle.timer.is_none() {
-            schedule_throttle_timer(context, THROTTLE_DURATION);
+        if throttle.timer.is_none() {
+            drop(throttle);
+            schedule_throttle_timer(delegate, THROTTLE_DURATION);
         }
     }
 }
 
-fn schedule_throttle_timer(context: &mut WindowContext, delay: Duration) {
-    let context_ptr = context as *mut WindowContext;
+fn schedule_throttle_timer(delegate: &'static AppDelegate, delay: Duration) {
+    let delegate_ptr = delegate as *const AppDelegate as *mut std::ffi::c_void;
     let fire_time = CFAbsoluteTimeGetCurrent() + delay.as_secs_f64();
     let mut timer_context = CFRunLoopTimerContext {
         version: 0,
-        info: context_ptr as *mut std::ffi::c_void,
+        info: delegate_ptr,
         retain: None,
         release: None,
         copyDescription: None,
@@ -386,7 +400,7 @@ fn schedule_throttle_timer(context: &mut WindowContext, delay: Duration) {
         CFRunLoop::current()
             .unwrap()
             .add_timer(Some(&timer), unsafe { kCFRunLoopDefaultMode });
-        context.throttle.timer = Some(timer);
+        delegate.ivars().throttle.borrow_mut().timer = Some(timer);
     }
 }
 
@@ -396,45 +410,65 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
 ) {
     // Similar to observer callback, we should not call render_workspace here, as this is just the
     // throttling version of observer callback
-    let context = unsafe { &mut *(info as *mut WindowContext) };
-    context.throttle.timer = None;
+    // Safety: AppDelegate lives until the end of the app
+    let delegate: &'static AppDelegate = unsafe { &*(info as *const AppDelegate) };
+    let ivars = delegate.ivars();
+    let mut throttle = ivars.throttle.borrow_mut();
+    throttle.timer = None;
 
     // Skip processing when suspended (sleep/lock)
-    if context.is_suspended {
-        context.throttle.pending_pids.clear();
-        context.throttle.pending_focus_sync = false;
+    if ivars.is_suspended.get() {
+        throttle.pending_pids.clear();
+        throttle.pending_focus_sync = false;
         return;
     }
 
-    context.throttle.last_execution = Some(Instant::now());
+    throttle.last_execution = Some(Instant::now());
 
-    let pids: Vec<_> = context.throttle.pending_pids.drain().collect();
-    let pending_focus_sync = std::mem::take(&mut context.throttle.pending_focus_sync);
+    let pids: Vec<_> = throttle.pending_pids.drain().collect();
+    let pending_focus_sync = std::mem::take(&mut throttle.pending_focus_sync);
+    drop(throttle);
 
     for pid in pids {
-        let app = unsafe { AXUIElement::new_application(pid) };
-        sync_windows(pid, &app, context);
+        let ax_app = unsafe { AXUIElement::new_application(pid) };
+        sync_windows(pid, &ax_app, delegate);
         if pending_focus_sync {
-            sync_focus(&app, context);
+            let mut hub = ivars.hub.borrow_mut();
+            let registry = ivars.registry.borrow();
+            sync_focus(&ax_app, &mut hub, &registry);
         }
     }
 
-    if let Err(e) = apply_layout(context) {
+    let hub = ivars.hub.borrow();
+    let registry = ivars.registry.borrow();
+    let mut displayed_windows = ivars.displayed_windows.borrow_mut();
+    let tiling_overlay = ivars.tiling_overlay.get().unwrap();
+    let float_overlay = ivars.float_overlay.get().unwrap();
+    if let Err(e) = apply_layout(
+        &hub,
+        &registry,
+        &ivars.config,
+        &mut displayed_windows,
+        tiling_overlay,
+        float_overlay,
+    ) {
         tracing::warn!("Failed to apply layout: {e:#}");
     }
 
-    if !pending_focus_sync && let Err(e) = focus_window(context) {
+    if !pending_focus_sync && let Err(e) = focus_window(&hub, &registry) {
         tracing::warn!("Failed to focus window: {e:#}");
     }
 }
 
-fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
+fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, delegate: &'static AppDelegate) {
     let Ok(windows) = get_windows(app) else {
         tracing::warn!("Failed to get windows");
         return;
     };
-    let screen = context.hub.screen();
-    let rules = &context.config.window_rules;
+    let hub = delegate.ivars().hub.borrow();
+    let screen = hub.screen();
+    drop(hub);
+    let rules = &delegate.ivars().config.window_rules;
     let active_windows: Vec<_> = windows
         .into_iter()
         .filter_map(|w| MacWindow::new(w.clone(), app.clone(), pid, screen))
@@ -442,22 +476,23 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowCon
         .collect();
     let active_hashes: Vec<_> = active_windows.iter().map(|w| w.cf_hash()).collect();
 
-    let mut registry = context.registry.borrow_mut();
+    let mut registry = delegate.ivars().registry.borrow_mut();
     let tracked_hashes = registry.hashes_for_pid(pid);
 
+    let mut hub = delegate.ivars().hub.borrow_mut();
     for h in tracked_hashes {
         if !active_hashes.contains(&h) {
             match registry.remove_by_hash(h) {
                 Some(RemovedWindow::Tiling(id, window)) => {
                     let _span =
                         tracing::info_span!("sync_windows", %id, window = %window).entered();
-                    context.hub.delete_window(id);
+                    hub.delete_window(id);
                     tracing::info!("Tiling window deleted");
                 }
                 Some(RemovedWindow::Float(id, window)) => {
                     let _span =
                         tracing::info_span!("sync_windows", %id, window = %window).entered();
-                    context.hub.delete_float(id);
+                    hub.delete_float(id);
                     tracing::info!("Float window deleted");
                 }
                 None => {}
@@ -471,43 +506,40 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, context: &mut WindowCon
         .into_iter()
         .filter(|w| !registry.contains(w))
         .collect();
-    drop(registry);
 
     for mac_window in new_windows {
-        let rule = match_rule(&mac_window, &context.config.window_rules);
-        let mut registry = context.registry.borrow_mut();
+        let rule = match_rule(&mac_window, &delegate.ivars().config.window_rules);
         if mac_window.should_tile() {
-            let id = context.hub.insert_tiling();
+            let id = hub.insert_tiling();
             let _span = tracing::info_span!("sync_windows", %id, window = %mac_window).entered();
             tracing::info!("New tiling window");
             registry.insert_tiling(id, mac_window);
         } else {
             let dim = mac_window.dimension();
-            let id = context.hub.insert_float(dim);
+            let id = hub.insert_float(dim);
             let _span = tracing::info_span!("sync_windows", %id, window = %mac_window).entered();
             tracing::info!("New float window");
             registry.insert_float(id, mac_window);
         }
         if let Some(r) = rule {
-            execute_actions(&mut context.hub, &mut registry, &r.run);
+            execute_actions(&mut hub, &mut registry, &r.run);
         }
     }
 }
 
-fn sync_focus(app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
+fn sync_focus(app: &CFRetained<AXUIElement>, hub: &mut Hub, registry: &WindowRegistry) {
     let Ok(focused) = get_attribute::<AXUIElement>(app, &kAXFocusedWindowAttribute()) else {
         return;
     };
     let h = CFHash(Some(&focused));
-    let registry = context.registry.borrow();
     if let Some(id) = registry.get_tiling_by_hash(h) {
-        if !context.hub.is_focusing(id) {
+        if !hub.is_focusing(id) {
             let title = registry
                 .get_tiling(id)
                 .map(|w| w.to_string())
                 .unwrap_or_default();
             tracing::debug!(%id, %title, "Focus changed to tiling window");
-            context.hub.set_focus(id);
+            hub.set_focus(id);
         }
     } else if let Some(id) = registry.get_float_by_hash(h) {
         let title = registry
@@ -515,7 +547,7 @@ fn sync_focus(app: &CFRetained<AXUIElement>, context: &mut WindowContext) {
             .map(|w| w.to_string())
             .unwrap_or_default();
         tracing::debug!(%id, %title, "Focus changed to float window");
-        context.hub.set_float_focus(id);
+        hub.set_float_focus(id);
     }
 }
 
@@ -525,18 +557,19 @@ unsafe extern "C-unwind" fn event_tap_callback(
     event: NonNull<CGEvent>,
     refcon: *mut std::ffi::c_void,
 ) -> *mut CGEvent {
-    let context = unsafe { &mut *(refcon as *mut WindowContext) };
+    // Safety: AppDelegate lives until the end of the app
+    let delegate: &'static AppDelegate = unsafe { &*(refcon as *const AppDelegate) };
     let event = event.as_ptr();
 
     if event_type == CGEventType::TapDisabledByTimeout
         || event_type == CGEventType::TapDisabledByUserInput
     {
-        if let Some(tap) = &context.event_tap {
+        if let Some(tap) = delegate.ivars().event_tap.get() {
             tracing::debug!("Event tap disabled, re-enabling");
             CGEvent::tap_enable(tap, true);
         }
     } else if event_type == CGEventType::KeyDown {
-        if handle_keyboard(context, event) {
+        if handle_keyboard(delegate, event) {
             return std::ptr::null_mut();
         }
     } else {
@@ -546,7 +579,7 @@ unsafe extern "C-unwind" fn event_tap_callback(
     event
 }
 
-fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
+fn handle_keyboard(delegate: &'static AppDelegate, event: *mut CGEvent) -> bool {
     let flags = CGEvent::flags(Some(unsafe { &*event }));
     let key = get_key_from_event(event);
 
@@ -565,7 +598,7 @@ fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
     }
 
     let keymap = Keymap { key, modifiers };
-    let actions = context.config.get_actions(&keymap);
+    let actions = delegate.ivars().config.get_actions(&keymap);
 
     if actions.is_empty() {
         return false;
@@ -573,17 +606,17 @@ fn handle_keyboard(context: &mut WindowContext, event: *mut CGEvent) -> bool {
 
     // Event tap is disabled while locked.
     // If we receive hotkeys event, it must be unlocked
-    if context.is_suspended {
+    if delegate.ivars().is_suspended.get() {
         tracing::info!("Received keymap action, resuming window management");
-        context.is_suspended = false;
+        delegate.ivars().is_suspended.set(false);
     }
 
     execute_actions(
-        &mut context.hub,
-        &mut context.registry.borrow_mut(),
+        &mut delegate.ivars().hub.borrow_mut(),
+        &mut delegate.ivars().registry.borrow_mut(),
         &actions,
     );
-    if let Err(e) = render_workspace(context) {
+    if let Err(e) = render_workspace(delegate) {
         tracing::warn!("Failed to render workspace: {e:#}");
     }
     true
@@ -623,11 +656,12 @@ fn get_windows(app: &AXUIElement) -> Result<CFRetained<CFArray<AXUIElement>>> {
     get_attribute(app, &kAXWindowsAttribute())
 }
 
-fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<AXObserver>> {
-    let context = unsafe { &mut *context_ptr };
-    let screen = context.hub.screen();
+fn register_app(pid: i32, delegate: &'static AppDelegate) -> Result<CFRetained<AXObserver>> {
+    let hub = delegate.ivars().hub.borrow();
+    let screen = hub.screen();
+    drop(hub);
     let app = unsafe { AXUIElement::new_application(pid) };
-    let rules = &context.config.window_rules;
+    let rules = &delegate.ivars().config.window_rules;
 
     if let Ok(windows) = get_windows(&app) {
         for window in windows {
@@ -638,19 +672,20 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
                 continue;
             }
             let rule = match_rule(&mac_window, rules);
-            let mut registry = context.registry.borrow_mut();
+            let mut registry = delegate.ivars().registry.borrow_mut();
+            let mut hub = delegate.ivars().hub.borrow_mut();
             if mac_window.should_tile() {
-                let window_id = context.hub.insert_tiling();
+                let window_id = hub.insert_tiling();
                 tracing::debug!(%window_id, window = %mac_window, "Managing as tiling");
                 registry.insert_tiling(window_id, mac_window);
             } else {
                 let dim = mac_window.dimension();
-                let float_id = context.hub.insert_float(dim);
+                let float_id = hub.insert_float(dim);
                 tracing::debug!(%float_id, window = %mac_window, "Managing as float");
                 registry.insert_float(float_id, mac_window);
             }
             if let Some(r) = rule {
-                execute_actions(&mut context.hub, &mut registry, &r.run);
+                execute_actions(&mut hub, &mut registry, &r.run);
             }
         }
     }
@@ -660,7 +695,7 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
     let source = unsafe { observer.run_loop_source() };
     run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
 
-    let context_ptr = context_ptr as *mut std::ffi::c_void;
+    let delegate_ptr = delegate as *const AppDelegate as *mut std::ffi::c_void;
     for notification in [
         kAXWindowCreatedNotification(),
         kAXWindowMiniaturizedNotification(),
@@ -672,7 +707,7 @@ fn register_app(pid: i32, context_ptr: *mut WindowContext) -> Result<CFRetained<
         kAXApplicationShownNotification(),
         kAXTitleChangedNotification(),
     ] {
-        add_observer_notification(&observer, &app, &notification, context_ptr)?;
+        add_observer_notification(&observer, &app, &notification, delegate_ptr)?;
     }
 
     Ok(observer)

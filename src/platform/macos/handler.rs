@@ -1,14 +1,16 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
-use objc2::MainThreadMarker;
+use objc2::{DefinedClass, MainThreadMarker};
 use objc2_app_kit::NSApplication;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
+use crate::config::Config;
 use crate::core::{Child, Dimension, Focus, Hub};
 
-use super::context::{WindowContext, WindowRegistry};
-use super::overlay::collect_overlays;
+use super::app::AppDelegate;
+use super::context::WindowRegistry;
+use super::overlay::{OverlayView, collect_overlays};
 
 #[tracing::instrument(skip(hub, registry), fields(actions = %actions))]
 pub(super) fn execute_actions(hub: &mut Hub, registry: &mut WindowRegistry, actions: &Actions) {
@@ -49,19 +51,39 @@ pub(super) fn execute_actions(hub: &mut Hub, registry: &mut WindowRegistry, acti
     }
 }
 
-pub(super) fn render_workspace(context: &mut WindowContext) -> Result<()> {
-    apply_layout(context)?;
-    focus_window(context)?;
+pub(super) fn render_workspace(delegate: &'static AppDelegate) -> Result<()> {
+    let hub = delegate.ivars().hub.borrow();
+    let registry = delegate.ivars().registry.borrow();
+    let config = &delegate.ivars().config;
+    let mut displayed_windows = delegate.ivars().displayed_windows.borrow_mut();
+    let tiling_overlay = delegate.ivars().tiling_overlay.get().unwrap();
+    let float_overlay = delegate.ivars().float_overlay.get().unwrap();
+
+    apply_layout(
+        &hub,
+        &registry,
+        config,
+        &mut displayed_windows,
+        tiling_overlay,
+        float_overlay,
+    )?;
+    focus_window(&hub, &registry)?;
     Ok(())
 }
 
 /// Sync window state to actual macOS windows.
 /// Some windows report incorrect AX attributes and can't actually be managed.
 /// Layout failures for such windows are logged at trace level and ignored.
-pub(super) fn apply_layout(context: &mut WindowContext) -> Result<()> {
-    let workspace_id = context.hub.current_workspace();
-    let workspace = context.hub.get_workspace(workspace_id);
-    let registry = context.registry.borrow();
+pub(super) fn apply_layout(
+    hub: &Hub,
+    registry: &WindowRegistry,
+    config: &Config,
+    displayed_windows: &mut HashSet<usize>,
+    tiling_overlay: &OverlayView,
+    float_overlay: &OverlayView,
+) -> Result<()> {
+    let workspace_id = hub.current_workspace();
+    let workspace = hub.get_workspace(workspace_id);
 
     let mut workspace_windows = HashSet::new();
     let mut tiling_layouts = Vec::new();
@@ -73,12 +95,12 @@ pub(super) fn apply_layout(context: &mut WindowContext) -> Result<()> {
             Child::Window(window_id) => {
                 if let Some(os_window) = registry.get_tiling(window_id) {
                     workspace_windows.insert(os_window.cf_hash());
-                    let dim = context.hub.get_window(window_id).dimension();
+                    let dim = hub.get_window(window_id).dimension();
                     tiling_layouts.push((window_id, dim));
                 }
             }
             Child::Container(container_id) => {
-                let container = context.hub.get_container(container_id);
+                let container = hub.get_container(container_id);
                 if let Some(active_tab) = container.active_tab() {
                     stack.push(active_tab);
                 } else {
@@ -92,13 +114,12 @@ pub(super) fn apply_layout(context: &mut WindowContext) -> Result<()> {
     for &float_id in workspace.float_windows() {
         if let Some(os_window) = registry.get_float(float_id) {
             workspace_windows.insert(os_window.cf_hash());
-            let dim = context.hub.get_float(float_id).dimension();
+            let dim = hub.get_float(float_id).dimension();
             float_layouts.push((float_id, dim));
         }
     }
 
-    let to_hide: Vec<usize> = context
-        .displayed_windows
+    let to_hide: Vec<usize> = displayed_windows
         .difference(&workspace_windows)
         .copied()
         .collect();
@@ -120,7 +141,7 @@ pub(super) fn apply_layout(context: &mut WindowContext) -> Result<()> {
 
     for (window_id, dim) in tiling_layouts {
         if let Some(os_window) = registry.get_tiling(window_id) {
-            let border = context.config.border_size;
+            let border = config.border_size;
             let inset_dim = Dimension {
                 x: dim.x + border,
                 y: dim.y + border,
@@ -134,7 +155,7 @@ pub(super) fn apply_layout(context: &mut WindowContext) -> Result<()> {
     }
     for (float_id, dim) in float_layouts {
         if let Some(os_window) = registry.get_float(float_id) {
-            let border = context.config.border_size;
+            let border = config.border_size;
             let inset_dim = Dimension {
                 x: dim.x + border,
                 y: dim.y + border,
@@ -147,32 +168,28 @@ pub(super) fn apply_layout(context: &mut WindowContext) -> Result<()> {
         }
     }
 
-    let overlays = collect_overlays(&context.hub, &context.config, workspace_id, &registry);
+    let overlays = collect_overlays(hub, config, workspace_id, registry);
 
-    context
-        .tiling_overlay
-        .set_rects(overlays.tiling_rects, overlays.tiling_labels);
-    context
-        .float_overlay
-        .set_rects(overlays.float_rects, vec![]);
+    tiling_overlay.set_rects(overlays.tiling_rects, overlays.tiling_labels);
+    float_overlay.set_rects(overlays.float_rects, vec![]);
 
-    context.displayed_windows = workspace_windows;
+    *displayed_windows = workspace_windows;
 
     Ok(())
 }
 
-pub(super) fn focus_window(context: &WindowContext) -> Result<()> {
-    let workspace_id = context.hub.current_workspace();
-    let workspace = context.hub.get_workspace(workspace_id);
+pub(super) fn focus_window(hub: &Hub, registry: &WindowRegistry) -> Result<()> {
+    let workspace_id = hub.current_workspace();
+    let workspace = hub.get_workspace(workspace_id);
 
     match workspace.focused() {
         Some(Focus::Tiling(Child::Window(window_id))) => {
-            if let Some(os_window) = context.registry.borrow().get_tiling(window_id) {
+            if let Some(os_window) = registry.get_tiling(window_id) {
                 os_window.focus()?;
             }
         }
         Some(Focus::Float(float_id)) => {
-            if let Some(os_window) = context.registry.borrow().get_float(float_id) {
+            if let Some(os_window) = registry.get_float(float_id) {
                 os_window.focus()?;
             }
         }

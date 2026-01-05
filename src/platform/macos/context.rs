@@ -1,14 +1,10 @@
-use std::os::unix::net::UnixListener;
 use std::{cell::RefCell, collections::HashMap, collections::HashSet, rc::Rc, time::Instant};
 
-use objc2::rc::Retained;
 use objc2_application_services::AXObserver;
 use objc2_core_foundation::{CFRetained, CFRunLoopTimer};
 
-use super::overlay::OverlayView;
 use super::window::MacWindow;
-use crate::config::Config;
-use crate::core::{Dimension, FloatWindowId, Hub, WindowId};
+use crate::core::{FloatWindowId, WindowId};
 
 pub(super) type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;
 
@@ -25,6 +21,15 @@ pub(super) struct ThrottleState {
 }
 
 impl ThrottleState {
+    pub(super) fn new() -> Self {
+        Self {
+            last_execution: None,
+            pending_pids: HashSet::new(),
+            pending_focus_sync: false,
+            timer: None,
+        }
+    }
+
     pub(super) fn reset(&mut self) {
         if let Some(timer) = self.timer.take() {
             CFRunLoopTimer::invalidate(&timer);
@@ -44,7 +49,7 @@ pub(super) struct WindowRegistry {
 }
 
 impl WindowRegistry {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             pid_to_hashes: HashMap::new(),
             hash_to_tiling: HashMap::new(),
@@ -161,55 +166,6 @@ impl WindowRegistry {
             && let Some(window) = self.float_to_window.get_mut(float_id)
         {
             window.update_title();
-        }
-    }
-}
-
-pub(super) struct WindowContext {
-    pub(super) hub: Hub,
-    pub(super) tiling_overlay: Retained<OverlayView>,
-    pub(super) float_overlay: Retained<OverlayView>,
-    // To be used in block2, as it only allows Fn, not FnMut
-    pub(super) registry: RefCell<WindowRegistry>,
-    pub(super) config: Config,
-    pub(super) event_tap: Option<CFRetained<objc2_core_foundation::CFMachPort>>,
-    pub(super) throttle: ThrottleState,
-    pub(super) displayed_windows: HashSet<usize>,
-    /// Suspend on sleep/lock screen.
-    /// There is a subtle race condition here, when we receive sleep/lock screen notification, but
-    /// it's queued after other callback notifications. If these notifications take too long too be
-    /// processed, screen will be locked and AX API will be unavailable before we are able turn on
-    /// this flag.
-    pub(super) is_suspended: bool,
-    pub(super) listener: UnixListener,
-}
-
-impl WindowContext {
-    pub(super) fn new(
-        tiling_overlay: Retained<OverlayView>,
-        float_overlay: Retained<OverlayView>,
-        screen: Dimension,
-        config: Config,
-        listener: UnixListener,
-    ) -> Self {
-        let hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
-
-        Self {
-            hub,
-            tiling_overlay,
-            float_overlay,
-            registry: RefCell::new(WindowRegistry::new()),
-            config,
-            event_tap: None,
-            throttle: ThrottleState {
-                last_execution: None,
-                pending_pids: HashSet::new(),
-                pending_focus_sync: false,
-                timer: None,
-            },
-            displayed_windows: HashSet::new(),
-            is_suspended: false,
-            listener,
         }
     }
 }
