@@ -9,11 +9,10 @@ use objc2_core_foundation::{
 };
 
 use super::objc2_wrapper::{
-    get_attribute, is_attribute_settable, kAXDialogSubrole, kAXEnhancedUserInterfaceAttribute,
-    kAXFloatingWindowSubrole, kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute,
-    kAXMinimizedAttribute, kAXParentAttribute, kAXPositionAttribute, kAXRoleAttribute,
-    kAXSizeAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute, kAXTitleAttribute,
-    kAXWindowRole, set_attribute_value,
+    get_attribute, is_attribute_settable, kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute,
+    kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute, kAXParentAttribute,
+    kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole,
+    kAXSubroleAttribute, kAXTitleAttribute, kAXWindowRole, set_attribute_value,
 };
 use crate::core::Dimension;
 
@@ -24,7 +23,7 @@ pub(crate) struct MacWindow {
     pid: i32,
     running_app: objc2::rc::Retained<NSRunningApplication>,
     screen: Dimension,
-    title: String,
+    title: Option<String>,
     app_name: String,
     bundle_id: Option<String>,
 }
@@ -43,7 +42,7 @@ impl MacWindow {
 
         let title = get_attribute::<CFString>(&window, &kAXTitleAttribute())
             .map(|t| t.to_string())
-            .unwrap_or_else(|_| "Unknown".to_string());
+            .ok();
         let app_name = running_app
             .localizedName()
             .map(|name| name.to_string())
@@ -141,7 +140,7 @@ impl MacWindow {
     }
 
     pub(crate) fn title(&self) -> &str {
-        &self.title
+        self.title.as_deref().unwrap_or("Unknown")
     }
 
     pub(crate) fn app_name(&self) -> &str {
@@ -154,7 +153,7 @@ impl MacWindow {
 
     pub(crate) fn update_title(&mut self) {
         if let Ok(t) = get_attribute::<CFString>(&self.window, &kAXTitleAttribute()) {
-            self.title = t.to_string();
+            self.title = Some(t.to_string());
         }
     }
 
@@ -179,33 +178,25 @@ impl MacWindow {
             .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
             .unwrap_or(false);
 
-        let is_valid_subrole = subrole
-            .as_ref()
-            .map(|sr| {
-                CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole()))
-                    || CFEqual(Some(&**sr), Some(&*kAXDialogSubrole()))
-                    || CFEqual(Some(&**sr), Some(&*kAXFloatingWindowSubrole()))
-            })
-            .unwrap_or(false);
-
-        is_window
-            && is_valid_subrole
-            && self.is_root()
-            && self.can_move()
-            && self.can_focus()
-            && !self.is_minimized()
-            && !self.is_hidden()
-    }
-
-    /// Returns true if this window should be tiled (not floated)
-    pub(crate) fn should_tile(&self) -> bool {
-        let subrole = get_attribute::<CFString>(&self.window, &kAXSubroleAttribute()).ok();
         let is_standard = subrole
             .as_ref()
             .map(|sr| CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole())))
             .unwrap_or(false);
 
-        is_standard && self.can_resize() && !self.is_fullscreen()
+        is_window
+            && is_standard
+            && self.is_root()
+            && self.can_move()
+            && self.can_resize()
+            && self.can_focus()
+            && !self.is_minimized()
+            && !self.is_hidden()
+            && self.title.is_some()
+    }
+
+    /// Returns true if this window should be tiled (not floated)
+    pub(crate) fn should_tile(&self) -> bool {
+        !self.is_fullscreen()
     }
 
     fn is_root(&self) -> bool {
@@ -271,7 +262,9 @@ impl std::fmt::Display for MacWindow {
         write!(
             f,
             "'{}' from app '{}' (PID: {})",
-            self.title, self.app_name, self.pid
+            self.title(),
+            self.app_name,
+            self.pid
         )
     }
 }

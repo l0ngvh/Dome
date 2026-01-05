@@ -184,16 +184,6 @@ pub(crate) fn kAXFullScreenAttribute() -> CFRetained<CFString> {
 }
 
 #[allow(non_snake_case)]
-pub(crate) fn kAXDialogSubrole() -> CFRetained<CFString> {
-    CFString::from_static_str("AXDialog")
-}
-
-#[allow(non_snake_case)]
-pub(crate) fn kAXFloatingWindowSubrole() -> CFRetained<CFString> {
-    CFString::from_static_str("AXFloatingWindow")
-}
-
-#[allow(non_snake_case)]
 pub(crate) fn kAXFocusedWindowChangedNotification() -> CFRetained<CFString> {
     CFString::from_static_str("AXFocusedWindowChanged")
 }

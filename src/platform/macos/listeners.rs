@@ -747,7 +747,7 @@ fn match_rule<'a>(window: &MacWindow, rules: &'a [WindowRule]) -> Option<&'a Win
 }
 
 fn should_manage(window: &MacWindow, rules: &[WindowRule]) -> bool {
-    match_rule(window, rules).map_or_else(|| window.is_manageable(), |r| r.manage)
+    !match_rule(window, rules).is_some_and(|r| !r.manage) && window.is_manageable()
 }
 
 fn pattern_matches(pattern: &str, text: &str) -> bool {
