@@ -9,11 +9,17 @@ use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSFloatingWindowLevel,
     NSNormalWindowLevel, NSScreen, NSWindow,
 };
-use objc2_application_services::AXIsProcessTrustedWithOptions;
-use objc2_core_foundation::{CFMachPort, CFRetained, kCFBooleanTrue};
+use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
+use objc2_core_foundation::{
+    CFDictionary, CFFileDescriptor, CFMachPort, CFRetained, kCFBooleanTrue,
+};
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
+use tracing_error::ErrorLayer;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
+use super::config::setup_config_watcher;
 use super::context::{Observers, ThrottleState, WindowRegistry};
 use super::handler::render_workspace;
 use super::ipc;
@@ -22,9 +28,14 @@ use super::overlay::{OverlayView, create_overlay_window};
 use crate::config::Config;
 use crate::core::{Dimension, Hub};
 
-pub fn run_app(config: Config) {
-    use objc2_application_services::kAXTrustedCheckOptionPrompt;
-    use objc2_core_foundation::CFDictionary;
+pub fn run_app(config_path: Option<String>) {
+    let config_path = config_path.unwrap_or_else(Config::default_path);
+    let config = Config::load(&config_path).unwrap_or_else(|e| {
+        eprintln!("Failed to load config from {config_path}: {e}, using defaults");
+        Config::default()
+    });
+
+    init_tracing(&config);
 
     tracing::debug!("Accessibility: {}", unsafe {
         AXIsProcessTrustedWithOptions(Some(
@@ -37,14 +48,32 @@ pub fn run_app(config: Config) {
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
-    let delegate = AppDelegate::new(mtm, config);
+    let delegate = AppDelegate::new(mtm, config, config_path);
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
     app.run();
 }
 
+fn init_tracing(config: &Config) {
+    let filter = config
+        .log_level
+        .as_ref()
+        .and_then(|l| l.parse().ok())
+        .unwrap_or_else(EnvFilter::from_default_env);
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer())
+        .with(ErrorLayer::default())
+        .init();
+    std::panic::set_hook(Box::new(|panic_info| {
+        let backtrace = backtrace::Backtrace::new();
+        tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
+    }));
+}
+
 pub(super) struct AppDelegateIvars {
-    pub(super) config: Config,
+    pub(super) config: RefCell<Config>,
+    pub(super) config_path: String,
     pub(super) hub: RefCell<Hub>,
     pub(super) registry: RefCell<WindowRegistry>,
     pub(super) throttle: RefCell<ThrottleState>,
@@ -56,6 +85,7 @@ pub(super) struct AppDelegateIvars {
     pub(super) float_overlay: OnceCell<Retained<OverlayView>>,
     pub(super) event_tap: OnceCell<CFRetained<CFMachPort>>,
     pub(super) listener: OnceCell<UnixListener>,
+    pub(super) config_fd: OnceCell<CFRetained<CFFileDescriptor>>,
     pub(super) is_suspended: Cell<bool>,
 }
 
@@ -120,6 +150,10 @@ define_class!(
                 tracing::error!("Failed to setup keyboard listener: {e:#}");
             }
 
+            if let Err(e) = setup_config_watcher(delegate) {
+                tracing::warn!("Failed to setup config watcher: {e:#}");
+            }
+
             setup_app_observers(delegate);
 
             if let Err(e) = render_workspace(delegate) {
@@ -135,11 +169,12 @@ define_class!(
 );
 
 impl AppDelegate {
-    fn new(mtm: MainThreadMarker, config: Config) -> Retained<Self> {
+    fn new(mtm: MainThreadMarker, config: Config, config_path: String) -> Retained<Self> {
         let screen = get_main_screen(mtm);
         let hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
         let ivars = AppDelegateIvars {
-            config,
+            config: RefCell::new(config),
+            config_path,
             hub: RefCell::new(hub),
             registry: RefCell::new(WindowRegistry::new()),
             throttle: RefCell::new(ThrottleState::new()),
@@ -151,6 +186,7 @@ impl AppDelegate {
             float_overlay: OnceCell::new(),
             event_tap: OnceCell::new(),
             listener: OnceCell::new(),
+            config_fd: OnceCell::new(),
             is_suspended: Cell::new(false),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);

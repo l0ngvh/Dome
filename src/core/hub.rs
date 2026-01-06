@@ -77,6 +77,14 @@ impl Hub {
         self.screen
     }
 
+    pub(crate) fn sync_config(&mut self, tab_bar_height: f32, auto_tile: bool) {
+        self.tab_bar_height = tab_bar_height;
+        self.auto_tile = auto_tile;
+        for (ws_id, _) in self.workspaces.all_active() {
+            self.adjust_children_dimension_of(Parent::Workspace(ws_id));
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn all_workspaces(&self) -> Vec<(WorkspaceId, Workspace)> {
         self.workspaces.all_active()

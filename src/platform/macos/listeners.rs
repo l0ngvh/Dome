@@ -356,13 +356,14 @@ unsafe extern "C-unwind" fn observer_callback(
             tracing::warn!("Failed to focus window: {e:#}");
         }
 
+        let config = ivars.config.borrow();
         let mut displayed_windows = ivars.displayed_windows.borrow_mut();
         let tiling_overlay = ivars.tiling_overlay.get().unwrap();
         let float_overlay = ivars.float_overlay.get().unwrap();
         if let Err(e) = apply_layout(
             &hub,
             &registry,
-            &ivars.config,
+            &config,
             &mut displayed_windows,
             tiling_overlay,
             float_overlay,
@@ -447,13 +448,14 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
 
     let hub = ivars.hub.borrow();
     let registry = ivars.registry.borrow();
+    let config = ivars.config.borrow();
     let mut displayed_windows = ivars.displayed_windows.borrow_mut();
     let tiling_overlay = ivars.tiling_overlay.get().unwrap();
     let float_overlay = ivars.float_overlay.get().unwrap();
     if let Err(e) = apply_layout(
         &hub,
         &registry,
-        &ivars.config,
+        &config,
         &mut displayed_windows,
         tiling_overlay,
         float_overlay,
@@ -474,12 +476,13 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, delegate: &'static AppD
     let hub = delegate.ivars().hub.borrow();
     let screen = hub.screen();
     drop(hub);
-    let rules = &delegate.ivars().config.window_rules;
+    let config = delegate.ivars().config.borrow();
     let active_windows: Vec<_> = windows
         .into_iter()
         .filter_map(|w| MacWindow::new(w.clone(), app.clone(), pid, screen))
-        .filter(|w| should_manage(w, rules))
+        .filter(|w| should_manage(w, &config.window_rules))
         .collect();
+    drop(config);
     let active_window_ids: HashSet<_> = active_windows.iter().map(|w| w.window_id()).collect();
 
     let mut registry = delegate.ivars().registry.borrow_mut();
@@ -524,8 +527,9 @@ fn sync_windows(pid: i32, app: &CFRetained<AXUIElement>, delegate: &'static AppD
         .filter(|w| !registry.contains(w))
         .collect();
 
+    let config = delegate.ivars().config.borrow();
     for mac_window in new_windows {
-        let rule = match_rule(&mac_window, &delegate.ivars().config.window_rules);
+        let rule = match_rule(&mac_window, &config.window_rules);
         if mac_window.should_tile() {
             let id = hub.insert_tiling();
             let _span = tracing::info_span!("sync_windows", %id, window = %mac_window).entered();
@@ -617,7 +621,7 @@ fn handle_keyboard(delegate: &'static AppDelegate, event: *mut CGEvent) -> bool 
     }
 
     let keymap = Keymap { key, modifiers };
-    let actions = delegate.ivars().config.get_actions(&keymap);
+    let actions = delegate.ivars().config.borrow().get_actions(&keymap);
 
     if actions.is_empty() {
         return false;
@@ -681,17 +685,17 @@ fn register_app(pid: i32, delegate: &'static AppDelegate) -> Result<CFRetained<A
     let screen = hub.screen();
     drop(hub);
     let app = unsafe { AXUIElement::new_application(pid) };
-    let rules = &delegate.ivars().config.window_rules;
+    let config = delegate.ivars().config.borrow();
 
     if let Ok(windows) = get_windows(&app) {
         for window in windows {
             let Some(mac_window) = MacWindow::new(window.clone(), app.clone(), pid, screen) else {
                 continue;
             };
-            if !should_manage(&mac_window, rules) {
+            if !should_manage(&mac_window, &config.window_rules) {
                 continue;
             }
-            let rule = match_rule(&mac_window, rules);
+            let rule = match_rule(&mac_window, &config.window_rules);
             let mut registry = delegate.ivars().registry.borrow_mut();
             let mut hub = delegate.ivars().hub.borrow_mut();
             if mac_window.should_tile() {

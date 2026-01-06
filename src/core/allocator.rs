@@ -52,7 +52,6 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
             .unwrap_or_else(|| panic!("Node {id:?} was deleted"))
     }
 
-    #[cfg(test)]
     pub(super) fn all_active(&self) -> Vec<(T::Id, T)> {
         self.storage
             .iter()

@@ -7,7 +7,7 @@ use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct Modifiers: u8 {
+    pub(crate) struct Modifiers: u8 {
         const CMD = 1 << 0;
         const SHIFT = 1 << 1;
         const ALT = 1 << 2;
@@ -16,9 +16,9 @@ bitflags::bitflags! {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Keymap {
-    pub key: String,
-    pub modifiers: Modifiers,
+pub(crate) struct Keymap {
+    pub(crate) key: String,
+    pub(crate) modifiers: Modifiers,
 }
 
 impl FromStr for Keymap {
@@ -236,11 +236,11 @@ fn parse_actions(action_strs: &[String]) -> Result<Actions> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Color {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-    pub a: f32,
+pub(crate) struct Color {
+    pub(crate) r: f32,
+    pub(crate) g: f32,
+    pub(crate) b: f32,
+    pub(crate) a: f32,
 }
 
 impl<'de> Deserialize<'de> for Color {
@@ -307,17 +307,17 @@ fn default_active_tab_background_color() -> Color {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct WindowRule {
+pub(crate) struct WindowRule {
     #[serde(default)]
-    pub app: Option<String>,
+    pub(crate) app: Option<String>,
     #[serde(default)]
-    pub bundle_id: Option<String>,
+    pub(crate) bundle_id: Option<String>,
     #[serde(default)]
-    pub title: Option<String>,
+    pub(crate) title: Option<String>,
     #[serde(default = "default_manage_window")]
-    pub manage: bool,
+    pub(crate) manage: bool,
     #[serde(default)]
-    pub run: Actions,
+    pub(crate) run: Actions,
 }
 
 fn default_manage_window() -> bool {
@@ -325,29 +325,29 @@ fn default_manage_window() -> bool {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Config {
+pub(crate) struct Config {
     #[serde(default = "default_keymaps", deserialize_with = "deserialize_keymaps")]
     keymaps: HashMap<Keymap, Actions>,
     #[serde(default = "default_border_size")]
-    pub border_size: f32,
+    pub(crate) border_size: f32,
     #[serde(default = "default_tab_bar_height")]
-    pub tab_bar_height: f32,
+    pub(crate) tab_bar_height: f32,
     #[serde(default = "default_automatic_tiling")]
-    pub automatic_tiling: bool,
+    pub(crate) automatic_tiling: bool,
     #[serde(default = "default_focused_color")]
-    pub focused_color: Color,
+    pub(crate) focused_color: Color,
     #[serde(default = "default_spawn_indicator_color")]
-    pub spawn_indicator_color: Color,
+    pub(crate) spawn_indicator_color: Color,
     #[serde(default = "default_border_color")]
-    pub border_color: Color,
+    pub(crate) border_color: Color,
     #[serde(default = "default_tab_bar_background_color")]
-    pub tab_bar_background_color: Color,
+    pub(crate) tab_bar_background_color: Color,
     #[serde(default = "default_active_tab_background_color")]
-    pub active_tab_background_color: Color,
+    pub(crate) active_tab_background_color: Color,
     #[serde(default)]
-    pub window_rules: Vec<WindowRule>,
+    pub(crate) window_rules: Vec<WindowRule>,
     #[serde(default)]
-    pub log_level: Option<String>,
+    pub(crate) log_level: Option<String>,
 }
 
 fn default_border_size() -> f32 {
@@ -381,33 +381,24 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load(path: Option<&str>) -> Self {
-        let path = path.map(|p| p.to_string()).unwrap_or_else(|| {
-            let config_dir = std::env::var("XDG_CONFIG_HOME")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| {
-                    let home = std::env::var("HOME").unwrap_or_default();
-                    format!("{home}/.config")
-                });
-            format!("{config_dir}/dome/config.toml")
-        });
-        match std::fs::read_to_string(&path) {
-            Ok(content) => match toml::from_str(&content) {
-                Ok(config) => config,
-                Err(e) => {
-                    tracing::warn!("Failed to parse config: {e}, using defaults");
-                    Config::default()
-                }
-            },
-            Err(e) => {
-                tracing::warn!("Failed to load config from {path}: {e}, using defaults");
-                Config::default()
-            }
-        }
+    pub(crate) fn default_path() -> String {
+        let config_dir = std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                let home = std::env::var("HOME").unwrap_or_default();
+                format!("{home}/.config")
+            });
+        format!("{config_dir}/dome/config.toml")
     }
 
-    pub fn get_actions(&self, keymap: &Keymap) -> Actions {
+    pub(crate) fn load(path: &str) -> Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let config = toml::from_str(&content)?;
+        Ok(config)
+    }
+
+    pub(crate) fn get_actions(&self, keymap: &Keymap) -> Actions {
         self.keymaps.get(keymap).cloned().unwrap_or_default()
     }
 }

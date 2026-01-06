@@ -11,6 +11,7 @@ mod move_in_direction;
 mod move_to_workspace;
 mod set_focus;
 mod smoke;
+mod sync_config;
 mod tabbed;
 mod toggle_direction;
 mod toggle_spawn_mode;

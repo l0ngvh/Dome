@@ -55,7 +55,7 @@ pub(super) fn execute_actions(hub: &mut Hub, registry: &mut WindowRegistry, acti
 pub(super) fn render_workspace(delegate: &'static AppDelegate) -> Result<()> {
     let hub = delegate.ivars().hub.borrow();
     let registry = delegate.ivars().registry.borrow();
-    let config = &delegate.ivars().config;
+    let config = delegate.ivars().config.borrow();
     let mut displayed_windows = delegate.ivars().displayed_windows.borrow_mut();
     let tiling_overlay = delegate.ivars().tiling_overlay.get().unwrap();
     let float_overlay = delegate.ivars().float_overlay.get().unwrap();
@@ -63,7 +63,7 @@ pub(super) fn render_workspace(delegate: &'static AppDelegate) -> Result<()> {
     apply_layout(
         &hub,
         &registry,
-        config,
+        &config,
         &mut displayed_windows,
         tiling_overlay,
         float_overlay,

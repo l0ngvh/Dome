@@ -1,3 +1,6 @@
+# Dome configuration file
+# Changes to this file are automatically reloaded (hot reload)
+
 # Border size in pixels (default: 2.0)
 border_size = 5.0
 

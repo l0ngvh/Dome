@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command};
 #[cfg(target_os = "macos")]
@@ -5,9 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-fn spawn_server() -> Child {
+fn spawn_server(config_path: &str) -> Child {
     Command::new(env!("CARGO_BIN_EXE_dome"))
-        .args(["launch", "--config", "examples/config.toml"])
+        .args(["launch", "--config", config_path])
         .spawn()
         .expect("failed to start server")
 }
@@ -82,7 +83,11 @@ struct TestEnv {
 
 impl TestEnv {
     fn new() -> Self {
-        let server = spawn_server();
+        Self::with_config("examples/config.toml")
+    }
+
+    fn with_config(config_path: &str) -> Self {
+        let server = spawn_server(config_path);
         assert!(
             wait_for_server(Duration::from_secs(5)),
             "server failed to start"
@@ -202,4 +207,27 @@ fn test_terminate_app() {
     quit_test_app();
 
     env.shutdown();
+}
+
+#[test]
+fn test_config_hot_reload() {
+    let tmp = std::env::temp_dir().join("dome_test_config.toml");
+    std::fs::write(&tmp, "border_size = 5.0\n").unwrap();
+
+    let env = TestEnv::with_config(tmp.to_str().unwrap());
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&tmp)
+        .unwrap();
+    writeln!(file, "border_size = 10.0").unwrap();
+    file.flush().unwrap();
+
+    thread::sleep(Duration::from_millis(200));
+
+    assert!(dome(&["focus", "workspace", "0"]));
+
+    env.shutdown();
+    std::fs::remove_file(&tmp).ok();
 }
