@@ -334,10 +334,6 @@ impl Hub {
         tracing::debug!(?focused, target_workspace, "Moved to workspace");
     }
 
-    pub(crate) fn is_focusing(&self, id: WindowId) -> bool {
-        self.workspaces.get(self.current).focused == Some(Focus::Tiling(Child::Window(id)))
-    }
-
     fn move_in_direction(&mut self, direction: Direction, forward: bool) {
         let Some(Focus::Tiling(child)) = self.workspaces.get(self.current).focused else {
             return;

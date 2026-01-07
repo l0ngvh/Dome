@@ -86,7 +86,11 @@ pub(super) struct AppDelegateIvars {
     pub(super) event_tap: OnceCell<CFRetained<CFMachPort>>,
     pub(super) listener: OnceCell<UnixListener>,
     pub(super) config_fd: OnceCell<CFRetained<CFFileDescriptor>>,
+    /// To suspend on sleep/screen lock to save battery
+    /// Not reliable to detect whether screen is locked for other purposes as screen sleep/lock
+    /// notification can arrive after screen is locked
     pub(super) is_suspended: Cell<bool>,
+    pub(super) last_focused: Cell<Option<(i32, CGWindowID)>>,
 }
 
 define_class!(
@@ -188,6 +192,7 @@ impl AppDelegate {
             listener: OnceCell::new(),
             config_fd: OnceCell::new(),
             is_suspended: Cell::new(false),
+            last_focused: Cell::new(None),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }

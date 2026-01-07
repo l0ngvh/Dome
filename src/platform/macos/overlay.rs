@@ -184,7 +184,7 @@ pub(super) fn collect_overlays(
 
     let get_title = |wid: WindowId| -> String {
         registry
-            .get_tiling(wid)
+            .get_by_tiling_id(wid)
             .map(|w| w.title().to_owned())
             .unwrap_or_else(|| "Unknown".to_owned())
     };

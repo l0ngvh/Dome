@@ -1,75 +1,81 @@
 use anyhow::{Context, Result};
 use std::ptr::NonNull;
 
-use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFBoolean, CFEqual, CFRetained, CFString, CGPoint, CGSize, kCFBooleanFalse, kCFBooleanTrue,
+    CFBoolean, CFDictionary, CFRetained, CFString, CFType, CGPoint, CGSize, kCFBooleanFalse,
+    kCFBooleanTrue,
 };
-use objc2_core_graphics::CGWindowID;
+use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
 use super::objc2_wrapper::{
-    AXError, get_attribute, get_cg_window_id, is_attribute_settable,
-    kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute, kAXFullScreenAttribute,
-    kAXMainAttribute, kAXMinimizedAttribute, kAXParentAttribute, kAXPositionAttribute,
-    kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
-    kAXTitleAttribute, kAXWindowRole, set_attribute_value,
+    AXError, get_attribute, kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute,
+    kAXMainAttribute, kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute, kAXTitleAttribute,
+    set_attribute_value,
 };
-use crate::core::Dimension;
+use crate::core::{Dimension, FloatWindowId, WindowId};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowType {
+    Tiling(WindowId),
+    Float(FloatWindowId),
+    Popup,
+}
 
 #[derive(Debug)]
 pub(crate) struct MacWindow {
+    window_type: WindowType,
     window: CFRetained<AXUIElement>,
     app: CFRetained<AXUIElement>,
     cg_window_id: CGWindowID,
     pid: i32,
-    running_app: objc2::rc::Retained<NSRunningApplication>,
     screen: Dimension,
     title: Option<String>,
     app_name: String,
-    bundle_id: Option<String>,
 }
 
 impl MacWindow {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         window: CFRetained<AXUIElement>,
         app: CFRetained<AXUIElement>,
+        cg_window_id: CGWindowID,
         pid: i32,
         screen: Dimension,
-    ) -> Option<Self> {
-        let cg_window_id = get_cg_window_id(&window)?;
-        let running_app = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)?;
-        if running_app.isTerminated() {
-            return None;
-        }
-
-        let title = get_attribute::<CFString>(&window, &kAXTitleAttribute())
-            .map(|t| t.to_string())
-            .ok();
-        let app_name = running_app
-            .localizedName()
-            .map(|name| name.to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-        let bundle_id = running_app.bundleIdentifier().map(|id| id.to_string());
-
-        Some(Self {
+        title: Option<String>,
+        app_name: String,
+        window_type: WindowType,
+    ) -> Self {
+        Self {
+            window_type,
             window,
             app,
             cg_window_id,
             pid,
-            running_app,
             screen,
             title,
             app_name,
-            bundle_id,
-        })
+        }
+    }
+
+    pub(crate) fn window_type(&self) -> WindowType {
+        self.window_type
+    }
+
+    pub(crate) fn set_window_type(&mut self, window_type: WindowType) {
+        self.window_type = window_type;
     }
 
     pub(crate) fn window_id(&self) -> CGWindowID {
         self.cg_window_id
     }
 
+    /// As we're tracking windows with CGWindowID, we have to check whether a window is still valid
+    /// as macOS can reuse CGWindowID of deleted windows.
     pub(crate) fn is_valid(&self) -> bool {
+        if is_screen_locked() {
+            return true;
+        }
         !matches!(
             get_attribute::<CFString>(&self.window, &kAXRoleAttribute()),
             Err(AXError::InvalidUIElement)
@@ -90,13 +96,25 @@ impl MacWindow {
     }
 
     pub(crate) fn focus(&self) -> Result<()> {
-        set_attribute_value(&self.app, &kAXFrontmostAttribute(), unsafe {
-            kCFBooleanTrue.unwrap()
-        })?;
-        set_attribute_value(&self.window, &kAXMainAttribute(), unsafe {
-            kCFBooleanTrue.unwrap()
-        })
-        .with_context(|| format!("focus for {self}"))
+        let is_frontmost = get_attribute::<CFBoolean>(&self.app, &kAXFrontmostAttribute())
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        if !is_frontmost {
+            set_attribute_value(&self.app, &kAXFrontmostAttribute(), unsafe {
+                kCFBooleanTrue.unwrap()
+            })
+            .with_context(|| format!("focus for {self}"))?;
+        }
+        let is_main = get_attribute::<CFBoolean>(&self.window, &kAXMainAttribute())
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        if !is_main {
+            set_attribute_value(&self.window, &kAXMainAttribute(), unsafe {
+                kCFBooleanTrue.unwrap()
+            })
+            .with_context(|| format!("focus for {self}"))?;
+        }
+        Ok(())
     }
 
     /// Hide the window by moving it offscreen
@@ -162,118 +180,34 @@ impl MacWindow {
         self.title.as_deref().unwrap_or("Unknown")
     }
 
-    pub(crate) fn app_name(&self) -> &str {
-        &self.app_name
+    pub(crate) fn update_title(&mut self) -> anyhow::Result<()> {
+        let t = get_attribute::<CFString>(&self.window, &kAXTitleAttribute())?;
+        self.title = Some(t.to_string());
+        Ok(())
+    }
+}
+
+fn is_screen_locked() -> bool {
+    let Some(dict) = CGSessionCopyCurrentDictionary() else {
+        return false;
+    };
+    let dict: &CFDictionary<CFString, CFType> = unsafe { dict.cast_unchecked() };
+
+    // CGSSessionScreenIsLocked is present when screen is locked
+    let locked_key = CFString::from_static_str("CGSSessionScreenIsLocked");
+    if dict.contains_key(&locked_key) {
+        return true;
     }
 
-    pub(crate) fn bundle_id(&self) -> Option<&str> {
-        self.bundle_id.as_deref()
+    // kCGSSessionOnConsoleKey is false when screen is off/sleeping
+    let on_console_key = CFString::from_static_str("kCGSSessionOnConsoleKey");
+    if let Some(value) = dict.get(&on_console_key)
+        && let Some(b) = value.downcast_ref::<CFBoolean>()
+    {
+        return !b.as_bool();
     }
 
-    pub(crate) fn update_title(&mut self) {
-        if let Ok(t) = get_attribute::<CFString>(&self.window, &kAXTitleAttribute()) {
-            self.title = Some(t.to_string());
-        }
-    }
-
-    pub(crate) fn dimension(&self) -> Dimension {
-        let (x, y) = self.position();
-        let (width, height) = self.size();
-        Dimension {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    /// Returns true if this is a "real" window worth managing (tile or float)
-    pub(crate) fn is_manageable(&self) -> bool {
-        let role = get_attribute::<CFString>(&self.window, &kAXRoleAttribute()).ok();
-        let subrole = get_attribute::<CFString>(&self.window, &kAXSubroleAttribute()).ok();
-
-        let is_window = role
-            .as_ref()
-            .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
-            .unwrap_or(false);
-
-        let is_standard = subrole
-            .as_ref()
-            .map(|sr| CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole())))
-            .unwrap_or(false);
-
-        is_window
-            && is_standard
-            && self.is_root()
-            && self.can_move()
-            && self.can_resize()
-            && self.can_focus()
-            && !self.is_minimized()
-            && !self.is_hidden()
-            && self.title.is_some()
-    }
-
-    /// Returns true if this window should be tiled (not floated)
-    pub(crate) fn should_tile(&self) -> bool {
-        !self.is_fullscreen()
-    }
-
-    fn is_root(&self) -> bool {
-        match get_attribute::<AXUIElement>(&self.window, &kAXParentAttribute()) {
-            Err(_) => true,
-            Ok(parent) => CFEqual(Some(&*parent), Some(&*self.app)),
-        }
-    }
-
-    fn can_move(&self) -> bool {
-        is_attribute_settable(&self.window, &kAXPositionAttribute())
-    }
-
-    fn can_resize(&self) -> bool {
-        is_attribute_settable(&self.window, &kAXSizeAttribute())
-    }
-
-    fn is_fullscreen(&self) -> bool {
-        get_attribute::<CFBoolean>(&self.window, &kAXFullScreenAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false)
-    }
-
-    fn is_minimized(&self) -> bool {
-        get_attribute::<CFBoolean>(&self.window, &kAXMinimizedAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false)
-    }
-
-    fn is_hidden(&self) -> bool {
-        self.running_app.isHidden()
-    }
-
-    fn can_focus(&self) -> bool {
-        is_attribute_settable(&self.window, &kAXMainAttribute())
-    }
-
-    fn position(&self) -> (f32, f32) {
-        get_attribute::<AXValue>(&self.window, &kAXPositionAttribute())
-            .map(|v| {
-                let mut pos = CGPoint::new(0.0, 0.0);
-                let ptr = NonNull::new(&mut pos as *mut _ as *mut _).unwrap();
-                unsafe { v.value(AXValueType::CGPoint, ptr) };
-                (pos.x as f32, pos.y as f32)
-            })
-            .unwrap_or((0.0, 0.0))
-    }
-
-    fn size(&self) -> (f32, f32) {
-        get_attribute::<AXValue>(&self.window, &kAXSizeAttribute())
-            .map(|v| {
-                let mut size = CGSize::new(0.0, 0.0);
-                let ptr = NonNull::new(&mut size as *mut _ as *mut _).unwrap();
-                unsafe { v.value(AXValueType::CGSize, ptr) };
-                (size.width as f32, size.height as f32)
-            })
-            .unwrap_or((0.0, 0.0))
-    }
+    false
 }
 
 impl std::fmt::Display for MacWindow {

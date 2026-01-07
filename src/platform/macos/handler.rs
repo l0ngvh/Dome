@@ -3,15 +3,14 @@ use std::collections::HashSet;
 use anyhow::Result;
 use objc2::{DefinedClass, MainThreadMarker};
 use objc2_app_kit::NSApplication;
-use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
-use crate::config::Config;
 use crate::core::{Child, Dimension, Focus, Hub};
 
 use super::app::AppDelegate;
 use super::context::WindowRegistry;
-use super::overlay::{OverlayView, collect_overlays};
+use super::overlay::collect_overlays;
+use super::window::WindowType;
 
 #[tracing::instrument(skip(hub, registry), fields(actions = %actions))]
 pub(super) fn execute_actions(hub: &mut Hub, registry: &mut WindowRegistry, actions: &Actions) {
@@ -52,6 +51,9 @@ pub(super) fn execute_actions(hub: &mut Hub, registry: &mut WindowRegistry, acti
     }
 }
 
+/// Sync hub state to actual macOS windows.
+/// Some windows report incorrect AX attributes and can't actually be managed.
+/// Layout failures for such windows are logged at trace level and ignored.
 pub(super) fn render_workspace(delegate: &'static AppDelegate) -> Result<()> {
     let hub = delegate.ivars().hub.borrow();
     let registry = delegate.ivars().registry.borrow();
@@ -60,29 +62,6 @@ pub(super) fn render_workspace(delegate: &'static AppDelegate) -> Result<()> {
     let tiling_overlay = delegate.ivars().tiling_overlay.get().unwrap();
     let float_overlay = delegate.ivars().float_overlay.get().unwrap();
 
-    apply_layout(
-        &hub,
-        &registry,
-        &config,
-        &mut displayed_windows,
-        tiling_overlay,
-        float_overlay,
-    )?;
-    focus_window(&hub, &registry)?;
-    Ok(())
-}
-
-/// Sync window state to actual macOS windows.
-/// Some windows report incorrect AX attributes and can't actually be managed.
-/// Layout failures for such windows are logged at trace level and ignored.
-pub(super) fn apply_layout(
-    hub: &Hub,
-    registry: &WindowRegistry,
-    config: &Config,
-    displayed_windows: &mut HashSet<CGWindowID>,
-    tiling_overlay: &OverlayView,
-    float_overlay: &OverlayView,
-) -> Result<()> {
     let workspace_id = hub.current_workspace();
     let workspace = hub.get_workspace(workspace_id);
 
@@ -94,7 +73,7 @@ pub(super) fn apply_layout(
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(window_id) => {
-                if let Some(os_window) = registry.get_tiling(window_id) {
+                if let Some(os_window) = registry.get_by_tiling_id(window_id) {
                     workspace_windows.insert(os_window.window_id());
                     let dim = hub.get_window(window_id).dimension();
                     tiling_layouts.push((window_id, dim));
@@ -113,7 +92,7 @@ pub(super) fn apply_layout(
         }
     }
     for &float_id in workspace.float_windows() {
-        if let Some(os_window) = registry.get_float(float_id) {
+        if let Some(os_window) = registry.get_by_float_id(float_id) {
             workspace_windows.insert(os_window.window_id());
             let dim = hub.get_float(float_id).dimension();
             float_layouts.push((float_id, dim));
@@ -125,23 +104,26 @@ pub(super) fn apply_layout(
         .copied()
         .collect();
 
-    for window_id in to_hide {
-        if let Some(tiling_id) = registry.get_tiling_by_window_id(window_id) {
-            if let Some(os_window) = registry.get_tiling(tiling_id)
-                && let Err(e) = os_window.hide()
-            {
-                tracing::warn!("Failed to hide tiling window {tiling_id}: {e:#}");
+    for cg_id in to_hide {
+        if let Some(os_window) = registry.get(cg_id) {
+            match os_window.window_type() {
+                WindowType::Tiling(id) => {
+                    if let Err(e) = os_window.hide() {
+                        tracing::warn!("Failed to hide tiling window {id}: {e:#}");
+                    }
+                }
+                WindowType::Float(id) => {
+                    if let Err(e) = os_window.hide() {
+                        tracing::warn!("Failed to hide float window {id}: {e:#}");
+                    }
+                }
+                WindowType::Popup => {}
             }
-        } else if let Some(float_id) = registry.get_float_by_window_id(window_id)
-            && let Some(os_window) = registry.get_float(float_id)
-            && let Err(e) = os_window.hide()
-        {
-            tracing::warn!("Failed to hide float window {float_id}: {e:#}");
         }
     }
 
     for (window_id, dim) in tiling_layouts {
-        if let Some(os_window) = registry.get_tiling(window_id) {
+        if let Some(os_window) = registry.get_by_tiling_id(window_id) {
             let border = config.border_size;
             let inset_dim = Dimension {
                 x: dim.x + border,
@@ -155,7 +137,7 @@ pub(super) fn apply_layout(
         }
     }
     for (float_id, dim) in float_layouts {
-        if let Some(os_window) = registry.get_float(float_id) {
+        if let Some(os_window) = registry.get_by_float_id(float_id) {
             let border = config.border_size;
             let inset_dim = Dimension {
                 x: dim.x + border,
@@ -169,33 +151,23 @@ pub(super) fn apply_layout(
         }
     }
 
-    let overlays = collect_overlays(hub, config, workspace_id, registry);
+    let overlays = collect_overlays(&hub, &config, workspace_id, &registry);
 
     tiling_overlay.set_rects(overlays.tiling_rects, overlays.tiling_labels);
     float_overlay.set_rects(overlays.float_rects, vec![]);
 
     *displayed_windows = workspace_windows;
 
-    Ok(())
-}
-
-pub(super) fn focus_window(hub: &Hub, registry: &WindowRegistry) -> Result<()> {
-    let workspace_id = hub.current_workspace();
-    let workspace = hub.get_workspace(workspace_id);
-
     match workspace.focused() {
         Some(Focus::Tiling(Child::Window(window_id))) => {
-            if let Some(os_window) = registry.get_tiling(window_id) {
-                os_window.focus()?;
-            }
+            let os_window = registry.get_by_tiling_id(window_id).unwrap();
+            os_window.focus()?;
         }
         Some(Focus::Float(float_id)) => {
-            if let Some(os_window) = registry.get_float(float_id) {
-                os_window.focus()?;
-            }
+            let os_window = registry.get_by_float_id(float_id).unwrap();
+            os_window.focus()?;
         }
         _ => {}
     }
-
     Ok(())
 }
