@@ -20,6 +20,15 @@ pub(super) fn execute_actions(hub: &mut Hub, registry: &mut WindowRegistry, acti
                 let mtm = MainThreadMarker::new().unwrap();
                 NSApplication::sharedApplication(mtm).terminate(None);
             }
+            Action::Exec { command } => {
+                if let Err(e) = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(command)
+                    .spawn()
+                {
+                    tracing::warn!(%command, "Failed to exec: {e}");
+                }
+            }
             Action::Focus { target } => match target {
                 FocusTarget::Up => hub.focus_up(),
                 FocusTarget::Down => hub.focus_down(),

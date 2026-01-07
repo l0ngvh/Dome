@@ -28,6 +28,8 @@ enum Op {
     FocusWorkspace,
     SetFocus,
     SetFloatFocus,
+    // Note: Exec is not included because it's a platform-specific action
+    // that spawns external processes, not a core hub operation.
 }
 
 const ALL_OPS: &[Op] = &[

@@ -20,8 +20,9 @@ use objc2_core_foundation::{
     CGSize, kCFAllocatorDefault, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
-    CGEvent, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-    CGEventTapProxy, CGEventType, CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption,
+    CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventTapOptions,
+    CGEventTapPlacement, CGEventTapProxy, CGEventType, CGWindowID, CGWindowListCopyWindowInfo,
+    CGWindowListOption,
 };
 use objc2_foundation::{
     NSDistributedNotificationCenter, NSNotification, NSOperationQueue, NSString,
@@ -505,6 +506,26 @@ fn handle_keyboard(delegate: &'static AppDelegate, event: *mut CGEvent) -> bool 
 }
 
 fn get_key_from_event(event: *mut CGEvent) -> String {
+    // Get virtual keycode for special keys
+    let keycode =
+        CGEvent::integer_value_field(Some(unsafe { &*event }), CGEventField::KeyboardEventKeycode);
+
+    // Map special keys to names
+    match keycode {
+        0x24 => return "return".to_string(),
+        0x4C => return "enter".to_string(),
+        0x33 => return "backspace".to_string(),
+        0x35 => return "escape".to_string(),
+        0x30 => return "tab".to_string(),
+        0x31 => return "space".to_string(),
+        0x7E => return "up".to_string(),
+        0x7D => return "down".to_string(),
+        0x7B => return "left".to_string(),
+        0x7C => return "right".to_string(),
+        _ => {}
+    }
+
+    // For regular keys, get unicode character
     let max_len: usize = 256;
     let mut buffer: Vec<u16> = vec![0; max_len];
     let mut actual_len: std::ffi::c_ulong = 0;

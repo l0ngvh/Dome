@@ -231,3 +231,22 @@ fn test_config_hot_reload() {
     env.shutdown();
     std::fs::remove_file(&tmp).ok();
 }
+
+#[test]
+fn test_exec() {
+    let env = TestEnv::new();
+
+    let marker = std::env::temp_dir().join("dome_exec_test_marker");
+    std::fs::remove_file(&marker).ok();
+
+    let cmd = format!("touch {}", marker.display());
+    assert!(dome(&["exec", &cmd]));
+
+    // Wait for command to complete
+    thread::sleep(Duration::from_millis(200));
+
+    assert!(marker.exists(), "exec command did not create marker file");
+
+    std::fs::remove_file(&marker).ok();
+    env.shutdown();
+}

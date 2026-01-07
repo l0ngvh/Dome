@@ -56,6 +56,7 @@ active_tab_background_color = "#4d4d66"
 "cmd+shift+l" = ["move right"]
 "cmd+shift+f" = ["toggle float"]
 "cmd+shift+q" = ["exit"]
+"cmd+return" = ["exec open -a Terminal"]
 
 # Window rules to force manage or ignore windows
 # All specified fields must match (AND logic)

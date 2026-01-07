@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
+#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 pub enum Action {
     Focus {
         #[command(subcommand)]
@@ -18,6 +18,9 @@ pub enum Action {
         #[command(subcommand)]
         target: ToggleTarget,
     },
+    Exec {
+        command: String,
+    },
     Exit,
 }
 
@@ -27,6 +30,7 @@ impl fmt::Display for Action {
             Action::Focus { target } => write!(f, "focus {target}"),
             Action::Move { target } => write!(f, "move {target}"),
             Action::Toggle { target } => write!(f, "toggle {target}"),
+            Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
         }
     }
@@ -147,6 +151,13 @@ impl FromStr for Action {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
+        // Handle exec specially since command can contain spaces
+        if let Some(command) = s.strip_prefix("exec ") {
+            return Ok(Action::Exec {
+                command: command.to_string(),
+            });
+        }
+
         let parts: Vec<&str> = s.split_whitespace().collect();
         match parts.as_slice() {
             ["focus", "up"] => Ok(Action::Focus {

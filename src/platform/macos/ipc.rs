@@ -51,7 +51,7 @@ fn handle_client(mut stream: UnixStream, delegate: &'static AppDelegate) {
             return;
         }
         let response = match serde_json::from_str::<Action>(trimmed) {
-            Ok(action) => match handle_action(action, delegate) {
+            Ok(action) => match handle_action(action.clone(), delegate) {
                 Ok(()) => "ok\n".to_string(),
                 Err(e) => {
                     tracing::warn!(?action, "IPC action failed: {e}");
