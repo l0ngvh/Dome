@@ -14,13 +14,14 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetClientRect, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SW_SHOWNA, SWP_NOACTIVATE,
-    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_PAINT, WNDCLASSW,
+    GetClientRect, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SWP_NOACTIVATE,
+    SetWindowLongPtrW, SetWindowPos, WM_PAINT, WNDCLASSW,
     WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 use super::hub::{Frame, OverlayRect, WM_APP_FRAME, WindowHandle};
 use super::window::{Taskbar, hide_window, set_window_pos, show_window};
+use super::windows_wrapper::set_foreground_window;
 use crate::core::Dimension;
 
 pub(super) struct App {
@@ -101,17 +102,17 @@ impl App {
         let new_floats: HashSet<WindowHandle> = cmd.floats.iter().map(|(h, _)| *h).collect();
 
         for handle in self.displayed.difference(&new_displayed) {
-            hide_window(handle.0)?;
+            hide_window(handle.0);
             self.taskbar.delete_tab(handle.0)?;
         }
         for handle in self.displayed_floats.difference(&new_floats) {
-            hide_window(handle.0)?;
+            hide_window(handle.0);
             self.taskbar.delete_tab(handle.0)?;
         }
 
         for (handle, dim) in &cmd.windows {
             if !self.displayed.contains(handle) {
-                show_window(handle.0)?;
+                show_window(handle.0);
                 self.taskbar.add_tab(handle.0)?;
             }
             let inset = Dimension {
@@ -125,7 +126,7 @@ impl App {
 
         for (handle, dim) in &cmd.floats {
             if !self.displayed_floats.contains(handle) {
-                show_window(handle.0)?;
+                show_window(handle.0);
                 self.taskbar.add_tab(handle.0)?;
             }
             let inset = Dimension {
@@ -140,9 +141,10 @@ impl App {
         self.displayed = new_displayed;
         self.displayed_floats = new_floats;
 
-        if let Some(handle) = cmd.focus {
-            let res = unsafe { SetForegroundWindow(handle.0) };
-            anyhow::ensure!(res.as_bool(), "SetForegroundWindow failed");
+        if let Some(handle) = cmd.focus
+            && let Err(e) = set_foreground_window(handle.0)
+        {
+            tracing::warn!("{e}");
         }
 
         self.set_overlays(cmd.overlays)
@@ -164,8 +166,7 @@ impl App {
         self.render_target = create_render_target(&self.factory, self.hwnd)?;
         self.rects = rects;
         self.render()?;
-        let res = unsafe { ShowWindow(self.hwnd, SW_SHOWNA) };
-        anyhow::ensure!(res.as_bool(), "ShowWindow failed");
+        show_window(self.hwnd);
         Ok(())
     }
 

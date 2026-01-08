@@ -8,13 +8,12 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetWindowLongW,
-    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, HWND_TOP, IsWindowVisible,
-    SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos, ShowWindow, WS_CHILD,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_CHILD,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 use windows::core::{BOOL, PWSTR};
 
-use crate::core::Dimension;
+pub(super) use super::windows_wrapper::{hide_window, set_window_pos, show_window};
 
 pub(super) fn enum_windows<F>(mut callback: F) -> windows::core::Result<()>
 where
@@ -97,32 +96,6 @@ pub(super) fn get_process_name(hwnd: HWND) -> anyhow::Result<String> {
         .next()
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow::anyhow!("no filename in path"))
-}
-
-pub(super) fn set_window_pos(hwnd: HWND, dim: &Dimension) -> windows::core::Result<()> {
-    unsafe {
-        SetWindowPos(
-            hwnd,
-            Some(HWND_TOP),
-            dim.x as i32,
-            dim.y as i32,
-            dim.width as i32,
-            dim.height as i32,
-            SWP_NOACTIVATE | SWP_NOZORDER,
-        )
-    }
-}
-
-pub(super) fn show_window(hwnd: HWND) -> anyhow::Result<()> {
-    let res = unsafe { ShowWindow(hwnd, SW_SHOW) };
-    anyhow::ensure!(res.as_bool(), "ShowWindow failed");
-    Ok(())
-}
-
-pub(super) fn hide_window(hwnd: HWND) -> anyhow::Result<()> {
-    let res = unsafe { ShowWindow(hwnd, SW_HIDE) };
-    anyhow::ensure!(res.as_bool(), "ShowWindow (hide) failed");
-    Ok(())
 }
 
 pub(super) struct Taskbar(ITaskbarList);
