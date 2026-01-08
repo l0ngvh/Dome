@@ -65,6 +65,15 @@ impl<'a> IntoIterator for &'a Actions {
     }
 }
 
+impl IntoIterator for Actions {
+    type Item = Action;
+    type IntoIter = std::vec::IntoIter<Action>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for Actions {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

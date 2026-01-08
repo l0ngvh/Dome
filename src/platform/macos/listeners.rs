@@ -43,7 +43,7 @@ use super::objc2_wrapper::{
     kAXWindowsAttribute,
 };
 use super::window::{MacWindow, WindowType};
-use crate::config::{Keymap, Modifiers, WindowRule};
+use crate::config::{Keymap, MacosWindowRule, Modifiers};
 use crate::core::{Dimension, Hub};
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 
@@ -403,7 +403,7 @@ fn sync_all_windows(delegate: &'static AppDelegate) {
                 pid,
                 &app_name,
                 bundle_id.as_deref(),
-                &config.window_rules,
+                &config.macos.window_rules,
                 &mut hub,
                 &mut registry,
             );
@@ -589,8 +589,8 @@ fn match_rule<'a>(
     app_name: &str,
     bundle_id: Option<&str>,
     title: Option<&str>,
-    rules: &'a [WindowRule],
-) -> Option<&'a WindowRule> {
+    rules: &'a [MacosWindowRule],
+) -> Option<&'a MacosWindowRule> {
     for rule in rules {
         if let Some(app) = &rule.app
             && !pattern_matches(app, app_name)
@@ -618,7 +618,7 @@ fn should_manage(
     app_name: &str,
     bundle_id: Option<&str>,
     title: Option<&str>,
-    rules: &[WindowRule],
+    rules: &[MacosWindowRule],
 ) -> bool {
     match_rule(app_name, bundle_id, title, rules).is_none_or(|r| r.manage)
 }
@@ -629,7 +629,7 @@ fn process_new_window(
     pid: i32,
     app_name: &str,
     bundle_id: Option<&str>,
-    rules: &[WindowRule],
+    rules: &[MacosWindowRule],
     hub: &mut Hub,
     registry: &mut WindowRegistry,
 ) {

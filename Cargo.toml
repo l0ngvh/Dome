@@ -6,14 +6,6 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 backtrace = "0.3.76"
-block2 = "0.6.2"
-objc2 = "0.6.3"
-# TODO: use only necessary features to lower build time
-objc2-app-kit = "0.3.2"
-objc2-application-services = "0.3.2"
-objc2-core-foundation = "0.3.2"
-objc2-core-graphics = "0.3.2"
-objc2-foundation = "0.3.2"
 tracing = "0.1.41"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
@@ -24,7 +16,19 @@ csscolorparser = { version = "0.8.1", features = ["serde"] }
 clap = { version = "4.5.53", features = ["derive"] }
 serde_json = "1.0.148"
 regex = "1.12.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
 libc = "0.2.179"
+objc2 = "0.6.3"
+objc2-app-kit = "0.3.2"
+objc2-application-services = "0.3.2"
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = "0.3.2"
+objc2-foundation = "0.3.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_Graphics_Direct2D", "Win32_Graphics_Direct2D_Common", "Win32_Graphics_Dxgi_Common", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO"] }
 
 [dev-dependencies]
 insta = "1.44.3"

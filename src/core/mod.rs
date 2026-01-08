@@ -5,7 +5,7 @@ mod node;
 mod tests;
 
 pub(crate) use hub::Hub;
-pub(crate) use node::{Child, Dimension, FloatWindowId, Focus, WindowId, WorkspaceId};
+pub(crate) use node::{Child, Dimension, FloatWindowId, Focus, SpawnMode, WindowId, WorkspaceId};
 
 const MAX_ITERATIONS: usize = 10000;
 

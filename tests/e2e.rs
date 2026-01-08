@@ -1,4 +1,5 @@
 use std::io::Write;
+#[cfg(target_os = "macos")]
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command};
 #[cfg(target_os = "macos")]
@@ -13,11 +14,47 @@ fn spawn_server(config_path: &str) -> Child {
         .expect("failed to start server")
 }
 
+#[cfg(target_os = "macos")]
 fn wait_for_server(timeout: Duration) -> bool {
     let socket = std::env::temp_dir().join("dome.sock");
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
         if UnixStream::connect(&socket).is_ok() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn wait_for_server(timeout: Duration) -> bool {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE};
+    use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_NONE, OPEN_EXISTING};
+    use windows::core::PCWSTR;
+
+    let name: Vec<u16> = OsStr::new(r"\\.\pipe\dome")
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        let result = unsafe {
+            CreateFileW(
+                PCWSTR(name.as_ptr()),
+                (GENERIC_READ | GENERIC_WRITE).0,
+                FILE_SHARE_NONE,
+                None,
+                OPEN_EXISTING,
+                Default::default(),
+                None,
+            )
+        };
+        if let Ok(pipe) = result {
+            let _ = unsafe { CloseHandle(pipe) };
             return true;
         }
         thread::sleep(Duration::from_millis(50));
@@ -53,10 +90,28 @@ fn spawn_test_window() {
     thread::sleep(Duration::from_millis(500));
 }
 
+#[cfg(target_os = "windows")]
+fn spawn_test_window() {
+    Command::new("notepad.exe")
+        .spawn()
+        .expect("failed to spawn test window");
+    thread::sleep(Duration::from_millis(500));
+}
+
 #[cfg(target_os = "macos")]
 fn close_front_window() {
     Command::new("osascript")
         .args(["-e", "tell application \"TextEdit\" to close front window"])
+        .output()
+        .ok();
+    thread::sleep(Duration::from_millis(100));
+}
+
+#[cfg(target_os = "windows")]
+fn close_front_window() {
+    // Close one notepad instance
+    Command::new("taskkill")
+        .args(["/IM", "notepad.exe"])
         .output()
         .ok();
     thread::sleep(Duration::from_millis(100));
@@ -71,10 +126,27 @@ fn quit_test_app() {
     thread::sleep(Duration::from_millis(300));
 }
 
+#[cfg(target_os = "windows")]
+fn quit_test_app() {
+    Command::new("taskkill")
+        .args(["/IM", "notepad.exe", "/F"])
+        .output()
+        .ok();
+    thread::sleep(Duration::from_millis(300));
+}
+
 #[cfg(target_os = "macos")]
 fn kill_test_app() {
     // Wait until all TextEdit instances are killed
     Command::new("killall").arg("TextEdit").output().ok();
+}
+
+#[cfg(target_os = "windows")]
+fn kill_test_app() {
+    Command::new("taskkill")
+        .args(["/IM", "notepad.exe", "/F"])
+        .output()
+        .ok();
 }
 
 struct TestEnv {
@@ -233,6 +305,7 @@ fn test_config_hot_reload() {
 }
 
 #[test]
+#[cfg(target_os = "macos")]
 fn test_exec() {
     let env = TestEnv::new();
 
@@ -243,6 +316,25 @@ fn test_exec() {
     assert!(dome(&["exec", &cmd]));
 
     // Wait for command to complete
+    thread::sleep(Duration::from_millis(200));
+
+    assert!(marker.exists(), "exec command did not create marker file");
+
+    std::fs::remove_file(&marker).ok();
+    env.shutdown();
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn test_exec() {
+    let env = TestEnv::new();
+
+    let marker = std::env::temp_dir().join("dome_exec_test_marker");
+    std::fs::remove_file(&marker).ok();
+
+    let cmd = format!("type nul > {}", marker.display());
+    assert!(dome(&["exec", &cmd]));
+
     thread::sleep(Duration::from_millis(200));
 
     assert!(marker.exists(), "exec command did not create marker file");

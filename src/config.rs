@@ -306,8 +306,9 @@ fn default_active_tab_background_color() -> Color {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct WindowRule {
+#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct MacosWindowRule {
     #[serde(default)]
     pub(crate) app: Option<String>,
     #[serde(default)]
@@ -320,8 +321,36 @@ pub(crate) struct WindowRule {
     pub(crate) run: Actions,
 }
 
+#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct WindowsWindowRule {
+    /// Process name (e.g., "notepad.exe", "chrome.exe")
+    #[serde(default)]
+    pub(crate) process: Option<String>,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+    #[serde(default = "default_manage_window")]
+    pub(crate) manage: bool,
+    #[serde(default)]
+    pub(crate) run: Actions,
+}
+
 fn default_manage_window() -> bool {
     true
+}
+
+#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct MacosConfig {
+    #[serde(default)]
+    pub(crate) window_rules: Vec<MacosWindowRule>,
+}
+
+#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct WindowsConfig {
+    #[serde(default)]
+    pub(crate) window_rules: Vec<WindowsWindowRule>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -345,7 +374,11 @@ pub(crate) struct Config {
     #[serde(default = "default_active_tab_background_color")]
     pub(crate) active_tab_background_color: Color,
     #[serde(default)]
-    pub(crate) window_rules: Vec<WindowRule>,
+    #[cfg_attr(not(target_os = "macos"), expect(dead_code))]
+    pub(crate) macos: MacosConfig,
+    #[serde(default)]
+    #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
+    pub(crate) windows: WindowsConfig,
     #[serde(default)]
     pub(crate) log_level: Option<String>,
 }
@@ -374,13 +407,24 @@ impl Default for Config {
             border_color: default_border_color(),
             tab_bar_background_color: default_tab_bar_background_color(),
             active_tab_background_color: default_active_tab_background_color(),
-            window_rules: vec![],
+            macos: MacosConfig::default(),
+            windows: WindowsConfig::default(),
             log_level: None,
         }
     }
 }
 
 impl Config {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn default_path() -> String {
+        let config_dir = std::env::var("APPDATA").unwrap_or_else(|_| {
+            let home = std::env::var("USERPROFILE").unwrap_or_default();
+            format!("{home}\\AppData\\Roaming")
+        });
+        format!("{config_dir}\\dome\\config.toml")
+    }
+
+    #[cfg(not(target_os = "windows"))]
     pub(crate) fn default_path() -> String {
         let config_dir = std::env::var("XDG_CONFIG_HOME")
             .ok()

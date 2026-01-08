@@ -18,18 +18,15 @@ enum Command {
     Action(Action),
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        None => run_app(None),
-        Some(Command::Launch { config }) => run_app(config),
-        Some(Command::Action(action)) => match dome::send_action(&action) {
-            Ok(response) => println!("{response}"),
-            Err(e) => {
-                eprintln!("error: {e}");
-                std::process::exit(1);
-            }
-        },
+        None => run_app(None)?,
+        Some(Command::Launch { config }) => run_app(config)?,
+        Some(Command::Action(action)) => {
+            dome::send_action(&action)?;
+        }
     }
+    Ok(())
 }

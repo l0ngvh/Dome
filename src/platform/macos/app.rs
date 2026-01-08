@@ -28,7 +28,7 @@ use super::overlay::{OverlayView, create_overlay_window};
 use crate::config::Config;
 use crate::core::{Dimension, Hub};
 
-pub fn run_app(config_path: Option<String>) {
+pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
     let config = Config::load(&config_path).unwrap_or_else(|e| {
         eprintln!("Failed to load config from {config_path}: {e}, using defaults");
@@ -52,6 +52,7 @@ pub fn run_app(config_path: Option<String>) {
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
     app.run();
+    Ok(())
 }
 
 fn init_tracing(config: &Config) {

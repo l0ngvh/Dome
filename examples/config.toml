@@ -61,25 +61,43 @@ active_tab_background_color = "#4d4d66"
 # Window rules to force manage or ignore windows
 # All specified fields must match (AND logic)
 # First matching rule wins
-# Use /pattern/ for regex matching on app and title
+# Use /pattern/ for regex matching on app/process and title
 
-# [[window_rules]]
+# macOS window rules
+# [[macos.window_rules]]
 # app = "System Preferences"
 # manage = false
 
-# [[window_rules]]
+# [[macos.window_rules]]
 # app = "/.*Preferences/"
 # manage = false
 
-# [[window_rules]]
+# [[macos.window_rules]]
 # bundle_id = "com.apple.finder"
 # title = "Trash"
 # manage = false
 
-# [[window_rules]]
+# [[macos.window_rules]]
 # app = "Slack"
 # run = ["move workspace 3"]
 
-# [[window_rules]]
+# [[macos.window_rules]]
 # app = "Safari"
 # run = ["toggle float"]
+
+# Windows window rules
+# [[windows.window_rules]]
+# process = "SystemSettings.exe"
+# manage = false
+
+# [[windows.window_rules]]
+# process = "/.*Settings.*/"
+# manage = false
+
+# [[windows.window_rules]]
+# title = "Task Manager"
+# manage = false
+
+# [[windows.window_rules]]
+# process = "slack.exe"
+# run = ["move workspace 3"]

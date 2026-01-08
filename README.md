@@ -107,33 +107,59 @@ active_tab_background_color = "#4d4d66"
 
 ### Window Rules
 
-Window rules let you customize behavior for specific applications:
+Window rules let you customize behavior for specific applications. Rules are platform-specific.
+
+#### macOS
 
 ```toml
 # Ignore windows (don't manage)
-[[window_rules]]
+[[macos.window_rules]]
 app = "System Preferences"
 manage = false
 
 # Regex matching
-[[window_rules]]
+[[macos.window_rules]]
 app = "/.*Preferences/"
 manage = false
 
 # Match by bundle ID and title
-[[window_rules]]
+[[macos.window_rules]]
 bundle_id = "com.apple.finder"
 title = "Trash"
 manage = false
 
 # Run actions on window open
-[[window_rules]]
+[[macos.window_rules]]
 app = "Slack"
 run = ["move workspace 3"]
 
-[[window_rules]]
+[[macos.window_rules]]
 app = "Safari"
 run = ["toggle float"]
+```
+
+#### Windows
+
+```toml
+# Ignore windows by process name
+[[windows.window_rules]]
+process = "SystemSettings.exe"
+manage = false
+
+# Regex matching
+[[windows.window_rules]]
+process = "/.*Settings.*/"
+manage = false
+
+# Match by title
+[[windows.window_rules]]
+title = "Task Manager"
+manage = false
+
+# Run actions on window open
+[[windows.window_rules]]
+process = "slack.exe"
+run = ["move workspace 3"]
 ```
 
 ## License
