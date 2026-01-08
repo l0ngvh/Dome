@@ -22,7 +22,7 @@ use windows::core::BOOL;
 use crate::config::Config;
 use crate::core::Dimension;
 use app::App;
-use event_listener::{install_event_hook, uninstall_event_hook};
+use event_listener::install_event_hooks;
 use hub::{HubEvent, HubThread, WindowHandle};
 use ipc::start_server;
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
@@ -50,7 +50,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     let sender = hub_thread.sender();
 
     let keyboard_hook = install_keyboard_hook(sender.clone())?;
-    let event_hook = install_event_hook(sender.clone())?;
+    let _event_hooks = install_event_hooks(sender.clone())?;
 
     start_server(sender.clone());
     start_config_watcher(config_path, sender.clone());
@@ -75,7 +75,6 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     hub_thread.shutdown();
     uninstall_keyboard_hook(keyboard_hook);
-    uninstall_event_hook(event_hook);
 
     Ok(())
 }
