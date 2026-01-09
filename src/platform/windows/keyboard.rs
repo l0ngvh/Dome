@@ -106,12 +106,9 @@ fn vk_to_string(vk: VIRTUAL_KEY) -> Option<String> {
         VK_OEM_4 => "[",
         VK_OEM_6 => "]",
         _ => {
-            let code = vk.0;
-            if (0x30..=0x39).contains(&code) {
-                return Some(((code as u8 - 0x30) + b'0').to_string());
-            }
-            if (0x41..=0x5A).contains(&code) {
-                return Some(((code as u8 - 0x41 + b'a') as char).to_string());
+            let code = vk.0 as u8;
+            if matches!(code, b'0'..=b'9' | b'A'..=b'Z') {
+                return Some((code.to_ascii_lowercase() as char).to_string());
             }
             return None;
         }
