@@ -13,8 +13,8 @@ use windows::Win32::Graphics::Direct2D::{
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetClientRect, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SWP_NOACTIVATE,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GetForegroundWindow,
+    GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SWP_NOACTIVATE,
     SetWindowLongPtrW, SetWindowPos, WM_PAINT, WNDCLASSW,
     WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
@@ -142,7 +142,7 @@ impl App {
         self.displayed_floats = new_floats;
 
         if let Some(handle) = cmd.focus
-            && let Err(e) = set_foreground_window(handle.0)
+            && let Err(e) = focus_window(handle.0)
         {
             tracing::warn!("{e}");
         }
@@ -266,4 +266,11 @@ unsafe extern "system" fn wnd_proc(
         WM_PAINT => LRESULT(0),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
+}
+
+fn focus_window(hwnd: HWND) -> anyhow::Result<()> {
+    if unsafe { GetForegroundWindow() } == hwnd {
+        return Ok(());
+    }
+    set_foreground_window(hwnd)
 }
