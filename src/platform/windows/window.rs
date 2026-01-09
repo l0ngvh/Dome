@@ -1,4 +1,5 @@
 use windows::Win32::Foundation::{HWND, LPARAM};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
@@ -36,6 +37,11 @@ pub(super) fn is_manageable_window(hwnd: HWND) -> bool {
         return false;
     }
 
+    // Cloaked windows appear visible but are actually hidden (common for UWP apps like TextInputHost)
+    if is_cloaked(hwnd) {
+        return false;
+    }
+
     if unsafe { GetAncestor(hwnd, GA_ROOT) } != hwnd {
         return false;
     }
@@ -57,6 +63,19 @@ pub(super) fn is_manageable_window(hwnd: HWND) -> bool {
     }
 
     true
+}
+
+fn is_cloaked(hwnd: HWND) -> bool {
+    let mut cloaked = 0u32;
+    let result = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            std::ptr::from_mut(&mut cloaked).cast(),
+            std::mem::size_of::<u32>() as u32,
+        )
+    };
+    result.is_ok() && cloaked != 0
 }
 
 pub(super) fn get_window_title(hwnd: HWND) -> Option<String> {
