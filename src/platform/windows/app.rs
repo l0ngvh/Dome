@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::pin::Pin;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
@@ -14,9 +14,9 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GetForegroundWindow,
-    GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SWP_NOACTIVATE,
-    SetWindowLongPtrW, SetWindowPos, WM_PAINT, WNDCLASSW,
-    WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+    GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, HWND_TOP, LWA_ALPHA, RegisterClassW,
+    SWP_NOACTIVATE, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, WM_PAINT,
+    WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 use super::hub::{Frame, OverlayRect, WM_APP_FRAME, WindowHandle};
@@ -73,6 +73,8 @@ impl App {
                 None,
             )?
         };
+
+        unsafe { SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA)? };
 
         let render_target = create_render_target(&factory, hwnd)?;
 
