@@ -206,8 +206,11 @@ impl HubThread {
 fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd: WindowHandle) {
     let mut hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
     let mut registry = Registry::new();
+    let mut last_focus: Option<Focus> = None;
 
-    send_frame(&hub, &registry, &config, &main_hwnd);
+    let frame = build_frame(&hub, &registry, &config, last_focus);
+    last_focus = hub.get_workspace(hub.current_workspace()).focused();
+    send_frame(frame, &main_hwnd);
 
     while let Ok(event) = rx.recv() {
         match event {
@@ -248,6 +251,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 } else if let Some(id) = registry.get_float(&handle) {
                     hub.set_float_focus(id);
                 }
+                last_focus = hub.get_workspace(hub.current_workspace()).focused();
             }
             // TODO: update float window position in hub instead of re-rendering
             HubEvent::WindowMovedOrResized(_) => {}
@@ -255,12 +259,14 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 execute_actions(&mut hub, &mut registry, &actions, &main_hwnd);
             }
         }
-        send_frame(&hub, &registry, &config, &main_hwnd);
+        let frame = build_frame(&hub, &registry, &config, last_focus);
+        last_focus = hub.get_workspace(hub.current_workspace()).focused();
+        send_frame(frame, &main_hwnd);
     }
 }
 
-fn send_frame(hub: &Hub, registry: &Registry, config: &Config, main_hwnd: &WindowHandle) {
-    let cmd = Box::new(build_frame(hub, registry, config));
+fn send_frame(frame: Frame, main_hwnd: &WindowHandle) {
+    let cmd = Box::new(frame);
     let ptr = Box::into_raw(cmd) as usize;
     unsafe { PostMessageW(Some(main_hwnd.hwnd()), WM_APP_FRAME, WPARAM(ptr), LPARAM(0)).ok() };
 }
@@ -316,7 +322,12 @@ fn execute_actions(
     }
 }
 
-fn build_frame(hub: &Hub, registry: &Registry, config: &Config) -> Frame {
+fn build_frame(
+    hub: &Hub,
+    registry: &Registry,
+    config: &Config,
+    last_focus: Option<Focus>,
+) -> Frame {
     let ws = hub.get_workspace(hub.current_workspace());
     let border = config.border_size;
 
@@ -428,17 +439,21 @@ fn build_frame(hub: &Hub, registry: &Registry, config: &Config) -> Frame {
         }
     }
 
-    let focus_handle = match focused {
-        Some(Focus::Tiling(Child::Window(id))) => registry.get_handle(id),
-        Some(Focus::Float(id)) => registry.get_float_handle(id),
-        _ => None,
+    let focus = if focused != last_focus {
+        match focused {
+            Some(Focus::Tiling(Child::Window(id))) => registry.get_handle(id),
+            Some(Focus::Float(id)) => registry.get_float_handle(id),
+            _ => None,
+        }
+    } else {
+        None
     };
 
     Frame {
         windows,
         floats,
         overlays,
-        focus: focus_handle,
+        focus,
     }
 }
 

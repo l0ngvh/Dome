@@ -1,8 +1,8 @@
 use std::collections::HashSet;
+use std::mem::size_of;
 use std::pin::Pin;
 
 use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::core::Interface;
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
@@ -12,7 +12,7 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, ID3D11Device,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
 };
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
@@ -21,16 +21,20 @@ use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
-    IDXGIDevice, IDXGISurface, IDXGISwapChain1, DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC1,
-    DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
+    DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGISurface, IDXGISwapChain1,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GetForegroundWindow,
-    GWLP_USERDATA, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
+    GetForegroundWindow, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE,
     SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, WM_PAINT, WNDCLASSW, WS_EX_NOREDIRECTIONBITMAP,
     WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
+use windows::core::Interface;
 
 use super::hub::{Frame, OverlayRect, WM_APP_FRAME, WindowHandle};
 use super::window::{Taskbar, hide_window, set_window_pos, show_window};
@@ -41,7 +45,10 @@ pub(super) struct App {
     hwnd: HWND,
     swap_chain: IDXGISwapChain1,
     dc: ID2D1DeviceContext,
-    #[expect(dead_code, reason = "must be kept alive for DirectComposition visual tree")]
+    #[expect(
+        dead_code,
+        reason = "must be kept alive for DirectComposition visual tree"
+    )]
     comp_target: IDCompositionTarget,
     comp_device: IDCompositionDevice,
     rects: Vec<OverlayRect>,
@@ -163,7 +170,7 @@ impl App {
         self.displayed_floats = new_floats;
 
         if let Some(ref handle) = cmd.focus
-            && let Err(e) = focus_window(handle.hwnd())
+            && let Err(e) = focus_window(handle)
         {
             tracing::warn!("{handle}: {e}");
         }
@@ -337,9 +344,36 @@ unsafe extern "system" fn wnd_proc(
     }
 }
 
-fn focus_window(hwnd: HWND) -> anyhow::Result<()> {
+fn focus_window(handle: &WindowHandle) -> anyhow::Result<()> {
+    let hwnd = handle.hwnd();
     if unsafe { GetForegroundWindow() } == hwnd {
         return Ok(());
     }
+
+    // Simulate ALT key press to bypass SetForegroundWindow restrictions
+    // https://gist.github.com/Aetopia/1581b40f00cc0cadc93a0e8ccb65dc8c
+    let inputs = [
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VK_MENU,
+                    ..Default::default()
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VK_MENU,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    ..Default::default()
+                },
+            },
+        },
+    ];
+    unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
+
     set_foreground_window(hwnd)
 }
