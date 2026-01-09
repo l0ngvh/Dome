@@ -1,22 +1,35 @@
 use std::collections::HashSet;
 use std::pin::Pin;
 
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::core::Interface;
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+    D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES,
-    D2D1_PRESENT_OPTIONS_IMMEDIATELY, D2D1_RENDER_TARGET_PROPERTIES,
-    D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1CreateFactory, ID2D1Factory, ID2D1HwndRenderTarget,
+    D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1CreateFactory,
+    ID2D1DeviceContext, ID2D1Factory1,
 };
-use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11CreateDevice, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, ID3D11Device,
+};
+use windows::Win32::Graphics::DirectComposition::{
+    DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
+};
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
+};
+use windows::Win32::Graphics::Dxgi::{
+    IDXGIDevice, IDXGISurface, IDXGISwapChain1, DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC1,
+    DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GetForegroundWindow,
-    GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, HWND_TOP, LWA_ALPHA, RegisterClassW,
-    SWP_NOACTIVATE, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, WM_PAINT,
-    WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+    GWLP_USERDATA, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, WM_PAINT, WNDCLASSW, WS_EX_NOREDIRECTIONBITMAP,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 use super::hub::{Frame, OverlayRect, WM_APP_FRAME, WindowHandle};
@@ -26,8 +39,11 @@ use crate::core::Dimension;
 
 pub(super) struct App {
     hwnd: HWND,
-    factory: ID2D1Factory,
-    render_target: ID2D1HwndRenderTarget,
+    swap_chain: IDXGISwapChain1,
+    dc: ID2D1DeviceContext,
+    #[expect(dead_code, reason = "must be kept alive for DirectComposition visual tree")]
+    comp_target: IDCompositionTarget,
+    comp_device: IDCompositionDevice,
     rects: Vec<OverlayRect>,
     taskbar: Taskbar,
     displayed: HashSet<WindowHandle>,
@@ -42,9 +58,6 @@ impl App {
         screen: Dimension,
         border: f32,
     ) -> windows::core::Result<Pin<Box<Self>>> {
-        let factory: ID2D1Factory =
-            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
-
         let class_name = windows::core::w!("DomeApp");
         let hinstance = unsafe { GetModuleHandleW(None)? };
 
@@ -57,16 +70,19 @@ impl App {
         };
         unsafe { RegisterClassW(&wc) };
 
+        // WS_EX_NOREDIRECTIONBITMAP: enables DirectComposition for per-pixel alpha
+        // WS_EX_TRANSPARENT: allows mouse clicks to pass through to windows underneath
+        // WS_EX_TOOLWINDOW: hides from taskbar and alt-tab
         let hwnd = unsafe {
             CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
+                WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
                 class_name,
                 windows::core::w!(""),
                 WS_POPUP,
-                0,
-                0,
-                1,
-                1,
+                screen.x as i32,
+                screen.y as i32,
+                screen.width as i32,
+                screen.height as i32,
                 None,
                 None,
                 Some(hinstance.into()),
@@ -74,14 +90,15 @@ impl App {
             )?
         };
 
-        unsafe { SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA)? };
-
-        let render_target = create_render_target(&factory, hwnd)?;
+        let (swap_chain, dc, comp_device, comp_target) =
+            create_composition_resources(hwnd, screen.width as u32, screen.height as u32)?;
 
         let app = Box::pin(Self {
             hwnd,
-            factory,
-            render_target,
+            swap_chain,
+            dc,
+            comp_target,
+            comp_device,
             rects: Vec::new(),
             taskbar,
             displayed: HashSet::new(),
@@ -100,8 +117,10 @@ impl App {
     }
 
     fn process_frame(&mut self, cmd: Frame) -> anyhow::Result<()> {
-        let new_displayed: HashSet<WindowHandle> = cmd.windows.iter().cloned().map(|(h, _)| h).collect();
-        let new_floats: HashSet<WindowHandle> = cmd.floats.iter().cloned().map(|(h, _)| h).collect();
+        let new_displayed: HashSet<WindowHandle> =
+            cmd.windows.iter().cloned().map(|(h, _)| h).collect();
+        let new_floats: HashSet<WindowHandle> =
+            cmd.floats.iter().cloned().map(|(h, _)| h).collect();
 
         for handle in self.displayed.difference(&new_displayed) {
             hide_window(handle.hwnd());
@@ -153,31 +172,43 @@ impl App {
     }
 
     fn set_overlays(&mut self, rects: Vec<OverlayRect>) -> anyhow::Result<()> {
+        self.rects = rects;
+        self.render()?;
+        show_window(self.hwnd);
         unsafe {
             SetWindowPos(
                 self.hwnd,
                 Some(HWND_TOP),
-                self.screen.x as i32,
-                self.screen.y as i32,
-                self.screen.width as i32,
-                self.screen.height as i32,
-                SWP_NOACTIVATE,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
             )?
         };
-
-        self.render_target = create_render_target(&self.factory, self.hwnd)?;
-        self.rects = rects;
-        self.render()?;
-        show_window(self.hwnd);
         Ok(())
     }
 
     fn render(&self) -> anyhow::Result<()> {
-        let rt = &self.render_target;
-
         unsafe {
-            rt.BeginDraw();
-            rt.Clear(Some(&D2D1_COLOR_F {
+            let surface: IDXGISurface = self.swap_chain.GetBuffer(0)?;
+            let bitmap = self.dc.CreateBitmapFromDxgiSurface(
+                &surface,
+                Some(&windows::Win32::Graphics::Direct2D::D2D1_BITMAP_PROPERTIES1 {
+                    pixelFormat: D2D1_PIXEL_FORMAT {
+                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    },
+                    bitmapOptions:
+                        windows::Win32::Graphics::Direct2D::D2D1_BITMAP_OPTIONS_TARGET
+                            | windows::Win32::Graphics::Direct2D::D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                    ..Default::default()
+                }),
+            )?;
+
+            self.dc.SetTarget(&bitmap);
+            self.dc.BeginDraw();
+            self.dc.Clear(Some(&D2D1_COLOR_F {
                 r: 0.0,
                 g: 0.0,
                 b: 0.0,
@@ -185,7 +216,7 @@ impl App {
             }));
 
             for rect in &self.rects {
-                if let Ok(brush) = rt.CreateSolidColorBrush(
+                let brush = self.dc.CreateSolidColorBrush(
                     &D2D1_COLOR_F {
                         r: rect.color.r,
                         g: rect.color.g,
@@ -193,21 +224,23 @@ impl App {
                         a: rect.color.a,
                     },
                     None,
-                ) {
-                    rt.FillRectangle(
-                        &D2D_RECT_F {
-                            left: rect.x,
-                            top: rect.y,
-                            right: rect.x + rect.width,
-                            bottom: rect.y + rect.height,
-                        },
-                        &brush,
-                    );
-                }
+                )?;
+                self.dc.FillRectangle(
+                    &D2D_RECT_F {
+                        left: rect.x,
+                        top: rect.y,
+                        right: rect.x + rect.width,
+                        bottom: rect.y + rect.height,
+                    },
+                    &brush,
+                );
             }
 
-            rt.EndDraw(None, None)?
-        };
+            self.dc.EndDraw(None, None)?;
+            self.dc.SetTarget(None);
+            self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()?;
+            self.comp_device.Commit()?;
+        }
         Ok(())
     }
 }
@@ -220,34 +253,68 @@ impl Drop for App {
     }
 }
 
-fn create_render_target(
-    factory: &ID2D1Factory,
+fn create_composition_resources(
     hwnd: HWND,
-) -> windows::core::Result<ID2D1HwndRenderTarget> {
-    let mut rc = windows::Win32::Foundation::RECT::default();
-    unsafe { GetClientRect(hwnd, &mut rc)? };
+    width: u32,
+    height: u32,
+) -> windows::core::Result<(
+    IDXGISwapChain1,
+    ID2D1DeviceContext,
+    IDCompositionDevice,
+    IDCompositionTarget,
+)> {
+    unsafe {
+        let mut d3d_device = None;
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            HMODULE::default(),
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut d3d_device),
+            None,
+            None,
+        )?;
+        let d3d_device: ID3D11Device = d3d_device.unwrap();
 
-    let size = D2D_SIZE_U {
-        width: (rc.right - rc.left) as u32,
-        height: (rc.bottom - rc.top) as u32,
-    };
+        let dxgi_device: IDXGIDevice = d3d_device.cast()?;
+        let dxgi_adapter = dxgi_device.GetAdapter()?;
+        let dxgi_factory: windows::Win32::Graphics::Dxgi::IDXGIFactory2 =
+            dxgi_adapter.GetParent()?;
 
-    let render_props = D2D1_RENDER_TARGET_PROPERTIES {
-        r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        pixelFormat: D2D1_PIXEL_FORMAT {
-            format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
-        },
-        ..Default::default()
-    };
+        let swap_chain_desc = DXGI_SWAP_CHAIN_DESC1 {
+            Width: width,
+            Height: height,
+            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            BufferCount: 2,
+            SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+            AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
+            ..Default::default()
+        };
 
-    let hwnd_props = D2D1_HWND_RENDER_TARGET_PROPERTIES {
-        hwnd,
-        pixelSize: size,
-        presentOptions: D2D1_PRESENT_OPTIONS_IMMEDIATELY,
-    };
+        let swap_chain =
+            dxgi_factory.CreateSwapChainForComposition(&dxgi_device, &swap_chain_desc, None)?;
 
-    unsafe { factory.CreateHwndRenderTarget(&render_props, &hwnd_props) }
+        let d2d_factory: ID2D1Factory1 =
+            D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
+        let d2d_device = d2d_factory.CreateDevice(&dxgi_device)?;
+        let dc = d2d_device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
+
+        let comp_device: IDCompositionDevice = DCompositionCreateDevice(&dxgi_device)?;
+        let comp_target = comp_device.CreateTargetForHwnd(hwnd, true)?;
+        let visual: IDCompositionVisual = comp_device.CreateVisual()?;
+        visual.SetContent(&swap_chain)?;
+        comp_target.SetRoot(&visual)?;
+        comp_device.Commit()?;
+
+        Ok((swap_chain, dc, comp_device, comp_target))
+    }
 }
 
 unsafe extern "system" fn wnd_proc(

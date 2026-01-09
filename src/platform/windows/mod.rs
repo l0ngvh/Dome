@@ -15,6 +15,7 @@ use windows::Win32::Foundation::{LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
 };
+use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MSG, TranslateMessage,
 };
@@ -34,6 +35,10 @@ use config_watcher::start_config_watcher;
 pub use ipc::send_action;
 
 pub fn run_app(config_path: Option<String>) -> Result<()> {
+    // All windows objects manipulation happen on the main thread anyway, so we don't need
+    // multithreading for now
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
+
     let config_path = config_path.unwrap_or_else(Config::default_path);
     let config = Config::load(&config_path).unwrap_or_else(|e| {
         eprintln!("Failed to load config from {config_path}: {e}, using defaults");

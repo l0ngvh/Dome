@@ -1,7 +1,5 @@
 use windows::Win32::Foundation::{HWND, LPARAM};
-use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-};
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
@@ -103,7 +101,6 @@ pub(super) struct Taskbar(ITaskbarList);
 impl Taskbar {
     pub(super) fn new() -> windows::core::Result<Self> {
         unsafe {
-            CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
             let list: ITaskbarList = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)?;
             list.HrInit()?;
             Ok(Self(list))
