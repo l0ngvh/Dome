@@ -100,22 +100,22 @@ impl App {
     }
 
     fn process_frame(&mut self, cmd: Frame) -> anyhow::Result<()> {
-        let new_displayed: HashSet<WindowHandle> = cmd.windows.iter().map(|(h, _)| *h).collect();
-        let new_floats: HashSet<WindowHandle> = cmd.floats.iter().map(|(h, _)| *h).collect();
+        let new_displayed: HashSet<WindowHandle> = cmd.windows.iter().cloned().map(|(h, _)| h).collect();
+        let new_floats: HashSet<WindowHandle> = cmd.floats.iter().cloned().map(|(h, _)| h).collect();
 
         for handle in self.displayed.difference(&new_displayed) {
-            hide_window(handle.0);
-            self.taskbar.delete_tab(handle.0)?;
+            hide_window(handle.hwnd());
+            self.taskbar.delete_tab(handle.hwnd())?;
         }
         for handle in self.displayed_floats.difference(&new_floats) {
-            hide_window(handle.0);
-            self.taskbar.delete_tab(handle.0)?;
+            hide_window(handle.hwnd());
+            self.taskbar.delete_tab(handle.hwnd())?;
         }
 
         for (handle, dim) in &cmd.windows {
             if !self.displayed.contains(handle) {
-                show_window(handle.0);
-                self.taskbar.add_tab(handle.0)?;
+                show_window(handle.hwnd());
+                self.taskbar.add_tab(handle.hwnd())?;
             }
             let inset = Dimension {
                 x: dim.x + self.border,
@@ -123,13 +123,13 @@ impl App {
                 width: dim.width - 2.0 * self.border,
                 height: dim.height - 2.0 * self.border,
             };
-            set_window_pos(handle.0, &inset)?;
+            set_window_pos(handle.hwnd(), &inset)?;
         }
 
         for (handle, dim) in &cmd.floats {
             if !self.displayed_floats.contains(handle) {
-                show_window(handle.0);
-                self.taskbar.add_tab(handle.0)?;
+                show_window(handle.hwnd());
+                self.taskbar.add_tab(handle.hwnd())?;
             }
             let inset = Dimension {
                 x: dim.x + self.border,
@@ -137,16 +137,16 @@ impl App {
                 width: dim.width - 2.0 * self.border,
                 height: dim.height - 2.0 * self.border,
             };
-            set_window_pos(handle.0, &inset)?;
+            set_window_pos(handle.hwnd(), &inset)?;
         }
 
         self.displayed = new_displayed;
         self.displayed_floats = new_floats;
 
-        if let Some(handle) = cmd.focus
-            && let Err(e) = focus_window(handle.0)
+        if let Some(ref handle) = cmd.focus
+            && let Err(e) = focus_window(handle.hwnd())
         {
-            tracing::warn!("{e}");
+            tracing::warn!("{handle}: {e}");
         }
 
         self.set_overlays(cmd.overlays)

@@ -86,23 +86,23 @@ unsafe extern "system" fn event_hook_proc(
             EVENT_OBJECT_CREATE | EVENT_OBJECT_SHOW | EVENT_SYSTEM_MINIMIZEEND => {
                 if is_manageable_window(hwnd) {
                     sender
-                        .send(HubEvent::WindowCreated(WindowHandle(hwnd)))
+                        .send(HubEvent::WindowCreated(WindowHandle::new(hwnd)))
                         .ok();
                 }
             }
             EVENT_OBJECT_DESTROY | EVENT_OBJECT_HIDE | EVENT_SYSTEM_MINIMIZESTART => {
                 sender
-                    .send(HubEvent::WindowDestroyed(WindowHandle(hwnd)))
+                    .send(HubEvent::WindowDestroyed(WindowHandle::new(hwnd)))
                     .ok();
             }
             EVENT_SYSTEM_FOREGROUND => {
                 sender
-                    .send(HubEvent::WindowFocused(WindowHandle(hwnd)))
+                    .send(HubEvent::WindowFocused(WindowHandle::new(hwnd)))
                     .ok();
             }
             EVENT_SYSTEM_MOVESIZEEND => {
                 sender
-                    .send(HubEvent::WindowMovedOrResized(WindowHandle(hwnd)))
+                    .send(HubEvent::WindowMovedOrResized(WindowHandle::new(hwnd)))
                     .ok();
             }
             _ => {}

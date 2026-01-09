@@ -47,7 +47,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     let app = App::new(taskbar, screen, config.border_size)?;
 
-    let hub_thread = HubThread::spawn(config, screen, WindowHandle(app.hwnd()));
+    let hub_thread = HubThread::spawn(config, screen, WindowHandle::new(app.hwnd()));
     let sender = hub_thread.sender();
 
     let keyboard_hook = install_keyboard_hook(sender.clone())?;
@@ -59,7 +59,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     if let Err(e) = enum_windows(|hwnd| {
         if is_manageable_window(hwnd) {
             sender
-                .send(HubEvent::WindowCreated(WindowHandle(hwnd)))
+                .send(HubEvent::WindowCreated(WindowHandle::new(hwnd)))
                 .ok();
         }
     }) {

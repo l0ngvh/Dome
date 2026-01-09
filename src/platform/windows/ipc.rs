@@ -13,7 +13,7 @@ use windows::Win32::System::Pipes::{
 use windows::core::PCWSTR;
 
 use super::hub::HubEvent;
-use crate::action::Action;
+use crate::action::{Action, Actions};
 
 const PIPE_NAME: &str = r"\\.\pipe\dome";
 const PIPE_ACCESS_DUPLEX: FILE_FLAGS_AND_ATTRIBUTES = FILE_FLAGS_AND_ATTRIBUTES(0x00000003);
@@ -76,7 +76,7 @@ fn handle_client(pipe: HANDLE, sender: &Sender<HubEvent>) {
     let msg = String::from_utf8_lossy(&buf[..bytes_read as usize]);
     let response = match serde_json::from_str::<Action>(msg.trim()) {
         Ok(action) => {
-            sender.send(HubEvent::Action(action)).ok();
+            sender.send(HubEvent::Action(Actions::new(vec![action]))).ok();
             "ok\n"
         }
         Err(e) => {

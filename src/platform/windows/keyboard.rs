@@ -48,9 +48,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                     if actions.is_empty() {
                         return false;
                     }
-                    for action in actions {
-                        state.sender.send(HubEvent::Action(action)).ok();
-                    }
+                    state.sender.send(HubEvent::Action(actions)).ok();
                     true
                 });
                 if handled {
