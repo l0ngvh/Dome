@@ -221,6 +221,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 tracing::info!("Config reloaded");
             }
             HubEvent::WindowCreated(handle) => {
+                let _span = tracing::info_span!("window_created", %handle).entered();
                 if registry.contains(&handle) {
                     continue;
                 }
@@ -228,28 +229,32 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                     continue;
                 }
                 let id = hub.insert_tiling();
+                registry.insert_tiling(handle.clone(), id);
+                tracing::info!("Window inserted");
                 if let Some(rule) =
                     match_rule(handle.process(), handle.title(), &config.windows.window_rules)
                 {
-                    registry.insert_tiling(handle, id);
                     execute_actions(&mut hub, &mut registry, &rule.run, &main_hwnd);
-                } else {
-                    registry.insert_tiling(handle, id);
                 }
             }
             HubEvent::WindowDestroyed(handle) => {
+                let _span = tracing::info_span!("window_destroyed", %handle).entered();
                 if let Some(wt) = registry.remove(&handle) {
                     match wt {
                         WindowType::Tiling(id) => hub.delete_window(id),
                         WindowType::Float(id) => hub.delete_float(id),
                     }
+                    tracing::info!("Window deleted");
                 }
             }
             HubEvent::WindowFocused(handle) => {
+                let _span = tracing::info_span!("window_focused", %handle).entered();
                 if let Some(id) = registry.get_tiling(&handle) {
                     hub.set_focus(id);
+                    tracing::info!("Tiling window focused");
                 } else if let Some(id) = registry.get_float(&handle) {
                     hub.set_float_focus(id);
+                    tracing::info!("Float window focused");
                 }
                 last_focus = hub.get_workspace(hub.current_workspace()).focused();
             }
