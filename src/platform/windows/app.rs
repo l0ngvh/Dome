@@ -5,17 +5,17 @@ use std::ptr;
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT, D2D_RECT_F,
+    D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1CreateFactory, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_RENDER_TARGET_PROPERTIES,
-    D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, ID2D1DCRenderTarget,
-    ID2D1Factory,
+    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory,
+    ID2D1DCRenderTarget, ID2D1Factory,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION,
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, DIB_RGB_COLORS, HDC, HGDIOBJ,
+    AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
+    CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, HDC, HGDIOBJ,
     SelectObject,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -24,15 +24,22 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetForegroundWindow, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, ULW_ALPHA, UpdateLayeredWindow, WM_PAINT,
-    WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+    GetForegroundWindow, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SW_SHOWNA, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WM_PAINT, WNDCLASSW, WS_EX_LAYERED,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 use super::hub::{Frame, OverlayRect, WM_APP_FRAME, WindowHandle};
-use super::window::{Taskbar, hide_window, set_window_pos, show_window};
-use super::windows_wrapper::set_foreground_window;
+use super::window::Taskbar;
 use crate::core::Dimension;
+
+const OFFSCREEN: Dimension = Dimension {
+    x: -32000.0,
+    y: -32000.0,
+    width: 0.0,
+    height: 0.0,
+};
 
 pub(super) struct App {
     hwnd: HWND,
@@ -116,40 +123,42 @@ impl App {
             cmd.floats.iter().cloned().map(|(h, _)| h).collect();
 
         for handle in self.displayed.difference(&new_displayed) {
-            hide_window(handle.hwnd());
+            if let Err(e) = set_window_position(handle.hwnd(), &OFFSCREEN) {
+                tracing::trace!("Failed to hide window: {e}");
+            }
             self.taskbar.delete_tab(handle.hwnd())?;
         }
         for handle in self.displayed_floats.difference(&new_floats) {
-            hide_window(handle.hwnd());
+            if let Err(e) = set_window_position(handle.hwnd(), &OFFSCREEN) {
+                tracing::trace!("Failed to hide window: {e}");
+            }
             self.taskbar.delete_tab(handle.hwnd())?;
         }
 
         for (handle, dim) in &cmd.windows {
-            if !self.displayed.contains(handle) {
-                show_window(handle.hwnd());
-                self.taskbar.add_tab(handle.hwnd())?;
-            }
             let inset = Dimension {
                 x: dim.x + self.border,
                 y: dim.y + self.border,
                 width: dim.width - 2.0 * self.border,
                 height: dim.height - 2.0 * self.border,
             };
-            set_window_pos(handle.hwnd(), &inset)?;
+            if !self.displayed.contains(handle) {
+                self.taskbar.add_tab(handle.hwnd())?;
+            }
+            set_window_position(handle.hwnd(), &inset)?;
         }
 
         for (handle, dim) in &cmd.floats {
-            if !self.displayed_floats.contains(handle) {
-                show_window(handle.hwnd());
-                self.taskbar.add_tab(handle.hwnd())?;
-            }
             let inset = Dimension {
                 x: dim.x + self.border,
                 y: dim.y + self.border,
                 width: dim.width - 2.0 * self.border,
                 height: dim.height - 2.0 * self.border,
             };
-            set_window_pos(handle.hwnd(), &inset)?;
+            if !self.displayed_floats.contains(handle) {
+                self.taskbar.add_tab(handle.hwnd())?;
+            }
+            set_window_position(handle.hwnd(), &inset)?;
         }
 
         self.displayed = new_displayed;
@@ -167,7 +176,7 @@ impl App {
     fn set_overlays(&mut self, rects: Vec<OverlayRect>) -> anyhow::Result<()> {
         self.rects = rects;
         self.render()?;
-        show_window(self.hwnd);
+        let _ = unsafe { ShowWindow(self.hwnd, SW_SHOWNA) };
         unsafe {
             SetWindowPos(
                 self.hwnd,
@@ -275,8 +284,7 @@ fn create_render_resources(
 ) -> windows::core::Result<(ID2D1DCRenderTarget, HDC, HGDIOBJ)> {
     unsafe {
         // Create D2D factory and DC render target
-        let d2d_factory: ID2D1Factory =
-            D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
+        let d2d_factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
 
         let render_props = D2D1_RENDER_TARGET_PROPERTIES {
             r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
@@ -367,5 +375,25 @@ fn focus_window(handle: &WindowHandle) -> anyhow::Result<()> {
     ];
     unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
 
-    set_foreground_window(hwnd)
+    if unsafe { SetForegroundWindow(hwnd) }.as_bool() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "SetForegroundWindow failed, another app may have focus lock"
+        ))
+    }
+}
+
+pub(super) fn set_window_position(hwnd: HWND, dim: &Dimension) -> windows::core::Result<()> {
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            None,
+            dim.x as i32,
+            dim.y as i32,
+            dim.width as i32,
+            dim.height as i32,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    }
 }

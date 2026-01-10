@@ -12,8 +12,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PWSTR};
 
-pub(super) use super::windows_wrapper::{hide_window, set_window_pos, show_window};
-
 pub(super) fn enum_windows<F>(mut callback: F) -> windows::core::Result<()>
 where
     F: FnMut(HWND),

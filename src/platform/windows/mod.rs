@@ -5,7 +5,6 @@ mod hub;
 mod ipc;
 mod keyboard;
 mod window;
-mod windows_wrapper;
 
 use anyhow::Result;
 use tracing_error::ErrorLayer;
