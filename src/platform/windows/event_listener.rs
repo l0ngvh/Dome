@@ -5,10 +5,10 @@ use anyhow::{Result, anyhow};
 use windows::Win32::Foundation::{GetLastError, HWND};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_NAMECHANGE,
-    EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND,
-    EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT,
-    WINEVENT_SKIPOWNPROCESS,
+    EVENT_OBJECT_CLOAKED, EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE,
+    EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND,
+    EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND, OBJID_WINDOW,
+    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
 use super::hub::{HubEvent, WindowHandle};
@@ -33,19 +33,21 @@ impl Drop for EventHooks {
 pub(super) fn install_event_hooks(sender: Sender<HubEvent>) -> Result<EventHooks> {
     SENDER.with(|s| s.set(sender).ok());
 
-    // We need 3 separate hooks because SetWinEventHook only accepts contiguous
+    // We need separate hooks because SetWinEventHook only accepts contiguous
     // event ranges (min <= max). A single hook covering all events would include
     // thousands of irrelevant events between the ranges we care about:
     // - foreground/movesize: 0x0003-0x000B
     // - minimize: 0x0016-0x0017
     // - object create/hide/namechange: 0x8000-0x800C
-    // Using a single range like 0x0003-0x8005 would fire our callback for every
+    // - object cloaked/uncloaked: 0x8017-0x8018 (for UWP apps like Settings)
+    // Using a single range like 0x0003-0x8018 would fire our callback for every
     // event in between, wasting CPU. Worse, if min > max (e.g., 0x8000-0x000B),
     // SetWinEventHook fails with ERROR_INVALID_HOOK_FILTER (1426).
     let ranges = [
         (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MOVESIZEEND),
         (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
         (EVENT_OBJECT_CREATE, EVENT_OBJECT_NAMECHANGE),
+        (EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED),
     ];
 
     let flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
@@ -84,7 +86,10 @@ unsafe extern "system" fn event_hook_proc(
     SENDER.with(|s| {
         let sender = s.get().unwrap();
         match event {
-            EVENT_OBJECT_CREATE | EVENT_OBJECT_SHOW | EVENT_SYSTEM_MINIMIZEEND => {
+            EVENT_OBJECT_CREATE
+            | EVENT_OBJECT_SHOW
+            | EVENT_SYSTEM_MINIMIZEEND
+            | EVENT_OBJECT_UNCLOAKED => {
                 if is_manageable_window(hwnd) {
                     sender
                         .send(HubEvent::WindowCreated(WindowHandle::new(hwnd)))
@@ -98,7 +103,10 @@ unsafe extern "system" fn event_hook_proc(
                         .ok();
                 }
             }
-            EVENT_OBJECT_DESTROY | EVENT_OBJECT_HIDE | EVENT_SYSTEM_MINIMIZESTART => {
+            EVENT_OBJECT_DESTROY
+            | EVENT_OBJECT_HIDE
+            | EVENT_SYSTEM_MINIMIZESTART
+            | EVENT_OBJECT_CLOAKED => {
                 sender
                     .send(HubEvent::WindowDestroyed(WindowHandle::new(hwnd)))
                     .ok();
