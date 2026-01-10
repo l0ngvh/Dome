@@ -15,6 +15,7 @@ use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MSG, TranslateMessage,
 };
@@ -34,6 +35,8 @@ use config_watcher::start_config_watcher;
 pub use ipc::send_action;
 
 pub fn run_app(config_path: Option<String>) -> Result<()> {
+    unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).ok() };
+
     // All windows objects manipulation happen on the main thread anyway, so we don't need
     // multithreading for now
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
