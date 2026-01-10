@@ -94,7 +94,6 @@ pub(super) enum HubEvent {
 
 pub(super) struct Frame {
     pub(super) windows: Vec<(WindowHandle, Dimension)>,
-    pub(super) floats: Vec<(WindowHandle, Dimension)>,
     pub(super) overlays: Vec<OverlayRect>,
     pub(super) focus: Option<WindowHandle>,
 }
@@ -391,7 +390,6 @@ fn build_frame(
     let border = config.border_size;
 
     let mut windows = Vec::new();
-    let mut floats = Vec::new();
     let mut overlays = Vec::new();
     let focused = ws.focused();
 
@@ -488,7 +486,7 @@ fn build_frame(
     for &id in ws.float_windows() {
         if let Some(handle) = registry.get_float_handle(id) {
             let dim = hub.get_float(id).dimension();
-            floats.push((handle, dim));
+            windows.push((handle, dim));
             let color = if focused == Some(Focus::Float(id)) {
                 config.focused_color
             } else {
@@ -510,7 +508,6 @@ fn build_frame(
 
     Frame {
         windows,
-        floats,
         overlays,
         focus,
     }
