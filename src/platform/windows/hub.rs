@@ -7,9 +7,11 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsWindowRule};
-use crate::core::{Child, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId};
+use crate::core::{Child, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId, WorkspaceId};
 
-use super::window::{get_process_name, get_window_dimension, get_window_title, is_manageable_window, should_tile};
+use super::window::{
+    get_process_name, get_window_dimension, get_window_title, is_manageable_window, should_tile,
+};
 
 pub(super) const WM_APP_FRAME: u32 = 0x8000;
 
@@ -60,20 +62,6 @@ impl WindowHandle {
 
 unsafe impl Send for WindowHandle {}
 
-impl PartialEq for WindowHandle {
-    fn eq(&self, other: &Self) -> bool {
-        self.key() == other.key()
-    }
-}
-
-impl Eq for WindowHandle {}
-
-impl std::hash::Hash for WindowHandle {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.key().hash(state);
-    }
-}
-
 impl std::fmt::Display for WindowHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let title = self.title().unwrap_or("<no title>");
@@ -94,6 +82,7 @@ pub(super) enum HubEvent {
 
 pub(super) struct Frame {
     pub(super) windows: Vec<(WindowHandle, Dimension)>,
+    pub(super) hide: Vec<WindowHandle>,
     pub(super) overlays: Vec<OverlayRect>,
     pub(super) focus: Option<WindowHandle>,
 }
@@ -220,13 +209,13 @@ impl HubThread {
 fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd: WindowHandle) {
     let mut hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
     let mut registry = Registry::new();
-    let mut last_focus: Option<Focus> = None;
 
-    let frame = build_frame(&hub, &registry, &config, last_focus);
-    last_focus = hub.get_workspace(hub.current_workspace()).focused();
+    let frame = build_frame(&hub, &registry, &config, None, hub.current_workspace());
     send_frame(frame, &main_hwnd);
 
     while let Ok(event) = rx.recv() {
+        let last_focus = hub.get_workspace(hub.current_workspace()).focused();
+        let last_workspace = hub.current_workspace();
         match event {
             HubEvent::Shutdown => break,
             HubEvent::ConfigReloaded(new_config) => {
@@ -270,7 +259,6 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                     hub.set_float_focus(id);
                     tracing::info!("Float window focused");
                 }
-                last_focus = hub.get_workspace(hub.current_workspace()).focused();
             }
             // TODO: update float window position in hub instead of re-rendering
             HubEvent::WindowMovedOrResized(_) => {}
@@ -297,8 +285,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 execute_actions(&mut hub, &mut registry, &actions, &main_hwnd);
             }
         }
-        let frame = build_frame(&hub, &registry, &config, last_focus);
-        last_focus = hub.get_workspace(hub.current_workspace()).focused();
+        let frame = build_frame(&hub, &registry, &config, last_focus, last_workspace);
         send_frame(frame, &main_hwnd);
     }
 }
@@ -377,9 +364,36 @@ fn build_frame(
     registry: &Registry,
     config: &Config,
     last_focus: Option<Focus>,
+    last_workspace: WorkspaceId,
 ) -> Frame {
-    let ws = hub.get_workspace(hub.current_workspace());
+    let current_workspace = hub.current_workspace();
+    let ws = hub.get_workspace(current_workspace);
     let border = config.border_size;
+
+    let mut hide = Vec::new();
+    if current_workspace != last_workspace {
+        let prev_ws = hub.get_workspace(last_workspace);
+        let mut stack: Vec<Child> = prev_ws.root().into_iter().collect();
+        while let Some(child) = stack.pop() {
+            match child {
+                Child::Window(id) => {
+                    if let Some(handle) = registry.get_handle(id) {
+                        hide.push(handle);
+                    }
+                }
+                Child::Container(id) => {
+                    for &c in hub.get_container(id).children() {
+                        stack.push(c);
+                    }
+                }
+            }
+        }
+        for &id in prev_ws.float_windows() {
+            if let Some(handle) = registry.get_float_handle(id) {
+                hide.push(handle);
+            }
+        }
+    }
 
     let mut windows = Vec::new();
     let mut overlays = Vec::new();
@@ -500,6 +514,7 @@ fn build_frame(
 
     Frame {
         windows,
+        hide,
         overlays,
         focus,
     }

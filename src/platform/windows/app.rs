@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::mem::size_of;
 use std::pin::Pin;
 use std::ptr;
@@ -49,7 +48,6 @@ pub(super) struct App {
     bitmap: HGDIOBJ,
     rects: Vec<OverlayRect>,
     taskbar: Taskbar,
-    displayed: HashSet<WindowHandle>,
     screen: Dimension,
     border: f32,
 }
@@ -101,7 +99,6 @@ impl App {
             bitmap,
             rects: Vec::new(),
             taskbar,
-            displayed: HashSet::new(),
             screen,
             border,
         });
@@ -116,21 +113,15 @@ impl App {
     }
 
     fn process_frame(&mut self, cmd: Frame) -> anyhow::Result<()> {
-        let new_displayed: HashSet<WindowHandle> =
-            cmd.windows.iter().map(|(h, _)| h.clone()).collect();
-
-        for handle in self.displayed.difference(&new_displayed) {
+        for handle in &cmd.hide {
             if let Err(e) = set_window_position(handle.hwnd(), &OFFSCREEN) {
                 tracing::trace!("Failed to hide window: {e}");
             }
             self.taskbar.delete_tab(handle.hwnd())?;
         }
 
-        for handle in new_displayed.difference(&self.displayed) {
-            self.taskbar.add_tab(handle.hwnd())?;
-        }
-
         for (handle, dim) in &cmd.windows {
+            self.taskbar.add_tab(handle.hwnd())?;
             let inset = Dimension {
                 x: dim.x + self.border,
                 y: dim.y + self.border,
@@ -139,8 +130,6 @@ impl App {
             };
             set_window_position(handle.hwnd(), &inset)?;
         }
-
-        self.displayed = new_displayed;
 
         if let Some(ref handle) = cmd.focus
             && let Err(e) = focus_window(handle)
