@@ -126,6 +126,7 @@ impl Hub {
         let float_id = self
             .float_windows
             .allocate(FloatWindow::new(self.current, dimension));
+        tracing::debug!("Inserting float window {float_id} with dimension {dimension:?}");
         self.attach_float_to_workspace(self.current, float_id);
         float_id
     }
