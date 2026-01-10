@@ -9,7 +9,7 @@ use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsWindowRule};
 use crate::core::{Child, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId};
 
-use super::window::{get_process_name, get_window_dimension, get_window_title, should_tile};
+use super::window::{get_process_name, get_window_dimension, get_window_title, is_manageable_window, should_tile};
 
 pub(super) const WM_APP_FRAME: u32 = 0x8000;
 
@@ -239,11 +239,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 if registry.contains(&handle) {
                     continue;
                 }
-                if !should_manage(
-                    handle.process(),
-                    handle.title(),
-                    &config.windows.window_rules,
-                ) {
+                if !should_manage(&handle, &config.windows.window_rules) {
                     continue;
                 }
                 insert_window(&mut hub, &mut registry, &handle);
@@ -285,11 +281,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                     continue;
                 }
                 // Some apps have a brief moment where their title is empty
-                if !should_manage(
-                    handle.process(),
-                    handle.title(),
-                    &config.windows.window_rules,
-                ) {
+                if !should_manage(&handle, &config.windows.window_rules) {
                     continue;
                 }
                 insert_window(&mut hub, &mut registry, &handle);
@@ -580,8 +572,9 @@ fn match_rule<'a>(
     None
 }
 
-fn should_manage(process: &str, title: Option<&str>, rules: &[WindowsWindowRule]) -> bool {
-    match_rule(process, title, rules).is_none_or(|r| r.manage)
+fn should_manage(handle: &WindowHandle, rules: &[WindowsWindowRule]) -> bool {
+    is_manageable_window(handle.hwnd())
+        && match_rule(handle.process(), handle.title(), rules).is_none_or(|r| r.manage)
 }
 
 fn pattern_matches(pattern: &str, text: &str) -> bool {

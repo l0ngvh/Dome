@@ -12,7 +12,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::hub::{HubEvent, WindowHandle};
-use super::window::is_manageable_window;
 
 thread_local! {
     static SENDER: OnceCell<Sender<HubEvent>> = const { OnceCell::new() };
@@ -90,18 +89,14 @@ unsafe extern "system" fn event_hook_proc(
             | EVENT_OBJECT_SHOW
             | EVENT_SYSTEM_MINIMIZEEND
             | EVENT_OBJECT_UNCLOAKED => {
-                if is_manageable_window(hwnd) {
-                    sender
-                        .send(HubEvent::WindowCreated(WindowHandle::new(hwnd)))
-                        .ok();
-                }
+                sender
+                    .send(HubEvent::WindowCreated(WindowHandle::new(hwnd)))
+                    .ok();
             }
             EVENT_OBJECT_NAMECHANGE => {
-                if is_manageable_window(hwnd) {
-                    sender
-                        .send(HubEvent::WindowTitleChanged(WindowHandle::new(hwnd)))
-                        .ok();
-                }
+                sender
+                    .send(HubEvent::WindowTitleChanged(WindowHandle::new(hwnd)))
+                    .ok();
             }
             EVENT_OBJECT_DESTROY
             | EVENT_OBJECT_HIDE

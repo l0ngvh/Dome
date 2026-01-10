@@ -32,16 +32,23 @@ where
 }
 
 pub(super) fn is_manageable_window(hwnd: HWND) -> bool {
+    let Some(title) = get_window_title(hwnd) else {
+        tracing::trace!(?hwnd, "not manageable: window has no title");
+        return false;
+    };
+
     if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+        tracing::trace!(?hwnd, title, "not manageable: window is not visible");
         return false;
     }
 
-    // Cloaked windows appear visible but are actually hidden (common for UWP apps like TextInputHost)
     if is_cloaked(hwnd) {
+        tracing::trace!(?hwnd, title, "not manageable: window is cloaked");
         return false;
     }
 
     if unsafe { GetAncestor(hwnd, GA_ROOT) } != hwnd {
+        tracing::trace!(?hwnd, title, "not manageable: window is not root");
         return false;
     }
 
@@ -49,15 +56,17 @@ pub(super) fn is_manageable_window(hwnd: HWND) -> bool {
     let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
 
     if style & WS_CHILD.0 != 0 {
+        tracing::trace!(?hwnd, title, "not manageable: window is a child window");
         return false;
     }
 
-    if ex_style & WS_EX_TOOLWINDOW.0 != 0 || ex_style & WS_EX_NOACTIVATE.0 != 0 {
+    if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+        tracing::trace!(?hwnd, title, "not manageable: window is a tool window");
         return false;
     }
 
-    let title_len = unsafe { GetWindowTextLengthW(hwnd) };
-    if title_len == 0 {
+    if ex_style & WS_EX_NOACTIVATE.0 != 0 {
+        tracing::trace!(?hwnd, title, "not manageable: window has WS_EX_NOACTIVATE");
         return false;
     }
 
