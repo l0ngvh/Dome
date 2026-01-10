@@ -5,9 +5,10 @@ use anyhow::{Result, anyhow};
 use windows::Win32::Foundation::{GetLastError, HWND};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_SHOW,
-    EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART,
-    EVENT_SYSTEM_MOVESIZEEND, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_NAMECHANGE,
+    EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND,
+    EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT,
+    WINEVENT_SKIPOWNPROCESS,
 };
 
 use super::hub::{HubEvent, WindowHandle};
@@ -37,14 +38,14 @@ pub(super) fn install_event_hooks(sender: Sender<HubEvent>) -> Result<EventHooks
     // thousands of irrelevant events between the ranges we care about:
     // - foreground/movesize: 0x0003-0x000B
     // - minimize: 0x0016-0x0017
-    // - object create/hide: 0x8000-0x8005
+    // - object create/hide/namechange: 0x8000-0x800C
     // Using a single range like 0x0003-0x8005 would fire our callback for every
     // event in between, wasting CPU. Worse, if min > max (e.g., 0x8000-0x000B),
     // SetWinEventHook fails with ERROR_INVALID_HOOK_FILTER (1426).
     let ranges = [
         (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MOVESIZEEND),
         (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
-        (EVENT_OBJECT_CREATE, EVENT_OBJECT_HIDE),
+        (EVENT_OBJECT_CREATE, EVENT_OBJECT_NAMECHANGE),
     ];
 
     let flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
@@ -87,6 +88,13 @@ unsafe extern "system" fn event_hook_proc(
                 if is_manageable_window(hwnd) {
                     sender
                         .send(HubEvent::WindowCreated(WindowHandle::new(hwnd)))
+                        .ok();
+                }
+            }
+            EVENT_OBJECT_NAMECHANGE => {
+                if is_manageable_window(hwnd) {
+                    sender
+                        .send(HubEvent::WindowTitleChanged(WindowHandle::new(hwnd)))
                         .ok();
                 }
             }

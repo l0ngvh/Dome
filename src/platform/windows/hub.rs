@@ -85,6 +85,7 @@ pub(super) enum HubEvent {
     WindowCreated(WindowHandle),
     WindowDestroyed(WindowHandle),
     WindowFocused(WindowHandle),
+    WindowTitleChanged(WindowHandle),
     WindowMovedOrResized(WindowHandle),
     Action(Actions),
     ConfigReloaded(Config),
@@ -163,6 +164,15 @@ impl Registry {
         self.tiling.contains_key(&key) || self.float.contains_key(&key)
     }
 
+    fn update_title(&mut self, handle: &WindowHandle) {
+        let key = handle.key();
+        if let Some(&id) = self.tiling.get(&key) {
+            self.tiling_rev.insert(id, handle.clone());
+        } else if let Some(&id) = self.float.get(&key) {
+            self.float_rev.insert(id, handle.clone());
+        }
+    }
+
     fn toggle(&mut self, window_id: WindowId, float_id: FloatWindowId) {
         if let Some(handle) = self.tiling_rev.remove(&window_id) {
             self.tiling.remove(&handle.key());
@@ -225,15 +235,21 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 if registry.contains(&handle) {
                     continue;
                 }
-                if !should_manage(handle.process(), handle.title(), &config.windows.window_rules) {
+                if !should_manage(
+                    handle.process(),
+                    handle.title(),
+                    &config.windows.window_rules,
+                ) {
                     continue;
                 }
                 let id = hub.insert_tiling();
                 registry.insert_tiling(handle.clone(), id);
                 tracing::info!("Window inserted");
-                if let Some(rule) =
-                    match_rule(handle.process(), handle.title(), &config.windows.window_rules)
-                {
+                if let Some(rule) = match_rule(
+                    handle.process(),
+                    handle.title(),
+                    &config.windows.window_rules,
+                ) {
                     execute_actions(&mut hub, &mut registry, &rule.run, &main_hwnd);
                 }
             }
@@ -260,6 +276,31 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
             }
             // TODO: update float window position in hub instead of re-rendering
             HubEvent::WindowMovedOrResized(_) => {}
+            HubEvent::WindowTitleChanged(handle) => {
+                let _span = tracing::info_span!("window_title_changed", %handle).entered();
+                if registry.contains(&handle) {
+                    registry.update_title(&handle);
+                    continue;
+                }
+                // Some apps have a brief moment where their title is empty
+                if !should_manage(
+                    handle.process(),
+                    handle.title(),
+                    &config.windows.window_rules,
+                ) {
+                    continue;
+                }
+                let id = hub.insert_tiling();
+                registry.insert_tiling(handle.clone(), id);
+                tracing::info!("Window inserted after title change");
+                if let Some(rule) = match_rule(
+                    handle.process(),
+                    handle.title(),
+                    &config.windows.window_rules,
+                ) {
+                    execute_actions(&mut hub, &mut registry, &rule.run, &main_hwnd);
+                }
+            }
             HubEvent::Action(actions) => {
                 execute_actions(&mut hub, &mut registry, &actions, &main_hwnd);
             }
