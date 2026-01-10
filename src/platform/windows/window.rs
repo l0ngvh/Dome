@@ -1,3 +1,4 @@
+use crate::core::Dimension;
 use windows::Win32::Foundation::{HWND, LPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
@@ -6,9 +7,9 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetWindowLongW,
+    EnumWindows, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetWindowLongW, GetWindowRect,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_CHILD,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -61,6 +62,34 @@ pub(super) fn is_manageable_window(hwnd: HWND) -> bool {
     }
 
     true
+}
+
+pub(super) fn should_tile(hwnd: HWND) -> bool {
+    let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
+    let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
+
+    // Popup windows without resize border (notifications, tooltips, etc.)
+    if style & WS_POPUP.0 != 0 && style & WS_THICKFRAME.0 == 0 {
+        return false;
+    }
+
+    // Always-on-top windows (notifications, alerts)
+    if ex_style & WS_EX_TOPMOST.0 != 0 {
+        return false;
+    }
+
+    true
+}
+
+pub(super) fn get_window_dimension(hwnd: HWND) -> Dimension {
+    let mut rect = windows::Win32::Foundation::RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut rect).ok() };
+    Dimension {
+        x: rect.left as f32,
+        y: rect.top as f32,
+        width: (rect.right - rect.left) as f32,
+        height: (rect.bottom - rect.top) as f32,
+    }
 }
 
 fn is_cloaked(hwnd: HWND) -> bool {

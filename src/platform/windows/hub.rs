@@ -9,7 +9,7 @@ use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsWindowRule};
 use crate::core::{Child, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId};
 
-use super::window::{get_process_name, get_window_title};
+use super::window::{get_process_name, get_window_dimension, get_window_title, should_tile};
 
 pub(super) const WM_APP_FRAME: u32 = 0x8000;
 
@@ -130,6 +130,11 @@ impl Registry {
         self.tiling_rev.insert(id, handle);
     }
 
+    fn insert_float(&mut self, handle: WindowHandle, id: FloatWindowId) {
+        self.float.insert(handle.key(), id);
+        self.float_rev.insert(id, handle);
+    }
+
     fn remove(&mut self, handle: &WindowHandle) -> Option<WindowType> {
         let key = handle.key();
         if let Some(id) = self.tiling.remove(&key) {
@@ -242,9 +247,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 ) {
                     continue;
                 }
-                let id = hub.insert_tiling();
-                registry.insert_tiling(handle.clone(), id);
-                tracing::info!("Window inserted");
+                insert_window(&mut hub, &mut registry, &handle);
                 if let Some(rule) = match_rule(
                     handle.process(),
                     handle.title(),
@@ -290,9 +293,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 ) {
                     continue;
                 }
-                let id = hub.insert_tiling();
-                registry.insert_tiling(handle.clone(), id);
-                tracing::info!("Window inserted after title change");
+                insert_window(&mut hub, &mut registry, &handle);
                 if let Some(rule) = match_rule(
                     handle.process(),
                     handle.title(),
@@ -308,6 +309,18 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
         let frame = build_frame(&hub, &registry, &config, last_focus);
         last_focus = hub.get_workspace(hub.current_workspace()).focused();
         send_frame(frame, &main_hwnd);
+    }
+}
+
+fn insert_window(hub: &mut Hub, registry: &mut Registry, handle: &WindowHandle) {
+    if should_tile(handle.hwnd()) {
+        let id = hub.insert_tiling();
+        registry.insert_tiling(handle.clone(), id);
+        tracing::info!("Tiling window inserted");
+    } else {
+        let id = hub.insert_float(get_window_dimension(handle.hwnd()));
+        registry.insert_float(handle.clone(), id);
+        tracing::info!("Float window inserted");
     }
 }
 
