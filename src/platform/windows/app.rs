@@ -12,6 +12,7 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory,
     ID2D1DCRenderTarget, ID2D1Factory,
 };
+use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
@@ -24,9 +25,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetForegroundWindow, GetWindowLongPtrW, HWND_TOP, RegisterClassW, SW_SHOWNA, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WM_PAINT, WNDCLASSW, WS_EX_LAYERED,
+    GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HWND_TOP, RegisterClassW, SW_SHOWNA,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WM_PAINT, WNDCLASSW, WS_EX_LAYERED,
     WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
@@ -385,15 +386,46 @@ fn focus_window(handle: &WindowHandle) -> anyhow::Result<()> {
 }
 
 pub(super) fn set_window_position(hwnd: HWND, dim: &Dimension) -> windows::core::Result<()> {
+    let (left, top, right, bottom) = get_invisible_border(hwnd);
+
     unsafe {
         SetWindowPos(
             hwnd,
             None,
-            dim.x as i32,
-            dim.y as i32,
-            dim.width as i32,
-            dim.height as i32,
+            dim.x as i32 - left,
+            dim.y as i32 - top,
+            dim.width as i32 + left + right,
+            dim.height as i32 + top + bottom,
             SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    }
+}
+
+fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
+    unsafe {
+        let mut window_rect = RECT::default();
+        let mut frame_rect = RECT::default();
+
+        if GetWindowRect(hwnd, &mut window_rect).is_err() {
+            return (0, 0, 0, 0);
+        }
+
+        if DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame_rect as *mut _ as *mut _,
+            size_of::<RECT>() as u32,
+        )
+        .is_err()
+        {
+            return (0, 0, 0, 0);
+        }
+
+        (
+            frame_rect.left - window_rect.left,
+            frame_rect.top - window_rect.top,
+            window_rect.right - frame_rect.right,
+            window_rect.bottom - frame_rect.bottom,
         )
     }
 }
