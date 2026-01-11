@@ -520,10 +520,6 @@ fn sync_all_windows(delegate: &'static AppDelegate) {
     for running_app in &running_apps {
         try_register_app(delegate, running_app);
         sync_app_windows(delegate, running_app);
-
-        if running_app.isActive() {
-            sync_focused_window(delegate, running_app);
-        }
     }
 }
 
