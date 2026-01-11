@@ -1,6 +1,6 @@
 mod app;
-mod config_watcher;
 mod hub;
+mod keyboard;
 mod listeners;
 mod objc2_wrapper;
 mod overlay;

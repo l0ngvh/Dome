@@ -20,6 +20,8 @@ pub(super) struct AXWindow {
     app: CFRetained<AXUIElement>,
     pid: i32,
     screen: Dimension,
+    app_name: String,
+    title: Option<String>,
 }
 
 impl AXWindow {
@@ -28,12 +30,16 @@ impl AXWindow {
         app: CFRetained<AXUIElement>,
         pid: i32,
         screen: Dimension,
+        app_name: String,
+        title: Option<String>,
     ) -> Self {
         Self {
             window,
             app,
             pid,
             screen,
+            app_name,
+            title,
         }
     }
 
@@ -47,14 +53,22 @@ impl AXWindow {
         if is_screen_locked() {
             return true;
         }
-        let is_invalid = matches!(
+        let is_deleted = matches!(
             get_attribute::<CFString>(&self.window, &kAXRoleAttribute()),
             Err(AXError::InvalidUIElement)
         );
+        if is_deleted {
+            tracing::trace!(app = %self.app_name, title = ?self.title, "not valid: window is deleted");
+            return false;
+        }
         let is_minimized = get_attribute::<CFBoolean>(&self.window, &kAXMinimizedAttribute())
             .map(|b| b.as_bool())
             .unwrap_or(false);
-        !is_invalid && !is_minimized
+        if is_minimized {
+            tracing::trace!(app = %self.app_name, title = ?self.title, "not valid: window is minimized");
+            return false;
+        }
+        true
     }
 
     #[tracing::instrument(skip(self))]
@@ -63,7 +77,7 @@ impl AXWindow {
             self.set_position(dim.x, dim.y)?;
             self.set_size(dim.width, dim.height)
         })
-        .with_context(|| format!("set_dimension for pid {}", self.pid))
+        .with_context(|| format!("set_dimension for {} {:?}", self.app_name, self.title))
     }
 
     pub(super) fn focus(&self) -> Result<()> {
@@ -74,7 +88,7 @@ impl AXWindow {
             set_attribute_value(&self.app, &kAXFrontmostAttribute(), unsafe {
                 kCFBooleanTrue.unwrap()
             })
-            .with_context(|| format!("focus for pid {}", self.pid))?;
+            .with_context(|| format!("focus for {} {:?}", self.app_name, self.title))?;
         }
         let is_main = get_attribute::<CFBoolean>(&self.window, &kAXMainAttribute())
             .map(|b| b.as_bool())
@@ -83,7 +97,7 @@ impl AXWindow {
             set_attribute_value(&self.window, &kAXMainAttribute(), unsafe {
                 kCFBooleanTrue.unwrap()
             })
-            .with_context(|| format!("focus for pid {}", self.pid))?;
+            .with_context(|| format!("focus for {} {:?}", self.app_name, self.title))?;
         }
         Ok(())
     }
@@ -102,7 +116,7 @@ impl AXWindow {
                 self.screen.y + self.screen.height - 1.0,
             )
         })
-        .with_context(|| format!("hide for pid {}", self.pid))
+        .with_context(|| format!("hide for {} {:?}", self.app_name, self.title))
     }
 
     /// Without this the windows move in a janky way

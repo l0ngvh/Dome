@@ -7,8 +7,8 @@ use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWi
 use windows::Win32::UI::WindowsAndMessaging::{
     EVENT_OBJECT_CLOAKED, EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE,
     EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND,
-    EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND, OBJID_WINDOW,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND,
+    GetForegroundWindow, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
 use super::hub::{HubEvent, WindowHandle};
@@ -107,6 +107,15 @@ unsafe extern "system" fn event_hook_proc(
                     .ok();
             }
             EVENT_SYSTEM_FOREGROUND => {
+                // This can happen when Windows queue an event for an activated application, but by
+                // the time this callback is run the focus have been given to another app. This
+                // will cause a feedback loop where this app try to take focus and succeed, but the
+                // activation event for the other app is already queued. The other app will then
+                // proceed to take focus when the event is processed, but which tries to take focus
+                // and forms the feedback loop.
+                if GetForegroundWindow() != hwnd {
+                    return;
+                }
                 sender
                     .send(HubEvent::WindowFocused(WindowHandle::new(hwnd)))
                     .ok();

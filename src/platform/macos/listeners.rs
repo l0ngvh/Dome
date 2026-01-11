@@ -15,15 +15,11 @@ use objc2_app_kit::{
 };
 use objc2_application_services::{AXObserver, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFAbsoluteTimeGetCurrent, CFArray, CFBoolean, CFDictionary, CFEqual, CFMachPort, CFNumber,
-    CFRetained, CFRunLoop, CFRunLoopTimer, CFRunLoopTimerContext, CFString, CFType, CGPoint,
-    CGSize, kCFAllocatorDefault, kCFRunLoopDefaultMode,
+    CFAbsoluteTimeGetCurrent, CFArray, CFBoolean, CFDictionary, CFEqual, CFNumber, CFRetained,
+    CFRunLoop, CFRunLoopTimer, CFRunLoopTimerContext, CFString, CFType, CGPoint, CGSize,
+    kCFRunLoopDefaultMode,
 };
-use objc2_core_graphics::{
-    CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventTapOptions,
-    CGEventTapPlacement, CGEventTapProxy, CGEventType, CGWindowID, CGWindowListCopyWindowInfo,
-    CGWindowListOption,
-};
+use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
 use objc2_foundation::{
     NSDistributedNotificationCenter, NSNotification, NSOperationQueue, NSString,
 };
@@ -42,8 +38,6 @@ use super::objc2_wrapper::{
     kAXWindowsAttribute,
 };
 use super::window::AXWindow;
-use crate::action::Actions;
-use crate::config::{Keymap, Modifiers};
 use crate::core::Dimension;
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 
@@ -145,36 +139,6 @@ pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
             }),
         );
     }
-}
-
-pub(super) fn listen_to_input_devices(delegate: &'static AppDelegate) -> Result<()> {
-    let run_loop = CFRunLoop::current().unwrap();
-    let event_mask = 1u64 << CGEventType::KeyDown.0;
-    let delegate_ptr = delegate as *const AppDelegate as *mut std::ffi::c_void;
-    let Some(match_port) = (unsafe {
-        CGEvent::tap_create(
-            CGEventTapLocation::SessionEventTap,
-            CGEventTapPlacement::HeadInsertEventTap,
-            CGEventTapOptions::Default,
-            event_mask,
-            Some(event_tap_callback),
-            delegate_ptr,
-        )
-    }) else {
-        return Err(anyhow::anyhow!("Failed to create event tap"));
-    };
-
-    delegate.ivars().event_tap.set(match_port.clone()).unwrap();
-
-    let Some(run_loop_source) =
-        CFMachPort::new_run_loop_source(unsafe { kCFAllocatorDefault }, Some(&match_port), 0)
-    else {
-        return Err(anyhow::anyhow!(
-            "Failed to create match port run loop source"
-        ));
-    };
-    run_loop.add_source(Some(&run_loop_source), unsafe { kCFRunLoopDefaultMode });
-    Ok(())
 }
 
 fn schedule_sync_timer(delegate: &'static AppDelegate) {
@@ -325,16 +289,34 @@ unsafe extern "C-unwind" fn observer_callback(
     tracing::trace!("Received event: {}", (*notification));
 
     if CFEqual(Some(notification), Some(&*kAXWindowCreatedNotification()))
-        || CFEqual(Some(notification), Some(&*kAXUIElementDestroyedNotification()))
-        || CFEqual(Some(notification), Some(&*kAXWindowMiniaturizedNotification()))
-        || CFEqual(Some(notification), Some(&*kAXWindowDeminiaturizedNotification()))
-        || CFEqual(Some(notification), Some(&*kAXApplicationHiddenNotification()))
-        || CFEqual(Some(notification), Some(&*kAXApplicationShownNotification()))
+        || CFEqual(
+            Some(notification),
+            Some(&*kAXUIElementDestroyedNotification()),
+        )
+        || CFEqual(
+            Some(notification),
+            Some(&*kAXWindowMiniaturizedNotification()),
+        )
+        || CFEqual(
+            Some(notification),
+            Some(&*kAXWindowDeminiaturizedNotification()),
+        )
+        || CFEqual(
+            Some(notification),
+            Some(&*kAXApplicationHiddenNotification()),
+        )
+        || CFEqual(
+            Some(notification),
+            Some(&*kAXApplicationShownNotification()),
+        )
     {
         handle_window_event(delegate, element);
         return;
     }
-    if CFEqual(Some(notification), Some(&*kAXFocusedWindowChangedNotification())) {
+    if CFEqual(
+        Some(notification),
+        Some(&*kAXFocusedWindowChangedNotification()),
+    ) {
         handle_window_focused(delegate, element);
         return;
     }
@@ -488,11 +470,24 @@ fn sync_app_windows(delegate: &AppDelegate, app: &NSRunningApplication) {
             .map(|t| t.to_string())
             .ok();
 
-        if !is_manageable(&ax_window, &ax_app, title.as_deref()) {
+        if !is_manageable(
+            &ax_window,
+            &ax_app,
+            title.as_deref(),
+            &app_name,
+            bundle_id.as_deref(),
+        ) {
             continue;
         }
 
-        let ax_win = AXWindow::new(ax_window.clone(), ax_app.clone(), pid, screen);
+        let ax_win = AXWindow::new(
+            ax_window.clone(),
+            ax_app.clone(),
+            pid,
+            screen,
+            app_name.clone(),
+            title.clone(),
+        );
         ax_registry.insert(cg_id, ax_win);
 
         let info = WindowInfo {
@@ -539,106 +534,6 @@ fn sync_all_windows(delegate: &'static AppDelegate) {
         try_register_app(delegate, running_app);
         sync_app_windows(delegate, running_app);
     }
-}
-
-unsafe extern "C-unwind" fn event_tap_callback(
-    _proxy: CGEventTapProxy,
-    event_type: CGEventType,
-    event: NonNull<CGEvent>,
-    refcon: *mut std::ffi::c_void,
-) -> *mut CGEvent {
-    // Safety: AppDelegate lives until the end of the app
-    let delegate: &'static AppDelegate = unsafe { &*(refcon as *const AppDelegate) };
-    let event = event.as_ptr();
-
-    if event_type == CGEventType::TapDisabledByTimeout
-        || event_type == CGEventType::TapDisabledByUserInput
-    {
-        if let Some(tap) = delegate.ivars().event_tap.get() {
-            tracing::debug!("Event tap disabled, re-enabling");
-            CGEvent::tap_enable(tap, true);
-        }
-    } else if event_type == CGEventType::KeyDown {
-        if handle_keyboard(delegate, event) {
-            return std::ptr::null_mut();
-        }
-    } else {
-        tracing::warn!("Unrecognized event type: {:?}", event_type);
-    }
-
-    event
-}
-
-fn handle_keyboard(delegate: &'static AppDelegate, event: *mut CGEvent) -> bool {
-    let flags = CGEvent::flags(Some(unsafe { &*event }));
-    let key = get_key_from_event(event);
-
-    let mut modifiers = Modifiers::empty();
-    if flags.contains(CGEventFlags::MaskCommand) {
-        modifiers |= Modifiers::CMD;
-    }
-    if flags.contains(CGEventFlags::MaskShift) {
-        modifiers |= Modifiers::SHIFT;
-    }
-    if flags.contains(CGEventFlags::MaskAlternate) {
-        modifiers |= Modifiers::ALT;
-    }
-    if flags.contains(CGEventFlags::MaskControl) {
-        modifiers |= Modifiers::CTRL;
-    }
-
-    let keymap = Keymap { key, modifiers };
-    let actions = delegate.ivars().config.borrow().get_actions(&keymap);
-
-    if actions.is_empty() {
-        return false;
-    }
-
-    // Event tap is disabled while locked.
-    // If we receive hotkeys event, it must be unlocked
-    if delegate.ivars().is_suspended.get() {
-        tracing::info!("Received keymap action, resuming window management");
-        delegate.ivars().is_suspended.set(false);
-    }
-
-    handle_actions(delegate, &actions);
-    true
-}
-
-pub(super) fn handle_actions(delegate: &AppDelegate, actions: &Actions) {
-    delegate.send_event(HubEvent::Action(actions.clone()));
-}
-
-fn get_key_from_event(event: *mut CGEvent) -> String {
-    let keycode =
-        CGEvent::integer_value_field(Some(unsafe { &*event }), CGEventField::KeyboardEventKeycode);
-
-    match keycode {
-        0x24 => return "return".to_string(),
-        0x4C => return "enter".to_string(),
-        0x33 => return "backspace".to_string(),
-        0x35 => return "escape".to_string(),
-        0x30 => return "tab".to_string(),
-        0x31 => return "space".to_string(),
-        0x7E => return "up".to_string(),
-        0x7D => return "down".to_string(),
-        0x7B => return "left".to_string(),
-        0x7C => return "right".to_string(),
-        _ => {}
-    }
-
-    let max_len: usize = 256;
-    let mut buffer: Vec<u16> = vec![0; max_len];
-    let mut actual_len: std::ffi::c_ulong = 0;
-    unsafe {
-        CGEvent::keyboard_get_unicode_string(
-            Some(&*event),
-            max_len as std::ffi::c_ulong,
-            &mut actual_len as *mut std::ffi::c_ulong,
-            buffer.as_mut_ptr(),
-        )
-    };
-    String::from_utf16(&buffer[..actual_len as usize]).unwrap()
 }
 
 fn get_windows(app: &AXUIElement) -> anyhow::Result<CFRetained<CFArray<AXUIElement>>> {
@@ -711,41 +606,106 @@ fn get_ax_dimension(window: &AXUIElement) -> Dimension {
     }
 }
 
-fn is_manageable(window: &AXUIElement, app: &AXUIElement, title: Option<&str>) -> bool {
-    let role = get_attribute::<CFString>(window, &kAXRoleAttribute()).ok();
-    let subrole = get_attribute::<CFString>(window, &kAXSubroleAttribute()).ok();
+fn is_manageable(
+    window: &AXUIElement,
+    app: &AXUIElement,
+    title: Option<&str>,
+    app_name: &str,
+    bundle_id: Option<&str>,
+) -> bool {
+    let Some(title) = title else {
+        tracing::trace!(app_name, bundle_id, "not manageable: window has no title");
+        return false;
+    };
 
+    let role = get_attribute::<CFString>(window, &kAXRoleAttribute()).ok();
     let is_window = role
         .as_ref()
         .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
         .unwrap_or(false);
+    if !is_window {
+        tracing::trace!(
+            app_name,
+            bundle_id,
+            title,
+            "not manageable: role is not AXWindow"
+        );
+        return false;
+    }
 
+    let subrole = get_attribute::<CFString>(window, &kAXSubroleAttribute()).ok();
     let is_standard = subrole
         .as_ref()
         .map(|sr| CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole())))
         .unwrap_or(false);
+    if !is_standard {
+        tracing::trace!(
+            app_name,
+            bundle_id,
+            title,
+            "not manageable: subrole is not AXStandardWindow"
+        );
+        return false;
+    }
 
     let is_root = match get_attribute::<AXUIElement>(window, &kAXParentAttribute()) {
         Err(_) => true,
         Ok(parent) => CFEqual(Some(&*parent), Some(app)),
     };
+    if !is_root {
+        tracing::trace!(
+            app_name,
+            bundle_id,
+            title,
+            "not manageable: window is not root"
+        );
+        return false;
+    }
 
-    let can_move = is_attribute_settable(window, &kAXPositionAttribute());
-    let can_resize = is_attribute_settable(window, &kAXSizeAttribute());
-    let can_focus = is_attribute_settable(window, &kAXMainAttribute());
+    if !is_attribute_settable(window, &kAXPositionAttribute()) {
+        tracing::trace!(
+            app_name,
+            bundle_id,
+            title,
+            "not manageable: position is not settable"
+        );
+        return false;
+    }
+
+    if !is_attribute_settable(window, &kAXSizeAttribute()) {
+        tracing::trace!(
+            app_name,
+            bundle_id,
+            title,
+            "not manageable: size is not settable"
+        );
+        return false;
+    }
+
+    if !is_attribute_settable(window, &kAXMainAttribute()) {
+        tracing::trace!(
+            app_name,
+            bundle_id,
+            title,
+            "not manageable: main attribute is not settable"
+        );
+        return false;
+    }
 
     let is_minimized = get_attribute::<CFBoolean>(window, &kAXMinimizedAttribute())
         .map(|b| b.as_bool())
         .unwrap_or(false);
+    if is_minimized {
+        tracing::trace!(
+            app_name,
+            bundle_id,
+            title,
+            "not manageable: window is minimized"
+        );
+        return false;
+    }
 
-    is_window
-        && is_standard
-        && is_root
-        && can_move
-        && can_resize
-        && can_focus
-        && !is_minimized
-        && title.is_some()
+    true
 }
 
 fn list_cg_window_ids() -> HashSet<CGWindowID> {

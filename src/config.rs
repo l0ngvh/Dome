@@ -446,3 +446,35 @@ impl Config {
         self.keymaps.get(keymap).cloned().unwrap_or_default()
     }
 }
+
+pub(crate) fn start_config_watcher(
+    config_path: &str,
+    on_change: impl Fn(Config) + Send + 'static,
+) -> anyhow::Result<notify::RecommendedWatcher> {
+    use notify::{Watcher, event::ModifyKind};
+    use std::path::Path;
+
+    let path = Path::new(config_path).canonicalize()?;
+    let Some(watch_dir) = path.parent().map(|p| p.to_owned()) else {
+        anyhow::bail!("no parent dir");
+    };
+
+    let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
+        if let Ok(event) = res
+            && matches!(event.kind, notify::EventKind::Modify(ModifyKind::Data(_)))
+            && event.paths.iter().any(|p| p == &path)
+        {
+            match Config::load(path.to_str().unwrap()) {
+                Ok(new_config) => {
+                    tracing::info!("Config reloaded");
+                    on_change(new_config);
+                }
+                Err(e) => tracing::warn!("Failed to reload config: {e}"),
+            }
+        }
+    })?;
+
+    watcher.watch(&watch_dir, notify::RecursiveMode::NonRecursive)?;
+    tracing::info!(path = config_path, "Config watcher started");
+    Ok(watcher)
+}

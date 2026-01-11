@@ -1,5 +1,4 @@
 mod app;
-mod config_watcher;
 mod event_listener;
 mod hub;
 mod keyboard;
@@ -20,7 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::BOOL;
 
-use crate::config::Config;
+use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
 use app::App;
@@ -28,8 +27,6 @@ use event_listener::install_event_hooks;
 use hub::{HubEvent, HubThread, WindowHandle};
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use window::{Taskbar, enum_windows, is_manageable_window};
-
-use config_watcher::start_config_watcher;
 
 pub fn run_app(config_path: Option<String>) -> Result<()> {
     unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).ok() };
@@ -49,19 +46,30 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     let screen = get_primary_screen()?;
     let taskbar = Taskbar::new()?;
 
-    let app = App::new(taskbar, screen, config.border_size)?;
+    let app = App::new(taskbar, screen)?;
 
-    let hub_thread = HubThread::spawn(config, screen, WindowHandle::new(app.hwnd()));
+    let hub_thread = HubThread::spawn(config.clone(), screen, WindowHandle::new(app.hwnd()));
     let sender = hub_thread.sender();
 
-    let keyboard_hook = install_keyboard_hook(sender.clone())?;
+    let keyboard_hook = install_keyboard_hook(sender.clone(), config)?;
     let _event_hooks = install_event_hooks(sender.clone())?;
 
-    let tx = sender.clone();
-    ipc::start_server(move |actions| {
-        tx.send(HubEvent::Action(actions)).ok();
+    ipc::start_server({
+        let tx = sender.clone();
+        move |actions| {
+            tx.send(HubEvent::Action(actions)).ok();
+        }
     });
-    start_config_watcher(config_path, sender.clone());
+
+    let _config_watcher = start_config_watcher(&config_path, {
+        let tx = sender.clone();
+        move |cfg| {
+            keyboard::update_config(cfg.clone());
+            tx.send(HubEvent::ConfigChanged(cfg)).ok();
+        }
+    })
+    .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
+    .ok();
 
     if let Err(e) = enum_windows(|hwnd| {
         if is_manageable_window(hwnd) {

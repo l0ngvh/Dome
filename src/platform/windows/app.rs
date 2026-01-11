@@ -46,17 +46,14 @@ pub(super) struct App {
     dc_target: ID2D1DCRenderTarget,
     mem_dc: HDC,
     bitmap: HGDIOBJ,
-    rects: Vec<OverlayRect>,
     taskbar: Taskbar,
     screen: Dimension,
-    border: f32,
 }
 
 impl App {
     pub(super) fn new(
         taskbar: Taskbar,
         screen: Dimension,
-        border: f32,
     ) -> windows::core::Result<Pin<Box<Self>>> {
         let class_name = windows::core::w!("DomeApp");
         let hinstance = unsafe { GetModuleHandleW(None)? };
@@ -97,10 +94,8 @@ impl App {
             dc_target,
             mem_dc,
             bitmap,
-            rects: Vec::new(),
             taskbar,
             screen,
-            border,
         });
 
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &*app as *const _ as isize) };
@@ -122,13 +117,7 @@ impl App {
 
         for (handle, dim) in &cmd.windows {
             self.taskbar.add_tab(handle.hwnd())?;
-            let inset = Dimension {
-                x: dim.x + self.border,
-                y: dim.y + self.border,
-                width: dim.width - 2.0 * self.border,
-                height: dim.height - 2.0 * self.border,
-            };
-            set_window_position(handle.hwnd(), &inset)?;
+            set_window_position(handle.hwnd(), dim)?;
         }
 
         if let Some(ref handle) = cmd.focus
@@ -141,8 +130,7 @@ impl App {
     }
 
     fn set_overlays(&mut self, rects: Vec<OverlayRect>) -> anyhow::Result<()> {
-        self.rects = rects;
-        self.render()?;
+        self.render(&rects)?;
         let _ = unsafe { ShowWindow(self.hwnd, SW_SHOWNA) };
         unsafe {
             SetWindowPos(
@@ -158,7 +146,7 @@ impl App {
         Ok(())
     }
 
-    fn render(&self) -> anyhow::Result<()> {
+    fn render(&self, rects: &[OverlayRect]) -> anyhow::Result<()> {
         let width = self.screen.width as i32;
         let height = self.screen.height as i32;
 
@@ -179,7 +167,7 @@ impl App {
                 a: 0.0,
             }));
 
-            for rect in &self.rects {
+            for rect in rects {
                 let brush = self.dc_target.CreateSolidColorBrush(
                     &D2D1_COLOR_F {
                         r: rect.color.r * rect.color.a, // premultiply

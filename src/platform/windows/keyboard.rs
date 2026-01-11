@@ -1,5 +1,4 @@
-use std::cell::OnceCell;
-use std::sync::mpsc::Sender;
+use std::sync::{OnceLock, RwLock, mpsc::Sender};
 
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -15,17 +14,28 @@ use crate::config::{Config, Keymap, Modifiers};
 
 struct KeyboardState {
     sender: Sender<HubEvent>,
+    config: RwLock<Config>,
+}
+
+static STATE: OnceLock<KeyboardState> = OnceLock::new();
+
+pub(super) fn install_keyboard_hook(
+    sender: Sender<HubEvent>,
     config: Config,
-}
-
-thread_local! {
-    static STATE: OnceCell<KeyboardState> = const { OnceCell::new() };
-}
-
-pub(super) fn install_keyboard_hook(sender: Sender<HubEvent>) -> windows::core::Result<HHOOK> {
-    let config = Config::default();
-    STATE.with(|s| s.set(KeyboardState { sender, config }).ok());
+) -> windows::core::Result<HHOOK> {
+    STATE
+        .set(KeyboardState {
+            sender,
+            config: RwLock::new(config),
+        })
+        .ok();
     unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0) }
+}
+
+pub(super) fn update_config(config: Config) {
+    if let Some(state) = STATE.get() {
+        *state.config.write().unwrap() = config;
+    }
 }
 
 pub(super) fn uninstall_keyboard_hook(hook: HHOOK) {
@@ -41,26 +51,18 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             let kb_struct = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
             let vk = VIRTUAL_KEY(kb_struct.vkCode as u16);
 
-            if let Some(keymap) = build_keymap(vk) {
-                let handled = STATE.with(|s| {
-                    let state = s.get().unwrap();
-                    let actions = state.config.get_actions(&keymap);
-                    if actions.is_empty() {
-                        return false;
-                    }
+            if let Some(actions) = get_actions(vk) {
+                if let Some(state) = STATE.get() {
                     state.sender.send(HubEvent::Action(actions)).ok();
-                    true
-                });
-                if handled {
-                    return LRESULT(1);
                 }
+                return LRESULT(1);
             }
         }
     }
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
-fn build_keymap(vk: VIRTUAL_KEY) -> Option<Keymap> {
+fn get_actions(vk: VIRTUAL_KEY) -> Option<crate::action::Actions> {
     if matches!(
         vk,
         VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN | VK_LMENU | VK_RMENU
@@ -83,7 +85,16 @@ fn build_keymap(vk: VIRTUAL_KEY) -> Option<Keymap> {
     }
 
     let key = vk_to_string(vk)?;
-    Some(Keymap { key, modifiers })
+    let keymap = Keymap { key, modifiers };
+
+    let state = STATE.get()?;
+    let config = state.config.read().ok()?;
+    let actions = config.get_actions(&keymap);
+    if actions.is_empty() {
+        None
+    } else {
+        Some(actions)
+    }
 }
 
 fn is_key_pressed(vk: VIRTUAL_KEY) -> bool {

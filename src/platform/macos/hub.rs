@@ -26,7 +26,7 @@ pub(super) enum HubEvent {
     WindowFocused(CGWindowID),
     TitleChanged { cg_id: CGWindowID, title: String },
     Action(Actions),
-    ConfigReloaded(Config),
+    ConfigChanged(Config),
     Shutdown,
 }
 
@@ -60,67 +60,43 @@ impl Frame {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum WindowType {
     Tiling(WindowId),
     Float(FloatWindowId),
 }
 
 struct WindowEntry {
-    title: Option<String>,
+    info: WindowInfo,
     window_type: WindowType,
 }
 
 struct HubRegistry {
     windows: HashMap<CGWindowID, WindowEntry>,
-    tiling_to_cg: HashMap<WindowId, CGWindowID>,
-    float_to_cg: HashMap<FloatWindowId, CGWindowID>,
+    type_to_cg: HashMap<WindowType, CGWindowID>,
 }
 
 impl HubRegistry {
     fn new() -> Self {
         Self {
             windows: HashMap::new(),
-            tiling_to_cg: HashMap::new(),
-            float_to_cg: HashMap::new(),
+            type_to_cg: HashMap::new(),
         }
     }
 
     fn insert(&mut self, cg_id: CGWindowID, entry: WindowEntry) {
-        match entry.window_type {
-            WindowType::Tiling(id) => {
-                self.tiling_to_cg.insert(id, cg_id);
-            }
-            WindowType::Float(id) => {
-                self.float_to_cg.insert(id, cg_id);
-            }
-        }
+        self.type_to_cg.insert(entry.window_type, cg_id);
         self.windows.insert(cg_id, entry);
     }
 
     fn remove(&mut self, cg_id: CGWindowID) -> Option<WindowType> {
         let entry = self.windows.remove(&cg_id)?;
-        match entry.window_type {
-            WindowType::Tiling(id) => {
-                self.tiling_to_cg.remove(&id);
-            }
-            WindowType::Float(id) => {
-                self.float_to_cg.remove(&id);
-            }
-        }
+        self.type_to_cg.remove(&entry.window_type);
         Some(entry.window_type)
     }
 
-    fn get(&self, cg_id: CGWindowID) -> Option<WindowType> {
-        self.windows.get(&cg_id).map(|e| e.window_type)
-    }
-
-    fn get_cg_id(&self, window_id: WindowId) -> Option<CGWindowID> {
-        self.tiling_to_cg.get(&window_id).copied()
-    }
-
-    fn get_float_cg_id(&self, float_id: FloatWindowId) -> Option<CGWindowID> {
-        self.float_to_cg.get(&float_id).copied()
+    fn get_cg_id(&self, window_type: WindowType) -> Option<CGWindowID> {
+        self.type_to_cg.get(&window_type).copied()
     }
 
     fn contains(&self, cg_id: CGWindowID) -> bool {
@@ -129,29 +105,31 @@ impl HubRegistry {
 
     fn update_title(&mut self, cg_id: CGWindowID, title: String) {
         if let Some(entry) = self.windows.get_mut(&cg_id) {
-            entry.title = Some(title);
+            entry.info.title = Some(title);
         }
     }
 
     fn toggle_float(&mut self, window_id: WindowId, float_id: FloatWindowId) {
-        if let Some(cg_id) = self.tiling_to_cg.remove(&window_id) {
-            self.float_to_cg.insert(float_id, cg_id);
+        let tiling = WindowType::Tiling(window_id);
+        let float = WindowType::Float(float_id);
+        if let Some(cg_id) = self.type_to_cg.remove(&tiling) {
+            self.type_to_cg.insert(float, cg_id);
             if let Some(entry) = self.windows.get_mut(&cg_id) {
-                entry.window_type = WindowType::Float(float_id);
+                entry.window_type = float;
             }
-        } else if let Some(cg_id) = self.float_to_cg.remove(&float_id) {
-            self.tiling_to_cg.insert(window_id, cg_id);
+        } else if let Some(cg_id) = self.type_to_cg.remove(&float) {
+            self.type_to_cg.insert(tiling, cg_id);
             if let Some(entry) = self.windows.get_mut(&cg_id) {
-                entry.window_type = WindowType::Tiling(window_id);
+                entry.window_type = tiling;
             }
         }
     }
 
     fn get_title(&self, window_id: WindowId) -> Option<&str> {
-        self.tiling_to_cg
-            .get(&window_id)
+        self.type_to_cg
+            .get(&WindowType::Tiling(window_id))
             .and_then(|cg_id| self.windows.get(cg_id))
-            .and_then(|e| e.title.as_deref())
+            .and_then(|e| e.info.title.as_deref())
     }
 }
 
@@ -224,7 +202,7 @@ fn run(
 
         match event {
             HubEvent::Shutdown => break,
-            HubEvent::ConfigReloaded(new_config) => {
+            HubEvent::ConfigChanged(new_config) => {
                 hub.sync_config(new_config.tab_bar_height, new_config.automatic_tiling);
                 config = new_config;
                 tracing::info!("Config reloaded");
@@ -244,24 +222,21 @@ fn run(
                 } else {
                     WindowType::Float(hub.insert_float(info.dimension))
                 };
-                registry.insert(
-                    info.cg_id,
-                    WindowEntry {
-                        title: info.title.clone(),
-                        window_type,
-                    },
-                );
+                let cg_id = info.cg_id;
+                registry.insert(cg_id, WindowEntry { info, window_type });
                 tracing::info!("Window inserted");
 
-                if let Some(rule) = match_rule(&info, &config.macos.window_rules)
+                let info = &registry.windows.get(&cg_id).unwrap().info;
+                if let Some(rule) = match_rule(info, &config.macos.window_rules)
                     && execute_actions(&mut hub, &mut registry, &rule.run)
                 {
                     break;
                 }
             }
             HubEvent::WindowDestroyed(cg_id) => {
-                let _span = tracing::info_span!("window_destroyed", cg_id).entered();
-                if let Some(wt) = registry.remove(cg_id) {
+                if let Some(entry) = registry.windows.get(&cg_id) {
+                    let _span = tracing::info_span!("window_destroyed", app = %entry.info.app_name, title = ?entry.info.title).entered();
+                    let wt = registry.remove(cg_id).unwrap();
                     match wt {
                         WindowType::Tiling(id) => hub.delete_window(id),
                         WindowType::Float(id) => hub.delete_float(id),
@@ -270,9 +245,9 @@ fn run(
                 }
             }
             HubEvent::WindowFocused(cg_id) => {
-                let _span = tracing::info_span!("window_focused", cg_id).entered();
-                if let Some(wt) = registry.get(cg_id) {
-                    match wt {
+                if let Some(entry) = registry.windows.get(&cg_id) {
+                    let _span = tracing::info_span!("window_focused", app = %entry.info.app_name, title = ?entry.info.title).entered();
+                    match entry.window_type {
                         WindowType::Tiling(id) => hub.set_focus(id),
                         WindowType::Float(id) => hub.set_float_focus(id),
                     }
@@ -351,7 +326,7 @@ fn get_displayed_windows(hub: &Hub, registry: &HubRegistry) -> Vec<(CGWindowID, 
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(id) => {
-                if let Some(cg_id) = registry.get_cg_id(id) {
+                if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id)) {
                     windows.push((cg_id, hub.get_window(id).dimension()));
                 }
             }
@@ -369,7 +344,7 @@ fn get_displayed_windows(hub: &Hub, registry: &HubRegistry) -> Vec<(CGWindowID, 
     }
 
     for &float_id in ws.float_windows() {
-        if let Some(cg_id) = registry.get_float_cg_id(float_id) {
+        if let Some(cg_id) = registry.get_cg_id(WindowType::Float(float_id)) {
             windows.push((cg_id, hub.get_float(float_id).dimension()));
         }
     }
@@ -481,7 +456,7 @@ fn build_overlays(hub: &Hub, registry: &HubRegistry, config: &Config) -> Overlay
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(id) => {
-                if registry.get_cg_id(id).is_some()
+                if registry.get_cg_id(WindowType::Tiling(id)).is_some()
                     && focused != Some(Focus::Tiling(Child::Window(id)))
                 {
                     let dim = hub.get_window(id).dimension();
@@ -529,7 +504,7 @@ fn build_overlays(hub: &Hub, registry: &HubRegistry, config: &Config) -> Overlay
     }
 
     for &float_id in ws.float_windows() {
-        if registry.get_float_cg_id(float_id).is_some() {
+        if registry.get_cg_id(WindowType::Float(float_id)).is_some() {
             let dim = hub.get_float(float_id).dimension();
             let color = if focused == Some(Focus::Float(float_id)) {
                 config.focused_color
@@ -552,14 +527,19 @@ fn build_frame(
 ) -> Frame {
     let ws = hub.get_workspace(hub.current_workspace());
     let focused = ws.focused();
+    let border = config.border_size;
 
     let windows = get_displayed_windows(hub, registry);
+    let windows: Vec<_> = windows
+        .into_iter()
+        .map(|(cg_id, dim)| (cg_id, apply_inset(dim, border)))
+        .collect();
     let overlays = build_overlays(hub, registry, config);
 
     let focus = if focused != last_focus {
         match focused {
-            Some(Focus::Tiling(Child::Window(id))) => registry.get_cg_id(id),
-            Some(Focus::Float(id)) => registry.get_float_cg_id(id),
+            Some(Focus::Tiling(Child::Window(id))) => registry.get_cg_id(WindowType::Tiling(id)),
+            Some(Focus::Float(id)) => registry.get_cg_id(WindowType::Float(id)),
             _ => None,
         }
     } else {
@@ -595,6 +575,15 @@ fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
 // Windows uses top-left origin, so no flip needed there.
 fn flip_y(screen: Dimension, y: f32, height: f32) -> f32 {
     screen.y + screen.height - y - height
+}
+
+fn apply_inset(dim: Dimension, border: f32) -> Dimension {
+    Dimension {
+        x: dim.x + border,
+        y: dim.y + border,
+        width: dim.width - 2.0 * border,
+        height: dim.height - 2.0 * border,
+    }
 }
 
 // colors: [top, bottom, left, right]

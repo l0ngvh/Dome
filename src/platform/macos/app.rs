@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, RwLock};
 
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
@@ -13,19 +14,19 @@ use objc2_application_services::{
     AXIsProcessTrustedWithOptions, AXObserver, kAXTrustedCheckOptionPrompt,
 };
 use objc2_core_foundation::{
-    CFDictionary, CFFileDescriptor, CFMachPort, CFRetained, CFRunLoop, CFRunLoopSource,
-    CFRunLoopSourceContext, CFRunLoopTimer, kCFBooleanTrue, kCFRunLoopDefaultMode,
+    CFDictionary, CFMachPort, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext,
+    CFRunLoopTimer, kCFBooleanTrue, kCFRunLoopDefaultMode,
 };
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
-use super::config_watcher::setup_config_watcher;
 use super::hub::{Frame, HubEvent, HubMessage, HubThread};
-use super::listeners::{ThrottleState, listen_to_input_devices, setup_app_observers};
+use super::keyboard;
+use super::listeners::{ThrottleState, setup_app_observers};
 use super::overlay::{OverlayView, create_overlay_window};
-use crate::config::Config;
+use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
 use crate::platform::macos::window::AXRegistry;
@@ -50,11 +51,59 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
-    let delegate = AppDelegate::new(mtm, config, config_path);
-    app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+    let (event_tx, event_rx) = mpsc::channel();
+    let (frame_tx, frame_rx) = mpsc::channel();
 
+    let hub_config = config.clone();
+    let config = Arc::new(RwLock::new(config));
+
+    let _config_watcher = start_config_watcher(&config_path, {
+        let config = config.clone();
+        let tx = event_tx.clone();
+        move |cfg| {
+            *config.write().unwrap() = cfg.clone();
+            tx.send(HubEvent::ConfigChanged(cfg)).ok();
+        }
+    })
+    .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
+    .ok();
+
+    ipc::start_server({
+        let tx = event_tx.clone();
+        move |actions| {
+            tx.send(HubEvent::Action(actions)).ok();
+        }
+    });
+    let screen = get_main_screen(mtm);
+
+    let delegate = AppDelegate::new(mtm, screen, config, event_tx, frame_rx);
+    let source = create_frame_source(&delegate);
+
+    let main_run_loop = CFRunLoop::main().unwrap();
+    main_run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
+
+    let hub_thread = HubThread::spawn(hub_config, screen, event_rx, frame_tx, source, main_run_loop);
+
+    app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     app.run();
+    hub_thread.join();
     Ok(())
+}
+
+fn create_frame_source(delegate: &Retained<AppDelegate>) -> CFRetained<CFRunLoopSource> {
+    let mut context = CFRunLoopSourceContext {
+        version: 0,
+        info: Retained::as_ptr(delegate) as *mut c_void,
+        retain: None,
+        release: None,
+        copyDescription: None,
+        equal: None,
+        hash: None,
+        schedule: None,
+        cancel: None,
+        perform: Some(frame_callback),
+    };
+    unsafe { CFRunLoopSource::new(None, 0, &mut context).unwrap() }
 }
 
 fn init_tracing(config: &Config) {
@@ -75,22 +124,18 @@ fn init_tracing(config: &Config) {
 }
 
 pub(super) struct AppDelegateIvars {
-    pub(super) config: RefCell<Config>,
-    pub(super) config_path: String,
     pub(super) screen: Dimension,
-    pub(super) border_size: Cell<f32>,
+    pub(super) config: Arc<RwLock<Config>>,
     pub(super) ax_registry: RefCell<AXRegistry>,
     pub(super) throttle: RefCell<ThrottleState>,
     /// References to all observers to prevent them from being dropped
     pub(super) observers: Observers,
-    pub(super) hub_thread: RefCell<Option<HubThread>>,
-    pub(super) hub_sender: OnceCell<Sender<HubEvent>>,
-    pub(super) frame_rx: OnceCell<Receiver<HubMessage>>,
+    pub(super) hub_sender: Sender<HubEvent>,
+    pub(super) frame_rx: Receiver<HubMessage>,
     /// Reference to overlay window to prevent it from being dropped
     pub(super) overlay_window: OnceCell<Retained<NSWindow>>,
     pub(super) overlay: OnceCell<Retained<OverlayView>>,
     pub(super) event_tap: OnceCell<CFRetained<CFMachPort>>,
-    pub(super) config_fd: OnceCell<CFRetained<CFFileDescriptor>>,
     pub(super) sync_timer: OnceCell<CFRetained<CFRunLoopTimer>>,
     /// To suspend on sleep/screen lock to save battery
     /// Not reliable to detect whether screen is locked for other purposes as screen sleep/lock
@@ -127,46 +172,8 @@ define_class!(
             let _ = delegate.ivars().overlay_window.set(overlay_window);
             let _ = delegate.ivars().overlay.set(overlay);
 
-            let (event_tx, event_rx) = mpsc::channel();
-            let (frame_tx, frame_rx) = mpsc::channel();
-
-            let tx = event_tx.clone();
-            ipc::start_server(move |actions| {
-                tx.send(HubEvent::Action(actions)).ok();
-            });
-
-            let delegate_ptr = delegate as *const AppDelegate as *mut c_void;
-            let mut context = CFRunLoopSourceContext {
-                version: 0,
-                info: delegate_ptr,
-                retain: None,
-                release: None,
-                copyDescription: None,
-                equal: None,
-                hash: None,
-                schedule: None,
-                cancel: None,
-                perform: Some(frame_callback),
-            };
-
-            let source = unsafe { CFRunLoopSource::new(None, 0, &mut context).unwrap() };
-            let main_run_loop = CFRunLoop::current().unwrap();
-            main_run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
-
-            let config = delegate.ivars().config.borrow().clone();
-            let hub_thread =
-                HubThread::spawn(config, screen, event_rx, frame_tx, source, main_run_loop);
-
-            let _ = delegate.ivars().hub_thread.borrow_mut().replace(hub_thread);
-            let _ = delegate.ivars().hub_sender.set(event_tx);
-            let _ = delegate.ivars().frame_rx.set(frame_rx);
-
-            if let Err(e) = listen_to_input_devices(delegate) {
-                tracing::error!("Failed to setup keyboard listener: {e:#}");
-            }
-
-            if let Err(e) = setup_config_watcher(delegate) {
-                tracing::warn!("Failed to setup config watcher: {e:#}");
+            if let Err(e) = keyboard::listen_to_input_devices(delegate) {
+                tracing::error!("Failed to listen to input devices: {e:#}");
             }
 
             setup_app_observers(delegate);
@@ -177,37 +184,30 @@ define_class!(
             if let Some(timer) = self.ivars().sync_timer.get() {
                 CFRunLoopTimer::invalidate(timer);
             }
-
-            if let Some(sender) = self.ivars().hub_sender.get() {
-                let _ = sender.send(HubEvent::Shutdown);
-            }
-
-            if let Some(handle) = self.ivars().hub_thread.borrow_mut().take() {
-                handle.join();
-            }
+            let _ = self.ivars().hub_sender.send(HubEvent::Shutdown);
         }
     }
 );
 
 impl AppDelegate {
-    fn new(mtm: MainThreadMarker, config: Config, config_path: String) -> Retained<Self> {
-        let screen = get_main_screen(mtm);
-        let border_size = config.border_size;
+    fn new(
+        mtm: MainThreadMarker,
+        screen: Dimension,
+        config: Arc<RwLock<Config>>,
+        hub_sender: Sender<HubEvent>,
+        frame_rx: Receiver<HubMessage>,
+    ) -> Retained<Self> {
         let ivars = AppDelegateIvars {
-            config: RefCell::new(config),
-            config_path,
             screen,
-            border_size: Cell::new(border_size),
+            config,
             ax_registry: RefCell::new(AXRegistry::new()),
             throttle: RefCell::new(ThrottleState::new()),
             observers: Rc::new(RefCell::new(HashMap::new())),
-            hub_thread: RefCell::new(None),
-            hub_sender: OnceCell::new(),
-            frame_rx: OnceCell::new(),
+            hub_sender,
+            frame_rx,
             overlay_window: OnceCell::new(),
             overlay: OnceCell::new(),
             event_tap: OnceCell::new(),
-            config_fd: OnceCell::new(),
             sync_timer: OnceCell::new(),
             is_suspended: Cell::new(false),
         };
@@ -216,9 +216,7 @@ impl AppDelegate {
     }
 
     pub(super) fn send_event(&self, event: HubEvent) {
-        if let Some(sender) = self.ivars().hub_sender.get()
-            && sender.send(event).is_err()
-        {
+        if self.ivars().hub_sender.send(event).is_err() {
             tracing::error!("Hub thread died, shutting down");
             let mtm = MainThreadMarker::new().unwrap();
             NSApplication::sharedApplication(mtm).terminate(None);
@@ -228,11 +226,8 @@ impl AppDelegate {
 
 unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     let delegate: &'static AppDelegate = unsafe { &*(info as *const AppDelegate) };
-    let Some(frame_rx) = delegate.ivars().frame_rx.get() else {
-        return;
-    };
 
-    while let Ok(msg) = frame_rx.try_recv() {
+    while let Ok(msg) = delegate.ivars().frame_rx.try_recv() {
         match msg {
             HubMessage::Frame(frame) => {
                 if let Err(e) = process_frame(delegate, &frame) {
@@ -250,7 +245,6 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
 
 fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
     let ax_registry = delegate.ivars().ax_registry.borrow();
-    let border = delegate.ivars().border_size.get();
     let overlay = delegate.ivars().overlay.get().unwrap();
 
     for &cg_id in frame.hide() {
@@ -263,13 +257,7 @@ fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
 
     for &(cg_id, dim) in frame.windows() {
         if let Some(ax_window) = ax_registry.get(cg_id) {
-            let inset = Dimension {
-                x: dim.x + border,
-                y: dim.y + border,
-                width: dim.width - 2.0 * border,
-                height: dim.height - 2.0 * border,
-            };
-            if let Err(e) = ax_window.set_dimension(inset) {
+            if let Err(e) = ax_window.set_dimension(dim) {
                 tracing::trace!("Failed to set dimension: {e:#}");
             }
         }

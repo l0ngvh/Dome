@@ -76,7 +76,7 @@ pub(super) enum HubEvent {
     WindowTitleChanged(WindowHandle),
     WindowMovedOrResized(WindowHandle),
     Action(Actions),
-    ConfigReloaded(Config),
+    ConfigChanged(Config),
     Shutdown,
 }
 
@@ -218,7 +218,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
         let last_workspace = hub.current_workspace();
         match event {
             HubEvent::Shutdown => break,
-            HubEvent::ConfigReloaded(new_config) => {
+            HubEvent::ConfigChanged(new_config) => {
                 hub.sync_config(new_config.tab_bar_height, new_config.automatic_tiling);
                 config = new_config;
                 tracing::info!("Config reloaded");
@@ -405,7 +405,8 @@ fn build_frame(
             Child::Window(id) => {
                 if let Some(handle) = registry.get_handle(id) {
                     let dim = hub.get_window(id).dimension();
-                    windows.push((handle, dim));
+                    let inset = apply_inset(dim, border);
+                    windows.push((handle, inset));
                     if focused != Some(Focus::Tiling(Child::Window(id))) {
                         overlays.extend(border_rects(dim, border, [config.border_color; 4]));
                     }
@@ -492,7 +493,8 @@ fn build_frame(
     for &id in ws.float_windows() {
         if let Some(handle) = registry.get_float_handle(id) {
             let dim = hub.get_float(id).dimension();
-            windows.push((handle, dim));
+            let inset = apply_inset(dim, border);
+            windows.push((handle, inset));
             let color = if focused == Some(Focus::Float(id)) {
                 config.focused_color
             } else {
@@ -529,6 +531,15 @@ fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
         f,
         if spawn.is_horizontal() { s } else { f },
     ]
+}
+
+fn apply_inset(dim: Dimension, border: f32) -> Dimension {
+    Dimension {
+        x: dim.x + border,
+        y: dim.y + border,
+        width: dim.width - 2.0 * border,
+        height: dim.height - 2.0 * border,
+    }
 }
 
 fn border_rects(dim: Dimension, border: f32, colors: [Color; 4]) -> [OverlayRect; 4] {
