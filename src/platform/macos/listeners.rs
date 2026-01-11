@@ -247,6 +247,15 @@ fn handle_app_activated(delegate: &'static AppDelegate, notification: &NSNotific
         return;
     }
 
+    // This can happen when Mac queue an event for an activated application, but by the time this
+    // callback is run the focus have been given to another app. This will cause a feedback loop
+    // where this app try to take focus and succeed, but the activation event for the other app is
+    // already queued. The other app will then proceed to take focus when the event is processed,
+    // but which tries to take focus and forms the feedback loop.
+    if !app.isActive() {
+        return;
+    }
+
     let app_name = app.localizedName().map(|n| n.to_string());
     tracing::debug!(app = ?app_name, "App activated");
     sync_app_windows(delegate, &app);
