@@ -1,11 +1,11 @@
 use std::io::Write;
-#[cfg(target_os = "macos")]
-use std::os::unix::net::UnixStream;
 use std::process::{Child, Command};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
+
+use dome::DomeClient;
 
 fn spawn_server(config_path: &str) -> Child {
     Command::new(env!("CARGO_BIN_EXE_dome"))
@@ -14,47 +14,11 @@ fn spawn_server(config_path: &str) -> Child {
         .expect("failed to start server")
 }
 
-#[cfg(target_os = "macos")]
 fn wait_for_server(timeout: Duration) -> bool {
-    let socket = std::env::temp_dir().join("dome.sock");
+    let client = DomeClient::default();
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
-        if UnixStream::connect(&socket).is_ok() {
-            return true;
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    false
-}
-
-#[cfg(target_os = "windows")]
-fn wait_for_server(timeout: Duration) -> bool {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
-    use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE};
-    use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_NONE, OPEN_EXISTING};
-    use windows::core::PCWSTR;
-
-    let name: Vec<u16> = OsStr::new(r"\\.\pipe\dome")
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
-
-    let start = std::time::Instant::now();
-    while start.elapsed() < timeout {
-        let result = unsafe {
-            CreateFileW(
-                PCWSTR(name.as_ptr()),
-                (GENERIC_READ | GENERIC_WRITE).0,
-                FILE_SHARE_NONE,
-                None,
-                OPEN_EXISTING,
-                Default::default(),
-                None,
-            )
-        };
-        if let Ok(pipe) = result {
-            let _ = unsafe { CloseHandle(pipe) };
+        if client.ping() {
             return true;
         }
         thread::sleep(Duration::from_millis(50));

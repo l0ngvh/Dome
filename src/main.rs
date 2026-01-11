@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use dome::{Action, run_app};
+use dome::{Action, DomeClient, run_app};
 
 #[derive(Parser)]
 #[command(name = "dome", about = "A cross-platform tiling window manager")]
@@ -25,7 +25,7 @@ fn main() -> anyhow::Result<()> {
         None => run_app(None)?,
         Some(Command::Launch { config }) => run_app(config)?,
         Some(Command::Action(action)) => {
-            dome::send_action(&action)?;
+            DomeClient::default().send_action(&action)?;
         }
     }
     Ok(())

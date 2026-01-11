@@ -16,6 +16,7 @@ csscolorparser = { version = "0.8.1", features = ["serde"] }
 clap = { version = "4.5.53", features = ["derive"] }
 serde_json = "1.0.148"
 regex = "1.12.2"
+interprocess = "2.2.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"

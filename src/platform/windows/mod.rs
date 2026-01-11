@@ -2,7 +2,6 @@ mod app;
 mod config_watcher;
 mod event_listener;
 mod hub;
-mod ipc;
 mod keyboard;
 mod window;
 
@@ -23,16 +22,14 @@ use windows::core::BOOL;
 
 use crate::config::Config;
 use crate::core::Dimension;
+use crate::ipc;
 use app::App;
 use event_listener::install_event_hooks;
 use hub::{HubEvent, HubThread, WindowHandle};
-use ipc::start_server;
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use window::{Taskbar, enum_windows, is_manageable_window};
 
 use config_watcher::start_config_watcher;
-
-pub use ipc::send_action;
 
 pub fn run_app(config_path: Option<String>) -> Result<()> {
     unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).ok() };
@@ -60,7 +57,10 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     let keyboard_hook = install_keyboard_hook(sender.clone())?;
     let _event_hooks = install_event_hooks(sender.clone())?;
 
-    start_server(sender.clone());
+    let tx = sender.clone();
+    ipc::start_server(move |actions| {
+        tx.send(HubEvent::Action(actions)).ok();
+    });
     start_config_watcher(config_path, sender.clone());
 
     if let Err(e) = enum_windows(|hwnd| {

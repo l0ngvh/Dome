@@ -1,7 +1,6 @@
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::os::unix::net::UnixListener;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
 
@@ -24,11 +23,11 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
 use super::config_watcher::setup_config_watcher;
 use super::hub::{Frame, HubEvent, HubMessage, HubThread};
-use super::ipc;
 use super::listeners::{ThrottleState, listen_to_input_devices, setup_app_observers};
 use super::overlay::{OverlayView, create_overlay_window};
 use crate::config::Config;
 use crate::core::Dimension;
+use crate::ipc;
 use crate::platform::macos::window::AXRegistry;
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
@@ -91,7 +90,6 @@ pub(super) struct AppDelegateIvars {
     pub(super) overlay_window: OnceCell<Retained<NSWindow>>,
     pub(super) overlay: OnceCell<Retained<OverlayView>>,
     pub(super) event_tap: OnceCell<CFRetained<CFMachPort>>,
-    pub(super) listener: OnceCell<UnixListener>,
     pub(super) config_fd: OnceCell<CFRetained<CFFileDescriptor>>,
     pub(super) sync_timer: OnceCell<CFRetained<CFRunLoopTimer>>,
     /// To suspend on sleep/screen lock to save battery
@@ -112,18 +110,8 @@ define_class!(
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
             tracing::info!("Application did finish launching");
-            // Safety: AppDelegate lives until the end of the app
             let delegate: &'static AppDelegate = unsafe { std::mem::transmute(self) };
             let mtm = self.mtm();
-
-            let listener = match ipc::try_bind() {
-                Ok(l) => l,
-                Err(e) => {
-                    tracing::error!("{e}");
-                    NSApplication::sharedApplication(mtm).terminate(None);
-                    return;
-                }
-            };
 
             let screen = delegate.ivars().screen;
             let frame = NSRect::new(
@@ -136,12 +124,16 @@ define_class!(
             overlay_window.setContentView(Some(&overlay));
             overlay_window.makeKeyAndOrderFront(None);
 
-            let _ = delegate.ivars().listener.set(listener);
             let _ = delegate.ivars().overlay_window.set(overlay_window);
             let _ = delegate.ivars().overlay.set(overlay);
 
             let (event_tx, event_rx) = mpsc::channel();
             let (frame_tx, frame_rx) = mpsc::channel();
+
+            let tx = event_tx.clone();
+            ipc::start_server(move |actions| {
+                tx.send(HubEvent::Action(actions)).ok();
+            });
 
             let delegate_ptr = delegate as *const AppDelegate as *mut c_void;
             let mut context = CFRunLoopSourceContext {
@@ -168,10 +160,6 @@ define_class!(
             let _ = delegate.ivars().hub_thread.borrow_mut().replace(hub_thread);
             let _ = delegate.ivars().hub_sender.set(event_tx);
             let _ = delegate.ivars().frame_rx.set(frame_rx);
-
-            if let Err(e) = ipc::register_with_runloop(delegate) {
-                tracing::error!("Failed to setup IPC: {e:#}");
-            }
 
             if let Err(e) = listen_to_input_devices(delegate) {
                 tracing::error!("Failed to setup keyboard listener: {e:#}");
@@ -219,7 +207,6 @@ impl AppDelegate {
             overlay_window: OnceCell::new(),
             overlay: OnceCell::new(),
             event_tap: OnceCell::new(),
-            listener: OnceCell::new(),
             config_fd: OnceCell::new(),
             sync_timer: OnceCell::new(),
             is_suspended: Cell::new(false),
