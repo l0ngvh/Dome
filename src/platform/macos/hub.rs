@@ -30,6 +30,11 @@ pub(super) enum HubEvent {
     Shutdown,
 }
 
+pub(super) enum HubMessage {
+    Frame(Frame),
+    Shutdown,
+}
+
 pub(super) struct Frame {
     windows: Vec<(CGWindowID, Dimension)>,
     hide: Vec<CGWindowID>,
@@ -166,7 +171,7 @@ impl HubThread {
         config: Config,
         screen: Dimension,
         event_rx: Receiver<HubEvent>,
-        frame_tx: Sender<Frame>,
+        frame_tx: Sender<HubMessage>,
         source: CFRetained<CFRunLoopSource>,
         main_run_loop: CFRetained<CFRunLoop>,
     ) -> Self {
@@ -186,7 +191,7 @@ fn run(
     mut config: Config,
     screen: Dimension,
     rx: Receiver<HubEvent>,
-    frame_tx: Sender<Frame>,
+    frame_tx: Sender<HubMessage>,
     source: SendableSource,
     main_run_loop: SendableRunLoop,
 ) {
@@ -194,7 +199,14 @@ fn run(
     let mut registry = HubRegistry::new();
 
     let send_frame = |frame: Frame| {
-        if frame_tx.send(frame).is_ok() {
+        if frame_tx.send(HubMessage::Frame(frame)).is_ok() {
+            source.0.signal();
+            main_run_loop.0.wake_up();
+        }
+    };
+
+    let send_shutdown = || {
+        if frame_tx.send(HubMessage::Shutdown).is_ok() {
             source.0.signal();
             main_run_loop.0.wake_up();
         }
@@ -219,7 +231,7 @@ fn run(
             }
             HubEvent::WindowCreated(info) => {
                 let _span =
-                    tracing::info_span!("window_created", cg_id = info.cg_id, app = %info.app_name)
+                    tracing::info_span!("window_created", cg_id = info.cg_id, app = %info.app_name, title = ?info.title)
                         .entered();
                 if registry.contains(info.cg_id) {
                     continue;
@@ -270,7 +282,9 @@ fn run(
                 registry.update_title(cg_id, title);
             }
             HubEvent::Action(actions) => {
+                tracing::debug!(%actions, "Executing actions");
                 if execute_actions(&mut hub, &mut registry, &actions) {
+                    tracing::debug!("Exiting hub thread");
                     break;
                 }
             }
@@ -279,8 +293,11 @@ fn run(
         let frame = build_frame(&hub, &registry, &config, last_focus, previous_displayed);
         send_frame(frame);
     }
+
+    send_shutdown();
 }
 
+#[tracing::instrument(skip(hub, registry))]
 fn execute_actions(hub: &mut Hub, registry: &mut HubRegistry, actions: &Actions) -> bool {
     for action in actions {
         match action {

@@ -1,6 +1,5 @@
 mod app;
 mod config_watcher;
-mod context;
 mod hub;
 mod ipc;
 mod listeners;

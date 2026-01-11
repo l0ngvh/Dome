@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::collections::hash_map::Entry;
+use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
@@ -8,7 +8,7 @@ use block2::RcBlock;
 use objc2::DefinedClass;
 use objc2::rc::Retained;
 use objc2_app_kit::{
-    NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace,
+    NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
     NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
     NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceScreensDidSleepNotification,
     NSWorkspaceWillSleepNotification,
@@ -29,10 +29,9 @@ use objc2_foundation::{
 };
 
 use super::app::AppDelegate;
-use super::context::AXRegistry;
 use super::hub::{HubEvent, WindowInfo};
 use super::objc2_wrapper::{
-    add_observer_notification, create_observer, get_attribute, get_cg_window_id,
+    add_observer_notification, create_observer, get_attribute, get_cg_window_id, get_pid,
     is_attribute_settable, kAXApplicationHiddenNotification, kAXApplicationShownNotification,
     kAXFocusedWindowAttribute, kAXFocusedWindowChangedNotification, kAXFullScreenAttribute,
     kAXMainAttribute, kAXMinimizedAttribute, kAXMovedNotification, kAXParentAttribute,
@@ -48,10 +47,12 @@ use crate::config::{Keymap, Modifiers};
 use crate::core::Dimension;
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 
-const THROTTLE_DURATION: Duration = Duration::from_millis(20);
+const FRAME_THROTTLE: Duration = Duration::from_millis(16);
+const SYNC_INTERVAL: Duration = Duration::from_secs(5);
 
 pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
     sync_all_windows(delegate);
+    schedule_sync_timer(delegate);
 
     let notification_center = NSWorkspace::sharedWorkspace().notificationCenter();
 
@@ -60,8 +61,8 @@ pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
             Some(NSWorkspaceDidLaunchApplicationNotification),
             None,
             Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |_: NonNull<NSNotification>| {
-                sync_all_windows(delegate);
+            &RcBlock::new(move |notification: NonNull<NSNotification>| {
+                handle_app_launched(delegate, notification.as_ref());
             }),
         );
     }
@@ -71,8 +72,8 @@ pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
             Some(NSWorkspaceDidTerminateApplicationNotification),
             None,
             Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |_: NonNull<NSNotification>| {
-                sync_all_windows(delegate);
+            &RcBlock::new(move |notification: NonNull<NSNotification>| {
+                handle_app_terminated(delegate, notification.as_ref());
             }),
         );
     }
@@ -82,8 +83,8 @@ pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
             Some(NSWorkspaceDidActivateApplicationNotification),
             None,
             Some(&NSOperationQueue::mainQueue()),
-            &RcBlock::new(move |_: NonNull<NSNotification>| {
-                sync_all_windows(delegate);
+            &RcBlock::new(move |notification: NonNull<NSNotification>| {
+                handle_app_activated(delegate, notification.as_ref());
             }),
         );
     }
@@ -176,42 +177,211 @@ pub(super) fn listen_to_input_devices(delegate: &'static AppDelegate) -> Result<
     Ok(())
 }
 
-#[tracing::instrument(skip_all)]
-unsafe extern "C-unwind" fn observer_callback(
-    _observer: NonNull<AXObserver>,
-    _element: NonNull<AXUIElement>,
-    notification: NonNull<CFString>,
-    refcon: *mut std::ffi::c_void,
-) {
-    // Safety: AppDelegate lives until the end of the app
-    let delegate: &'static AppDelegate = unsafe { &*(refcon as *const AppDelegate) };
-    let ivars = delegate.ivars();
+fn schedule_sync_timer(delegate: &'static AppDelegate) {
+    let delegate_ptr = delegate as *const AppDelegate as *mut c_void;
+    let mut context = CFRunLoopTimerContext {
+        version: 0,
+        info: delegate_ptr,
+        retain: None,
+        release: None,
+        copyDescription: None,
+    };
+    let timer = unsafe {
+        CFRunLoopTimer::new(
+            None,
+            CFAbsoluteTimeGetCurrent() + SYNC_INTERVAL.as_secs_f64(),
+            SYNC_INTERVAL.as_secs_f64(),
+            0,
+            0,
+            Some(sync_timer_callback),
+            &mut context,
+        )
+    };
+    if let Some(timer) = timer {
+        CFRunLoop::current()
+            .unwrap()
+            .add_timer(Some(&timer), unsafe { kCFRunLoopDefaultMode });
+        let _ = delegate.ivars().sync_timer.set(timer);
+    }
+}
 
-    if ivars.is_suspended.get() {
+unsafe extern "C-unwind" fn sync_timer_callback(_timer: *mut CFRunLoopTimer, info: *mut c_void) {
+    let delegate: &'static AppDelegate = unsafe { &*(info as *const AppDelegate) };
+    sync_all_windows(delegate);
+}
+
+fn handle_app_launched(delegate: &'static AppDelegate, notification: &NSNotification) {
+    let Some(app) = get_app_from_notification(notification) else {
+        return;
+    };
+    let app_name = app.localizedName().map(|n| n.to_string());
+    tracing::debug!(app = ?app_name, "App launched");
+    try_register_app(delegate, &app);
+    sync_app_windows(delegate, &app);
+}
+
+fn handle_app_terminated(delegate: &'static AppDelegate, notification: &NSNotification) {
+    let Some(app) = get_app_from_notification(notification) else {
+        return;
+    };
+    let pid = app.processIdentifier();
+    tracing::debug!(%pid, "App terminated");
+    remove_terminated_app(delegate, pid);
+}
+
+fn remove_terminated_app(delegate: &AppDelegate, pid: i32) {
+    delegate.ivars().observers.borrow_mut().remove(&pid);
+    for cg_id in delegate.ivars().ax_registry.borrow_mut().remove_by_pid(pid) {
+        delegate.send_event(HubEvent::WindowDestroyed(cg_id));
+    }
+}
+
+fn handle_app_activated(delegate: &'static AppDelegate, notification: &NSNotification) {
+    if delegate.ivars().is_suspended.get() {
+        return;
+    }
+    let Some(app) = get_app_from_notification(notification) else {
+        return;
+    };
+    if app.activationPolicy() != NSApplicationActivationPolicy::Regular {
         return;
     }
 
-    let notification = unsafe { CFRetained::retain(notification) };
+    let app_name = app.localizedName().map(|n| n.to_string());
+    tracing::debug!(app = ?app_name, "App activated");
+    sync_app_windows(delegate, &app);
+    sync_focused_window(delegate, &app);
+}
+
+fn get_app_from_notification(
+    notification: &NSNotification,
+) -> Option<Retained<NSRunningApplication>> {
+    let user_info = notification.userInfo()?;
+    let app = unsafe { user_info.objectForKey(NSWorkspaceApplicationKey)? };
+    Some(unsafe { Retained::cast_unchecked(app) })
+}
+
+fn try_register_app(delegate: &'static AppDelegate, app: &NSRunningApplication) {
+    let pid = app.processIdentifier();
+    if pid == -1 || app.activationPolicy() != NSApplicationActivationPolicy::Regular {
+        return;
+    }
+
+    let mut observers = delegate.ivars().observers.borrow_mut();
+    if observers.contains_key(&pid) {
+        return;
+    }
+
+    let app_name = app
+        .localizedName()
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    match register_app(pid, delegate) {
+        Ok(observer) => {
+            tracing::info!(%pid, %app_name, "Registered app");
+            observers.insert(pid, observer);
+        }
+        Err(err) => {
+            tracing::warn!(%pid, %app_name, "Can't register app: {err:#}");
+        }
+    }
+}
+
+fn sync_focused_window(delegate: &AppDelegate, app: &NSRunningApplication) {
+    let pid = app.processIdentifier();
+    let ax_app = unsafe { AXUIElement::new_application(pid) };
+    if let Ok(focused) = get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute())
+        && let Some(cg_id) = get_cg_window_id(&focused)
+        && delegate.ivars().ax_registry.borrow().contains(cg_id)
+    {
+        delegate.send_event(HubEvent::WindowFocused(cg_id));
+    }
+}
+
+#[tracing::instrument(skip_all)]
+unsafe extern "C-unwind" fn observer_callback(
+    _observer: NonNull<AXObserver>,
+    element: NonNull<AXUIElement>,
+    notification: NonNull<CFString>,
+    refcon: *mut std::ffi::c_void,
+) {
+    let delegate: &'static AppDelegate = unsafe { &*(refcon as *const AppDelegate) };
+    if delegate.ivars().is_suspended.get() {
+        return;
+    }
+
+    let notification = unsafe { notification.as_ref() };
+    let element = unsafe { element.as_ref() };
     tracing::trace!("Received event: {}", (*notification));
 
-    let now = Instant::now();
-    let mut throttle = ivars.throttle.borrow_mut();
-    let should_execute = throttle
-        .last_execution
-        .map(|last| now.duration_since(last) >= THROTTLE_DURATION)
-        .unwrap_or(true);
+    if CFEqual(Some(notification), Some(&*kAXWindowCreatedNotification()))
+        || CFEqual(Some(notification), Some(&*kAXUIElementDestroyedNotification()))
+        || CFEqual(Some(notification), Some(&*kAXWindowMiniaturizedNotification()))
+        || CFEqual(Some(notification), Some(&*kAXWindowDeminiaturizedNotification()))
+    {
+        handle_window_event(delegate, element);
+        return;
+    }
+    if CFEqual(Some(notification), Some(&*kAXFocusedWindowChangedNotification())) {
+        handle_window_focused(delegate, element);
+        return;
+    }
 
-    if should_execute {
-        throttle.reset();
-        drop(throttle);
-        // AX notifications are unreliable, when new windows are being rapidly created and deleted,
-        // macOS may decide skip sending notifications.
-        // So we are basically polling as much as possible to keep the state in sync
-        // https://github.com/nikitabobko/AeroSpace/issues/445
-        sync_all_windows(delegate);
-    } else if throttle.timer.is_none() {
-        drop(throttle);
-        schedule_throttle_timer(delegate, THROTTLE_DURATION);
+    let should_throttle = CFEqual(Some(notification), Some(&*kAXMovedNotification()))
+        || CFEqual(Some(notification), Some(&*kAXResizedNotification()))
+        || CFEqual(Some(notification), Some(&*kAXTitleChangedNotification()));
+
+    if should_throttle {
+        let now = Instant::now();
+        let mut throttle = delegate.ivars().throttle.borrow_mut();
+        let should_execute = throttle
+            .last_execution
+            .map(|last| now.duration_since(last) >= FRAME_THROTTLE)
+            .unwrap_or(true);
+
+        if should_execute {
+            throttle.reset();
+            drop(throttle);
+            handle_frame_event(delegate, notification, element);
+        } else if throttle.timer.is_none() {
+            drop(throttle);
+            schedule_throttle_timer(delegate, FRAME_THROTTLE);
+        }
+    }
+}
+
+fn handle_window_event(delegate: &AppDelegate, element: &AXUIElement) {
+    let Ok(pid) = get_pid(element) else {
+        return;
+    };
+    if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
+        sync_app_windows(delegate, &app);
+    }
+}
+
+fn handle_window_focused(delegate: &AppDelegate, element: &AXUIElement) {
+    let Ok(pid) = get_pid(element) else {
+        return;
+    };
+    if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
+        sync_app_windows(delegate, &app);
+        sync_focused_window(delegate, &app);
+    }
+}
+
+fn handle_frame_event(delegate: &AppDelegate, notification: &CFString, element: &AXUIElement) {
+    let Some(cg_id) = get_cg_window_id(element) else {
+        return;
+    };
+
+    if CFEqual(Some(&**notification), Some(&*kAXTitleChangedNotification()))
+        && let Ok(title) = get_attribute::<CFString>(element, &kAXTitleAttribute())
+    {
+        delegate.send_event(HubEvent::TitleChanged {
+            cg_id,
+            title: title.to_string(),
+        });
     }
 }
 
@@ -260,111 +430,99 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
     }
 
     throttle.last_execution = Some(Instant::now());
-    drop(throttle);
-
-    sync_all_windows(delegate);
 }
 
-#[tracing::instrument(skip_all)]
+fn sync_app_windows(delegate: &AppDelegate, app: &NSRunningApplication) {
+    let pid = app.processIdentifier();
+    let ax_app = unsafe { AXUIElement::new_application(pid) };
+    let Ok(windows) = get_windows(&ax_app) else {
+        return;
+    };
+
+    let screen = delegate.ivars().screen;
+    let cg_window_ids = list_cg_window_ids();
+    let mut ax_registry = delegate.ivars().ax_registry.borrow_mut();
+
+    let tracked_cg_ids = ax_registry.cg_ids_for_pid(pid);
+    for cg_id in tracked_cg_ids {
+        if cg_window_ids.contains(&cg_id) && ax_registry.is_valid(cg_id) {
+            continue;
+        }
+        ax_registry.remove(cg_id);
+        delegate.send_event(HubEvent::WindowDestroyed(cg_id));
+    }
+
+    let app_name = app
+        .localizedName()
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "Unknown".to_string());
+    let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
+
+    for ax_window in windows {
+        let Some(cg_id) = get_cg_window_id(&ax_window) else {
+            continue;
+        };
+        if ax_registry.contains(cg_id) {
+            continue;
+        }
+
+        let title = get_attribute::<CFString>(&ax_window, &kAXTitleAttribute())
+            .map(|t| t.to_string())
+            .ok();
+
+        if !is_manageable(&ax_window, &ax_app, title.as_deref()) {
+            continue;
+        }
+
+        let ax_win = AXWindow::new(ax_window.clone(), ax_app.clone(), pid, screen);
+        ax_registry.insert(cg_id, ax_win);
+
+        let info = WindowInfo {
+            cg_id,
+            title,
+            app_name: app_name.clone(),
+            bundle_id: bundle_id.clone(),
+            should_tile: should_tile(&ax_window),
+            dimension: get_ax_dimension(&ax_window),
+        };
+        delegate.send_event(HubEvent::WindowCreated(info));
+    }
+}
+
+// AX notifications are unreliable, when new windows are being rapidly created and deleted,
+// macOS may decide skip sending notifications.
+// So we poll periodically to keep the state in sync.
+// https://github.com/nikitabobko/AeroSpace/issues/445
 fn sync_all_windows(delegate: &'static AppDelegate) {
     if delegate.ivars().is_suspended.get() {
         return;
     }
+    tracing::trace!("Periodic sync every {}s", SYNC_INTERVAL.as_secs());
 
-    let mut observers = delegate.ivars().observers.borrow_mut();
-    let mut ax_registry = delegate.ivars().ax_registry.borrow_mut();
-    let screen = delegate.ivars().screen;
-    let cg_window_ids = list_cg_window_ids();
     let running_apps: Vec<_> = running_apps().collect();
-
     let running: HashSet<i32> = running_apps
         .iter()
         .map(|app| app.processIdentifier())
         .collect();
 
-    // Remove terminated apps
-    let terminated_pids: Vec<_> = observers
+    let terminated_pids: Vec<_> = delegate
+        .ivars()
+        .observers
+        .borrow()
         .keys()
         .filter(|pid| !running.contains(pid))
         .copied()
         .collect();
     for pid in terminated_pids {
-        observers.remove(&pid);
-        for cg_id in ax_registry.remove_by_pid(pid) {
-            delegate.send_event(HubEvent::WindowDestroyed(cg_id));
-        }
+        remove_terminated_app(delegate, pid);
     }
 
-    for running_app in running_apps {
-        let pid = running_app.processIdentifier();
+    for running_app in &running_apps {
+        try_register_app(delegate, running_app);
+        sync_app_windows(delegate, running_app);
 
-        if let Entry::Vacant(e) = observers.entry(pid) {
-            let app_name = get_app_name(pid);
-            match register_app(pid, delegate) {
-                Ok(observer) => {
-                    tracing::info!(%pid, %app_name, "Registered app");
-                    e.insert(observer);
-                }
-                Err(err) => {
-                    tracing::warn!(%pid, %app_name, "Can't register app: {err:#}");
-                }
-            }
-        }
-
-        let ax_app = unsafe { AXUIElement::new_application(pid) };
-        let Ok(windows) = get_windows(&ax_app) else {
-            continue;
-        };
-
-        let tracked_cg_ids = ax_registry.cg_ids_for_pid(pid);
-        for cg_id in tracked_cg_ids {
-            if cg_window_ids.contains(&cg_id) && ax_registry.is_valid(cg_id) {
-                if let Some(ax_window) = ax_registry.get(cg_id) {
-                    if let Some(new_title) = ax_window.title() {
-                        delegate.send_event(HubEvent::TitleChanged {
-                            cg_id,
-                            title: new_title,
-                        });
-                    }
-                }
-                continue;
-            }
-            ax_registry.remove(cg_id);
-            delegate.send_event(HubEvent::WindowDestroyed(cg_id));
-        }
-
-        let app_name = running_app
-            .localizedName()
-            .map(|n| n.to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-        let bundle_id = running_app.bundleIdentifier().map(|b| b.to_string());
-
-        for ax_window in windows {
-            process_new_window(
-                ax_window,
-                ax_app.clone(),
-                pid,
-                &app_name,
-                bundle_id.as_deref(),
-                screen,
-                delegate,
-                &mut ax_registry,
-            );
-        }
-
-        if !running_app.isActive() {
-            continue;
-        }
-        if let Ok(focused) = get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute())
-            && let Some(cg_id) = get_cg_window_id(&focused)
-            && ax_registry.contains(cg_id)
-        {
-            let last_focused = delegate.ivars().last_focused.get();
-            if last_focused == Some((pid, cg_id)) {
-                continue;
-            }
-            delegate.ivars().last_focused.set(Some((pid, cg_id)));
-            delegate.send_event(HubEvent::WindowFocused(cg_id));
+        if running_app.isActive() {
+            sync_focused_window(delegate, running_app);
         }
     }
 }
@@ -469,13 +627,6 @@ fn get_key_from_event(event: *mut CGEvent) -> String {
     String::from_utf16(&buffer[..actual_len as usize]).unwrap()
 }
 
-fn get_app_name(pid: i32) -> String {
-    NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
-        .and_then(|app| app.localizedName())
-        .map(|name| name.to_string())
-        .unwrap_or_else(|| "Unknown".to_string())
-}
-
 fn get_windows(app: &AXUIElement) -> anyhow::Result<CFRetained<CFArray<AXUIElement>>> {
     Ok(get_attribute(app, &kAXWindowsAttribute())?)
 }
@@ -512,45 +663,6 @@ fn running_apps() -> impl Iterator<Item = Retained<NSRunningApplication>> {
         .into_iter()
         .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
         .filter(|app| app.processIdentifier() != -1)
-}
-
-fn process_new_window(
-    ax_window: CFRetained<AXUIElement>,
-    ax_app: CFRetained<AXUIElement>,
-    pid: i32,
-    app_name: &str,
-    bundle_id: Option<&str>,
-    screen: Dimension,
-    delegate: &AppDelegate,
-    ax_registry: &mut AXRegistry,
-) {
-    let Some(cg_id) = get_cg_window_id(&ax_window) else {
-        return;
-    };
-    if ax_registry.contains(cg_id) {
-        return;
-    }
-
-    let title = get_attribute::<CFString>(&ax_window, &kAXTitleAttribute())
-        .map(|t| t.to_string())
-        .ok();
-
-    if !is_manageable(&ax_window, &ax_app, title.as_deref()) {
-        return;
-    }
-
-    let ax_win = AXWindow::new(ax_window.clone(), ax_app.clone(), pid, screen);
-    ax_registry.insert(cg_id, ax_win);
-
-    let info = WindowInfo {
-        cg_id,
-        title,
-        app_name: app_name.to_string(),
-        bundle_id: bundle_id.map(|s| s.to_string()),
-        should_tile: should_tile(&ax_window),
-        dimension: get_ax_dimension(&ax_window),
-    };
-    delegate.send_event(HubEvent::WindowCreated(info));
 }
 
 fn should_tile(window: &AXUIElement) -> bool {
@@ -645,4 +757,25 @@ fn list_cg_window_ids() -> HashSet<CGWindowID> {
         ids.insert(id as CGWindowID);
     }
     ids
+}
+
+pub(super) struct ThrottleState {
+    pub(super) last_execution: Option<Instant>,
+    pub(super) timer: Option<CFRetained<CFRunLoopTimer>>,
+}
+
+impl ThrottleState {
+    pub(super) fn new() -> Self {
+        Self {
+            last_execution: None,
+            timer: None,
+        }
+    }
+
+    fn reset(&mut self) {
+        if let Some(timer) = self.timer.take() {
+            CFRunLoopTimer::invalidate(&timer);
+        }
+        self.last_execution = Some(Instant::now());
+    }
 }

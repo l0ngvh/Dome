@@ -11,25 +11,26 @@ use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSFloatingWindowLevel,
     NSNormalWindowLevel, NSScreen, NSWindow,
 };
-use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
+use objc2_application_services::{
+    AXIsProcessTrustedWithOptions, AXObserver, kAXTrustedCheckOptionPrompt,
+};
 use objc2_core_foundation::{
     CFDictionary, CFFileDescriptor, CFMachPort, CFRetained, CFRunLoop, CFRunLoopSource,
-    CFRunLoopSourceContext, kCFBooleanTrue, kCFRunLoopDefaultMode,
+    CFRunLoopSourceContext, CFRunLoopTimer, kCFBooleanTrue, kCFRunLoopDefaultMode,
 };
-use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
 use super::config_watcher::setup_config_watcher;
-use super::context::{AXRegistry, Observers, ThrottleState};
-use super::hub::{Frame, HubEvent, HubThread};
+use super::hub::{Frame, HubEvent, HubMessage, HubThread};
 use super::ipc;
-use super::listeners::{listen_to_input_devices, setup_app_observers};
+use super::listeners::{ThrottleState, listen_to_input_devices, setup_app_observers};
 use super::overlay::{OverlayView, create_overlay_window};
 use crate::config::Config;
 use crate::core::Dimension;
+use crate::platform::macos::window::AXRegistry;
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -82,22 +83,25 @@ pub(super) struct AppDelegateIvars {
     pub(super) border_size: Cell<f32>,
     pub(super) ax_registry: RefCell<AXRegistry>,
     pub(super) throttle: RefCell<ThrottleState>,
+    /// References to all observers to prevent them from being dropped
     pub(super) observers: Observers,
     pub(super) hub_thread: RefCell<Option<HubThread>>,
     pub(super) hub_sender: OnceCell<Sender<HubEvent>>,
-    pub(super) frame_rx: OnceCell<Receiver<Frame>>,
+    pub(super) frame_rx: OnceCell<Receiver<HubMessage>>,
+    /// Reference to overlay window to prevent it from being dropped
     pub(super) tiling_overlay_window: OnceCell<Retained<NSWindow>>,
     pub(super) tiling_overlay: OnceCell<Retained<OverlayView>>,
+    /// Reference to overlay window to prevent it from being dropped
     pub(super) float_overlay_window: OnceCell<Retained<NSWindow>>,
     pub(super) float_overlay: OnceCell<Retained<OverlayView>>,
     pub(super) event_tap: OnceCell<CFRetained<CFMachPort>>,
     pub(super) listener: OnceCell<UnixListener>,
     pub(super) config_fd: OnceCell<CFRetained<CFFileDescriptor>>,
+    pub(super) sync_timer: OnceCell<CFRetained<CFRunLoopTimer>>,
     /// To suspend on sleep/screen lock to save battery
     /// Not reliable to detect whether screen is locked for other purposes as screen sleep/lock
     /// notification can arrive after screen is locked
     pub(super) is_suspended: Cell<bool>,
-    pub(super) last_focused: Cell<Option<(i32, CGWindowID)>>,
 }
 
 define_class!(
@@ -199,6 +203,10 @@ define_class!(
 
         #[unsafe(method(applicationWillTerminate:))]
         fn will_terminate(&self, _notification: &NSNotification) {
+            if let Some(timer) = self.ivars().sync_timer.get() {
+                CFRunLoopTimer::invalidate(timer);
+            }
+
             if let Some(sender) = self.ivars().hub_sender.get() {
                 let _ = sender.send(HubEvent::Shutdown);
             }
@@ -232,20 +240,20 @@ impl AppDelegate {
             event_tap: OnceCell::new(),
             listener: OnceCell::new(),
             config_fd: OnceCell::new(),
+            sync_timer: OnceCell::new(),
             is_suspended: Cell::new(false),
-            last_focused: Cell::new(None),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
     }
 
     pub(super) fn send_event(&self, event: HubEvent) {
-        if let Some(sender) = self.ivars().hub_sender.get() {
-            if sender.send(event).is_err() {
-                tracing::error!("Hub thread died, shutting down");
-                let mtm = MainThreadMarker::new().unwrap();
-                NSApplication::sharedApplication(mtm).terminate(None);
-            }
+        if let Some(sender) = self.ivars().hub_sender.get()
+            && sender.send(event).is_err()
+        {
+            tracing::error!("Hub thread died, shutting down");
+            let mtm = MainThreadMarker::new().unwrap();
+            NSApplication::sharedApplication(mtm).terminate(None);
         }
     }
 }
@@ -256,9 +264,18 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
         return;
     };
 
-    while let Ok(frame) = frame_rx.try_recv() {
-        if let Err(e) = process_frame(delegate, &frame) {
-            tracing::warn!("Failed to process frame: {e:#}");
+    while let Ok(msg) = frame_rx.try_recv() {
+        match msg {
+            HubMessage::Frame(frame) => {
+                if let Err(e) = process_frame(delegate, &frame) {
+                    tracing::warn!("Failed to process frame: {e:#}");
+                }
+            }
+            HubMessage::Shutdown => {
+                let mtm = MainThreadMarker::new().unwrap();
+                NSApplication::sharedApplication(mtm).terminate(None);
+                return;
+            }
         }
     }
 }
@@ -292,7 +309,10 @@ fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
     }
 
     let overlays = frame.overlays();
-    tiling_overlay.set_rects(overlays.tiling_rects.clone(), overlays.tiling_labels.clone());
+    tiling_overlay.set_rects(
+        overlays.tiling_rects.clone(),
+        overlays.tiling_labels.clone(),
+    );
     float_overlay.set_rects(overlays.float_rects.clone(), vec![]);
 
     if let Some(cg_id) = frame.focus()
@@ -315,3 +335,5 @@ fn get_main_screen(mtm: MainThreadMarker) -> Dimension {
         height: visible_frame.size.height as f32,
     }
 }
+
+type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;
