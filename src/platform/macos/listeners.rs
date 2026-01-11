@@ -319,6 +319,8 @@ unsafe extern "C-unwind" fn observer_callback(
         || CFEqual(Some(notification), Some(&*kAXUIElementDestroyedNotification()))
         || CFEqual(Some(notification), Some(&*kAXWindowMiniaturizedNotification()))
         || CFEqual(Some(notification), Some(&*kAXWindowDeminiaturizedNotification()))
+        || CFEqual(Some(notification), Some(&*kAXApplicationHiddenNotification()))
+        || CFEqual(Some(notification), Some(&*kAXApplicationShownNotification()))
     {
         handle_window_event(delegate, element);
         return;
@@ -444,6 +446,13 @@ fn sync_app_windows(delegate: &AppDelegate, app: &NSRunningApplication) {
     let mut ax_registry = delegate.ivars().ax_registry.borrow_mut();
 
     let tracked_cg_ids = ax_registry.cg_ids_for_pid(pid);
+    if app.isHidden() {
+        for cg_id in tracked_cg_ids {
+            ax_registry.remove(cg_id);
+            delegate.send_event(HubEvent::WindowDestroyed(cg_id));
+        }
+        return;
+    }
     for cg_id in tracked_cg_ids {
         if cg_window_ids.contains(&cg_id) && ax_registry.is_valid(cg_id) {
             continue;

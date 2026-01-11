@@ -10,8 +10,8 @@ use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
 use super::objc2_wrapper::{
     AXError, get_attribute, kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute,
-    kAXMainAttribute, kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute,
-    set_attribute_value,
+    kAXMainAttribute, kAXMinimizedAttribute, kAXPositionAttribute, kAXRoleAttribute,
+    kAXSizeAttribute, set_attribute_value,
 };
 use crate::core::Dimension;
 
@@ -47,10 +47,14 @@ impl AXWindow {
         if is_screen_locked() {
             return true;
         }
-        !matches!(
+        let is_invalid = matches!(
             get_attribute::<CFString>(&self.window, &kAXRoleAttribute()),
             Err(AXError::InvalidUIElement)
-        )
+        );
+        let is_minimized = get_attribute::<CFBoolean>(&self.window, &kAXMinimizedAttribute())
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        !is_invalid && !is_minimized
     }
 
     #[tracing::instrument(skip(self))]
