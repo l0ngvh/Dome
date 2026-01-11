@@ -6,73 +6,50 @@ use objc2_core_foundation::{
     CFBoolean, CFDictionary, CFRetained, CFString, CFType, CGPoint, CGSize, kCFBooleanFalse,
     kCFBooleanTrue,
 };
-use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
+use objc2_core_graphics::CGSessionCopyCurrentDictionary;
 
 use super::objc2_wrapper::{
     AXError, get_attribute, kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute,
     kAXMainAttribute, kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute, kAXTitleAttribute,
     set_attribute_value,
 };
-use crate::core::{Dimension, FloatWindowId, WindowId};
+use crate::core::Dimension;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WindowType {
-    Tiling(WindowId),
-    Float(FloatWindowId),
-    Popup,
-}
-
-#[derive(Debug)]
-pub(crate) struct MacWindow {
-    window_type: WindowType,
+pub(super) struct AXWindow {
     window: CFRetained<AXUIElement>,
     app: CFRetained<AXUIElement>,
-    cg_window_id: CGWindowID,
     pid: i32,
     screen: Dimension,
-    title: Option<String>,
-    app_name: String,
 }
 
-impl MacWindow {
-    #[expect(clippy::too_many_arguments)]
-    pub(crate) fn new(
+impl AXWindow {
+    pub(super) fn new(
         window: CFRetained<AXUIElement>,
         app: CFRetained<AXUIElement>,
-        cg_window_id: CGWindowID,
         pid: i32,
         screen: Dimension,
-        title: Option<String>,
-        app_name: String,
-        window_type: WindowType,
     ) -> Self {
         Self {
-            window_type,
             window,
             app,
-            cg_window_id,
             pid,
             screen,
-            title,
-            app_name,
         }
     }
 
-    pub(crate) fn window_type(&self) -> WindowType {
-        self.window_type
+    pub(super) fn pid(&self) -> i32 {
+        self.pid
     }
 
-    pub(crate) fn set_window_type(&mut self, window_type: WindowType) {
-        self.window_type = window_type;
-    }
-
-    pub(crate) fn window_id(&self) -> CGWindowID {
-        self.cg_window_id
+    pub(super) fn title(&self) -> Option<String> {
+        get_attribute::<CFString>(&self.window, &kAXTitleAttribute())
+            .map(|t| t.to_string())
+            .ok()
     }
 
     /// As we're tracking windows with CGWindowID, we have to check whether a window is still valid
     /// as macOS can reuse CGWindowID of deleted windows.
-    pub(crate) fn is_valid(&self) -> bool {
+    pub(super) fn is_valid(&self) -> bool {
         if is_screen_locked() {
             return true;
         }
@@ -82,20 +59,16 @@ impl MacWindow {
         )
     }
 
-    pub(crate) fn pid(&self) -> i32 {
-        self.pid
-    }
-
     #[tracing::instrument(skip(self))]
-    pub(crate) fn set_dimension(&self, dim: Dimension) -> Result<()> {
+    pub(super) fn set_dimension(&self, dim: Dimension) -> Result<()> {
         self.with_animation_disabled(|| {
             self.set_position(dim.x, dim.y)?;
             self.set_size(dim.width, dim.height)
         })
-        .with_context(|| format!("set_dimension for {self}"))
+        .with_context(|| format!("set_dimension for pid {}", self.pid))
     }
 
-    pub(crate) fn focus(&self) -> Result<()> {
+    pub(super) fn focus(&self) -> Result<()> {
         let is_frontmost = get_attribute::<CFBoolean>(&self.app, &kAXFrontmostAttribute())
             .map(|b| b.as_bool())
             .unwrap_or(false);
@@ -103,7 +76,7 @@ impl MacWindow {
             set_attribute_value(&self.app, &kAXFrontmostAttribute(), unsafe {
                 kCFBooleanTrue.unwrap()
             })
-            .with_context(|| format!("focus for {self}"))?;
+            .with_context(|| format!("focus for pid {}", self.pid))?;
         }
         let is_main = get_attribute::<CFBoolean>(&self.window, &kAXMainAttribute())
             .map(|b| b.as_bool())
@@ -112,7 +85,7 @@ impl MacWindow {
             set_attribute_value(&self.window, &kAXMainAttribute(), unsafe {
                 kCFBooleanTrue.unwrap()
             })
-            .with_context(|| format!("focus for {self}"))?;
+            .with_context(|| format!("focus for pid {}", self.pid))?;
         }
         Ok(())
     }
@@ -121,7 +94,7 @@ impl MacWindow {
     /// We don't minimize windows as there is no way to disable minimizing animation. When hiding
     /// multiple windows, it gets triggered in a staggered manner, which is extremely slow, and
     /// causes event tap to be timed out
-    pub(crate) fn hide(&self) -> Result<()> {
+    pub(super) fn hide(&self) -> Result<()> {
         // MacOS doesn't allow completely set windows offscreen, so we need to leave at
         // least one pixel left
         // https://nikitabobko.github.io/AeroSpace/guide#emulation-of-virtual-workspaces
@@ -131,7 +104,7 @@ impl MacWindow {
                 self.screen.y + self.screen.height - 1.0,
             )
         })
-        .with_context(|| format!("hide for {self}"))
+        .with_context(|| format!("hide for pid {}", self.pid))
     }
 
     /// Without this the windows move in a janky way
@@ -175,16 +148,6 @@ impl MacWindow {
             &size,
         )?)
     }
-
-    pub(crate) fn title(&self) -> &str {
-        self.title.as_deref().unwrap_or("Unknown")
-    }
-
-    pub(crate) fn update_title(&mut self) -> anyhow::Result<()> {
-        let t = get_attribute::<CFString>(&self.window, &kAXTitleAttribute())?;
-        self.title = Some(t.to_string());
-        Ok(())
-    }
 }
 
 fn is_screen_locked() -> bool {
@@ -208,16 +171,4 @@ fn is_screen_locked() -> bool {
     }
 
     false
-}
-
-impl std::fmt::Display for MacWindow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "'{}' from app '{}' (PID: {})",
-            self.title(),
-            self.app_name,
-            self.pid
-        )
-    }
 }

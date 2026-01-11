@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::fs::File;
-use std::os::unix::io::{AsRawFd, IntoRawFd};
+use std::os::unix::io::IntoRawFd;
+use std::os::fd::AsRawFd;
 
 use objc2::DefinedClass;
 use objc2_core_foundation::{
@@ -9,7 +10,7 @@ use objc2_core_foundation::{
 };
 
 use super::app::AppDelegate;
-use super::handler::render_workspace;
+use super::hub::HubEvent;
 use crate::config::Config;
 
 const K_CF_FILE_DESCRIPTOR_READ_CALL_BACK: CFOptionFlags = 1;
@@ -35,14 +36,9 @@ unsafe extern "C-unwind" fn config_callback(
         match Config::load(&ivars.config_path) {
             Ok(new_config) => {
                 tracing::info!("Config reloaded successfully");
-                ivars
-                    .hub
-                    .borrow_mut()
-                    .sync_config(new_config.tab_bar_height, new_config.automatic_tiling);
+                ivars.border_size.set(new_config.border_size);
+                delegate.send_event(HubEvent::ConfigReloaded(new_config.clone()));
                 *ivars.config.borrow_mut() = new_config;
-                if let Err(e) = render_workspace(delegate) {
-                    tracing::warn!("Failed to render workspace after config reload: {e:#}");
-                }
             }
             Err(e) => {
                 tracing::warn!("Failed to reload config: {e}, keeping current config");

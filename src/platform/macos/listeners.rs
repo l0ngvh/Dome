@@ -29,10 +29,10 @@ use objc2_foundation::{
 };
 
 use super::app::AppDelegate;
-use super::context::WindowRegistry;
-use super::handler::{execute_actions, render_workspace};
+use super::context::AXRegistry;
+use super::hub::{HubEvent, WindowInfo};
 use super::objc2_wrapper::{
-    add_observer_notification, create_observer, get_attribute, get_cg_window_id, get_pid,
+    add_observer_notification, create_observer, get_attribute, get_cg_window_id,
     is_attribute_settable, kAXApplicationHiddenNotification, kAXApplicationShownNotification,
     kAXFocusedWindowAttribute, kAXFocusedWindowChangedNotification, kAXFullScreenAttribute,
     kAXMainAttribute, kAXMinimizedAttribute, kAXMovedNotification, kAXParentAttribute,
@@ -42,18 +42,16 @@ use super::objc2_wrapper::{
     kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification, kAXWindowRole,
     kAXWindowsAttribute,
 };
-use super::window::{MacWindow, WindowType};
-use crate::config::{Keymap, MacosWindowRule, Modifiers};
-use crate::core::{Dimension, Hub};
+use super::window::AXWindow;
+use crate::action::Actions;
+use crate::config::{Keymap, Modifiers};
+use crate::core::Dimension;
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 
 const THROTTLE_DURATION: Duration = Duration::from_millis(20);
 
 pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
     sync_all_windows(delegate);
-    if let Err(e) = render_workspace(delegate) {
-        tracing::warn!("Failed to render workspace on startup: {e:#}");
-    }
 
     let notification_center = NSWorkspace::sharedWorkspace().notificationCenter();
 
@@ -64,9 +62,6 @@ pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 sync_all_windows(delegate);
-                if let Err(e) = render_workspace(delegate) {
-                    tracing::warn!("Failed to render workspace after app launch: {e:#}");
-                }
             }),
         );
     }
@@ -78,9 +73,6 @@ pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 sync_all_windows(delegate);
-                if let Err(e) = render_workspace(delegate) {
-                    tracing::warn!("Failed to render workspace after app termination: {e:#}");
-                }
             }),
         );
     }
@@ -92,9 +84,6 @@ pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 sync_all_windows(delegate);
-                if let Err(e) = render_workspace(delegate) {
-                    tracing::warn!("Failed to render workspace: {e:#}");
-                }
             }),
         );
     }
@@ -152,9 +141,6 @@ pub(super) fn setup_app_observers(delegate: &'static AppDelegate) {
                 tracing::info!("Screen unlocked, resuming window management");
                 delegate.ivars().is_suspended.set(false);
                 sync_all_windows(delegate);
-                if let Err(e) = render_workspace(delegate) {
-                    tracing::warn!("Failed to render workspace after unlock: {e:#}");
-                }
             }),
         );
     }
@@ -193,32 +179,20 @@ pub(super) fn listen_to_input_devices(delegate: &'static AppDelegate) -> Result<
 #[tracing::instrument(skip_all)]
 unsafe extern "C-unwind" fn observer_callback(
     _observer: NonNull<AXObserver>,
-    element: NonNull<AXUIElement>,
+    _element: NonNull<AXUIElement>,
     notification: NonNull<CFString>,
     refcon: *mut std::ffi::c_void,
 ) {
-    // Should not call render_workspace here, as that also set focused window. This callback
-    // can be fired when focused change, so calling render_workspace can cause an infinite loop
-    // of focus changes
     // Safety: AppDelegate lives until the end of the app
     let delegate: &'static AppDelegate = unsafe { &*(refcon as *const AppDelegate) };
     let ivars = delegate.ivars();
 
-    // Skip processing when suspended (sleep/lock)
     if ivars.is_suspended.get() {
         return;
     }
 
-    let element = unsafe { CFRetained::retain(element) };
-    let Ok(pid) = get_pid(&element) else {
-        return;
-    };
     let notification = unsafe { CFRetained::retain(notification) };
-    let app_name = get_app_name(pid);
-    tracing::trace!(
-        "[{app_name}] (pid: {pid}) Received event: {}",
-        (*notification)
-    );
+    tracing::trace!("Received event: {}", (*notification));
 
     let now = Instant::now();
     let mut throttle = ivars.throttle.borrow_mut();
@@ -235,9 +209,6 @@ unsafe extern "C-unwind" fn observer_callback(
         // So we are basically polling as much as possible to keep the state in sync
         // https://github.com/nikitabobko/AeroSpace/issues/445
         sync_all_windows(delegate);
-        if let Err(e) = render_workspace(delegate) {
-            tracing::warn!("Failed to render workspace: {e:#}");
-        }
     } else if throttle.timer.is_none() {
         drop(throttle);
         schedule_throttle_timer(delegate, THROTTLE_DURATION);
@@ -284,7 +255,6 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
     let mut throttle = ivars.throttle.borrow_mut();
     throttle.timer = None;
 
-    // Skip processing when suspended (sleep/lock)
     if ivars.is_suspended.get() {
         return;
     }
@@ -293,9 +263,6 @@ unsafe extern "C-unwind" fn throttle_timer_callback(
     drop(throttle);
 
     sync_all_windows(delegate);
-    if let Err(e) = render_workspace(delegate) {
-        tracing::warn!("Failed to render workspace: {e:#}");
-    }
 }
 
 #[tracing::instrument(skip_all)]
@@ -305,9 +272,8 @@ fn sync_all_windows(delegate: &'static AppDelegate) {
     }
 
     let mut observers = delegate.ivars().observers.borrow_mut();
-    let mut registry = delegate.ivars().registry.borrow_mut();
-    let mut hub = delegate.ivars().hub.borrow_mut();
-    let config = delegate.ivars().config.borrow();
+    let mut ax_registry = delegate.ivars().ax_registry.borrow_mut();
+    let screen = delegate.ivars().screen;
     let cg_window_ids = list_cg_window_ids();
     let running_apps: Vec<_> = running_apps().collect();
 
@@ -324,29 +290,14 @@ fn sync_all_windows(delegate: &'static AppDelegate) {
         .collect();
     for pid in terminated_pids {
         observers.remove(&pid);
-        for window in registry.remove_by_pid(pid) {
-            match window.window_type() {
-                WindowType::Tiling(id) => {
-                    let _span =
-                        tracing::info_span!("sync_terminated", %id, window = %window).entered();
-                    hub.delete_window(id);
-                    tracing::info!("Tiling window deleted");
-                }
-                WindowType::Float(id) => {
-                    let _span =
-                        tracing::info_span!("sync_terminated", %id, window = %window).entered();
-                    hub.delete_float(id);
-                    tracing::info!("Float window deleted");
-                }
-                WindowType::Popup => {}
-            }
+        for cg_id in ax_registry.remove_by_pid(pid) {
+            delegate.send_event(HubEvent::WindowDestroyed(cg_id));
         }
     }
 
     for running_app in running_apps {
         let pid = running_app.processIdentifier();
 
-        // Register app if not already registered
         if let Entry::Vacant(e) = observers.entry(pid) {
             let app_name = get_app_name(pid);
             match register_app(pid, delegate) {
@@ -365,29 +316,21 @@ fn sync_all_windows(delegate: &'static AppDelegate) {
             continue;
         };
 
-        let tracked_cg_ids = registry.cg_ids_for_pid(pid);
+        let tracked_cg_ids = ax_registry.cg_ids_for_pid(pid);
         for cg_id in tracked_cg_ids {
-            if cg_window_ids.contains(&cg_id) && registry.get(cg_id).is_some_and(|w| w.is_valid()) {
-                registry.update_title(cg_id);
+            if cg_window_ids.contains(&cg_id) && ax_registry.is_valid(cg_id) {
+                if let Some(ax_window) = ax_registry.get(cg_id) {
+                    if let Some(new_title) = ax_window.title() {
+                        delegate.send_event(HubEvent::TitleChanged {
+                            cg_id,
+                            title: new_title,
+                        });
+                    }
+                }
                 continue;
             }
-            if let Some(window) = registry.remove(cg_id) {
-                match window.window_type() {
-                    WindowType::Tiling(id) => {
-                        let _span =
-                            tracing::info_span!("sync_windows", %id, window = %window).entered();
-                        hub.delete_window(id);
-                        tracing::info!("Tiling window deleted");
-                    }
-                    WindowType::Float(id) => {
-                        let _span =
-                            tracing::info_span!("sync_windows", %id, window = %window).entered();
-                        hub.delete_float(id);
-                        tracing::info!("Float window deleted");
-                    }
-                    WindowType::Popup => {}
-                }
-            }
+            ax_registry.remove(cg_id);
+            delegate.send_event(HubEvent::WindowDestroyed(cg_id));
         }
 
         let app_name = running_app
@@ -403,9 +346,9 @@ fn sync_all_windows(delegate: &'static AppDelegate) {
                 pid,
                 &app_name,
                 bundle_id.as_deref(),
-                &config.macos.window_rules,
-                &mut hub,
-                &mut registry,
+                screen,
+                delegate,
+                &mut ax_registry,
             );
         }
 
@@ -414,22 +357,14 @@ fn sync_all_windows(delegate: &'static AppDelegate) {
         }
         if let Ok(focused) = get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute())
             && let Some(cg_id) = get_cg_window_id(&focused)
-            && let Some(window) = registry.get(cg_id)
+            && ax_registry.contains(cg_id)
         {
             let last_focused = delegate.ivars().last_focused.get();
             if last_focused == Some((pid, cg_id)) {
                 continue;
             }
             delegate.ivars().last_focused.set(Some((pid, cg_id)));
-            match window.window_type() {
-                WindowType::Tiling(tiling_id) => {
-                    hub.set_focus(tiling_id);
-                }
-                WindowType::Float(float_id) => {
-                    hub.set_float_focus(float_id);
-                }
-                WindowType::Popup => {}
-            }
+            delegate.send_event(HubEvent::WindowFocused(cg_id));
         }
     }
 }
@@ -494,23 +429,18 @@ fn handle_keyboard(delegate: &'static AppDelegate, event: *mut CGEvent) -> bool 
         delegate.ivars().is_suspended.set(false);
     }
 
-    execute_actions(
-        &mut delegate.ivars().hub.borrow_mut(),
-        &mut delegate.ivars().registry.borrow_mut(),
-        &actions,
-    );
-    if let Err(e) = render_workspace(delegate) {
-        tracing::warn!("Failed to render workspace: {e:#}");
-    }
+    handle_actions(delegate, &actions);
     true
 }
 
+pub(super) fn handle_actions(delegate: &AppDelegate, actions: &Actions) {
+    delegate.send_event(HubEvent::Action(actions.clone()));
+}
+
 fn get_key_from_event(event: *mut CGEvent) -> String {
-    // Get virtual keycode for special keys
     let keycode =
         CGEvent::integer_value_field(Some(unsafe { &*event }), CGEventField::KeyboardEventKeycode);
 
-    // Map special keys to names
     match keycode {
         0x24 => return "return".to_string(),
         0x4C => return "enter".to_string(),
@@ -525,7 +455,6 @@ fn get_key_from_event(event: *mut CGEvent) -> String {
         _ => {}
     }
 
-    // For regular keys, get unicode character
     let max_len: usize = 256;
     let mut buffer: Vec<u16> = vec![0; max_len];
     let mut actual_len: std::ffi::c_ulong = 0;
@@ -547,7 +476,6 @@ fn get_app_name(pid: i32) -> String {
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
-/// Returns list of windows for this app in current space
 fn get_windows(app: &AXUIElement) -> anyhow::Result<CFRetained<CFArray<AXUIElement>>> {
     Ok(get_attribute(app, &kAXWindowsAttribute())?)
 }
@@ -586,108 +514,45 @@ fn running_apps() -> impl Iterator<Item = Retained<NSRunningApplication>> {
         .filter(|app| app.processIdentifier() != -1)
 }
 
-fn match_rule<'a>(
-    app_name: &str,
-    bundle_id: Option<&str>,
-    title: Option<&str>,
-    rules: &'a [MacosWindowRule],
-) -> Option<&'a MacosWindowRule> {
-    for rule in rules {
-        if let Some(app) = &rule.app
-            && !pattern_matches(app, app_name)
-        {
-            continue;
-        }
-        if let Some(b) = &rule.bundle_id
-            && bundle_id != Some(b.as_str())
-        {
-            continue;
-        }
-        if let Some(t) = &rule.title
-            && !title.is_some_and(|title| pattern_matches(t, title))
-        {
-            continue;
-        }
-        if rule.app.is_some() || rule.bundle_id.is_some() || rule.title.is_some() {
-            return Some(rule);
-        }
-    }
-    None
-}
-
-fn should_manage(
-    app_name: &str,
-    bundle_id: Option<&str>,
-    title: Option<&str>,
-    rules: &[MacosWindowRule],
-) -> bool {
-    match_rule(app_name, bundle_id, title, rules).is_none_or(|r| r.manage)
-}
-
 fn process_new_window(
     ax_window: CFRetained<AXUIElement>,
     ax_app: CFRetained<AXUIElement>,
     pid: i32,
     app_name: &str,
     bundle_id: Option<&str>,
-    rules: &[MacosWindowRule],
-    hub: &mut Hub,
-    registry: &mut WindowRegistry,
+    screen: Dimension,
+    delegate: &AppDelegate,
+    ax_registry: &mut AXRegistry,
 ) {
     let Some(cg_id) = get_cg_window_id(&ax_window) else {
         return;
     };
-    if registry.contains(cg_id) {
+    if ax_registry.contains(cg_id) {
         return;
     }
-    let screen = hub.screen();
+
     let title = get_attribute::<CFString>(&ax_window, &kAXTitleAttribute())
         .map(|t| t.to_string())
         .ok();
 
-    let manageable = is_manageable(&ax_window, &ax_app, title.as_deref());
-    let dominated = should_manage(app_name, bundle_id, title.as_deref(), rules);
-
-    if !manageable || !dominated {
-        let mac_window = MacWindow::new(
-            ax_window,
-            ax_app.clone(),
-            cg_id,
-            pid,
-            screen,
-            title,
-            app_name.to_string(),
-            WindowType::Popup,
-        );
-        tracing::trace!(window = %mac_window, "New popup window");
-        registry.insert(mac_window);
+    if !is_manageable(&ax_window, &ax_app, title.as_deref()) {
         return;
     }
 
-    let rule = match_rule(app_name, bundle_id, title.as_deref(), rules);
-    let window_type = if should_tile(&ax_window) {
-        WindowType::Tiling(hub.insert_tiling())
-    } else {
-        WindowType::Float(hub.insert_float(get_ax_dimension(&ax_window)))
-    };
-    let mac_window = MacWindow::new(
-        ax_window,
-        ax_app.clone(),
+    let ax_win = AXWindow::new(ax_window.clone(), ax_app.clone(), pid, screen);
+    ax_registry.insert(cg_id, ax_win);
+
+    let info = WindowInfo {
         cg_id,
-        pid,
-        screen,
         title,
-        app_name.to_string(),
-        window_type,
-    );
-    tracing::info!(window = %mac_window, "New window");
-    registry.insert(mac_window);
-    if let Some(r) = rule {
-        execute_actions(hub, registry, &r.run);
-    }
+        app_name: app_name.to_string(),
+        bundle_id: bundle_id.map(|s| s.to_string()),
+        should_tile: should_tile(&ax_window),
+        dimension: get_ax_dimension(&ax_window),
+    };
+    delegate.send_event(HubEvent::WindowCreated(info));
 }
 
-/// Returns true if this window should be tiled (not floated)
 fn should_tile(window: &AXUIElement) -> bool {
     let is_fullscreen = get_attribute::<CFBoolean>(window, &kAXFullScreenAttribute())
         .map(|b| b.as_bool())
@@ -720,7 +585,6 @@ fn get_ax_dimension(window: &AXUIElement) -> Dimension {
     }
 }
 
-/// Returns true if this is a "real" window worth managing (tile or float)
 fn is_manageable(window: &AXUIElement, app: &AXUIElement, title: Option<&str>) -> bool {
     let role = get_attribute::<CFString>(window, &kAXRoleAttribute()).ok();
     let subrole = get_attribute::<CFString>(window, &kAXSubroleAttribute()).ok();
@@ -756,16 +620,6 @@ fn is_manageable(window: &AXUIElement, app: &AXUIElement, title: Option<&str>) -
         && can_focus
         && !is_minimized
         && title.is_some()
-}
-
-fn pattern_matches(pattern: &str, text: &str) -> bool {
-    if let Some(regex_pattern) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/')) {
-        regex::Regex::new(regex_pattern)
-            .map(|r| r.is_match(text))
-            .unwrap_or(false)
-    } else {
-        pattern == text
-    }
 }
 
 fn list_cg_window_ids() -> HashSet<CGWindowID> {

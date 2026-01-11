@@ -13,7 +13,7 @@ use objc2_core_foundation::{
 use crate::action::{Action, Actions};
 
 use super::app::AppDelegate;
-use super::handler::{execute_actions, render_workspace};
+use super::listeners::handle_actions;
 
 const K_CF_FILE_DESCRIPTOR_READ_CALL_BACK: CFOptionFlags = 1;
 
@@ -51,13 +51,12 @@ fn handle_client(mut stream: UnixStream, delegate: &'static AppDelegate) {
             return;
         }
         let response = match serde_json::from_str::<Action>(trimmed) {
-            Ok(action) => match handle_action(action.clone(), delegate) {
-                Ok(()) => "ok\n".to_string(),
-                Err(e) => {
-                    tracing::warn!(?action, "IPC action failed: {e}");
-                    format!("error:{e}\n")
-                }
-            },
+            Ok(action) => {
+                tracing::debug!(?action, "IPC action");
+                let actions = Actions::new(vec![action]);
+                handle_actions(delegate, &actions);
+                "ok\n".to_string()
+            }
             Err(e) => {
                 tracing::warn!(message = trimmed, "Invalid IPC message: {e}");
                 format!("error:invalid action: {e}\n")
@@ -65,17 +64,6 @@ fn handle_client(mut stream: UnixStream, delegate: &'static AppDelegate) {
         };
         let _ = stream.write_all(response.as_bytes());
     }
-}
-
-fn handle_action(action: Action, delegate: &'static AppDelegate) -> Result<(), String> {
-    tracing::debug!(?action, "IPC action");
-    let actions = Actions::new(vec![action]);
-    execute_actions(
-        &mut delegate.ivars().hub.borrow_mut(),
-        &mut delegate.ivars().registry.borrow_mut(),
-        &actions,
-    );
-    render_workspace(delegate).map_err(|e| e.to_string())
 }
 
 pub(super) fn register_with_runloop(delegate: &'static AppDelegate) -> anyhow::Result<()> {

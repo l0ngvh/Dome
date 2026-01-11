@@ -1,7 +1,9 @@
 use std::cell::{Cell, OnceCell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::ffi::c_void;
 use std::os::unix::net::UnixListener;
 use std::rc::Rc;
+use std::sync::mpsc::{self, Receiver, Sender};
 
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
@@ -11,7 +13,8 @@ use objc2_app_kit::{
 };
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
-    CFDictionary, CFFileDescriptor, CFMachPort, CFRetained, kCFBooleanTrue,
+    CFDictionary, CFFileDescriptor, CFMachPort, CFRetained, CFRunLoop, CFRunLoopSource,
+    CFRunLoopSourceContext, kCFBooleanTrue, kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
@@ -19,14 +22,14 @@ use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
-use super::config::setup_config_watcher;
-use super::context::{Observers, ThrottleState, WindowRegistry};
-use super::handler::render_workspace;
+use super::config_watcher::setup_config_watcher;
+use super::context::{AXRegistry, Observers, ThrottleState};
+use super::hub::{Frame, HubEvent, HubThread};
 use super::ipc;
 use super::listeners::{listen_to_input_devices, setup_app_observers};
 use super::overlay::{OverlayView, create_overlay_window};
 use crate::config::Config;
-use crate::core::{Dimension, Hub};
+use crate::core::Dimension;
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -75,11 +78,14 @@ fn init_tracing(config: &Config) {
 pub(super) struct AppDelegateIvars {
     pub(super) config: RefCell<Config>,
     pub(super) config_path: String,
-    pub(super) hub: RefCell<Hub>,
-    pub(super) registry: RefCell<WindowRegistry>,
+    pub(super) screen: Dimension,
+    pub(super) border_size: Cell<f32>,
+    pub(super) ax_registry: RefCell<AXRegistry>,
     pub(super) throttle: RefCell<ThrottleState>,
-    pub(super) displayed_windows: RefCell<HashSet<CGWindowID>>,
     pub(super) observers: Observers,
+    pub(super) hub_thread: RefCell<Option<HubThread>>,
+    pub(super) hub_sender: OnceCell<Sender<HubEvent>>,
+    pub(super) frame_rx: OnceCell<Receiver<Frame>>,
     pub(super) tiling_overlay_window: OnceCell<Retained<NSWindow>>,
     pub(super) tiling_overlay: OnceCell<Retained<OverlayView>>,
     pub(super) float_overlay_window: OnceCell<Retained<NSWindow>>,
@@ -119,7 +125,7 @@ define_class!(
                 }
             };
 
-            let screen = delegate.ivars().hub.borrow().screen();
+            let screen = delegate.ivars().screen;
             let frame = NSRect::new(
                 NSPoint::new(screen.x as f64, 0.0),
                 NSSize::new(screen.width as f64, screen.height as f64),
@@ -140,12 +146,41 @@ define_class!(
                 .ivars()
                 .tiling_overlay_window
                 .set(tiling_overlay_window);
-            let _ = delegate.ivars().tiling_overlay.set(tiling_overlay.clone());
+            let _ = delegate.ivars().tiling_overlay.set(tiling_overlay);
             let _ = delegate
                 .ivars()
                 .float_overlay_window
                 .set(float_overlay_window);
-            let _ = delegate.ivars().float_overlay.set(float_overlay.clone());
+            let _ = delegate.ivars().float_overlay.set(float_overlay);
+
+            let (event_tx, event_rx) = mpsc::channel();
+            let (frame_tx, frame_rx) = mpsc::channel();
+
+            let delegate_ptr = delegate as *const AppDelegate as *mut c_void;
+            let mut context = CFRunLoopSourceContext {
+                version: 0,
+                info: delegate_ptr,
+                retain: None,
+                release: None,
+                copyDescription: None,
+                equal: None,
+                hash: None,
+                schedule: None,
+                cancel: None,
+                perform: Some(frame_callback),
+            };
+
+            let source = unsafe { CFRunLoopSource::new(None, 0, &mut context).unwrap() };
+            let main_run_loop = CFRunLoop::current().unwrap();
+            main_run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
+
+            let config = delegate.ivars().config.borrow().clone();
+            let hub_thread =
+                HubThread::spawn(config, screen, event_rx, frame_tx, source, main_run_loop);
+
+            let _ = delegate.ivars().hub_thread.borrow_mut().replace(hub_thread);
+            let _ = delegate.ivars().hub_sender.set(event_tx);
+            let _ = delegate.ivars().frame_rx.set(frame_rx);
 
             if let Err(e) = ipc::register_with_runloop(delegate) {
                 tracing::error!("Failed to setup IPC: {e:#}");
@@ -160,15 +195,17 @@ define_class!(
             }
 
             setup_app_observers(delegate);
-
-            if let Err(e) = render_workspace(delegate) {
-                tracing::warn!("Failed to render workspace after initialization: {e:#}");
-            }
         }
 
         #[unsafe(method(applicationWillTerminate:))]
         fn will_terminate(&self, _notification: &NSNotification) {
-            // Nothing to clean up - ivars are dropped automatically
+            if let Some(sender) = self.ivars().hub_sender.get() {
+                let _ = sender.send(HubEvent::Shutdown);
+            }
+
+            if let Some(handle) = self.ivars().hub_thread.borrow_mut().take() {
+                handle.join();
+            }
         }
     }
 );
@@ -176,15 +213,18 @@ define_class!(
 impl AppDelegate {
     fn new(mtm: MainThreadMarker, config: Config, config_path: String) -> Retained<Self> {
         let screen = get_main_screen(mtm);
-        let hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
+        let border_size = config.border_size;
         let ivars = AppDelegateIvars {
             config: RefCell::new(config),
             config_path,
-            hub: RefCell::new(hub),
-            registry: RefCell::new(WindowRegistry::new()),
+            screen,
+            border_size: Cell::new(border_size),
+            ax_registry: RefCell::new(AXRegistry::new()),
             throttle: RefCell::new(ThrottleState::new()),
-            displayed_windows: RefCell::new(HashSet::new()),
             observers: Rc::new(RefCell::new(HashMap::new())),
+            hub_thread: RefCell::new(None),
+            hub_sender: OnceCell::new(),
+            frame_rx: OnceCell::new(),
             tiling_overlay_window: OnceCell::new(),
             tiling_overlay: OnceCell::new(),
             float_overlay_window: OnceCell::new(),
@@ -198,6 +238,70 @@ impl AppDelegate {
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
     }
+
+    pub(super) fn send_event(&self, event: HubEvent) {
+        if let Some(sender) = self.ivars().hub_sender.get() {
+            if sender.send(event).is_err() {
+                tracing::error!("Hub thread died, shutting down");
+                let mtm = MainThreadMarker::new().unwrap();
+                NSApplication::sharedApplication(mtm).terminate(None);
+            }
+        }
+    }
+}
+
+unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
+    let delegate: &'static AppDelegate = unsafe { &*(info as *const AppDelegate) };
+    let Some(frame_rx) = delegate.ivars().frame_rx.get() else {
+        return;
+    };
+
+    while let Ok(frame) = frame_rx.try_recv() {
+        if let Err(e) = process_frame(delegate, &frame) {
+            tracing::warn!("Failed to process frame: {e:#}");
+        }
+    }
+}
+
+fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
+    let ax_registry = delegate.ivars().ax_registry.borrow();
+    let border = delegate.ivars().border_size.get();
+    let tiling_overlay = delegate.ivars().tiling_overlay.get().unwrap();
+    let float_overlay = delegate.ivars().float_overlay.get().unwrap();
+
+    for &cg_id in frame.hide() {
+        if let Some(ax_window) = ax_registry.get(cg_id)
+            && let Err(e) = ax_window.hide()
+        {
+            tracing::trace!("Failed to hide window: {e:#}");
+        }
+    }
+
+    for &(cg_id, dim) in frame.windows() {
+        if let Some(ax_window) = ax_registry.get(cg_id) {
+            let inset = Dimension {
+                x: dim.x + border,
+                y: dim.y + border,
+                width: dim.width - 2.0 * border,
+                height: dim.height - 2.0 * border,
+            };
+            if let Err(e) = ax_window.set_dimension(inset) {
+                tracing::trace!("Failed to set dimension: {e:#}");
+            }
+        }
+    }
+
+    let overlays = frame.overlays();
+    tiling_overlay.set_rects(overlays.tiling_rects.clone(), overlays.tiling_labels.clone());
+    float_overlay.set_rects(overlays.float_rects.clone(), vec![]);
+
+    if let Some(cg_id) = frame.focus()
+        && let Some(ax_window) = ax_registry.get(cg_id)
+    {
+        ax_window.focus()?;
+    }
+
+    Ok(())
 }
 
 fn get_main_screen(mtm: MainThreadMarker) -> Dimension {

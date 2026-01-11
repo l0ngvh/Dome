@@ -1,7 +1,7 @@
 mod app;
-mod config;
+mod config_watcher;
 mod context;
-mod handler;
+mod hub;
 mod ipc;
 mod listeners;
 mod objc2_wrapper;
