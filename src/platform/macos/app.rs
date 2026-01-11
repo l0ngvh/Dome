@@ -8,8 +8,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSFloatingWindowLevel,
-    NSNormalWindowLevel, NSScreen, NSWindow,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSScreen, NSWindow,
 };
 use objc2_application_services::{
     AXIsProcessTrustedWithOptions, AXObserver, kAXTrustedCheckOptionPrompt,
@@ -89,11 +88,8 @@ pub(super) struct AppDelegateIvars {
     pub(super) hub_sender: OnceCell<Sender<HubEvent>>,
     pub(super) frame_rx: OnceCell<Receiver<HubMessage>>,
     /// Reference to overlay window to prevent it from being dropped
-    pub(super) tiling_overlay_window: OnceCell<Retained<NSWindow>>,
-    pub(super) tiling_overlay: OnceCell<Retained<OverlayView>>,
-    /// Reference to overlay window to prevent it from being dropped
-    pub(super) float_overlay_window: OnceCell<Retained<NSWindow>>,
-    pub(super) float_overlay: OnceCell<Retained<OverlayView>>,
+    pub(super) overlay_window: OnceCell<Retained<NSWindow>>,
+    pub(super) overlay: OnceCell<Retained<OverlayView>>,
     pub(super) event_tap: OnceCell<CFRetained<CFMachPort>>,
     pub(super) listener: OnceCell<UnixListener>,
     pub(super) config_fd: OnceCell<CFRetained<CFFileDescriptor>>,
@@ -135,27 +131,14 @@ define_class!(
                 NSSize::new(screen.width as f64, screen.height as f64),
             );
 
-            let tiling_overlay_window = create_overlay_window(mtm, frame, NSNormalWindowLevel - 1);
-            let tiling_overlay = OverlayView::new(mtm, frame);
-            tiling_overlay_window.setContentView(Some(&tiling_overlay));
-            tiling_overlay_window.makeKeyAndOrderFront(None);
-
-            let float_overlay_window = create_overlay_window(mtm, frame, NSFloatingWindowLevel);
-            let float_overlay = OverlayView::new(mtm, frame);
-            float_overlay_window.setContentView(Some(&float_overlay));
-            float_overlay_window.makeKeyAndOrderFront(None);
+            let overlay_window = create_overlay_window(mtm, frame);
+            let overlay = OverlayView::new(mtm, frame);
+            overlay_window.setContentView(Some(&overlay));
+            overlay_window.makeKeyAndOrderFront(None);
 
             let _ = delegate.ivars().listener.set(listener);
-            let _ = delegate
-                .ivars()
-                .tiling_overlay_window
-                .set(tiling_overlay_window);
-            let _ = delegate.ivars().tiling_overlay.set(tiling_overlay);
-            let _ = delegate
-                .ivars()
-                .float_overlay_window
-                .set(float_overlay_window);
-            let _ = delegate.ivars().float_overlay.set(float_overlay);
+            let _ = delegate.ivars().overlay_window.set(overlay_window);
+            let _ = delegate.ivars().overlay.set(overlay);
 
             let (event_tx, event_rx) = mpsc::channel();
             let (frame_tx, frame_rx) = mpsc::channel();
@@ -233,10 +216,8 @@ impl AppDelegate {
             hub_thread: RefCell::new(None),
             hub_sender: OnceCell::new(),
             frame_rx: OnceCell::new(),
-            tiling_overlay_window: OnceCell::new(),
-            tiling_overlay: OnceCell::new(),
-            float_overlay_window: OnceCell::new(),
-            float_overlay: OnceCell::new(),
+            overlay_window: OnceCell::new(),
+            overlay: OnceCell::new(),
             event_tap: OnceCell::new(),
             listener: OnceCell::new(),
             config_fd: OnceCell::new(),
@@ -283,8 +264,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
 fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
     let ax_registry = delegate.ivars().ax_registry.borrow();
     let border = delegate.ivars().border_size.get();
-    let tiling_overlay = delegate.ivars().tiling_overlay.get().unwrap();
-    let float_overlay = delegate.ivars().float_overlay.get().unwrap();
+    let overlay = delegate.ivars().overlay.get().unwrap();
 
     for &cg_id in frame.hide() {
         if let Some(ax_window) = ax_registry.get(cg_id)
@@ -309,11 +289,7 @@ fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
     }
 
     let overlays = frame.overlays();
-    tiling_overlay.set_rects(
-        overlays.tiling_rects.clone(),
-        overlays.tiling_labels.clone(),
-    );
-    float_overlay.set_rects(overlays.float_rects.clone(), vec![]);
+    overlay.set_rects(overlays.rects.clone(), overlays.labels.clone());
 
     if let Some(cg_id) = frame.focus()
         && let Some(ax_window) = ax_registry.get(cg_id)

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
-    NSBackingStoreType, NSBezierPath, NSColor, NSFont, NSFontAttributeName,
+    NSBackingStoreType, NSBezierPath, NSColor, NSFloatingWindowLevel, NSFont, NSFontAttributeName,
     NSForegroundColorAttributeName, NSResponder, NSStringDrawing, NSView, NSWindow,
     NSWindowCollectionBehavior, NSWindowStyleMask,
 };
@@ -13,11 +13,7 @@ use objc2_foundation::{
 
 use crate::config::Color;
 
-pub(super) fn create_overlay_window(
-    mtm: MainThreadMarker,
-    frame: NSRect,
-    level: isize,
-) -> Retained<NSWindow> {
+pub(super) fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSWindow> {
     let window = unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
             NSWindow::alloc(mtm),
@@ -29,7 +25,8 @@ pub(super) fn create_overlay_window(
     };
     window.setBackgroundColor(Some(&NSColor::clearColor()));
     window.setOpaque(false);
-    window.setLevel(level);
+    window.setLevel(NSFloatingWindowLevel);
+    window.setIgnoresMouseEvents(true);
     window.setCollectionBehavior(
         NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::Stationary,
     );
@@ -126,7 +123,6 @@ pub(super) struct OverlayLabel {
 }
 
 pub(super) struct Overlays {
-    pub(super) tiling_rects: Vec<OverlayRect>,
-    pub(super) tiling_labels: Vec<OverlayLabel>,
-    pub(super) float_rects: Vec<OverlayRect>,
+    pub(super) rects: Vec<OverlayRect>,
+    pub(super) labels: Vec<OverlayLabel>,
 }

@@ -474,9 +474,8 @@ fn build_overlays(hub: &Hub, registry: &HubRegistry, config: &Config) -> Overlay
     let border = config.border_size;
     let focused = ws.focused();
 
-    let mut tiling_rects = Vec::new();
-    let mut tiling_labels = Vec::new();
-    let mut float_rects = Vec::new();
+    let mut rects = Vec::new();
+    let mut labels = Vec::new();
 
     let mut stack: Vec<Child> = ws.root().into_iter().collect();
     while let Some(child) = stack.pop() {
@@ -486,12 +485,7 @@ fn build_overlays(hub: &Hub, registry: &HubRegistry, config: &Config) -> Overlay
                     && focused != Some(Focus::Tiling(Child::Window(id)))
                 {
                     let dim = hub.get_window(id).dimension();
-                    tiling_rects.extend(border_rects(
-                        screen,
-                        dim,
-                        border,
-                        [config.border_color; 4],
-                    ));
+                    rects.extend(border_rects(screen, dim, border, [config.border_color; 4]));
                 }
             }
             Child::Container(id) => {
@@ -499,10 +493,10 @@ fn build_overlays(hub: &Hub, registry: &HubRegistry, config: &Config) -> Overlay
                 if let Some(active) = container.active_tab() {
                     stack.push(active);
                     let is_focused = focused == Some(Focus::Tiling(Child::Container(id)));
-                    let (rects, labels) =
+                    let (tab_rects, tab_labels) =
                         build_tab_bar(screen, container, registry, config, is_focused);
-                    tiling_rects.extend(rects);
-                    tiling_labels.extend(labels);
+                    rects.extend(tab_rects);
+                    labels.extend(tab_labels);
                 } else {
                     for &c in container.children() {
                         stack.push(c);
@@ -515,7 +509,7 @@ fn build_overlays(hub: &Hub, registry: &HubRegistry, config: &Config) -> Overlay
     match focused {
         Some(Focus::Tiling(Child::Window(id))) => {
             let w = hub.get_window(id);
-            tiling_rects.extend(border_rects(
+            rects.extend(border_rects(
                 screen,
                 w.dimension(),
                 border,
@@ -524,7 +518,7 @@ fn build_overlays(hub: &Hub, registry: &HubRegistry, config: &Config) -> Overlay
         }
         Some(Focus::Tiling(Child::Container(id))) => {
             let c = hub.get_container(id);
-            tiling_rects.extend(border_rects(
+            rects.extend(border_rects(
                 screen,
                 c.dimension(),
                 border,
@@ -542,15 +536,11 @@ fn build_overlays(hub: &Hub, registry: &HubRegistry, config: &Config) -> Overlay
             } else {
                 config.border_color
             };
-            float_rects.extend(border_rects(screen, dim, border, [color; 4]));
+            rects.extend(border_rects(screen, dim, border, [color; 4]));
         }
     }
 
-    Overlays {
-        tiling_rects,
-        tiling_labels,
-        float_rects,
-    }
+    Overlays { rects, labels }
 }
 
 fn build_frame(
