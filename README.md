@@ -162,6 +162,14 @@ process = "slack.exe"
 run = ["move workspace 3"]
 ```
 
+## Development
+
+```bash
+# Run tests with coverage (requires cargo-make)
+cargo install cargo-make
+cargo make coverage
+```
+
 ## License
 
 MIT
