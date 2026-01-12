@@ -58,46 +58,32 @@ active_tab_background_color = "#4d4d66"
 "cmd+shift+q" = ["exit"]
 "cmd+return" = ["exec open -a Terminal"]
 
-# Window rules to force manage or ignore windows
+# Window rules to ignore windows or run actions on open
 # All specified fields must match (AND logic)
 # First matching rule wins
 # Use /pattern/ for regex matching on app/process and title
 
-# macOS window rules
-# [[macos.window_rules]]
-# app = "System Preferences"
-# manage = false
+# macOS rules
+# [macos]
+# ignore = [
+#   { app = "System Preferences" },
+#   { app = "/.*Preferences/" },
+#   { bundle_id = "com.apple.finder", title = "Trash" },
+# ]
+# on_open = [
+#   { app = "Slack", run = ["move workspace 3"] },
+#   { app = "Safari", run = ["toggle float"] },
+# ]
 
-# [[macos.window_rules]]
-# app = "/.*Preferences/"
-# manage = false
-
-# [[macos.window_rules]]
-# bundle_id = "com.apple.finder"
-# title = "Trash"
-# manage = false
-
-# [[macos.window_rules]]
-# app = "Slack"
-# run = ["move workspace 3"]
-
-# [[macos.window_rules]]
-# app = "Safari"
-# run = ["toggle float"]
-
-# Windows window rules
-# [[windows.window_rules]]
-# process = "SystemSettings.exe"
-# manage = false
-
-# [[windows.window_rules]]
-# process = "/.*Settings.*/"
-# manage = false
-
-# [[windows.window_rules]]
-# title = "Task Manager"
-# manage = false
-
-# [[windows.window_rules]]
-# process = "slack.exe"
-# run = ["move workspace 3"]
+# Windows rules
+[windows]
+ignore = [
+  { process = "LockApp.exe" },
+  { process = "SearchHost.exe" },
+  # { process = "SystemSettings.exe" },
+  # { process = "/.*Settings.*/" },
+  # { title = "Task Manager" },
+]
+# on_open = [
+#   { process = "slack.exe", run = ["move workspace 3"] },
+# ]

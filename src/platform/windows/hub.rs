@@ -6,7 +6,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
-use crate::config::{Color, Config, WindowsWindowRule};
+use crate::config::{Color, Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{Child, Container, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId};
 
 use super::window::{
@@ -256,16 +256,12 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 if registry.contains(&handle) {
                     continue;
                 }
-                if !should_manage(&handle, &config.windows.window_rules) {
+                if should_ignore(&handle, &config.windows.ignore) {
                     continue;
                 }
                 insert_window(&mut hub, &mut registry, &handle);
-                if let Some(rule) = match_rule(
-                    handle.process(),
-                    handle.title(),
-                    &config.windows.window_rules,
-                ) {
-                    execute_actions(&mut hub, &mut registry, &rule.run, &main_hwnd);
+                if let Some(actions) = on_open_actions(&handle, &config.windows.on_open) {
+                    execute_actions(&mut hub, &mut registry, &actions, &main_hwnd);
                 }
             }
             HubEvent::WindowDestroyed(handle) => {
@@ -297,16 +293,12 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                     continue;
                 }
                 // Some apps have a brief moment where their title is empty
-                if !should_manage(&handle, &config.windows.window_rules) {
+                if should_ignore(&handle, &config.windows.ignore) {
                     continue;
                 }
                 insert_window(&mut hub, &mut registry, &handle);
-                if let Some(rule) = match_rule(
-                    handle.process(),
-                    handle.title(),
-                    &config.windows.window_rules,
-                ) {
-                    execute_actions(&mut hub, &mut registry, &rule.run, &main_hwnd);
+                if let Some(actions) = on_open_actions(&handle, &config.windows.on_open) {
+                    execute_actions(&mut hub, &mut registry, &actions, &main_hwnd);
                 }
             }
             HubEvent::Action(actions) => {
@@ -676,40 +668,25 @@ fn border_rects(dim: Dimension, border: f32, colors: [Color; 4]) -> [OverlayRect
     ]
 }
 
-fn match_rule<'a>(
-    process: &str,
-    title: Option<&str>,
-    rules: &'a [WindowsWindowRule],
-) -> Option<&'a WindowsWindowRule> {
-    for rule in rules {
-        if let Some(pattern) = &rule.process
-            && !pattern_matches(pattern, process)
-        {
-            continue;
-        }
-        if let Some(pattern) = &rule.title
-            && !title.is_some_and(|t| pattern_matches(pattern, t))
-        {
-            continue;
-        }
-        if rule.process.is_some() || rule.title.is_some() {
-            return Some(rule);
-        }
-    }
-    None
+fn on_open_actions(handle: &WindowHandle, rules: &[WindowsOnOpenRule]) -> Option<Actions> {
+    let rule = rules
+        .iter()
+        .find(|r| r.window.matches(handle.process(), handle.title()))?;
+    tracing::debug!(%handle, actions = %rule.run, "Running on_open actions");
+    Some(rule.run.clone())
 }
 
-fn should_manage(handle: &WindowHandle, rules: &[WindowsWindowRule]) -> bool {
-    is_manageable_window(handle.hwnd())
-        && match_rule(handle.process(), handle.title(), rules).is_none_or(|r| r.manage)
-}
-
-fn pattern_matches(pattern: &str, text: &str) -> bool {
-    if let Some(regex) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/')) {
-        regex::Regex::new(regex)
-            .map(|r| r.is_match(text))
-            .unwrap_or(false)
-    } else {
-        pattern == text
+fn should_ignore(handle: &WindowHandle, rules: &[WindowsWindow]) -> bool {
+    if !is_manageable_window(handle.hwnd()) {
+        tracing::debug!(%handle, "Window ignored: not manageable");
+        return true;
     }
+    let matched = rules
+        .iter()
+        .find(|r| r.matches(handle.process(), handle.title()));
+    if let Some(rule) = matched {
+        tracing::debug!(%handle, ?rule, "Window ignored by rule");
+        return true;
+    }
+    false
 }

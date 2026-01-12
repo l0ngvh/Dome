@@ -113,27 +113,24 @@ Window rules let you customize behavior for specific applications. Rules are pla
 
 ```toml
 # Ignore windows (don't manage)
-[[macos.window_rules]]
+[[macos.ignore]]
 app = "System Preferences"
-manage = false
 
 # Regex matching
-[[macos.window_rules]]
+[[macos.ignore]]
 app = "/.*Preferences/"
-manage = false
 
 # Match by bundle ID and title
-[[macos.window_rules]]
+[[macos.ignore]]
 bundle_id = "com.apple.finder"
 title = "Trash"
-manage = false
 
 # Run actions on window open
-[[macos.window_rules]]
+[[macos.on_open]]
 app = "Slack"
 run = ["move workspace 3"]
 
-[[macos.window_rules]]
+[[macos.on_open]]
 app = "Safari"
 run = ["toggle float"]
 ```
@@ -142,22 +139,19 @@ run = ["toggle float"]
 
 ```toml
 # Ignore windows by process name
-[[windows.window_rules]]
+[[windows.ignore]]
 process = "SystemSettings.exe"
-manage = false
 
 # Regex matching
-[[windows.window_rules]]
+[[windows.ignore]]
 process = "/.*Settings.*/"
-manage = false
 
 # Match by title
-[[windows.window_rules]]
+[[windows.ignore]]
 title = "Task Manager"
-manage = false
 
 # Run actions on window open
-[[windows.window_rules]]
+[[windows.on_open]]
 process = "slack.exe"
 run = ["move workspace 3"]
 ```

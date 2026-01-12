@@ -6,7 +6,7 @@ use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource};
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
-use crate::config::{Color, Config, MacosWindowRule};
+use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{Child, Container, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId};
 
 use super::overlay::{OverlayLabel, OverlayRect, Overlays};
@@ -18,6 +18,19 @@ pub(super) struct WindowInfo {
     pub(super) bundle_id: Option<String>,
     pub(super) should_tile: bool,
     pub(super) dimension: Dimension,
+}
+
+impl std::fmt::Display for WindowInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.app_name)?;
+        if let Some(bundle_id) = &self.bundle_id {
+            write!(f, " ({bundle_id})")?;
+        }
+        if let Some(title) = &self.title {
+            write!(f, " - {title}")?;
+        }
+        Ok(())
+    }
 }
 
 pub(super) enum HubEvent {
@@ -214,7 +227,7 @@ fn run(
                 if registry.contains(info.cg_id) {
                     continue;
                 }
-                if !should_manage(&info, &config.macos.window_rules) {
+                if should_ignore(&info, &config.macos.ignore) {
                     continue;
                 }
                 let window_type = if info.should_tile {
@@ -227,8 +240,8 @@ fn run(
                 tracing::info!("Window inserted");
 
                 let info = &registry.windows.get(&cg_id).unwrap().info;
-                if let Some(rule) = match_rule(info, &config.macos.window_rules)
-                    && execute_actions(&mut hub, &mut registry, &rule.run)
+                if let Some(actions) = on_open_actions(info, &config.macos.on_open)
+                    && execute_actions(&mut hub, &mut registry, &actions)
                 {
                     break;
                 }
@@ -625,43 +638,22 @@ fn border_rects(
     ]
 }
 
-fn match_rule<'a>(info: &WindowInfo, rules: &'a [MacosWindowRule]) -> Option<&'a MacosWindowRule> {
-    for rule in rules {
-        if let Some(app) = &rule.app
-            && !pattern_matches(app, &info.app_name)
-        {
-            continue;
-        }
-        if let Some(b) = &rule.bundle_id
-            && info.bundle_id.as_ref() != Some(b)
-        {
-            continue;
-        }
-        if let Some(t) = &rule.title
-            && !info
-                .title
-                .as_ref()
-                .is_some_and(|title| pattern_matches(t, title))
-        {
-            continue;
-        }
-        if rule.app.is_some() || rule.bundle_id.is_some() || rule.title.is_some() {
-            return Some(rule);
-        }
-    }
-    None
+fn on_open_actions(info: &WindowInfo, rules: &[MacosOnOpenRule]) -> Option<Actions> {
+    let rule = rules.iter().find(|r| {
+        r.window
+            .matches(&info.app_name, info.bundle_id.as_deref(), info.title.as_deref())
+    })?;
+    tracing::debug!(%info, actions = %rule.run, "Running on_open actions");
+    Some(rule.run.clone())
 }
 
-fn should_manage(info: &WindowInfo, rules: &[MacosWindowRule]) -> bool {
-    match_rule(info, rules).is_none_or(|r| r.manage)
-}
-
-fn pattern_matches(pattern: &str, text: &str) -> bool {
-    if let Some(regex) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/')) {
-        regex::Regex::new(regex)
-            .map(|r| r.is_match(text))
-            .unwrap_or(false)
-    } else {
-        pattern == text
+fn should_ignore(info: &WindowInfo, rules: &[MacosWindow]) -> bool {
+    let matched = rules.iter().find(|r| {
+        r.matches(&info.app_name, info.bundle_id.as_deref(), info.title.as_deref())
+    });
+    if let Some(rule) = matched {
+        tracing::debug!(%info, ?rule, "Window ignored by rule");
+        return true;
     }
+    false
 }

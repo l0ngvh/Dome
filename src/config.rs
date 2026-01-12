@@ -308,51 +308,112 @@ fn default_active_tab_background_color() -> Color {
     }
 }
 
-#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
 #[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct MacosWindowRule {
+pub(crate) struct MacosWindow {
     #[serde(default)]
     pub(crate) app: Option<String>,
     #[serde(default)]
     pub(crate) bundle_id: Option<String>,
     #[serde(default)]
     pub(crate) title: Option<String>,
-    #[serde(default = "default_manage_window")]
-    pub(crate) manage: bool,
+}
+
+#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
+impl MacosWindow {
+    pub(crate) fn matches(
+        &self,
+        app: &str,
+        bundle_id: Option<&str>,
+        title: Option<&str>,
+    ) -> bool {
+        if let Some(pattern) = &self.app
+            && !pattern_matches(pattern, app)
+        {
+            return false;
+        }
+        if let Some(b) = &self.bundle_id
+            && bundle_id != Some(b.as_str())
+        {
+            return false;
+        }
+        if let Some(pattern) = &self.title
+            && !title.is_some_and(|t| pattern_matches(pattern, t))
+        {
+            return false;
+        }
+        self.app.is_some() || self.bundle_id.is_some() || self.title.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct WindowsWindow {
+    #[serde(default)]
+    pub(crate) process: Option<String>,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+}
+
+#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
+impl WindowsWindow {
+    pub(crate) fn matches(&self, process: &str, title: Option<&str>) -> bool {
+        if let Some(pattern) = &self.process
+            && !pattern_matches(pattern, process)
+        {
+            return false;
+        }
+        if let Some(pattern) = &self.title
+            && !title.is_some_and(|t| pattern_matches(pattern, t))
+        {
+            return false;
+        }
+        self.process.is_some() || self.title.is_some()
+    }
+}
+
+fn pattern_matches(pattern: &str, text: &str) -> bool {
+    if let Some(regex) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/')) {
+        regex::Regex::new(regex)
+            .map(|r| r.is_match(text))
+            .unwrap_or(false)
+    } else {
+        pattern == text
+    }
+}
+
+#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct MacosOnOpenRule {
+    #[serde(flatten)]
+    pub(crate) window: MacosWindow,
     #[serde(default)]
     pub(crate) run: Actions,
 }
 
 #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
-#[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct WindowsWindowRule {
-    /// Process name (e.g., "notepad.exe", "chrome.exe")
-    #[serde(default)]
-    pub(crate) process: Option<String>,
-    #[serde(default)]
-    pub(crate) title: Option<String>,
-    #[serde(default = "default_manage_window")]
-    pub(crate) manage: bool,
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct WindowsOnOpenRule {
+    #[serde(flatten)]
+    pub(crate) window: WindowsWindow,
     #[serde(default)]
     pub(crate) run: Actions,
-}
-
-fn default_manage_window() -> bool {
-    true
 }
 
 #[cfg_attr(not(target_os = "macos"), expect(dead_code))]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct MacosConfig {
     #[serde(default)]
-    pub(crate) window_rules: Vec<MacosWindowRule>,
+    pub(crate) ignore: Vec<MacosWindow>,
+    #[serde(default)]
+    pub(crate) on_open: Vec<MacosOnOpenRule>,
 }
 
 #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct WindowsConfig {
     #[serde(default)]
-    pub(crate) window_rules: Vec<WindowsWindowRule>,
+    pub(crate) ignore: Vec<WindowsWindow>,
+    #[serde(default)]
+    pub(crate) on_open: Vec<WindowsOnOpenRule>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
