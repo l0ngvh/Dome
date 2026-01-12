@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsWindowRule};
-use crate::core::{Child, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId, WorkspaceId};
+use crate::core::{Child, Container, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId};
 
 use super::window::{
     get_process_name, get_window_dimension, get_window_title, is_manageable_window, should_tile,
@@ -83,7 +83,7 @@ pub(super) enum HubEvent {
 pub(super) struct Frame {
     pub(super) windows: Vec<(WindowHandle, Dimension)>,
     pub(super) hide: Vec<WindowHandle>,
-    pub(super) overlays: Vec<OverlayRect>,
+    pub(super) overlays: Overlays,
     pub(super) focus: Option<WindowHandle>,
 }
 
@@ -94,6 +94,21 @@ pub(super) struct OverlayRect {
     pub(super) width: f32,
     pub(super) height: f32,
     pub(super) color: Color,
+}
+
+#[derive(Clone)]
+pub(super) struct OverlayLabel {
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) text: String,
+    pub(super) color: Color,
+    pub(super) bold: bool,
+}
+
+#[derive(Default)]
+pub(super) struct Overlays {
+    pub(super) rects: Vec<OverlayRect>,
+    pub(super) labels: Vec<OverlayLabel>,
 }
 
 struct Registry {
@@ -150,6 +165,16 @@ impl Registry {
 
     fn get_float_handle(&self, id: FloatWindowId) -> Option<WindowHandle> {
         self.float_rev.get(&id).cloned()
+    }
+
+    fn get_handle_by_key(&self, key: WindowKey) -> Option<WindowHandle> {
+        if let Some(&id) = self.tiling.get(&key) {
+            return self.tiling_rev.get(&id).cloned();
+        }
+        if let Some(&id) = self.float.get(&key) {
+            return self.float_rev.get(&id).cloned();
+        }
+        None
     }
 
     fn contains(&self, handle: &WindowHandle) -> bool {
@@ -210,12 +235,15 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
     let mut hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
     let mut registry = Registry::new();
 
-    let frame = build_frame(&hub, &registry, &config, None, hub.current_workspace());
+    let frame = build_frame(&hub, &registry, &config, None, HashSet::new());
     send_frame(frame, &main_hwnd);
 
     while let Ok(event) = rx.recv() {
         let last_focus = hub.get_workspace(hub.current_workspace()).focused();
-        let last_workspace = hub.current_workspace();
+        let previous_displayed: HashSet<_> = get_displayed_windows(&hub, &registry)
+            .into_iter()
+            .map(|(handle, _)| handle.key())
+            .collect();
         match event {
             HubEvent::Shutdown => break,
             HubEvent::ConfigChanged(new_config) => {
@@ -285,7 +313,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 execute_actions(&mut hub, &mut registry, &actions, &main_hwnd);
             }
         }
-        let frame = build_frame(&hub, &registry, &config, last_focus, last_workspace);
+        let frame = build_frame(&hub, &registry, &config, last_focus, previous_displayed);
         send_frame(frame, &main_hwnd);
     }
 }
@@ -364,103 +392,105 @@ fn build_frame(
     registry: &Registry,
     config: &Config,
     last_focus: Option<Focus>,
-    last_workspace: WorkspaceId,
+    previous_displayed: HashSet<WindowKey>,
 ) -> Frame {
-    let current_workspace = hub.current_workspace();
-    let ws = hub.get_workspace(current_workspace);
+    let ws = hub.get_workspace(hub.current_workspace());
     let border = config.border_size;
 
-    let mut hide = Vec::new();
-    if current_workspace != last_workspace {
-        let prev_ws = hub.get_workspace(last_workspace);
-        let mut stack: Vec<Child> = prev_ws.root().into_iter().collect();
-        while let Some(child) = stack.pop() {
-            match child {
-                Child::Window(id) => {
-                    if let Some(handle) = registry.get_handle(id) {
-                        hide.push(handle);
-                    }
-                }
-                Child::Container(id) => {
-                    for &c in hub.get_container(id).children() {
-                        stack.push(c);
-                    }
-                }
-            }
-        }
-        for &id in prev_ws.float_windows() {
-            if let Some(handle) = registry.get_float_handle(id) {
-                hide.push(handle);
-            }
-        }
-    }
+    let windows = get_displayed_windows(hub, registry);
+    let windows: Vec<_> = windows
+        .into_iter()
+        .map(|(handle, dim)| (handle, apply_inset(dim, border)))
+        .collect();
+    let overlays = build_overlays(hub, registry, config);
 
+    let focus = if ws.focused() != last_focus {
+        match ws.focused() {
+            Some(Focus::Tiling(Child::Window(id))) => registry.get_handle(id),
+            Some(Focus::Float(id)) => registry.get_float_handle(id),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    let current: HashSet<_> = windows.iter().map(|(h, _)| h.key()).collect();
+    let hide = previous_displayed
+        .into_iter()
+        .filter(|key| !current.contains(key))
+        .filter_map(|key| registry.get_handle_by_key(key))
+        .collect();
+
+    Frame {
+        windows,
+        hide,
+        overlays,
+        focus,
+    }
+}
+
+fn get_displayed_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimension)> {
+    let ws = hub.get_workspace(hub.current_workspace());
     let mut windows = Vec::new();
-    let mut overlays = Vec::new();
-    let focused = ws.focused();
 
     let mut stack: Vec<Child> = ws.root().into_iter().collect();
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(id) => {
                 if let Some(handle) = registry.get_handle(id) {
-                    let dim = hub.get_window(id).dimension();
-                    let inset = apply_inset(dim, border);
-                    windows.push((handle, inset));
-                    if focused != Some(Focus::Tiling(Child::Window(id))) {
-                        overlays.extend(border_rects(dim, border, [config.border_color; 4]));
-                    }
+                    windows.push((handle, hub.get_window(id).dimension()));
                 }
             }
             Child::Container(id) => {
                 let container = hub.get_container(id);
-                if container.is_tabbed() {
-                    if let Some(active) = container.active_tab() {
-                        stack.push(active);
+                if let Some(active) = container.active_tab() {
+                    stack.push(active);
+                } else {
+                    for &c in container.children() {
+                        stack.push(c);
                     }
-                    let dim = container.dimension();
+                }
+            }
+        }
+    }
+
+    for &float_id in ws.float_windows() {
+        if let Some(handle) = registry.get_float_handle(float_id) {
+            windows.push((handle, hub.get_float(float_id).dimension()));
+        }
+    }
+
+    windows
+}
+
+fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
+    let ws = hub.get_workspace(hub.current_workspace());
+    let border = config.border_size;
+    let focused = ws.focused();
+
+    let mut rects = Vec::new();
+    let mut labels = Vec::new();
+
+    let mut stack: Vec<Child> = ws.root().into_iter().collect();
+    while let Some(child) = stack.pop() {
+        match child {
+            Child::Window(id) => {
+                if registry.get_handle(id).is_some()
+                    && focused != Some(Focus::Tiling(Child::Window(id)))
+                {
+                    let dim = hub.get_window(id).dimension();
+                    rects.extend(border_rects(dim, border, [config.border_color; 4]));
+                }
+            }
+            Child::Container(id) => {
+                let container = hub.get_container(id);
+                if let Some(active) = container.active_tab() {
+                    stack.push(active);
                     let is_focused = focused == Some(Focus::Tiling(Child::Container(id)));
-                    let tab_color = if is_focused {
-                        config.focused_color
-                    } else {
-                        config.border_color
-                    };
-
-                    overlays.push(OverlayRect {
-                        x: dim.x,
-                        y: dim.y,
-                        width: dim.width,
-                        height: config.tab_bar_height,
-                        color: config.tab_bar_background_color,
-                    });
-                    let tab_dim = Dimension {
-                        x: dim.x,
-                        y: dim.y,
-                        width: dim.width,
-                        height: config.tab_bar_height,
-                    };
-                    overlays.extend(border_rects(tab_dim, border, [tab_color; 4]));
-
-                    let children = container.children();
-
-                    // SAFETY: children can never be empty
-                    let tab_width = dim.width / children.len() as f32;
-                    overlays.push(OverlayRect {
-                        x: dim.x + container.active_tab_index() as f32 * tab_width,
-                        y: dim.y,
-                        width: tab_width,
-                        height: config.tab_bar_height,
-                        color: config.active_tab_background_color,
-                    });
-                    for i in 1..children.len() {
-                        overlays.push(OverlayRect {
-                            x: dim.x + i as f32 * tab_width - border / 2.0,
-                            y: dim.y,
-                            width: border,
-                            height: config.tab_bar_height,
-                            color: tab_color,
-                        });
-                    }
+                    let (tab_rects, tab_labels) =
+                        build_tab_bar(container, registry, config, is_focused);
+                    rects.extend(tab_rects);
+                    labels.extend(tab_labels);
                 } else {
                     for &c in container.children() {
                         stack.push(c);
@@ -473,7 +503,7 @@ fn build_frame(
     match focused {
         Some(Focus::Tiling(Child::Window(id))) => {
             let w = hub.get_window(id);
-            overlays.extend(border_rects(
+            rects.extend(border_rects(
                 w.dimension(),
                 border,
                 spawn_colors(w.spawn_mode(), config),
@@ -481,7 +511,7 @@ fn build_frame(
         }
         Some(Focus::Tiling(Child::Container(id))) => {
             let c = hub.get_container(id);
-            overlays.extend(border_rects(
+            rects.extend(border_rects(
                 c.dimension(),
                 border,
                 spawn_colors(c.spawn_mode(), config),
@@ -490,36 +520,107 @@ fn build_frame(
         _ => {}
     }
 
-    for &id in ws.float_windows() {
-        if let Some(handle) = registry.get_float_handle(id) {
-            let dim = hub.get_float(id).dimension();
-            let inset = apply_inset(dim, border);
-            windows.push((handle, inset));
-            let color = if focused == Some(Focus::Float(id)) {
+    for &float_id in ws.float_windows() {
+        if registry.get_float_handle(float_id).is_some() {
+            let dim = hub.get_float(float_id).dimension();
+            let color = if focused == Some(Focus::Float(float_id)) {
                 config.focused_color
             } else {
                 config.border_color
             };
-            overlays.extend(border_rects(dim, border, [color; 4]));
+            rects.extend(border_rects(dim, border, [color; 4]));
         }
     }
 
-    let focus = if focused != last_focus {
-        match focused {
-            Some(Focus::Tiling(Child::Window(id))) => registry.get_handle(id),
-            Some(Focus::Float(id)) => registry.get_float_handle(id),
-            _ => None,
-        }
+    Overlays { rects, labels }
+}
+
+fn build_tab_bar(
+    container: &Container,
+    registry: &Registry,
+    config: &Config,
+    is_focused: bool,
+) -> (Vec<OverlayRect>, Vec<OverlayLabel>) {
+    let dim = container.dimension();
+    let border = config.border_size;
+    let height = config.tab_bar_height;
+    let tab_color = if is_focused {
+        config.focused_color
     } else {
-        None
+        config.border_color
     };
 
-    Frame {
-        windows,
-        hide,
-        overlays,
-        focus,
+    let mut rects = vec![OverlayRect {
+        x: dim.x,
+        y: dim.y,
+        width: dim.width,
+        height,
+        color: config.tab_bar_background_color,
+    }];
+
+    let tab_dim = Dimension {
+        x: dim.x,
+        y: dim.y,
+        width: dim.width,
+        height,
+    };
+    rects.extend(border_rects(tab_dim, border, [tab_color; 4]));
+
+    let children = container.children();
+    if children.is_empty() {
+        return (rects, Vec::new());
     }
+
+    let tab_width = dim.width / children.len() as f32;
+    let active_tab = container.active_tab_index();
+
+    rects.push(OverlayRect {
+        x: dim.x + active_tab as f32 * tab_width,
+        y: dim.y,
+        width: tab_width,
+        height,
+        color: config.active_tab_background_color,
+    });
+
+    for i in 1..children.len() {
+        rects.push(OverlayRect {
+            x: dim.x + i as f32 * tab_width - border / 2.0,
+            y: dim.y,
+            width: border,
+            height,
+            color: tab_color,
+        });
+    }
+
+    let labels = children
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let title = match c {
+                Child::Window(wid) => registry
+                    .get_handle(*wid)
+                    .and_then(|h| h.title().map(|s| s.to_owned()))
+                    .unwrap_or_else(|| "Unknown".to_owned()),
+                Child::Container(_) => "Container".to_owned(),
+            };
+            let is_active = i == active_tab;
+            let text = if is_active {
+                format!("[{title}]")
+            } else {
+                title
+            };
+            let x = dim.x + i as f32 * tab_width + tab_width / 2.0 - text.len() as f32 * 3.5;
+            OverlayLabel {
+                x,
+                y: dim.y + height / 2.0 - 6.0,
+                text,
+                color: Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+                bold: is_active,
+            }
+        })
+        .collect();
+
+    (rects, labels)
 }
 
 fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {

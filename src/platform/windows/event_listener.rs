@@ -113,7 +113,7 @@ unsafe extern "system" fn event_hook_proc(
                 // activation event for the other app is already queued. The other app will then
                 // proceed to take focus when the event is processed, but which tries to take focus
                 // and forms the feedback loop.
-                if GetForegroundWindow() != hwnd {
+                if unsafe { GetForegroundWindow() } != hwnd {
                     return;
                 }
                 sender

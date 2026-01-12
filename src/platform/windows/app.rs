@@ -7,9 +7,14 @@ use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_RENDER_TARGET_PROPERTIES,
     D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory,
     ID2D1DCRenderTarget, ID2D1Factory,
+};
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWriteCreateFactory, IDWriteFactory,
+    IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -30,7 +35,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
-use super::hub::{Frame, OverlayRect, WM_APP_FRAME, WindowHandle};
+use super::hub::{Frame, Overlays, WM_APP_FRAME, WindowHandle};
 use super::window::Taskbar;
 use crate::core::Dimension;
 
@@ -46,6 +51,8 @@ pub(super) struct App {
     dc_target: ID2D1DCRenderTarget,
     mem_dc: HDC,
     bitmap: HGDIOBJ,
+    text_format: IDWriteTextFormat,
+    text_format_bold: IDWriteTextFormat,
     taskbar: Taskbar,
     screen: Dimension,
 }
@@ -89,11 +96,38 @@ impl App {
         let (dc_target, mem_dc, bitmap) =
             create_render_resources(screen.width as u32, screen.height as u32)?;
 
+        let dwrite_factory: IDWriteFactory =
+            unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)? };
+        let text_format = unsafe {
+            dwrite_factory.CreateTextFormat(
+                windows::core::w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                12.0,
+                windows::core::w!(""),
+            )?
+        };
+        let text_format_bold = unsafe {
+            dwrite_factory.CreateTextFormat(
+                windows::core::w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_BOLD,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                12.0,
+                windows::core::w!(""),
+            )?
+        };
+
         let app = Box::pin(Self {
             hwnd,
             dc_target,
             mem_dc,
             bitmap,
+            text_format,
+            text_format_bold,
             taskbar,
             screen,
         });
@@ -129,8 +163,8 @@ impl App {
         self.set_overlays(cmd.overlays)
     }
 
-    fn set_overlays(&mut self, rects: Vec<OverlayRect>) -> anyhow::Result<()> {
-        self.render(&rects)?;
+    fn set_overlays(&mut self, overlays: Overlays) -> anyhow::Result<()> {
+        self.render(&overlays)?;
         let _ = unsafe { ShowWindow(self.hwnd, SW_SHOWNA) };
         unsafe {
             SetWindowPos(
@@ -146,7 +180,7 @@ impl App {
         Ok(())
     }
 
-    fn render(&self, rects: &[OverlayRect]) -> anyhow::Result<()> {
+    fn render(&self, overlays: &Overlays) -> anyhow::Result<()> {
         let width = self.screen.width as i32;
         let height = self.screen.height as i32;
 
@@ -167,7 +201,7 @@ impl App {
                 a: 0.0,
             }));
 
-            for rect in rects {
+            for rect in &overlays.rects {
                 let brush = self.dc_target.CreateSolidColorBrush(
                     &D2D1_COLOR_F {
                         r: rect.color.r * rect.color.a, // premultiply
@@ -185,6 +219,37 @@ impl App {
                         bottom: rect.y + rect.height,
                     },
                     &brush,
+                );
+            }
+
+            for label in &overlays.labels {
+                let brush = self.dc_target.CreateSolidColorBrush(
+                    &D2D1_COLOR_F {
+                        r: label.color.r,
+                        g: label.color.g,
+                        b: label.color.b,
+                        a: label.color.a,
+                    },
+                    None,
+                )?;
+                let text: Vec<u16> = label.text.encode_utf16().collect();
+                let format = if label.bold {
+                    &self.text_format_bold
+                } else {
+                    &self.text_format
+                };
+                self.dc_target.DrawText(
+                    &text,
+                    format,
+                    &D2D_RECT_F {
+                        left: label.x,
+                        top: label.y,
+                        right: label.x + 1000.0,
+                        bottom: label.y + 20.0,
+                    },
+                    &brush,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                    Default::default(),
                 );
             }
 
