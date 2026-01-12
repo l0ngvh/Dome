@@ -29,7 +29,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HWND_TOP, RegisterClassW, SW_SHOWNA,
+    GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HWND_TOPMOST, RegisterClassW, SW_SHOWNA,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW,
     SetWindowPos, ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WM_PAINT, WNDCLASSW, WS_EX_LAYERED,
     WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
@@ -169,7 +169,7 @@ impl App {
         unsafe {
             SetWindowPos(
                 self.hwnd,
-                Some(HWND_TOP),
+                Some(HWND_TOPMOST),
                 0,
                 0,
                 0,
