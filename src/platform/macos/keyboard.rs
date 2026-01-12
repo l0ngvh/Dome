@@ -57,10 +57,8 @@ unsafe extern "C-unwind" fn event_tap_callback(
             tracing::debug!("Event tap disabled, re-enabling");
             CGEvent::tap_enable(tap, true);
         }
-    } else if event_type == CGEventType::KeyDown {
-        if handle_keyboard(delegate, event_ptr) {
-            return std::ptr::null_mut();
-        }
+    } else if event_type == CGEventType::KeyDown && handle_keyboard(delegate, event_ptr) {
+        return std::ptr::null_mut();
     }
 
     event_ptr
