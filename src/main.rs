@@ -25,7 +25,7 @@ fn main() -> anyhow::Result<()> {
         None => run_app(None)?,
         Some(Command::Launch { config }) => run_app(config)?,
         Some(Command::Action(action)) => {
-            DomeClient::default().send_action(&action)?;
+            DomeClient.send_action(&action)?;
         }
     }
     Ok(())
