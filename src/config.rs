@@ -1,6 +1,8 @@
 use anyhow::{Result, anyhow};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
+use std::path::Path;
 use std::str::FromStr;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
@@ -450,10 +452,7 @@ impl Config {
 pub(crate) fn start_config_watcher(
     config_path: &str,
     on_change: impl Fn(Config) + Send + 'static,
-) -> anyhow::Result<notify::RecommendedWatcher> {
-    use notify::{Watcher, event::ModifyKind};
-    use std::path::Path;
-
+) -> anyhow::Result<RecommendedWatcher> {
     let path = Path::new(config_path).canonicalize()?;
     let Some(watch_dir) = path.parent().map(|p| p.to_owned()) else {
         anyhow::bail!("no parent dir");
@@ -461,7 +460,7 @@ pub(crate) fn start_config_watcher(
 
     let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
         if let Ok(event) = res
-            && matches!(event.kind, notify::EventKind::Modify(ModifyKind::Data(_)))
+            && matches!(event.kind, EventKind::Modify(ModifyKind::Any))
             && event.paths.iter().any(|p| p == &path)
         {
             match Config::load(path.to_str().unwrap()) {
@@ -474,7 +473,7 @@ pub(crate) fn start_config_watcher(
         }
     })?;
 
-    watcher.watch(&watch_dir, notify::RecursiveMode::NonRecursive)?;
+    watcher.watch(&watch_dir, RecursiveMode::NonRecursive)?;
     tracing::info!(path = config_path, "Config watcher started");
     Ok(watcher)
 }
