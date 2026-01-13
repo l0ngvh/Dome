@@ -1,21 +1,20 @@
 use std::cell::{Cell, OnceCell, RefCell};
-use std::collections::HashMap;
 use std::ffi::c_void;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSScreen, NSWindow,
 };
-use objc2_application_services::{
-    AXIsProcessTrustedWithOptions, AXObserver, kAXTrustedCheckOptionPrompt,
-};
+use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
     CFDictionary, CFMachPort, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext,
-    CFRunLoopTimer, kCFBooleanTrue, kCFRunLoopDefaultMode,
+    kCFBooleanTrue, kCFRunLoopDefaultMode,
 };
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use tracing_error::ErrorLayer;
@@ -24,12 +23,15 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
 use super::hub::{Frame, HubEvent, HubMessage, HubThread};
 use super::keyboard;
-use super::listeners::{ThrottleState, setup_app_observers};
+use super::listeners::EventListener;
 use super::overlay::{OverlayView, create_overlay_window};
+use super::throttle::Throttle;
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
 use crate::platform::macos::window::AXRegistry;
+
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -76,16 +78,42 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     });
     let screen = get_main_screen(mtm);
 
-    let delegate = AppDelegate::new(mtm, screen, config, event_tx, frame_rx);
+    let ax_registry = Rc::new(RefCell::new(AXRegistry::new()));
+    let is_suspended = Rc::new(Cell::new(false));
+
+    let _event_listeners = EventListener::new(
+        screen,
+        ax_registry.clone(),
+        event_tx.clone(),
+        is_suspended.clone(),
+    );
+
+    let delegate = AppDelegate::new(
+        mtm,
+        screen,
+        config,
+        event_tx,
+        frame_rx,
+        ax_registry,
+        is_suspended,
+    );
     let source = create_frame_source(&delegate);
 
     let main_run_loop = CFRunLoop::main().unwrap();
     main_run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
 
-    let hub_thread = HubThread::spawn(hub_config, screen, event_rx, frame_tx, source, main_run_loop);
+    let hub_thread = HubThread::spawn(
+        hub_config,
+        screen,
+        event_rx,
+        frame_tx,
+        source,
+        main_run_loop,
+    );
 
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     app.run();
+
     hub_thread.join();
     Ok(())
 }
@@ -126,21 +154,23 @@ fn init_tracing(config: &Config) {
 pub(super) struct AppDelegateIvars {
     pub(super) screen: Dimension,
     pub(super) config: Arc<RwLock<Config>>,
-    pub(super) ax_registry: RefCell<AXRegistry>,
-    pub(super) throttle: RefCell<ThrottleState>,
-    /// References to all observers to prevent them from being dropped
-    pub(super) observers: Observers,
+    pub(super) ax_registry: Rc<RefCell<AXRegistry>>,
+    pub(super) is_suspended: Rc<Cell<bool>>,
     pub(super) hub_sender: Sender<HubEvent>,
     pub(super) frame_rx: Receiver<HubMessage>,
-    /// Reference to overlay window to prevent it from being dropped
     pub(super) overlay_window: OnceCell<Retained<NSWindow>>,
     pub(super) overlay: OnceCell<Retained<OverlayView>>,
     pub(super) event_tap: OnceCell<CFRetained<CFMachPort>>,
-    pub(super) sync_timer: OnceCell<CFRetained<CFRunLoopTimer>>,
-    /// To suspend on sleep/screen lock to save battery
-    /// Not reliable to detect whether screen is locked for other purposes as screen sleep/lock
-    /// notification can arrive after screen is locked
-    pub(super) is_suspended: Cell<bool>,
+    /// Throttle rendering. Aside from the obvious benefit of reducing system call and lower CPU
+    /// usage, it also helps preventing feedback loop where moving/focusing windows generate
+    /// windows events that are indistinguishable from user created ones. This is particularly
+    /// helpful in preventing focus loop that can happen when Mac queue an event for an activated
+    /// application, but by the time event is processed the focus have been given to another app.
+    /// This will cause a feedback loop where this app try to take focus and succeed, but the
+    /// activation event for the other app is already queued. The other app will then proceed to
+    /// take focus when the event is processed, but which tries to take focus and forms the
+    /// feedback loop.
+    pub(super) frame_throttle: OnceCell<RefCell<Pin<Box<Throttle<Frame>>>>>,
 }
 
 define_class!(
@@ -155,6 +185,7 @@ define_class!(
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
             tracing::info!("Application did finish launching");
+            // AppDelegate lives for the entire duration of the app
             let delegate: &'static AppDelegate = unsafe { std::mem::transmute(self) };
             let mtm = self.mtm();
 
@@ -172,18 +203,23 @@ define_class!(
             let _ = delegate.ivars().overlay_window.set(overlay_window);
             let _ = delegate.ivars().overlay.set(overlay);
 
+            let frame_throttle = Throttle::new(FRAME_INTERVAL, move |frame: Frame| {
+                if let Err(e) = process_frame(delegate, &frame) {
+                    tracing::warn!("Failed to process frame: {e:#}");
+                }
+            });
+            let _ = delegate
+                .ivars()
+                .frame_throttle
+                .set(RefCell::new(frame_throttle));
+
             if let Err(e) = keyboard::listen_to_input_devices(delegate) {
                 tracing::error!("Failed to listen to input devices: {e:#}");
             }
-
-            setup_app_observers(delegate);
         }
 
         #[unsafe(method(applicationWillTerminate:))]
         fn will_terminate(&self, _notification: &NSNotification) {
-            if let Some(timer) = self.ivars().sync_timer.get() {
-                CFRunLoopTimer::invalidate(timer);
-            }
             let _ = self.ivars().hub_sender.send(HubEvent::Shutdown);
         }
     }
@@ -196,20 +232,20 @@ impl AppDelegate {
         config: Arc<RwLock<Config>>,
         hub_sender: Sender<HubEvent>,
         frame_rx: Receiver<HubMessage>,
+        ax_registry: Rc<RefCell<AXRegistry>>,
+        is_suspended: Rc<Cell<bool>>,
     ) -> Retained<Self> {
         let ivars = AppDelegateIvars {
             screen,
             config,
-            ax_registry: RefCell::new(AXRegistry::new()),
-            throttle: RefCell::new(ThrottleState::new()),
-            observers: Rc::new(RefCell::new(HashMap::new())),
+            ax_registry,
+            is_suspended,
             hub_sender,
             frame_rx,
             overlay_window: OnceCell::new(),
             overlay: OnceCell::new(),
             event_tap: OnceCell::new(),
-            sync_timer: OnceCell::new(),
-            is_suspended: Cell::new(false),
+            frame_throttle: OnceCell::new(),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
@@ -230,8 +266,8 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     while let Ok(msg) = delegate.ivars().frame_rx.try_recv() {
         match msg {
             HubMessage::Frame(frame) => {
-                if let Err(e) = process_frame(delegate, &frame) {
-                    tracing::warn!("Failed to process frame: {e:#}");
+                if let Some(throttle) = delegate.ivars().frame_throttle.get() {
+                    throttle.borrow_mut().submit(frame);
                 }
             }
             HubMessage::Shutdown => {
@@ -286,5 +322,3 @@ fn get_main_screen(mtm: MainThreadMarker) -> Dimension {
         height: visible_frame.size.height as f32,
     }
 }
-
-type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;
