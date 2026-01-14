@@ -72,10 +72,8 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     ipc::start_server({
         let tx = event_tx.clone();
-        move |actions| {
-            tx.send(HubEvent::Action(actions)).ok();
-        }
-    });
+        move |actions| tx.send(HubEvent::Action(actions)).ok().ok_or(anyhow::anyhow!("channel closed"))
+    })?;
     let screen = get_main_screen(mtm);
 
     let ax_registry = Rc::new(RefCell::new(AXRegistry::new()));

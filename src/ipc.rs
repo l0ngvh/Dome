@@ -42,20 +42,9 @@ impl DomeClient {
     }
 }
 
-pub(crate) fn start_server<F>(on_action: F)
+pub(crate) fn start_server<F>(on_action: F) -> anyhow::Result<()>
 where
-    F: Fn(Actions) + Send + 'static,
-{
-    std::thread::spawn(move || {
-        if let Err(e) = run_server(&on_action) {
-            tracing::error!("IPC server error: {e}");
-        }
-    });
-}
-
-fn run_server<F>(on_action: &F) -> anyhow::Result<()>
-where
-    F: Fn(Actions),
+    F: Fn(Actions) -> anyhow::Result<()> + Send + 'static,
 {
     let name = socket_name();
     let listener = match ListenerOptions::new().name(name.clone()).create_sync() {
@@ -73,15 +62,28 @@ where
     };
     tracing::info!("IPC server listening");
 
-    loop {
-        let stream = listener.accept()?;
-        handle_client(stream, on_action);
-    }
+    std::thread::spawn(move || {
+        loop {
+            match listener.accept() {
+                Ok(stream) => {
+                    if let Err(e) = handle_client(stream, &on_action) {
+                        tracing::debug!("IPC client handler stopped: {e}");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("IPC accept error: {e}");
+                    break;
+                }
+            }
+        }
+    });
+    Ok(())
 }
 
-fn handle_client<F>(stream: interprocess::local_socket::Stream, on_action: &F)
+fn handle_client<F>(stream: interprocess::local_socket::Stream, on_action: &F) -> anyhow::Result<()>
 where
-    F: Fn(Actions),
+    F: Fn(Actions) -> anyhow::Result<()>,
 {
     let mut stream = stream;
     let mut reader = BufReader::new(&stream);
@@ -90,13 +92,14 @@ where
     if reader.read_line(&mut line).is_ok() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            return;
+            return Ok(());
         }
         let response = match serde_json::from_str::<Action>(trimmed) {
             Ok(action) => {
                 tracing::debug!(?action, "IPC action");
-                on_action(Actions::new(vec![action]));
-                "ok\n"
+                let result = on_action(Actions::new(vec![action]));
+                let _ = stream.write_all(b"ok\n");
+                return result;
             }
             Err(e) => {
                 tracing::warn!(message = trimmed, "Invalid IPC message: {e}");
@@ -105,4 +108,5 @@ where
         };
         let _ = stream.write_all(response.as_bytes());
     }
+    Ok(())
 }

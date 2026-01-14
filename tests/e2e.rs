@@ -130,119 +130,103 @@ impl TestEnv {
         );
         Self { server }
     }
+}
 
-    fn shutdown(mut self) {
+impl Drop for TestEnv {
+    fn drop(&mut self) {
         dome(&["exit"]);
-        self.server.wait().unwrap();
+        self.server.wait().ok();
         kill_test_app();
     }
 }
 
 #[test]
 fn test_horizontal_navigation() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
     spawn_test_window();
     spawn_test_window();
 
     assert!(dome(&["focus", "left"]));
     assert!(dome(&["focus", "right"]));
-
-    env.shutdown();
 }
 
 #[test]
 fn test_vertical_navigation() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
     spawn_test_window();
     assert!(dome(&["toggle", "direction"]));
     spawn_test_window();
 
     assert!(dome(&["focus", "up"]));
     assert!(dome(&["focus", "down"]));
-
-    env.shutdown();
 }
 
 #[test]
 fn test_move_to_workspace() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
     spawn_test_window();
 
     assert!(dome(&["move", "workspace", "1"]));
     assert!(dome(&["focus", "workspace", "1"]));
     assert!(dome(&["focus", "workspace", "0"]));
-
-    env.shutdown();
 }
 
 #[test]
 fn test_move_window_position() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
     spawn_test_window();
     spawn_test_window();
 
     assert!(dome(&["move", "left"]));
     assert!(dome(&["move", "right"]));
-
-    env.shutdown();
 }
 
 #[test]
 fn test_float_toggle() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
     spawn_test_window();
 
     assert!(dome(&["toggle", "float"]));
     assert!(dome(&["toggle", "float"]));
-
-    env.shutdown();
 }
 
 #[test]
 fn test_tabbed_navigation() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
     spawn_test_window();
     spawn_test_window();
     assert!(dome(&["toggle", "layout"]));
 
     assert!(dome(&["focus", "prev-tab"]));
     assert!(dome(&["focus", "next-tab"]));
-
-    env.shutdown();
 }
 
 #[test]
 fn test_focus_parent() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
     spawn_test_window();
     spawn_test_window();
 
     assert!(dome(&["focus", "parent"]));
-
-    env.shutdown();
 }
 
 #[test]
 fn test_close_window() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
     spawn_test_window();
     spawn_test_window();
 
     close_front_window();
-
-    env.shutdown();
 }
 
 #[test]
 fn test_terminate_app() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
     spawn_test_window();
     spawn_test_window();
     spawn_test_window();
 
     quit_test_app();
-
-    env.shutdown();
 }
 
 #[test]
@@ -250,7 +234,7 @@ fn test_config_hot_reload() {
     let tmp = std::env::temp_dir().join("dome_test_config.toml");
     std::fs::write(&tmp, "border_size = 5.0\n").unwrap();
 
-    let env = TestEnv::with_config(tmp.to_str().unwrap());
+    let _env = TestEnv::with_config(tmp.to_str().unwrap());
 
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -264,14 +248,13 @@ fn test_config_hot_reload() {
 
     assert!(dome(&["focus", "workspace", "0"]));
 
-    env.shutdown();
     std::fs::remove_file(&tmp).ok();
 }
 
 #[test]
 #[cfg(target_os = "macos")]
 fn test_exec() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
 
     let marker = std::env::temp_dir().join("dome_exec_test_marker");
     std::fs::remove_file(&marker).ok();
@@ -280,18 +263,17 @@ fn test_exec() {
     assert!(dome(&["exec", &cmd]));
 
     // Wait for command to complete
-    thread::sleep(Duration::from_millis(200));
+    thread::sleep(Duration::from_millis(1000));
 
     assert!(marker.exists(), "exec command did not create marker file");
 
     std::fs::remove_file(&marker).ok();
-    env.shutdown();
 }
 
 #[test]
 #[cfg(target_os = "windows")]
 fn test_exec() {
-    let env = TestEnv::new();
+    let _env = TestEnv::new();
 
     let marker = std::env::temp_dir().join("dome_exec_test_marker");
     std::fs::remove_file(&marker).ok();
@@ -299,10 +281,9 @@ fn test_exec() {
     let cmd = format!("type nul > {}", marker.display());
     assert!(dome(&["exec", &cmd]));
 
-    thread::sleep(Duration::from_millis(200));
+    thread::sleep(Duration::from_millis(1000));
 
     assert!(marker.exists(), "exec command did not create marker file");
 
     std::fs::remove_file(&marker).ok();
-    env.shutdown();
 }

@@ -57,10 +57,8 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     ipc::start_server({
         let tx = sender.clone();
-        move |actions| {
-            tx.send(HubEvent::Action(actions)).ok();
-        }
-    });
+        move |actions| tx.send(HubEvent::Action(actions)).ok().ok_or(anyhow::anyhow!("channel closed"))
+    })?;
 
     let _config_watcher = start_config_watcher(&config_path, {
         let tx = sender.clone();
