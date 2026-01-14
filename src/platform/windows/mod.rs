@@ -2,6 +2,7 @@ mod app;
 mod event_listener;
 mod hub;
 mod keyboard;
+mod throttle;
 mod window;
 
 use anyhow::Result;

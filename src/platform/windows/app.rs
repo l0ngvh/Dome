@@ -1,6 +1,7 @@
 use std::mem::size_of;
 use std::pin::Pin;
 use std::ptr;
+use std::time::Duration;
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{
@@ -36,8 +37,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::hub::{Frame, Overlays, WM_APP_FRAME, WindowHandle};
+use super::throttle::Throttle;
 use super::window::Taskbar;
 use crate::core::Dimension;
+
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 const OFFSCREEN: Dimension = Dimension {
     x: -32000.0,
@@ -55,6 +59,7 @@ pub(super) struct App {
     text_format_bold: IDWriteTextFormat,
     taskbar: Taskbar,
     screen: Dimension,
+    frame_throttle: Pin<Box<Throttle<Frame>>>,
 }
 
 impl App {
@@ -121,7 +126,7 @@ impl App {
             )?
         };
 
-        let app = Box::pin(Self {
+        let mut app = Box::pin(Self {
             hwnd,
             dc_target,
             mem_dc,
@@ -130,9 +135,22 @@ impl App {
             text_format_bold,
             taskbar,
             screen,
+            frame_throttle: Throttle::new(FRAME_INTERVAL),
         });
 
-        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &*app as *const _ as isize) };
+        let ptr = &*app as *const _ as *mut App;
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize) };
+
+        unsafe {
+            app.as_mut()
+                .get_unchecked_mut()
+                .frame_throttle
+                .set_callback(move |frame| {
+                    if let Err(e) = (*ptr).process_frame(frame) {
+                        tracing::warn!("process_frame failed: {e}");
+                    }
+                });
+        }
 
         Ok(app)
     }
@@ -353,10 +371,8 @@ unsafe extern "system" fn wnd_proc(
     match msg {
         WM_APP_FRAME => {
             let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
-            let cmd = unsafe { *Box::from_raw(wparam.0 as *mut Frame) };
-            if let Err(e) = unsafe { (*ptr).process_frame(cmd) } {
-                tracing::warn!("process_frame failed: {e}");
-            }
+            let frame = unsafe { *Box::from_raw(wparam.0 as *mut Frame) };
+            unsafe { (*ptr).frame_throttle.submit(frame) };
             LRESULT(0)
         }
         WM_PAINT => LRESULT(0),

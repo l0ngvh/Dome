@@ -1,5 +1,7 @@
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
+use std::pin::Pin;
 use std::sync::mpsc::Sender;
+use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use windows::Win32::Foundation::{GetLastError, HWND};
@@ -12,9 +14,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::hub::{HubEvent, WindowHandle};
+use super::throttle::Throttle;
+
+const FOCUS_THROTTLE: Duration = Duration::from_millis(50);
+const RESIZE_THROTTLE: Duration = Duration::from_millis(16);
 
 thread_local! {
     static SENDER: OnceCell<Sender<HubEvent>> = const { OnceCell::new() };
+    static FOCUS_THROTTLE_CELL: RefCell<Pin<Box<Throttle<HWND>>>> = RefCell::new(Throttle::new(FOCUS_THROTTLE));
+    static RESIZE_THROTTLE_CELL: RefCell<Pin<Box<Throttle<HWND>>>> = RefCell::new(Throttle::new(RESIZE_THROTTLE));
 }
 
 pub(super) struct EventHooks(Vec<HWINEVENTHOOK>);
@@ -30,7 +38,25 @@ impl Drop for EventHooks {
 }
 
 pub(super) fn install_event_hooks(sender: Sender<HubEvent>) -> Result<EventHooks> {
-    SENDER.with(|s| s.set(sender).ok());
+    SENDER.with(|s| s.set(sender.clone()).ok());
+
+    FOCUS_THROTTLE_CELL.with(|c| {
+        let focus_sender = sender.clone();
+        c.borrow_mut().set_callback(move |hwnd| {
+            focus_sender
+                .send(HubEvent::WindowFocused(WindowHandle::new(hwnd)))
+                .ok();
+        });
+    });
+
+    RESIZE_THROTTLE_CELL.with(|c| {
+        let resize_sender = sender;
+        c.borrow_mut().set_callback(move |hwnd| {
+            resize_sender
+                .send(HubEvent::WindowMovedOrResized(WindowHandle::new(hwnd)))
+                .ok();
+        });
+    });
 
     // We need separate hooks because SetWinEventHook only accepts contiguous
     // event ranges (min <= max). A single hook covering all events would include
@@ -116,14 +142,10 @@ unsafe extern "system" fn event_hook_proc(
                 if unsafe { GetForegroundWindow() } != hwnd {
                     return;
                 }
-                sender
-                    .send(HubEvent::WindowFocused(WindowHandle::new(hwnd)))
-                    .ok();
+                FOCUS_THROTTLE_CELL.with(|c| c.borrow_mut().submit(hwnd));
             }
             EVENT_SYSTEM_MOVESIZEEND => {
-                sender
-                    .send(HubEvent::WindowMovedOrResized(WindowHandle::new(hwnd)))
-                    .ok();
+                RESIZE_THROTTLE_CELL.with(|c| c.borrow_mut().submit(hwnd));
             }
             _ => {}
         }
