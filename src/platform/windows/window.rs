@@ -9,7 +9,8 @@ use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetWindowLongW, GetWindowRect,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_CHILD,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_THICKFRAME,
+    WS_EX_DLGMODALFRAME, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -74,13 +75,33 @@ pub(super) fn should_tile(hwnd: HWND) -> bool {
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
     let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
 
-    // Popup windows without resize border (notifications, tooltips, etc.)
-    if style & WS_POPUP.0 != 0 && style & WS_THICKFRAME.0 == 0 {
+    // Popup windows (dialogs, menus, utilities)
+    if style & WS_POPUP.0 != 0 {
+        return false;
+    }
+
+    // Non-resizable windows
+    if style & WS_THICKFRAME.0 == 0 {
         return false;
     }
 
     // Always-on-top windows (notifications, alerts)
     if ex_style & WS_EX_TOPMOST.0 != 0 {
+        return false;
+    }
+
+    // Dialog windows
+    if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
+        return false;
+    }
+
+    // Layered windows (overlays, splash screens)
+    if ex_style & WS_EX_LAYERED.0 != 0 {
+        return false;
+    }
+
+    // Click-through windows
+    if ex_style & WS_EX_TRANSPARENT.0 != 0 {
         return false;
     }
 
