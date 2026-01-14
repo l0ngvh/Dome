@@ -32,10 +32,7 @@ where
 }
 
 pub(super) fn is_manageable_window(hwnd: HWND) -> bool {
-    let Some(title) = get_window_title(hwnd) else {
-        tracing::trace!(?hwnd, "not manageable: window has no title");
-        return false;
-    };
+    let title = get_window_title(hwnd);
 
     if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
         tracing::trace!(?hwnd, title, "not manageable: window is not visible");
