@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::path::Path;
@@ -521,7 +521,7 @@ pub(crate) fn start_config_watcher(
 
     let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
         if let Ok(event) = res
-            && matches!(event.kind, EventKind::Modify(ModifyKind::Any))
+            && matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_))
             && event.paths.iter().any(|p| p == &path)
         {
             match Config::load(path.to_str().unwrap()) {
