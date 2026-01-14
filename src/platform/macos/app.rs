@@ -1,10 +1,8 @@
 use std::cell::{Cell, OnceCell, RefCell};
 use std::ffi::c_void;
-use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
@@ -25,13 +23,10 @@ use super::hub::{Frame, HubEvent, HubMessage, HubThread};
 use super::keyboard;
 use super::listeners::EventListener;
 use super::overlay::{OverlayView, create_overlay_window};
-use super::throttle::Throttle;
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
 use crate::platform::macos::window::AXRegistry;
-
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -159,16 +154,6 @@ pub(super) struct AppDelegateIvars {
     pub(super) overlay_window: OnceCell<Retained<NSWindow>>,
     pub(super) overlay: OnceCell<Retained<OverlayView>>,
     pub(super) event_tap: OnceCell<CFRetained<CFMachPort>>,
-    /// Throttle rendering. Aside from the obvious benefit of reducing system call and lower CPU
-    /// usage, it also helps preventing feedback loop where moving/focusing windows generate
-    /// windows events that are indistinguishable from user created ones. This is particularly
-    /// helpful in preventing focus loop that can happen when Mac queue an event for an activated
-    /// application, but by the time event is processed the focus have been given to another app.
-    /// This will cause a feedback loop where this app try to take focus and succeed, but the
-    /// activation event for the other app is already queued. The other app will then proceed to
-    /// take focus when the event is processed, but which tries to take focus and forms the
-    /// feedback loop.
-    pub(super) frame_throttle: OnceCell<RefCell<Pin<Box<Throttle<Frame>>>>>,
 }
 
 define_class!(
@@ -200,16 +185,6 @@ define_class!(
 
             let _ = delegate.ivars().overlay_window.set(overlay_window);
             let _ = delegate.ivars().overlay.set(overlay);
-
-            let frame_throttle = Throttle::new(FRAME_INTERVAL, move |frame: Frame| {
-                if let Err(e) = process_frame(delegate, &frame) {
-                    tracing::warn!("Failed to process frame: {e:#}");
-                }
-            });
-            let _ = delegate
-                .ivars()
-                .frame_throttle
-                .set(RefCell::new(frame_throttle));
 
             if let Err(e) = keyboard::listen_to_input_devices(delegate) {
                 tracing::error!("Failed to listen to input devices: {e:#}");
@@ -243,7 +218,6 @@ impl AppDelegate {
             overlay_window: OnceCell::new(),
             overlay: OnceCell::new(),
             event_tap: OnceCell::new(),
-            frame_throttle: OnceCell::new(),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
@@ -264,8 +238,8 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     while let Ok(msg) = delegate.ivars().frame_rx.try_recv() {
         match msg {
             HubMessage::Frame(frame) => {
-                if let Some(throttle) = delegate.ivars().frame_throttle.get() {
-                    throttle.borrow_mut().submit(frame);
+                if let Err(e) = process_frame(delegate, &frame) {
+                    tracing::warn!("Failed to process frame: {e:#}");
                 }
             }
             HubMessage::Shutdown => {
