@@ -320,12 +320,7 @@ pub(crate) struct MacosWindow {
 
 #[cfg_attr(not(target_os = "macos"), expect(dead_code))]
 impl MacosWindow {
-    pub(crate) fn matches(
-        &self,
-        app: &str,
-        bundle_id: Option<&str>,
-        title: Option<&str>,
-    ) -> bool {
+    pub(crate) fn matches(&self, app: &str, bundle_id: Option<&str>, title: Option<&str>) -> bool {
         if let Some(pattern) = &self.app
             && !pattern_matches(pattern, app)
         {

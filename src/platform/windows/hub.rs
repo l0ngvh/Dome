@@ -629,7 +629,12 @@ fn build_tab_bar(
                 x,
                 y: dim.y + height / 2.0 - 6.0,
                 text,
-                color: Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+                color: Color {
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
+                    a: 1.0,
+                },
                 bold: is_active,
             }
         })

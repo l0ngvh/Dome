@@ -57,10 +57,7 @@ pub(super) struct App {
 }
 
 impl App {
-    pub(super) fn new(
-        taskbar: Taskbar,
-        screen: Dimension,
-    ) -> windows::core::Result<Box<Self>> {
+    pub(super) fn new(taskbar: Taskbar, screen: Dimension) -> windows::core::Result<Box<Self>> {
         let class_name = windows::core::w!("DomeApp");
         let hinstance = unsafe { GetModuleHandleW(None)? };
 

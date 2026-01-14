@@ -59,7 +59,9 @@ impl<T: 'static> Throttle<T> {
         } else {
             this.pending = Some(value);
             if this.timer_id.is_none() {
-                let delay = this.interval.saturating_sub(this.last_sent.unwrap().elapsed());
+                let delay = this
+                    .interval
+                    .saturating_sub(this.last_sent.unwrap().elapsed());
                 self.as_mut().schedule_timer(delay);
             }
         }
@@ -68,8 +70,7 @@ impl<T: 'static> Throttle<T> {
     fn schedule_timer(self: Pin<&mut Self>, delay: Duration) {
         let this = unsafe { self.get_unchecked_mut() };
         let ptr = this as *mut Self as *mut c_void;
-        let id =
-            unsafe { SetTimer(None, 0, delay.as_millis() as u32, Some(timer_callback::<T>)) };
+        let id = unsafe { SetTimer(None, 0, delay.as_millis() as u32, Some(timer_callback::<T>)) };
         TIMER_MAP.with(|m| unsafe { (*m.get()).insert(id, ptr) });
         this.timer_id = Some(id);
     }

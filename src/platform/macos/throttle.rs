@@ -50,7 +50,9 @@ impl<T: 'static> Throttle<T> {
         } else {
             this.pending = Some(value);
             if this.timer.is_none() {
-                let delay = this.interval.saturating_sub(this.last_sent.unwrap().elapsed());
+                let delay = this
+                    .interval
+                    .saturating_sub(this.last_sent.unwrap().elapsed());
                 self.as_mut().schedule_timer(delay);
             }
         }

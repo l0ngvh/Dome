@@ -14,7 +14,9 @@ use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
-use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
+use windows::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MSG, TranslateMessage,
 };
@@ -57,7 +59,11 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     ipc::start_server({
         let tx = sender.clone();
-        move |actions| tx.send(HubEvent::Action(actions)).ok().ok_or(anyhow::anyhow!("channel closed"))
+        move |actions| {
+            tx.send(HubEvent::Action(actions))
+                .ok()
+                .ok_or(anyhow::anyhow!("channel closed"))
+        }
     })?;
 
     let _config_watcher = start_config_watcher(&config_path, {

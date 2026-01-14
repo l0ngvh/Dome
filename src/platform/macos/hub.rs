@@ -196,12 +196,7 @@ impl HubThread {
     }
 }
 
-fn run(
-    mut config: Config,
-    screen: Dimension,
-    rx: Receiver<HubEvent>,
-    sender: MessageSender,
-) {
+fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, sender: MessageSender) {
     let mut hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
     let mut registry = HubRegistry::new();
 
@@ -654,8 +649,11 @@ fn border_rects(
 
 fn on_open_actions(info: &WindowInfo, rules: &[MacosOnOpenRule]) -> Option<Actions> {
     let rule = rules.iter().find(|r| {
-        r.window
-            .matches(&info.app_name, info.bundle_id.as_deref(), info.title.as_deref())
+        r.window.matches(
+            &info.app_name,
+            info.bundle_id.as_deref(),
+            info.title.as_deref(),
+        )
     })?;
     tracing::debug!(%info, actions = %rule.run, "Running on_open actions");
     Some(rule.run.clone())
@@ -663,7 +661,11 @@ fn on_open_actions(info: &WindowInfo, rules: &[MacosOnOpenRule]) -> Option<Actio
 
 fn should_ignore(info: &WindowInfo, rules: &[MacosWindow]) -> bool {
     let matched = rules.iter().find(|r| {
-        r.matches(&info.app_name, info.bundle_id.as_deref(), info.title.as_deref())
+        r.matches(
+            &info.app_name,
+            info.bundle_id.as_deref(),
+            info.title.as_deref(),
+        )
     });
     if let Some(rule) = matched {
         tracing::debug!(%info, ?rule, "Window ignored by rule");
