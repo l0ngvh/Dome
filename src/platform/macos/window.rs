@@ -214,6 +214,10 @@ impl AXRegistry {
     pub(super) fn is_valid(&self, cg_id: CGWindowID) -> bool {
         self.windows.get(&cg_id).is_some_and(|w| w.is_valid())
     }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = (CGWindowID, &AXWindow)> {
+        self.windows.iter().map(|(&id, w)| (id, w))
+    }
 }
 
 fn is_screen_locked() -> bool {

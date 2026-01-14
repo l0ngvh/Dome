@@ -40,11 +40,16 @@ pub(super) enum HubEvent {
     TitleChanged { cg_id: CGWindowID, title: String },
     Action(Actions),
     ConfigChanged(Config),
+    Sync,
     Shutdown,
 }
 
 pub(super) enum HubMessage {
     Frame(Frame),
+    SyncResponse {
+        managed: HashSet<CGWindowID>,
+        current_workspace: HashSet<CGWindowID>,
+    },
     Shutdown,
 }
 
@@ -146,12 +151,23 @@ impl HubRegistry {
     }
 }
 
-struct SendableSource(CFRetained<CFRunLoopSource>);
-struct SendableRunLoop(CFRetained<CFRunLoop>);
+struct MessageSender {
+    tx: Sender<HubMessage>,
+    source: CFRetained<CFRunLoopSource>,
+    run_loop: CFRetained<CFRunLoop>,
+}
 
 // Safety: CFRunLoopSource and CFRunLoop are thread-safe for signal/wake_up operations
-unsafe impl Send for SendableSource {}
-unsafe impl Send for SendableRunLoop {}
+unsafe impl Send for MessageSender {}
+
+impl MessageSender {
+    fn send(&self, msg: HubMessage) {
+        if self.tx.send(msg).is_ok() {
+            self.source.signal();
+            self.run_loop.wake_up();
+        }
+    }
+}
 
 pub(super) struct HubThread {
     handle: JoinHandle<()>,
@@ -166,10 +182,12 @@ impl HubThread {
         source: CFRetained<CFRunLoopSource>,
         main_run_loop: CFRetained<CFRunLoop>,
     ) -> Self {
-        let source = SendableSource(source);
-        let main_run_loop = SendableRunLoop(main_run_loop);
-        let handle =
-            thread::spawn(move || run(config, screen, event_rx, frame_tx, source, main_run_loop));
+        let sender = MessageSender {
+            tx: frame_tx,
+            source,
+            run_loop: main_run_loop,
+        };
+        let handle = thread::spawn(move || run(config, screen, event_rx, sender));
         Self { handle }
     }
 
@@ -182,29 +200,13 @@ fn run(
     mut config: Config,
     screen: Dimension,
     rx: Receiver<HubEvent>,
-    frame_tx: Sender<HubMessage>,
-    source: SendableSource,
-    main_run_loop: SendableRunLoop,
+    sender: MessageSender,
 ) {
     let mut hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
     let mut registry = HubRegistry::new();
 
-    let send_frame = |frame: Frame| {
-        if frame_tx.send(HubMessage::Frame(frame)).is_ok() {
-            source.0.signal();
-            main_run_loop.0.wake_up();
-        }
-    };
-
-    let send_shutdown = || {
-        if frame_tx.send(HubMessage::Shutdown).is_ok() {
-            source.0.signal();
-            main_run_loop.0.wake_up();
-        }
-    };
-
     let frame = build_frame(&hub, &registry, &config, None, HashSet::new());
-    send_frame(frame);
+    sender.send(HubMessage::Frame(frame));
 
     while let Ok(event) = rx.recv() {
         let last_focus = hub.get_workspace(hub.current_workspace()).focused();
@@ -276,13 +278,25 @@ fn run(
                     break;
                 }
             }
+            HubEvent::Sync => {
+                let managed: HashSet<_> = registry.windows.keys().copied().collect();
+                let current_workspace: HashSet<_> = get_displayed_windows(&hub, &registry)
+                    .into_iter()
+                    .map(|(id, _)| id)
+                    .collect();
+                sender.send(HubMessage::SyncResponse {
+                    managed,
+                    current_workspace,
+                });
+                continue;
+            }
         }
 
         let frame = build_frame(&hub, &registry, &config, last_focus, previous_displayed);
-        send_frame(frame);
+        sender.send(HubMessage::Frame(frame));
     }
 
-    send_shutdown();
+    sender.send(HubMessage::Shutdown);
 }
 
 #[tracing::instrument(skip(hub, registry))]

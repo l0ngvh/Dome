@@ -303,7 +303,11 @@ fn schedule_sync_timer(ctx: &ListenerCtx) -> Option<CFRetained<CFRunLoopTimer>> 
 
 unsafe extern "C-unwind" fn sync_timer_callback(_timer: *mut CFRunLoopTimer, info: *mut c_void) {
     let ctx: &mut ListenerCtx = unsafe { &mut *(info as *mut ListenerCtx) };
+    if ctx.is_suspended.get() {
+        return;
+    }
     sync_all_windows(ctx);
+    send_event(&ctx.hub_sender, HubEvent::Sync);
 }
 
 fn handle_app_launched(ctx: &ListenerCtx, notification: &NSNotification) {

@@ -1,4 +1,5 @@
 use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -14,6 +15,7 @@ use objc2_core_foundation::{
     CFDictionary, CFMachPort, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext,
     kCFBooleanTrue, kCFRunLoopDefaultMode,
 };
+use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -242,6 +244,12 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     tracing::warn!("Failed to process frame: {e:#}");
                 }
             }
+            HubMessage::SyncResponse {
+                managed,
+                current_workspace,
+            } => {
+                process_sync(delegate, &managed, &current_workspace);
+            }
             HubMessage::Shutdown => {
                 let mtm = MainThreadMarker::new().unwrap();
                 NSApplication::sharedApplication(mtm).terminate(None);
@@ -281,6 +289,32 @@ fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn process_sync(
+    delegate: &AppDelegate,
+    managed: &HashSet<CGWindowID>,
+    current_workspace: &HashSet<CGWindowID>,
+) {
+    let mut ax_registry = delegate.ivars().ax_registry.borrow_mut();
+    let to_remove: Vec<_> = ax_registry
+        .iter()
+        .filter_map(|(cg_id, ax_window)| {
+            if !managed.contains(&cg_id) {
+                Some(cg_id)
+            } else if !current_workspace.contains(&cg_id) {
+                if let Err(e) = ax_window.hide() {
+                    tracing::trace!("Failed to hide window: {e:#}");
+                }
+                None
+            } else {
+                None
+            }
+        })
+        .collect();
+    for cg_id in to_remove {
+        ax_registry.remove(cg_id);
+    }
 }
 
 fn get_main_screen(mtm: MainThreadMarker) -> Dimension {
