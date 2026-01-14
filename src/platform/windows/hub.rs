@@ -81,7 +81,8 @@ pub(super) enum HubEvent {
 }
 
 pub(super) struct Frame {
-    pub(super) windows: Vec<(WindowHandle, Dimension)>,
+    pub(super) tiling_windows: Vec<(WindowHandle, Dimension)>,
+    pub(super) float_windows: Vec<(WindowHandle, Dimension)>,
     pub(super) hide: Vec<WindowHandle>,
     pub(super) overlays: Overlays,
     pub(super) focus: Option<WindowHandle>,
@@ -389,11 +390,16 @@ fn build_frame(
     let ws = hub.get_workspace(hub.current_workspace());
     let border = config.border_size;
 
-    let windows = get_displayed_windows(hub, registry);
-    let windows: Vec<_> = windows
+    let tiling_windows: Vec<_> = get_tiling_windows(hub, registry)
         .into_iter()
         .map(|(handle, dim)| (handle, apply_inset(dim, border)))
         .collect();
+
+    let float_windows: Vec<_> = get_float_windows(hub, registry)
+        .into_iter()
+        .map(|(handle, dim)| (handle, apply_inset(dim, border)))
+        .collect();
+
     let overlays = build_overlays(hub, registry, config);
 
     let focus = if ws.focused() != last_focus {
@@ -406,7 +412,11 @@ fn build_frame(
         None
     };
 
-    let current: HashSet<_> = windows.iter().map(|(h, _)| h.key()).collect();
+    let current: HashSet<_> = tiling_windows
+        .iter()
+        .chain(float_windows.iter())
+        .map(|(h, _)| h.key())
+        .collect();
     let hide = previous_displayed
         .into_iter()
         .filter(|key| !current.contains(key))
@@ -414,14 +424,15 @@ fn build_frame(
         .collect();
 
     Frame {
-        windows,
+        tiling_windows,
+        float_windows,
         hide,
         overlays,
         focus,
     }
 }
 
-fn get_displayed_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimension)> {
+fn get_tiling_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimension)> {
     let ws = hub.get_workspace(hub.current_workspace());
     let mut windows = Vec::new();
 
@@ -446,12 +457,24 @@ fn get_displayed_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, D
         }
     }
 
-    for &float_id in ws.float_windows() {
-        if let Some(handle) = registry.get_float_handle(float_id) {
-            windows.push((handle, hub.get_float(float_id).dimension()));
-        }
-    }
+    windows
+}
 
+fn get_float_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimension)> {
+    let ws = hub.get_workspace(hub.current_workspace());
+    ws.float_windows()
+        .iter()
+        .filter_map(|&id| {
+            registry
+                .get_float_handle(id)
+                .map(|h| (h, hub.get_float(id).dimension()))
+        })
+        .collect()
+}
+
+fn get_displayed_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimension)> {
+    let mut windows = get_tiling_windows(hub, registry);
+    windows.extend(get_float_windows(hub, registry));
     windows
 }
 

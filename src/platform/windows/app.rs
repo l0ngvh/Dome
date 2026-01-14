@@ -149,9 +149,26 @@ impl App {
             self.taskbar.delete_tab(handle.hwnd())?;
         }
 
-        for (handle, dim) in &cmd.windows {
+        for (handle, dim) in &cmd.tiling_windows {
             self.taskbar.add_tab(handle.hwnd())?;
             set_window_position(handle.hwnd(), dim)?;
+        }
+
+        for (handle, dim) in &cmd.float_windows {
+            self.taskbar.add_tab(handle.hwnd())?;
+            set_window_position(handle.hwnd(), dim)?;
+            unsafe {
+                SetWindowPos(
+                    handle.hwnd(),
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                )
+                .ok()
+            };
         }
 
         if let Some(ref handle) = cmd.focus
