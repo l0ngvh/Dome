@@ -655,17 +655,10 @@ impl Hub {
             Parent::Container(id) => id,
             Parent::Workspace(ws_id) => {
                 let ws = self.workspaces.get(ws_id);
-                match ws.root {
-                    Some(Child::Container(cid)) => {
-                        self.containers.get_mut(cid).dimension = ws.screen;
-                        cid
-                    }
-                    Some(Child::Window(wid)) => {
-                        self.windows.get_mut(wid).dimension = ws.screen;
-                        return;
-                    }
-                    None => return,
-                }
+                let Some(root) = ws.root else { return };
+                self.set_child_dimension(root, ws.screen);
+                let Child::Container(cid) = root else { return };
+                cid
             }
         };
         let mut stack = vec![root_id];
@@ -679,30 +672,32 @@ impl Hub {
             let direction = container.direction();
             let child_count = children.len();
 
-            match direction {
+            let child_dims: Vec<_> = match direction {
                 Some(Direction::Horizontal) => {
                     let child_width = dim.width / child_count as f32;
-                    for (i, child) in children.into_iter().enumerate() {
-                        let child_dim = Dimension {
+                    children
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| Dimension {
                             x: dim.x + child_width * i as f32,
                             y: dim.y,
                             width: child_width,
                             height: dim.height,
-                        };
-                        self.set_child_dimension(child, child_dim, &mut stack);
-                    }
+                        })
+                        .collect()
                 }
                 Some(Direction::Vertical) => {
                     let child_height = dim.height / child_count as f32;
-                    for (i, child) in children.into_iter().enumerate() {
-                        let child_dim = Dimension {
+                    children
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| Dimension {
                             x: dim.x,
                             y: dim.y + child_height * i as f32,
                             width: dim.width,
                             height: child_height,
-                        };
-                        self.set_child_dimension(child, child_dim, &mut stack);
-                    }
+                        })
+                        .collect()
                 }
                 None => {
                     let child_dim = Dimension {
@@ -711,15 +706,20 @@ impl Hub {
                         width: dim.width,
                         height: dim.height - self.tab_bar_height,
                     };
-                    for child in children {
-                        self.set_child_dimension(child, child_dim, &mut stack);
-                    }
+                    vec![child_dim; child_count]
+                }
+            };
+
+            for (child, child_dim) in children.into_iter().zip(child_dims) {
+                self.set_child_dimension(child, child_dim);
+                if let Child::Container(cid) = child {
+                    stack.push(cid);
                 }
             }
         }
     }
 
-    fn set_child_dimension(&mut self, child: Child, dim: Dimension, stack: &mut Vec<ContainerId>) {
+    fn set_child_dimension(&mut self, child: Child, dim: Dimension) {
         let spawn_mode = if dim.width >= dim.height {
             SpawnMode::horizontal()
         } else {
@@ -739,7 +739,6 @@ impl Hub {
                 if self.auto_tile && !c.spawn_mode().is_tab() {
                     c.set_spawn_mode(spawn_mode);
                 }
-                stack.push(cid);
             }
         }
     }

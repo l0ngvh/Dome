@@ -1,4 +1,4 @@
-use crate::core::tests::{setup, snapshot};
+use crate::core::tests::{setup, setup_with_auto_tile, snapshot};
 use insta::assert_snapshot;
 
 #[test]
@@ -411,5 +411,123 @@ fn move_container_to_tabbed_workspace() {
         )
       )
     )
+    ");
+}
+
+#[test]
+fn move_to_empty_workspace_resets_spawn_mode_based_on_screen_size() {
+    let mut hub = setup_with_auto_tile();
+
+    hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+
+    hub.move_focused_to_workspace(1);
+    hub.focus_workspace(1);
+    hub.insert_tiling();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+      )
+      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(2),
+        Container(id=ContainerId(0), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(2), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        )
+      )
+    )
+
+    +-------------------------------------------------------------------------+***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W1                                   |*                                    W2                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
+
+#[test]
+fn move_container_to_empty_workspace_resets_spawn_mode_based_on_screen_size() {
+    let mut hub = setup_with_auto_tile();
+
+    hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+    hub.focus_parent();
+
+    hub.move_focused_to_workspace(1);
+    hub.focus_workspace(1);
+    hub.insert_tiling();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0)
+      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(2),
+        Container(id=ContainerId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=15.00)
+            Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=15.00, w=75.00, h=15.00)
+          )
+          Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00)
+        )
+      )
+    )
+
+    +-------------------------------------------------------------------------+***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W0                                   |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+*                                                                         *
+    +-------------------------------------------------------------------------+*                                    W2                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W1                                   |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
     ");
 }
