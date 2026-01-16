@@ -9,6 +9,16 @@ cargo test --test e2e -- --test-threads=1
 cargo llvm-cov report --branch --html
 '''
 
+[tasks.core-coverage]
+command = "cargo"
+toolchain = "nightly"
+args = ["llvm-cov", "test", "--lib", "--branch", "--ignore-filename-regex", "(platform|action|config|ipc)", "--", "--skip", "smoke"]
+
+[tasks.core-coverage-open]
+command = "cargo"
+toolchain = "nightly"
+args = ["llvm-cov", "test", "--lib", "--branch", "--html", "--open", "--ignore-filename-regex", "(platform|action|config|ipc)", "--", "--skip", "smoke"]
+
 [tasks.e2e]
 command = "cargo"
 args = ["test", "--test", "e2e", "--", "--test-threads=1", "${@}"]
