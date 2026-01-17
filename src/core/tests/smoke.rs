@@ -239,7 +239,7 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
 fn smoke_test() {
     let seed = 42u64;
     let runs = 200;
-    let ops_per_run = 1000;
+    let ops_per_run = 10000;
 
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
