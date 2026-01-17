@@ -226,7 +226,7 @@ impl Hub {
         let parent = container.parent;
         container.is_tabbed = !container.is_tabbed;
         tracing::debug!(%container_id, from = ?direction, "Toggled container layout");
-        if container.direction().is_none() {
+        if container.is_tabbed() {
             // Toggled from split to tabbed
             let tabbed_container = self.containers.get(container_id);
 
@@ -240,6 +240,9 @@ impl Hub {
             self.containers
                 .get_mut(container_id)
                 .set_active_tab(active_tab);
+        } else {
+            // Toggled from tabbed to split
+            self.maintain_direction_invariance(Parent::Container(container_id));
         }
         self.maintain_direction_invariance(parent);
         self.adjust_children_dimension_of(parent);

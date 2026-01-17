@@ -1928,3 +1928,122 @@ fn toggle_container_layout_with_float_focused() {
               ******************************
     ");
 }
+
+#[test]
+fn toggle_container_layout_in_nested_tabbed_maintain_direction_invariant() {
+    let mut hub = setup();
+
+    hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+
+    hub.toggle_container_layout();
+    let w2 = hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+    hub.set_focus(w1);
+    hub.toggle_container_layout();
+    // [w2, w3] was still vertical as toggle_container_layout doesn't change child orientation, nor
+    // should it do
+    hub.set_focus(w2);
+    hub.toggle_direction();
+    // Now we have 3 containers where original orientation were horizontal, 2 of which got turned
+    // into tabbed
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, tabbed=true, active_tab=1,
+            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=4.00, w=150.00, h=26.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=0.00, y=4.00, w=150.00, h=26.00, direction=Horizontal,
+              Window(id=WindowId(2), parent=ContainerId(2), x=0.00, y=4.00, w=75.00, h=26.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=75.00, y=4.00, w=75.00, h=26.00)
+            )
+          )
+        )
+      )
+    )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                   W0                                     |                                 [C1]                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                   W1                                     |                                 [C2]                                    |
+    ***************************************************************************+-------------------------------------------------------------------------+
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                    W2                                   *|                                    W3                                   |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    ***************************************************************************+-------------------------------------------------------------------------+
+    ");
+
+    hub.set_focus(w1);
+    hub.toggle_container_layout();
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, direction=Horizontal,
+            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=2.00, w=75.00, h=28.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00, direction=Vertical,
+              Window(id=WindowId(2), parent=ContainerId(2), x=75.00, y=2.00, w=75.00, h=14.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=75.00, y=16.00, w=75.00, h=14.00)
+            )
+          )
+        )
+      )
+    )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                   W0                                     |                                 [C1]                                    |
+    ***************************************************************************+-------------------------------------------------------------------------+
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                    W2                                   |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *+-------------------------------------------------------------------------+
+    *                                    W1                                   *+-------------------------------------------------------------------------+
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                    W3                                   |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    ***************************************************************************+-------------------------------------------------------------------------+
+    ");
+}
