@@ -80,6 +80,7 @@ active_tab_background_color = "#4d4d66"
 ignore = [
   { process = "LockApp.exe" },
   { process = "SearchHost.exe" },
+  { process = "StartMenuExperienceHost.exe" },
   # { process = "SystemSettings.exe" },
   # { process = "/.*Settings.*/" },
   # { title = "Task Manager" },
