@@ -209,8 +209,8 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, sender: Me
         screen,
         config.tab_bar_height,
         config.automatic_tiling,
-        config.min_width,
-        config.min_height,
+        config.min_width.resolve(screen.width),
+        config.min_height.resolve(screen.height),
     );
     let mut registry = HubRegistry::new();
 
@@ -230,8 +230,8 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, sender: Me
                 hub.sync_config(
                     new_config.tab_bar_height,
                     new_config.automatic_tiling,
-                    new_config.min_width,
-                    new_config.min_height,
+                    new_config.min_width.resolve(screen.width),
+                    new_config.min_height.resolve(screen.height),
                 );
                 config = new_config;
                 tracing::info!("Config reloaded");

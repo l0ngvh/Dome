@@ -308,6 +308,74 @@ fn default_active_tab_background_color() -> Color {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum MinSize {
+    Pixels(f32),
+    Percent(f32),
+}
+
+impl Default for MinSize {
+    fn default() -> Self {
+        MinSize::Percent(5.0)
+    }
+}
+
+impl MinSize {
+    pub(crate) fn resolve(&self, screen_size: f32) -> f32 {
+        match self {
+            MinSize::Pixels(px) => *px,
+            MinSize::Percent(pct) => screen_size * pct / 100.0,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MinSize {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MinSizeVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for MinSizeVisitor {
+            type Value = MinSize;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a float for pixels or a string percentage (e.g., \"10%\")")
+            }
+
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                let val = v as f32;
+                if val < 0.0 {
+                    return Err(E::custom("pixel value must be non-negative"));
+                }
+                Ok(MinSize::Pixels(val))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                self.visit_f64(v as f64)
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                self.visit_f64(v as f64)
+            }
+
+            fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                if let Some(pct) = s.strip_suffix('%') {
+                    let val: f32 = pct.trim().parse().map_err(E::custom)?;
+                    if !(0.0..=100.0).contains(&val) {
+                        return Err(E::custom("percentage must be between 0 and 100"));
+                    }
+                    Ok(MinSize::Percent(val))
+                } else {
+                    Err(E::custom("string must be a percentage (e.g., \"10%\")"))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(MinSizeVisitor)
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct MacosWindow {
     #[serde(default)]
@@ -422,9 +490,9 @@ pub(crate) struct Config {
     #[serde(default = "default_automatic_tiling")]
     pub(crate) automatic_tiling: bool,
     #[serde(default)]
-    pub(crate) min_width: f32,
+    pub(crate) min_width: MinSize,
     #[serde(default)]
-    pub(crate) min_height: f32,
+    pub(crate) min_height: MinSize,
     #[serde(default = "default_focused_color")]
     pub(crate) focused_color: Color,
     #[serde(default = "default_spawn_indicator_color")]
@@ -464,8 +532,8 @@ impl Default for Config {
             border_size: default_border_size(),
             tab_bar_height: default_tab_bar_height(),
             automatic_tiling: default_automatic_tiling(),
-            min_width: 0.0,
-            min_height: 0.0,
+            min_width: MinSize::default(),
+            min_height: MinSize::default(),
             focused_color: default_focused_color(),
             spawn_indicator_color: default_spawn_indicator_color(),
             border_color: default_border_color(),
@@ -538,4 +606,58 @@ pub(crate) fn start_config_watcher(
     watcher.watch(&watch_dir, RecursiveMode::NonRecursive)?;
     tracing::info!(path = config_path, "Config watcher started");
     Ok(watcher)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn min_size_default() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.min_width, MinSize::Percent(5.0));
+        assert_eq!(config.min_height, MinSize::Percent(5.0));
+    }
+
+    #[test]
+    fn min_size_parses_float_as_pixels() {
+        let config: Config = toml::from_str("min_width = 200.0").unwrap();
+        assert_eq!(config.min_width, MinSize::Pixels(200.0));
+    }
+
+    #[test]
+    fn min_size_parses_int_as_pixels() {
+        let config: Config = toml::from_str("min_width = 200").unwrap();
+        assert_eq!(config.min_width, MinSize::Pixels(200.0));
+    }
+
+    #[test]
+    fn min_size_parses_string_percent() {
+        let config: Config = toml::from_str(r#"min_width = "10%""#).unwrap();
+        assert_eq!(config.min_width, MinSize::Percent(10.0));
+    }
+
+    #[test]
+    fn min_size_rejects_invalid_percent() {
+        assert!(toml::from_str::<Config>(r#"min_width = "101%""#).is_err());
+        assert!(toml::from_str::<Config>(r#"min_width = "-5%""#).is_err());
+    }
+
+    #[test]
+    fn min_size_rejects_negative_pixels() {
+        assert!(toml::from_str::<Config>("min_width = -100").is_err());
+    }
+
+    #[test]
+    fn min_size_rejects_string_without_percent() {
+        assert!(toml::from_str::<Config>(r#"min_width = "200""#).is_err());
+    }
+
+    #[test]
+    fn min_size_resolve() {
+        assert_eq!(MinSize::Pixels(200.0).resolve(1000.0), 200.0);
+        assert_eq!(MinSize::Percent(10.0).resolve(1000.0), 100.0);
+        assert_eq!(MinSize::Percent(5.0).resolve(1920.0), 96.0);
+    }
 }

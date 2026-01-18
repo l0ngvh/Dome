@@ -60,6 +60,10 @@ border_size = 5.0
 # Automatic tiling - determine split direction based on window dimensions (default: true)
 automatic_tiling = true
 
+# Minimum window size - float for pixels, string for percentage (default: "5%")
+min_width = 200     # 200 logical pixels
+min_height = "10%"  # 10% of screen height
+
 # Focused window border color (default: light blue)
 focused_color = "#6699ff"
 
