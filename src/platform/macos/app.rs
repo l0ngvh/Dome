@@ -71,8 +71,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
         let tx = event_tx.clone();
         move |actions| {
             tx.send(HubEvent::Action(actions))
-                .ok()
-                .ok_or(anyhow::anyhow!("channel closed"))
+                .or(Err(anyhow::anyhow!("channel closed")))
         }
     })?;
     let screen = get_main_screen(mtm);
@@ -266,6 +265,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
 fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
     let ax_registry = delegate.ivars().ax_registry.borrow();
     let overlay = delegate.ivars().overlay.get().unwrap();
+    let screen = delegate.ivars().screen;
 
     for &cg_id in frame.hide() {
         if let Some(ax_window) = ax_registry.get(cg_id)
@@ -277,8 +277,40 @@ fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
 
     for &(cg_id, dim) in frame.windows() {
         if let Some(ax_window) = ax_registry.get(cg_id) {
+            // macOS doesn't allow windows completely offscreen - use hide position instead
+            if is_completely_offscreen(dim, screen) {
+                if let Err(e) = ax_window.hide() {
+                    tracing::trace!("Failed to hide offscreen window: {e:#}");
+                }
+                continue;
+            }
+
             if let Err(e) = ax_window.set_dimension(dim) {
                 tracing::trace!("Failed to set dimension: {e:#}");
+                continue;
+            }
+
+            // Min size discovery: check if window resized itself larger
+            if let Ok((actual_w, actual_h)) = ax_window.get_size() {
+                const EPSILON: f32 = 1.0;
+                let discovered_w = if actual_w > dim.width + EPSILON {
+                    actual_w
+                } else {
+                    0.0
+                };
+                let discovered_h = if actual_h > dim.height + EPSILON {
+                    actual_h
+                } else {
+                    0.0
+                };
+
+                if discovered_w > 0.0 || discovered_h > 0.0 {
+                    delegate.send_event(HubEvent::SetMinSize {
+                        cg_id,
+                        width: discovered_w,
+                        height: discovered_h,
+                    });
+                }
             }
         }
     }
@@ -293,6 +325,13 @@ fn process_frame(delegate: &AppDelegate, frame: &Frame) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn is_completely_offscreen(dim: Dimension, screen: Dimension) -> bool {
+    dim.x + dim.width <= screen.x
+        || dim.x >= screen.x + screen.width
+        || dim.y + dim.height <= screen.y
+        || dim.y >= screen.y + screen.height
 }
 
 fn process_sync(

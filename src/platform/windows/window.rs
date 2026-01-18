@@ -1,6 +1,6 @@
 use crate::core::Dimension;
-use windows::Win32::Foundation::{HWND, LPARAM};
-use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
@@ -8,9 +8,9 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetWindowLongW, GetWindowRect,
-    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_CHILD,
-    WS_EX_DLGMODALFRAME, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, MINMAXINFO,
+    SendMessageW, WM_GETMINMAXINFO, WS_CHILD, WS_EX_DLGMODALFRAME, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -117,6 +117,42 @@ pub(super) fn get_window_dimension(hwnd: HWND) -> Dimension {
         width: (rect.right - rect.left) as f32,
         height: (rect.bottom - rect.top) as f32,
     }
+}
+
+pub(super) fn get_min_size(hwnd: HWND) -> (f32, f32) {
+    let mut info = MINMAXINFO::default();
+    unsafe { SendMessageW(hwnd, WM_GETMINMAXINFO, Some(WPARAM(0)), Some(LPARAM(&mut info as *mut _ as isize))) };
+    let (left, top, right, bottom) = get_invisible_border(hwnd);
+    (
+        (info.ptMinTrackSize.x - left - right).max(0) as f32,
+        (info.ptMinTrackSize.y - top - bottom).max(0) as f32,
+    )
+}
+
+fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
+    let mut window_rect = windows::Win32::Foundation::RECT::default();
+    let mut frame_rect = windows::Win32::Foundation::RECT::default();
+    unsafe {
+        if GetWindowRect(hwnd, &mut window_rect).is_err() {
+            return (0, 0, 0, 0);
+        }
+        if DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame_rect as *mut _ as *mut _,
+            std::mem::size_of::<windows::Win32::Foundation::RECT>() as u32,
+        )
+        .is_err()
+        {
+            return (0, 0, 0, 0);
+        }
+    }
+    (
+        frame_rect.left - window_rect.left,
+        frame_rect.top - window_rect.top,
+        window_rect.right - frame_rect.right,
+        window_rect.bottom - frame_rect.bottom,
+    )
 }
 
 fn is_cloaked(hwnd: HWND) -> bool {

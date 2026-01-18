@@ -421,6 +421,10 @@ pub(crate) struct Config {
     pub(crate) tab_bar_height: f32,
     #[serde(default = "default_automatic_tiling")]
     pub(crate) automatic_tiling: bool,
+    #[serde(default)]
+    pub(crate) min_width: f32,
+    #[serde(default)]
+    pub(crate) min_height: f32,
     #[serde(default = "default_focused_color")]
     pub(crate) focused_color: Color,
     #[serde(default = "default_spawn_indicator_color")]
@@ -460,6 +464,8 @@ impl Default for Config {
             border_size: default_border_size(),
             tab_bar_height: default_tab_bar_height(),
             automatic_tiling: default_automatic_tiling(),
+            min_width: 0.0,
+            min_height: 0.0,
             focused_color: default_focused_color(),
             spawn_indicator_color: default_spawn_indicator_color(),
             border_color: default_border_color(),

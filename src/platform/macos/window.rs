@@ -24,6 +24,15 @@ pub(super) struct AXWindow {
     title: Option<String>,
 }
 
+impl std::fmt::Display for AXWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.title {
+            Some(title) => write!(f, "AXWindow(app={}, title={})", self.app_name, title),
+            None => write!(f, "AXWindow(app={})", self.app_name),
+        }
+    }
+}
+
 impl AXWindow {
     pub(super) fn new(
         window: CFRetained<AXUIElement>,
@@ -159,6 +168,15 @@ impl AXWindow {
             &kAXSizeAttribute(),
             &size,
         )?)
+    }
+
+    pub(super) fn get_size(&self) -> Result<(f32, f32)> {
+        let size = get_attribute::<AXValue>(&self.window, &kAXSizeAttribute())
+            .with_context(|| format!("get_size for {} {:?}", self.app_name, self.title))?;
+        let mut cg_size = CGSize::new(0.0, 0.0);
+        let ptr = NonNull::new((&mut cg_size as *mut CGSize).cast()).unwrap();
+        unsafe { size.value(AXValueType::CGSize, ptr) };
+        Ok((cg_size.width as f32, cg_size.height as f32))
     }
 }
 

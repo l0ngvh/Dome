@@ -10,6 +10,8 @@ pub(crate) struct Hub {
     current: WorkspaceId,
     tab_bar_height: f32,
     auto_tile: bool,
+    min_width: f32,
+    min_height: f32,
 
     workspaces: Allocator<Workspace>,
     windows: Allocator<Window>,
@@ -18,7 +20,13 @@ pub(crate) struct Hub {
 }
 
 impl Hub {
-    pub(crate) fn new(screen: Dimension, tab_bar_height: f32, auto_tile: bool) -> Self {
+    pub(crate) fn new(
+        screen: Dimension,
+        tab_bar_height: f32,
+        auto_tile: bool,
+        min_width: f32,
+        min_height: f32,
+    ) -> Self {
         let mut workspace_allocator: Allocator<Workspace> = Allocator::new();
         let window_allocator: Allocator<Window> = Allocator::new();
         let float_window_allocator: Allocator<FloatWindow> = Allocator::new();
@@ -33,6 +41,8 @@ impl Hub {
             screen,
             tab_bar_height,
             auto_tile,
+            min_width,
+            min_height,
             windows: window_allocator,
             float_windows: float_window_allocator,
             containers: container_allocator,
@@ -77,11 +87,19 @@ impl Hub {
         self.screen
     }
 
-    pub(crate) fn sync_config(&mut self, tab_bar_height: f32, auto_tile: bool) {
+    pub(crate) fn sync_config(
+        &mut self,
+        tab_bar_height: f32,
+        auto_tile: bool,
+        min_width: f32,
+        min_height: f32,
+    ) {
         self.tab_bar_height = tab_bar_height;
         self.auto_tile = auto_tile;
+        self.min_width = min_width;
+        self.min_height = min_height;
         for (ws_id, _) in self.workspaces.all_active() {
-            self.adjust_children_dimension_of(Parent::Workspace(ws_id));
+            self.adjust_workspace(ws_id);
         }
     }
 
@@ -139,7 +157,7 @@ impl Hub {
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn delete_window(&mut self, id: WindowId) {
-        self.detach_child_from_its_parent(Child::Window(id));
+        self.detach_child_from_workspace(Child::Window(id));
         self.windows.delete(id);
     }
 
@@ -187,7 +205,7 @@ impl Hub {
         }
         self.containers.get_mut(root_id).toggle_direction();
         self.maintain_direction_invariance(Parent::Container(root_id));
-        self.adjust_children_dimension_of(Parent::Container(root_id));
+        self.adjust_workspace(self.current);
     }
 
     #[tracing::instrument(skip(self))]
@@ -199,6 +217,7 @@ impl Hub {
             tracing::debug!("Cannot focus parent of workspace root, ignoring");
             return;
         };
+        tracing::debug!(parent = %container_id, %child, "Focusing parent");
         self.focus_child(Child::Container(container_id));
     }
 
@@ -227,16 +246,13 @@ impl Hub {
         container.is_tabbed = !container.is_tabbed;
         tracing::debug!(%container_id, from = ?direction, "Toggled container layout");
         if container.is_tabbed() {
-            // Toggled from split to tabbed
-            let tabbed_container = self.containers.get(container_id);
-
-            let active_tab = if Child::Container(container_id) == focused {
-                // `tabbed_container`'s focused at this moment must be a direct child, since the
-                // only way to focus a container is by calling focus_parent from a direct child
-                tabbed_container.focused
-            } else {
-                focused
-            };
+            // Toggled from split to tabbed - find the direct child matching container's focus
+            let container = self.containers.get(container_id);
+            let active_tab = *container
+                .children()
+                .iter()
+                .find(|c| **c == container.focused || matches!(c, Child::Container(cid) if self.containers.get(*cid).focused == container.focused))
+                .unwrap();
             self.containers
                 .get_mut(container_id)
                 .set_active_tab(active_tab);
@@ -245,7 +261,7 @@ impl Hub {
             self.maintain_direction_invariance(Parent::Container(container_id));
         }
         self.maintain_direction_invariance(parent);
-        self.adjust_children_dimension_of(parent);
+        self.adjust_workspace(self.current);
     }
 
     #[tracing::instrument(skip(self))]
@@ -325,7 +341,7 @@ impl Hub {
 
         match focused {
             Focus::Tiling(child) => {
-                self.detach_child_from_its_parent(child);
+                self.detach_child_from_workspace(child);
                 self.attach_child_to_workspace(child, target_workspace_id);
             }
             Focus::Float(float_id) => {
@@ -336,6 +352,22 @@ impl Hub {
         }
 
         tracing::debug!(?focused, target_workspace, "Moved to workspace");
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub(crate) fn set_min_size(&mut self, window_id: WindowId, width: f32, height: f32) {
+        let window = self.windows.get_mut(window_id);
+        if width > 0.0 {
+            window.min_width = width;
+        }
+        if height > 0.0 {
+            window.min_height = height;
+        }
+
+        tracing::debug!(%window_id, width, height, "Min size set");
+
+        let workspace_id = window.workspace;
+        self.adjust_workspace(workspace_id);
     }
 
     fn move_in_direction(&mut self, direction: Direction, forward: bool) {
@@ -349,11 +381,7 @@ impl Hub {
         // Handle swap within same container
         let direct_parent = self.containers.get(direct_parent_id);
         if direct_parent.direction().is_some_and(|d| d == direction) {
-            let pos = direct_parent
-                .children
-                .iter()
-                .position(|c| *c == child)
-                .unwrap();
+            let pos = direct_parent.position_of(child);
             let target_pos = if forward {
                 pos + 1
             } else {
@@ -367,7 +395,7 @@ impl Hub {
                     .get_mut(direct_parent_id)
                     .children
                     .swap(pos, target_pos);
-                self.adjust_children_dimension_of(Parent::Container(direct_parent_id));
+                self.adjust_workspace(self.current);
                 return;
             }
             // At edge, fall through to find ancestor
@@ -398,6 +426,7 @@ impl Hub {
                     );
                     self.detach_child_from_container(direct_parent_id, child);
                     self.attach_child_to_container(child, container_id, Some(insert_pos));
+                    self.adjust_workspace(self.current);
                     self.focus_child(child);
                     return;
                 }
@@ -419,6 +448,7 @@ impl Hub {
                     self.workspaces.get_mut(workspace_id).root =
                         Some(Child::Container(new_root_id));
 
+                    self.adjust_workspace(self.current);
                     self.focus_child(child);
                     return;
                 }
@@ -439,7 +469,7 @@ impl Hub {
             self.workspaces.get_mut(workspace_id).root = Some(child);
             self.set_parent(child, Parent::Workspace(workspace_id));
             self.workspaces.get_mut(workspace_id).focused = Some(Focus::Tiling(child));
-            self.adjust_children_dimension_of(Parent::Workspace(workspace_id));
+            self.adjust_workspace(workspace_id);
             return;
         };
 
@@ -472,6 +502,7 @@ impl Hub {
             }
         }
 
+        self.adjust_workspace(workspace_id);
         self.focus_child(child);
     }
 
@@ -621,7 +652,6 @@ impl Hub {
             container_id
         };
         self.maintain_direction_invariance(Parent::Container(container_id));
-        self.adjust_children_dimension_of(Parent::Container(container_id));
         container_id
     }
 
@@ -650,75 +680,134 @@ impl Hub {
             }
         }
         self.maintain_direction_invariance(Parent::Container(container_id));
-        self.adjust_children_dimension_of(Parent::Container(container_id));
     }
 
-    fn adjust_children_dimension_of(&mut self, parent: Parent) {
-        let root_id = match parent {
-            Parent::Container(id) => id,
-            Parent::Workspace(ws_id) => {
-                let ws = self.workspaces.get(ws_id);
-                let Some(root) = ws.root else { return };
-                self.set_child_dimension(root, ws.screen);
-                let Child::Container(cid) = root else { return };
-                cid
-            }
+    fn adjust_workspace(&mut self, ws_id: WorkspaceId) {
+        let ws = self.workspaces.get(ws_id);
+        let Some(root) = ws.root else { return };
+        let screen = ws.screen;
+
+        let Child::Container(root_id) = root else {
+            self.set_root_dimension(root, screen);
+            return;
         };
+
+        // Collect containers in pre-order
         let mut stack = vec![root_id];
+        let mut order = vec![];
         for _ in super::bounded_loop() {
-            let Some(container_id) = stack.pop() else {
-                return;
-            };
-            let container = self.containers.get(container_id);
+            let Some(cid) = stack.pop() else { break };
+            order.push(cid);
+            for child in &self.containers.get(cid).children {
+                if let Child::Container(child_cid) = child {
+                    stack.push(*child_cid);
+                }
+            }
+        }
+
+        // Update minimum sizes bottom-up, as parent's minimum size depends on children's minimum size
+        for &cid in order.iter().rev() {
+            self.update_container_min_size(cid);
+        }
+
+        self.set_root_dimension(root, screen);
+        for cid in order {
+            let container = self.containers.get(cid);
             let dim = container.dimension;
             let children = container.children.clone();
             let direction = container.direction();
-            let child_count = children.len();
-
-            let child_dims: Vec<_> = match direction {
-                Some(Direction::Horizontal) => {
-                    let child_width = dim.width / child_count as f32;
-                    children
-                        .iter()
-                        .enumerate()
-                        .map(|(i, _)| Dimension {
-                            x: dim.x + child_width * i as f32,
-                            y: dim.y,
-                            width: child_width,
-                            height: dim.height,
-                        })
-                        .collect()
-                }
-                Some(Direction::Vertical) => {
-                    let child_height = dim.height / child_count as f32;
-                    children
-                        .iter()
-                        .enumerate()
-                        .map(|(i, _)| Dimension {
-                            x: dim.x,
-                            y: dim.y + child_height * i as f32,
-                            width: dim.width,
-                            height: child_height,
-                        })
-                        .collect()
-                }
-                None => {
-                    let child_dim = Dimension {
-                        x: dim.x,
-                        y: dim.y + self.tab_bar_height,
-                        width: dim.width,
-                        height: dim.height - self.tab_bar_height,
-                    };
-                    vec![child_dim; child_count]
-                }
-            };
-
-            for (child, child_dim) in children.into_iter().zip(child_dims) {
-                self.set_child_dimension(child, child_dim);
-                if let Child::Container(cid) = child {
-                    stack.push(cid);
-                }
+            for (child, child_dim) in children
+                .iter()
+                .zip(self.layout_children(&children, dim, direction))
+            {
+                self.set_child_dimension(*child, child_dim);
             }
+        }
+
+        // Focused window can go out of view due to resizing other windows
+        self.scroll_into_view(ws_id);
+    }
+
+    // Windows can extend beyond screen visible area
+    fn set_root_dimension(&mut self, root: Child, screen: Dimension) {
+        let (min_w, min_h) = self.get_effective_min_size(root);
+        self.set_child_dimension(
+            root,
+            Dimension {
+                width: screen.width.max(min_w),
+                height: screen.height.max(min_h),
+                ..screen
+            },
+        );
+    }
+
+    fn layout_children(
+        &self,
+        children: &[Child],
+        dim: Dimension,
+        direction: Option<Direction>,
+    ) -> Vec<Dimension> {
+        match direction {
+            Some(Direction::Horizontal) => {
+                let mins: Vec<_> = children
+                    .iter()
+                    .map(|&c| self.get_effective_min_size(c))
+                    .collect();
+                let height = dim
+                    .height
+                    .max(mins.iter().map(|(_, h)| *h).fold(0.0, f32::max));
+                let widths =
+                    distribute_space(&mins.iter().map(|(w, _)| *w).collect::<Vec<_>>(), dim.width);
+                let mut x = dim.x;
+                widths
+                    .into_iter()
+                    .map(|w| {
+                        let d = Dimension {
+                            x,
+                            width: w,
+                            height,
+                            ..dim
+                        };
+                        x += w;
+                        d
+                    })
+                    .collect()
+            }
+            Some(Direction::Vertical) => {
+                let mins: Vec<_> = children
+                    .iter()
+                    .map(|&c| self.get_effective_min_size(c))
+                    .collect();
+                let width = dim
+                    .width
+                    .max(mins.iter().map(|(w, _)| *w).fold(0.0, f32::max));
+                let heights = distribute_space(
+                    &mins.iter().map(|(_, h)| *h).collect::<Vec<_>>(),
+                    dim.height,
+                );
+                let mut y = dim.y;
+                heights
+                    .into_iter()
+                    .map(|h| {
+                        let d = Dimension {
+                            y,
+                            height: h,
+                            width,
+                            ..dim
+                        };
+                        y += h;
+                        d
+                    })
+                    .collect()
+            }
+            None => vec![
+                Dimension {
+                    y: dim.y + self.tab_bar_height,
+                    height: dim.height - self.tab_bar_height,
+                    ..dim
+                };
+                children.len()
+            ],
         }
     }
 
@@ -746,11 +835,13 @@ impl Hub {
         }
     }
 
-    fn detach_child_from_its_parent(&mut self, child: Child) {
+    fn detach_child_from_workspace(&mut self, child: Child) {
         let parent = self.get_parent(child);
         match parent {
             Parent::Container(parent_id) => {
+                let workspace_id = self.containers.get(parent_id).workspace;
                 self.detach_child_from_container(parent_id, child);
+                self.adjust_workspace(workspace_id);
             }
             Parent::Workspace(workspace_id) => {
                 self.workspaces.get_mut(workspace_id).root = None;
@@ -764,6 +855,8 @@ impl Hub {
 
                 if workspace_id != self.current && !has_floats {
                     self.workspaces.delete(workspace_id);
+                } else {
+                    self.adjust_workspace(workspace_id);
                 }
             }
         }
@@ -788,7 +881,6 @@ impl Hub {
         self.replace_focus(child, new_focus);
 
         self.containers.get_mut(container_id).remove_child(child);
-        self.adjust_children_dimension_of(Parent::Container(container_id));
         if self.containers.get(container_id).children.len() != 1 {
             return;
         }
@@ -816,7 +908,6 @@ impl Hub {
 
         // When promoting a container to grandparent, ensure direction invariant is maintained
         self.maintain_direction_invariance(grandparent);
-        self.adjust_children_dimension_of(grandparent);
     }
 
     fn get_parent(&self, child: Child) -> Parent {
@@ -887,11 +978,7 @@ impl Hub {
                 continue;
             }
             let container = self.containers.get(container_id);
-            let pos = container
-                .children
-                .iter()
-                .position(|c| *c == current)
-                .unwrap();
+            let pos = container.position_of(current);
             let has_sibling = if forward {
                 pos + 1 < container.children.len()
             } else {
@@ -927,6 +1014,7 @@ impl Hub {
                 }
                 Parent::Workspace(ws) => {
                     self.workspaces.get_mut(ws).focused = Some(Focus::Tiling(child));
+                    self.scroll_into_view(ws);
                     break;
                 }
             }
@@ -1019,4 +1107,139 @@ impl Hub {
             self.workspaces.delete(ws);
         }
     }
+
+    fn get_effective_min_size(&self, child: Child) -> (f32, f32) {
+        match child {
+            Child::Window(id) => {
+                let (w, h) = self.windows.get(id).min_size();
+                (w.max(self.min_width), h.max(self.min_height))
+            }
+            Child::Container(id) => self.containers.get(id).min_size(),
+        }
+    }
+
+    fn update_container_min_size(&mut self, container_id: ContainerId) {
+        let container = self.containers.get(container_id);
+        let children = container.children.clone();
+        let direction = container.direction();
+
+        let child_mins: Vec<(f32, f32)> = children
+            .iter()
+            .map(|&c| self.get_effective_min_size(c))
+            .collect();
+
+        let (min_w, min_h) = match direction {
+            Some(Direction::Horizontal) => {
+                let sum_w: f32 = child_mins.iter().map(|(w, _)| *w).sum();
+                let max_h = child_mins.iter().map(|(_, h)| *h).fold(0.0, f32::max);
+                (sum_w, max_h)
+            }
+            Some(Direction::Vertical) => {
+                let max_w = child_mins.iter().map(|(w, _)| *w).fold(0.0, f32::max);
+                let sum_h: f32 = child_mins.iter().map(|(_, h)| *h).sum();
+                (max_w, sum_h)
+            }
+            None => {
+                // Tabbed
+                let max_w = child_mins.iter().map(|(w, _)| *w).fold(0.0, f32::max);
+                let max_h = child_mins.iter().map(|(_, h)| *h).fold(0.0, f32::max);
+                (max_w, max_h + self.tab_bar_height)
+            }
+        };
+
+        let container = self.containers.get_mut(container_id);
+        container.min_width = min_w;
+        container.min_height = min_h;
+
+        if container.dimension.width < min_w {
+            container.dimension.width = min_w;
+        }
+        if container.dimension.height < min_h {
+            container.dimension.height = min_h;
+        }
+    }
+
+    fn scroll_into_view(&mut self, workspace_id: WorkspaceId) {
+        let ws = self.workspaces.get(workspace_id);
+        let screen = ws.screen;
+
+        let Some(Focus::Tiling(focused)) = ws.focused else {
+            return;
+        };
+
+        let focused_dim = match focused {
+            Child::Window(id) => self.windows.get(id).dimension,
+            Child::Container(id) => self.containers.get(id).dimension,
+        };
+
+        let mut offset_x = 0.0;
+        let mut offset_y = 0.0;
+
+        if focused_dim.x + focused_dim.width > screen.x + screen.width {
+            offset_x = (screen.x + screen.width) - (focused_dim.x + focused_dim.width);
+        }
+        if focused_dim.x + offset_x < screen.x {
+            offset_x = screen.x - focused_dim.x;
+        }
+
+        if focused_dim.y + focused_dim.height > screen.y + screen.height {
+            offset_y = (screen.y + screen.height) - (focused_dim.y + focused_dim.height);
+        }
+        if focused_dim.y + offset_y < screen.y {
+            offset_y = screen.y - focused_dim.y;
+        }
+
+        if offset_x == 0.0 && offset_y == 0.0 {
+            return;
+        }
+
+        tracing::debug!(offset_x, offset_y, "Scrolling workspace into view");
+        self.apply_scroll_offset(workspace_id, offset_x, offset_y);
+    }
+
+    fn apply_scroll_offset(&mut self, workspace_id: WorkspaceId, offset_x: f32, offset_y: f32) {
+        let ws = self.workspaces.get(workspace_id);
+        let Some(root) = ws.root else { return };
+
+        let mut stack = vec![root];
+        for _ in super::bounded_loop() {
+            let Some(child) = stack.pop() else { break };
+            match child {
+                Child::Window(id) => {
+                    let w = self.windows.get_mut(id);
+                    w.dimension.x += offset_x;
+                    w.dimension.y += offset_y;
+                }
+                Child::Container(id) => {
+                    let c = self.containers.get_mut(id);
+                    c.dimension.x += offset_x;
+                    c.dimension.y += offset_y;
+                    stack.extend(c.children.iter().copied());
+                }
+            }
+        }
+    }
+}
+
+fn distribute_space(child_mins: &[f32], container_size: f32) -> Vec<f32> {
+    let sum_mins: f32 = child_mins.iter().sum();
+    if sum_mins >= container_size {
+        return child_mins.to_vec();
+    }
+
+    let mut low = 0.0;
+    let mut high = container_size;
+    const EPSILON: f32 = 0.001;
+
+    while high - low > EPSILON {
+        let mid = (low + high) / 2.0;
+        let total: f32 = child_mins.iter().map(|&m| mid.max(m)).sum();
+        if total > container_size {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+
+    child_mins.iter().map(|&m| low.max(m)).collect()
 }

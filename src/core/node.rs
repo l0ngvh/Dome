@@ -56,6 +56,8 @@ pub(crate) struct Container {
     spawn_mode: SpawnMode,
     pub(super) is_tabbed: bool,
     pub(super) active_tab_index: usize,
+    pub(super) min_width: f32,
+    pub(super) min_height: f32,
 }
 
 impl Node for Container {
@@ -85,6 +87,8 @@ impl Container {
             spawn_mode,
             is_tabbed: false,
             active_tab_index: 0,
+            min_width: 0.0,
+            min_height: 0.0,
         }
     }
 
@@ -105,6 +109,8 @@ impl Container {
             spawn_mode: SpawnMode::tabbed(),
             is_tabbed: true,
             active_tab_index: 0,
+            min_width: 0.0,
+            min_height: 0.0,
         }
     }
 
@@ -152,6 +158,10 @@ impl Container {
 
     pub(crate) fn dimension(&self) -> Dimension {
         self.dimension
+    }
+
+    pub(crate) fn min_size(&self) -> (f32, f32) {
+        (self.min_width, self.min_height)
     }
 
     pub(super) fn direction(&self) -> Option<Direction> {
@@ -293,7 +303,6 @@ impl SpawnMode {
     }
 
     pub(crate) fn switch_to(&self, other: SpawnMode) -> Self {
-        tracing::info!("switch_to {:?}, {:?}", other.current, self.current);
         Self {
             current: other.current,
             previous: self.current,
@@ -369,6 +378,8 @@ pub(crate) struct Window {
     // Don't allow directly set spawn_mode, otherwise that spawn mode will carry over other
     // spawn mode history
     spawn_mode: SpawnMode,
+    pub(super) min_width: f32,
+    pub(super) min_height: f32,
 }
 
 impl Node for Window {
@@ -382,11 +393,17 @@ impl Window {
             workspace,
             dimension: Dimension::default(),
             spawn_mode,
+            min_width: 0.0,
+            min_height: 0.0,
         }
     }
 
     pub(crate) fn dimension(&self) -> Dimension {
         self.dimension
+    }
+
+    pub(crate) fn min_size(&self) -> (f32, f32) {
+        (self.min_width, self.min_height)
     }
 
     pub(crate) fn spawn_mode(&self) -> SpawnMode {

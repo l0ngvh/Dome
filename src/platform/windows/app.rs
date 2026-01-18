@@ -28,14 +28,17 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HWND_TOPMOST, RegisterClassW, SW_SHOWNA,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW,
-    SetWindowPos, ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WM_PAINT, WNDCLASSW, WS_EX_LAYERED,
-    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+    GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HWND_TOPMOST, PostMessageW,
+    RegisterClassW, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, ULW_ALPHA,
+    UpdateLayeredWindow, WM_PAINT, WM_QUIT, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+    WS_EX_TRANSPARENT, WS_POPUP,
 };
 
-use super::hub::{Frame, Overlays, WM_APP_FRAME, WindowHandle};
-use super::window::Taskbar;
+use std::sync::mpsc::Sender;
+
+use super::hub::{AppHandle, Frame, HubEvent, Overlays, WM_APP_FRAME, WindowHandle};
+use super::window::{get_min_size, Taskbar};
 use crate::core::Dimension;
 
 const OFFSCREEN: Dimension = Dimension {
@@ -54,10 +57,15 @@ pub(super) struct App {
     text_format_bold: IDWriteTextFormat,
     taskbar: Taskbar,
     screen: Dimension,
+    hub_sender: Sender<HubEvent>,
 }
 
 impl App {
-    pub(super) fn new(taskbar: Taskbar, screen: Dimension) -> windows::core::Result<Box<Self>> {
+    pub(super) fn new(
+        taskbar: Taskbar,
+        screen: Dimension,
+        hub_sender: Sender<HubEvent>,
+    ) -> windows::core::Result<Box<Self>> {
         let class_name = windows::core::w!("DomeApp");
         let hinstance = unsafe { GetModuleHandleW(None)? };
 
@@ -126,16 +134,22 @@ impl App {
             text_format_bold,
             taskbar,
             screen,
+            hub_sender,
         });
 
         let ptr = &*app as *const _ as *mut App;
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize) };
 
+        app.send_event(HubEvent::AppInitialized(AppHandle::new(hwnd)));
+
         Ok(app)
     }
 
-    pub(super) fn hwnd(&self) -> HWND {
-        self.hwnd
+    fn send_event(&self, event: HubEvent) {
+        if self.hub_sender.send(event).is_err() {
+            tracing::error!("Hub thread died, shutting down");
+            unsafe { PostMessageW(Some(self.hwnd), WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+        }
     }
 
     fn process_frame(&mut self, cmd: Frame) -> anyhow::Result<()> {
@@ -149,6 +163,16 @@ impl App {
         for (handle, dim) in &cmd.tiling_windows {
             self.taskbar.add_tab(handle.hwnd())?;
             set_window_position(handle.hwnd(), dim)?;
+            let (min_w, min_h) = get_min_size(handle.hwnd());
+            let width = if min_w > dim.width { min_w } else { 0.0 };
+            let height = if min_h > dim.height { min_h } else { 0.0 };
+            if width > 0.0 || height > 0.0 {
+                self.send_event(HubEvent::SetMinSize {
+                    handle: handle.clone(),
+                    width,
+                    height,
+                });
+            }
         }
 
         for (handle, dim) in &cmd.float_windows {

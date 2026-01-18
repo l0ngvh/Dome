@@ -54,12 +54,21 @@ fn auto_tile_sets_horizontal_spawn_mode_when_width_greater_than_height() {
 #[test]
 fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
     let mut hub = setup_with_auto_tile();
+    // Going on a round trip to ensure that we can always create a horizontal container with 6
+    // direct children, as the auto tile logic can get confused when width is approximately equal
+    // to height, due to floating precision lost
     let w0 = hub.insert_tiling();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
+    hub.toggle_spawn_mode();
     hub.insert_tiling();
+    hub.toggle_direction();
     // Each window is 25x30, height > width, so spawn mode should be vertical
     hub.set_focus(w0);
     hub.insert_tiling();
@@ -88,14 +97,14 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
     |                       ||                       ||                       ||                       ||                       ||                       |
     |                       ||                       ||                       ||                       ||                       ||                       |
     |                       ||                       ||                       ||                       ||                       ||                       |
-    |           W0          ||                       ||                       ||                       ||                       ||                       |
+    |          W0           ||                       ||                       ||                       ||                       ||                       |
     |                       ||                       ||                       ||                       ||                       ||                       |
     |                       ||                       ||                       ||                       ||                       ||                       |
     |                       ||                       ||                       ||                       ||                       ||                       |
     |                       ||                       ||                       ||                       ||                       ||                       |
     |                       ||                       ||                       ||                       ||                       ||                       |
     +-----------------------+|                       ||                       ||                       ||                       ||                       |
-    *************************|           W1          ||           W2          ||           W3          ||           W4          ||           W5          |
+    *************************|          W1           ||          W2           ||          W3           ||          W4           ||          W5           |
     *                       *|                       ||                       ||                       ||                       ||                       |
     *                       *|                       ||                       ||                       ||                       ||                       |
     *                       *|                       ||                       ||                       ||                       ||                       |
@@ -103,7 +112,7 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
     *                       *|                       ||                       ||                       ||                       ||                       |
     *                       *|                       ||                       ||                       ||                       ||                       |
     *                       *|                       ||                       ||                       ||                       ||                       |
-    *           W6          *|                       ||                       ||                       ||                       ||                       |
+    *          W6           *|                       ||                       ||                       ||                       ||                       |
     *                       *|                       ||                       ||                       ||                       ||                       |
     *                       *|                       ||                       ||                       ||                       ||                       |
     *                       *|                       ||                       ||                       ||                       ||                       |

@@ -37,7 +37,15 @@ pub(super) enum HubEvent {
     WindowCreated(WindowInfo),
     WindowDestroyed(CGWindowID),
     WindowFocused(CGWindowID),
-    TitleChanged { cg_id: CGWindowID, title: String },
+    TitleChanged {
+        cg_id: CGWindowID,
+        title: String,
+    },
+    SetMinSize {
+        cg_id: CGWindowID,
+        width: f32,
+        height: f32,
+    },
     Action(Actions),
     ConfigChanged(Config),
     Sync,
@@ -197,7 +205,13 @@ impl HubThread {
 }
 
 fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, sender: MessageSender) {
-    let mut hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
+    let mut hub = Hub::new(
+        screen,
+        config.tab_bar_height,
+        config.automatic_tiling,
+        config.min_width,
+        config.min_height,
+    );
     let mut registry = HubRegistry::new();
 
     let frame = build_frame(&hub, &registry, &config, None, HashSet::new());
@@ -213,7 +227,12 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, sender: Me
         match event {
             HubEvent::Shutdown => break,
             HubEvent::ConfigChanged(new_config) => {
-                hub.sync_config(new_config.tab_bar_height, new_config.automatic_tiling);
+                hub.sync_config(
+                    new_config.tab_bar_height,
+                    new_config.automatic_tiling,
+                    new_config.min_width,
+                    new_config.min_height,
+                );
                 config = new_config;
                 tracing::info!("Config reloaded");
             }
@@ -265,6 +284,31 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, sender: Me
             }
             HubEvent::TitleChanged { cg_id, title } => {
                 registry.update_title(cg_id, title);
+            }
+            HubEvent::SetMinSize {
+                cg_id,
+                width,
+                height,
+            } => {
+                if let Some(entry) = registry.windows.get(&cg_id)
+                    && let WindowType::Tiling(window_id) = entry.window_type
+                {
+                    // Add border back since frame dimensions have border inset applied. If in the
+                    // original frame, window width is smaller than sum of borders, then we will
+                    // request a size that can accommodate the borders here
+                    let border = config.border_size;
+                    let width = if width > 0.0 {
+                        width + 2.0 * border
+                    } else {
+                        0.0
+                    };
+                    let height = if height > 0.0 {
+                        height + 2.0 * border
+                    } else {
+                        0.0
+                    };
+                    hub.set_min_size(window_id, width, height);
+                }
             }
             HubEvent::Action(actions) => {
                 tracing::debug!(%actions, "Executing actions");
@@ -603,8 +647,8 @@ fn apply_inset(dim: Dimension, border: f32) -> Dimension {
     Dimension {
         x: dim.x + border,
         y: dim.y + border,
-        width: dim.width - 2.0 * border,
-        height: dim.height - 2.0 * border,
+        width: (dim.width - 2.0 * border).max(0.0),
+        height: (dim.height - 2.0 * border).max(0.0),
     }
 }
 

@@ -13,12 +13,14 @@ fn sync_config_updates_tab_bar_height() {
         },
         10.0,
         true,
+        0.0,
+        0.0,
     );
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_container_layout();
 
-    hub.sync_config(10.0, true);
+    hub.sync_config(10.0, true, 0.0, 0.0);
 
     assert_snapshot!(snapshot_text(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=50.00 h=50.00),
@@ -43,6 +45,8 @@ fn sync_config_recalculates_all_workspaces() {
         },
         10.0,
         true,
+        0.0,
+        0.0,
     );
     hub.insert_tiling();
     hub.insert_tiling();
@@ -53,7 +57,7 @@ fn sync_config_recalculates_all_workspaces() {
     hub.insert_tiling();
     hub.toggle_container_layout();
 
-    hub.sync_config(5.0, true);
+    hub.sync_config(5.0, true, 0.0, 0.0);
 
     hub.focus_workspace(0);
     assert_snapshot!(snapshot_text(&hub), @r"

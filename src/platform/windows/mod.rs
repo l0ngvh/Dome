@@ -49,10 +49,10 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     let screen = get_primary_screen()?;
     let taskbar = Taskbar::new()?;
 
-    let app = App::new(taskbar, screen)?;
-
-    let hub_thread = HubThread::spawn(config.clone(), screen, WindowHandle::new(app.hwnd()));
+    let hub_thread = HubThread::spawn(config.clone(), screen);
     let sender = hub_thread.sender();
+
+    let _app = App::new(taskbar, screen, sender.clone())?;
 
     let keyboard_hook = install_keyboard_hook(sender.clone(), config)?;
     let _event_hooks = install_event_hooks(sender.clone())?;

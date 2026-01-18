@@ -1,4 +1,4 @@
-use super::{setup, snapshot_text, validate_hub};
+use super::{setup_hub, setup_logger_with_level, snapshot_text, validate_hub};
 use crate::core::node::{Dimension, FloatWindowId, WindowId};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -28,6 +28,7 @@ enum Op {
     FocusWorkspace,
     SetFocus,
     SetFloatFocus,
+    SetMinSize,
     // Note: Exec is not included because it's a platform-specific action
     // that spawns external processes, not a core hub operation.
 }
@@ -56,10 +57,11 @@ const ALL_OPS: &[Op] = &[
     Op::FocusWorkspace,
     Op::SetFocus,
     Op::SetFloatFocus,
+    Op::SetMinSize,
 ];
 
 fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
-    let mut hub = setup();
+    let mut hub = setup_hub();
     let mut windows: Vec<WindowId> = Vec::new();
     let mut floats: Vec<FloatWindowId> = Vec::new();
     let mut history: Vec<String> = Vec::new();
@@ -204,6 +206,17 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                     hub.set_float_focus(id);
                     format!("SetFloatFocus({id})")
                 }
+                Op::SetMinSize => {
+                    if windows.is_empty() {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..windows.len());
+                    let id = windows[idx];
+                    let w = rng.random_range(0.0..100.0);
+                    let h = rng.random_range(0.0..20.0);
+                    hub.set_min_size(id, w, h);
+                    format!("SetMinSize({id}, {w:.1}, {h:.1})")
+                }
             };
 
             history.push(op_str);
@@ -225,18 +238,20 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
     }));
 
     if let Err(e) = result {
-        eprintln!("=== SMOKE TEST FAILURE ===");
-        eprintln!("Operations:");
+        tracing::error!("=== SMOKE TEST FAILURE ===");
+        tracing::error!("Operations:");
         for (i, op) in history.iter().enumerate() {
-            eprintln!("  {i}: {op}");
+            tracing::error!("  {i}: {op}");
         }
-        eprintln!("\nHub state:\n{}", snapshot_text(&hub));
+        tracing::error!("\nHub state:\n{}", snapshot_text(&hub));
         std::panic::resume_unwind(e);
     }
 }
 
 #[test]
 fn smoke_test() {
+    setup_logger_with_level("info");
+
     let seed = 42u64;
     let runs = 200;
     let ops_per_run = 10000;
@@ -246,7 +261,7 @@ fn smoke_test() {
     for run in 0..runs {
         run_smoke_iteration(&mut rng, ops_per_run);
         if run % 10 == 0 {
-            eprintln!("Completed run {run}/{runs}");
+            tracing::info!("Completed run {run}/{runs}");
         }
     }
 }

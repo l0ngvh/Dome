@@ -7,6 +7,7 @@ mod focus_direction;
 mod focus_parent;
 mod focus_workspace;
 mod insert_window;
+mod min_size;
 mod move_in_direction;
 mod move_to_workspace;
 mod set_focus;
@@ -18,7 +19,7 @@ mod toggle_spawn_mode;
 
 use crate::core::allocator::NodeId;
 use crate::core::hub::Hub;
-use crate::core::node::{Child, FloatWindowId, Focus, Parent};
+use crate::core::node::{Child, Direction, FloatWindowId, Focus, Parent};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
@@ -231,48 +232,80 @@ fn draw_tab_bar(
 }
 
 fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str) {
-    let x1 = x.round() as usize;
-    let y1 = y.round() as usize;
-    let x2 = (x + w).round() as usize - 1;
-    let y2 = (y + h).round() as usize - 1;
+    let grid_w = grid[0].len() as isize;
+    let grid_h = grid.len() as isize;
 
-    for col in x1..=x2 {
-        grid[y1][col] = '-';
-        grid[y2][col] = '-';
-    }
-    for row in y1..=y2 {
-        grid[row][x1] = '|';
-        grid[row][x2] = '|';
-    }
-    grid[y1][x1] = '+';
-    grid[y1][x2] = '+';
-    grid[y2][x1] = '+';
-    grid[y2][x2] = '+';
+    let x1 = x.round() as isize;
+    let y1 = y.round() as isize;
+    let x2 = (x + w).round() as isize - 1;
+    let y2 = (y + h).round() as isize - 1;
 
-    let mid_x = (x + w / 2.0).round() as usize;
-    let mid_y = (y + h / 2.0).round() as usize;
-    let start_x = mid_x.saturating_sub(label.len() / 2);
-    for (i, ch) in label.chars().enumerate() {
-        let col = start_x + i;
-        if col > x1 && col < x2 {
-            grid[mid_y][col] = ch;
+    for col in x1.max(0)..=x2.min(grid_w - 1) {
+        if y1 >= 0 && y1 < grid_h {
+            grid[y1 as usize][col as usize] = '-';
+        }
+        if y2 >= 0 && y2 < grid_h {
+            grid[y2 as usize][col as usize] = '-';
+        }
+    }
+    for row in y1.max(0)..=y2.min(grid_h - 1) {
+        if x1 >= 0 && x1 < grid_w {
+            grid[row as usize][x1 as usize] = '|';
+        }
+        if x2 >= 0 && x2 < grid_w {
+            grid[row as usize][x2 as usize] = '|';
+        }
+    }
+    if x1 >= 0 && x1 < grid_w && y1 >= 0 && y1 < grid_h {
+        grid[y1 as usize][x1 as usize] = '+';
+    }
+    if x2 >= 0 && x2 < grid_w && y1 >= 0 && y1 < grid_h {
+        grid[y1 as usize][x2 as usize] = '+';
+    }
+    if x1 >= 0 && x1 < grid_w && y2 >= 0 && y2 < grid_h {
+        grid[y2 as usize][x1 as usize] = '+';
+    }
+    if x2 >= 0 && x2 < grid_w && y2 >= 0 && y2 < grid_h {
+        grid[y2 as usize][x2 as usize] = '+';
+    }
+
+    let mid_x = (x + w / 2.0).round() as isize;
+    let mid_y = (y + h / 2.0).round() as isize;
+    if mid_y >= 0 && mid_y < grid_h {
+        let start_x = mid_x - (label.len() / 2) as isize;
+        for (i, ch) in label.chars().enumerate() {
+            let col = start_x + i as isize;
+            if col > x1 && col < x2 && col >= 0 && col < grid_w {
+                grid[mid_y as usize][col as usize] = ch;
+            }
         }
     }
 }
 
 fn draw_focused_border(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32) {
-    let x1 = x.round() as usize;
-    let y1 = y.round() as usize;
-    let x2 = (x + w).round() as usize - 1;
-    let y2 = (y + h).round() as usize - 1;
+    let grid_w = grid[0].len() as isize;
+    let grid_h = grid.len() as isize;
 
-    for col in x1..=x2 {
-        grid[y1][col] = '*';
-        grid[y2][col] = '*';
+    let x1 = x.round() as isize;
+    let y1 = y.round() as isize;
+    let x2 = (x + w).round() as isize - 1;
+    let y2 = (y + h).round() as isize - 1;
+
+    for col in x1.max(0)..=x2.min(grid_w - 1) {
+        if y1 >= 0 && y1 < grid_h {
+            grid[y1 as usize][col as usize] = '*';
+        }
+        if y2 >= 0 && y2 < grid_h {
+            grid[y2 as usize][col as usize] = '*';
+        }
     }
-    for row in y1..=y2 {
-        grid[row][x1] = '*';
-        grid[row][x2] = '*';
+    for row in y1.max(0)..=y2.min(grid_h - 1) {
+        if x1 >= 0 && x1 < grid_w {
+            grid[row as usize][x1 as usize] = '*';
+        }
+        if x2 >= 0 && x2 < grid_w {
+            grid[row as usize][x2 as usize] = '*';
+        }
     }
 }
 
@@ -381,6 +414,21 @@ fn validate_hub(hub: &Hub) {
                         window.workspace, workspace_id,
                         "Window {wid} has wrong workspace"
                     );
+                    // Validate window dimension >= min size
+                    let dim = window.dimension();
+                    let (min_w, min_h) = window.min_size();
+                    assert!(
+                        dim.width >= min_w - 0.01,
+                        "Window {wid} width {:.2} < min_width {:.2}",
+                        dim.width,
+                        min_w
+                    );
+                    assert!(
+                        dim.height >= min_h - 0.01,
+                        "Window {wid} height {:.2} < min_height {:.2}",
+                        dim.height,
+                        min_h
+                    );
                 }
                 Child::Container(cid) => {
                     let container = hub.get_container(cid);
@@ -435,6 +483,100 @@ fn validate_hub(hub: &Hub) {
                         );
                     }
 
+                    // Validate container dimension = sum of children in layout direction
+                    let dim = container.dimension();
+                    let children = container.children();
+                    let child_dims: Vec<_> = children
+                        .iter()
+                        .map(|&c| match c {
+                            Child::Window(wid) => hub.get_window(wid).dimension(),
+                            Child::Container(cid) => hub.get_container(cid).dimension(),
+                        })
+                        .collect();
+                    let child_mins: Vec<_> = children
+                        .iter()
+                        .map(|&c| match c {
+                            Child::Window(wid) => hub.get_window(wid).min_size(),
+                            Child::Container(cid) => hub.get_container(cid).min_size(),
+                        })
+                        .collect();
+
+                    match container.direction() {
+                        Some(Direction::Horizontal) => {
+                            let sum_width: f32 = child_dims.iter().map(|d| d.width).sum();
+                            assert!(
+                                (dim.width - sum_width).abs() < 0.01,
+                                "Container {cid} width {:.2} != sum of children widths {:.2}",
+                                dim.width,
+                                sum_width
+                            );
+                            for (i, (d, (_, min_h))) in
+                                child_dims.iter().zip(child_mins.iter()).enumerate()
+                            {
+                                assert!(
+                                    d.height >= dim.height - 0.01 || d.height >= *min_h - 0.01,
+                                    "Container {cid} child {i} height {:.2} < container height {:.2} and < min_height {:.2}",
+                                    d.height,
+                                    dim.height,
+                                    min_h
+                                );
+                            }
+                        }
+                        Some(Direction::Vertical) => {
+                            let sum_height: f32 = child_dims.iter().map(|d| d.height).sum();
+                            assert!(
+                                (dim.height - sum_height).abs() < 0.01,
+                                "Container {cid} height {:.2} != sum of children heights {:.2}",
+                                dim.height,
+                                sum_height
+                            );
+                            for (i, (d, (min_w, _))) in
+                                child_dims.iter().zip(child_mins.iter()).enumerate()
+                            {
+                                assert!(
+                                    d.width >= dim.width - 0.01 || d.width >= *min_w - 0.01,
+                                    "Container {cid} child {i} width {:.2} < container width {:.2} and < min_width {:.2}",
+                                    d.width,
+                                    dim.width,
+                                    min_w
+                                );
+                            }
+                        }
+                        None => {
+                            // Tabbed: all children same size
+                            let expected_height = dim.height - TAB_BAR_HEIGHT;
+                            for (i, d) in child_dims.iter().enumerate() {
+                                assert!(
+                                    (d.width - dim.width).abs() < 0.01,
+                                    "Container {cid} tabbed child {i} width {:.2} != container width {:.2}",
+                                    d.width,
+                                    dim.width
+                                );
+                                assert!(
+                                    (d.height - expected_height).abs() < 0.01,
+                                    "Container {cid} tabbed child {i} height {:.2} != expected {:.2}",
+                                    d.height,
+                                    expected_height
+                                );
+                            }
+                        }
+                    }
+
+                    // Validate container dimension >= min size
+                    let (min_w, min_h) = container.min_size();
+                    assert!(
+                        dim.width >= min_w - 0.01,
+                        "Container {cid} width {:.2} < min_width {:.2}",
+                        dim.width,
+                        min_w
+                    );
+                    assert!(
+                        dim.height >= min_h - 0.01,
+                        "Container {cid} height {:.2} < min_height {:.2}",
+                        dim.height,
+                        min_h
+                    );
+
                     // A container's focus must either match a child's focus or point directly to a child
                     let focused = container.focused;
                     let is_direct_child = container.children().contains(&focused);
@@ -473,8 +615,12 @@ fn validate_child_exists(hub: &Hub, child: Child) {
 }
 
 fn setup_logger() {
+    setup_logger_with_level("warn");
+}
+
+pub(super) fn setup_logger_with_level(level: &str) {
     use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
@@ -482,8 +628,7 @@ fn setup_logger() {
     }));
 }
 
-pub(super) fn setup() -> Hub {
-    setup_logger();
+pub(super) fn setup_hub() -> Hub {
     use crate::core::node::Dimension;
     Hub::new(
         Dimension {
@@ -494,7 +639,14 @@ pub(super) fn setup() -> Hub {
         },
         TAB_BAR_HEIGHT,
         false,
+        0.0,
+        0.0,
     )
+}
+
+pub(super) fn setup() -> Hub {
+    setup_logger();
+    setup_hub()
 }
 
 pub(super) fn setup_with_auto_tile() -> Hub {
@@ -509,5 +661,7 @@ pub(super) fn setup_with_auto_tile() -> Hub {
         },
         TAB_BAR_HEIGHT,
         true,
+        0.0,
+        0.0,
     )
 }

@@ -70,15 +70,32 @@ impl std::fmt::Display for WindowHandle {
 }
 
 pub(super) enum HubEvent {
+    AppInitialized(AppHandle),
     WindowCreated(WindowHandle),
     WindowDestroyed(WindowHandle),
     WindowFocused(WindowHandle),
     WindowTitleChanged(WindowHandle),
     WindowMovedOrResized(WindowHandle),
+    SetMinSize { handle: WindowHandle, width: f32, height: f32 },
     Action(Actions),
     ConfigChanged(Config),
     Shutdown,
 }
+
+#[derive(Clone, Copy)]
+pub(super) struct AppHandle(HWND);
+
+impl AppHandle {
+    pub(super) fn new(hwnd: HWND) -> Self {
+        Self(hwnd)
+    }
+
+    pub(super) fn hwnd(self) -> HWND {
+        self.0
+    }
+}
+
+unsafe impl Send for AppHandle {}
 
 pub(super) struct Frame {
     pub(super) tiling_windows: Vec<(WindowHandle, Dimension)>,
@@ -216,9 +233,9 @@ pub(super) struct HubThread {
 }
 
 impl HubThread {
-    pub(super) fn spawn(config: Config, screen: Dimension, main_hwnd: WindowHandle) -> Self {
+    pub(super) fn spawn(config: Config, screen: Dimension) -> Self {
         let (tx, rx) = mpsc::channel();
-        let handle = thread::spawn(move || run(config, screen, rx, main_hwnd));
+        let handle = thread::spawn(move || run(config, screen, rx));
         Self { sender: tx, handle }
     }
 
@@ -232,12 +249,16 @@ impl HubThread {
     }
 }
 
-fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd: WindowHandle) {
-    let mut hub = Hub::new(screen, config.tab_bar_height, config.automatic_tiling);
+fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>) {
+    let mut hub = Hub::new(
+        screen,
+        config.tab_bar_height,
+        config.automatic_tiling,
+        config.min_width,
+        config.min_height,
+    );
     let mut registry = Registry::new();
-
-    let frame = build_frame(&hub, &registry, &config, None, HashSet::new());
-    send_frame(frame, &main_hwnd);
+    let mut app_hwnd: Option<AppHandle> = None;
 
     while let Ok(event) = rx.recv() {
         let last_focus = hub.get_workspace(hub.current_workspace()).focused();
@@ -246,9 +267,19 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
             .map(|(handle, _)| handle.key())
             .collect();
         match event {
+            HubEvent::AppInitialized(hwnd) => {
+                app_hwnd = Some(hwnd);
+                let frame = build_frame(&hub, &registry, &config, None, HashSet::new());
+                send_frame(frame, hwnd);
+            }
             HubEvent::Shutdown => break,
             HubEvent::ConfigChanged(new_config) => {
-                hub.sync_config(new_config.tab_bar_height, new_config.automatic_tiling);
+                hub.sync_config(
+                    new_config.tab_bar_height,
+                    new_config.automatic_tiling,
+                    new_config.min_width,
+                    new_config.min_height,
+                );
                 config = new_config;
                 tracing::info!("Config reloaded");
             }
@@ -262,7 +293,7 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 }
                 insert_window(&mut hub, &mut registry, &handle);
                 if let Some(actions) = on_open_actions(&handle, &config.windows.on_open) {
-                    execute_actions(&mut hub, &mut registry, &actions, &main_hwnd);
+                    execute_actions(&mut hub, &mut registry, &actions, app_hwnd);
                 }
             }
             HubEvent::WindowDestroyed(handle) => {
@@ -287,6 +318,14 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
             }
             // TODO: update float window position in hub instead of re-rendering
             HubEvent::WindowMovedOrResized(_) => {}
+            HubEvent::SetMinSize { handle, width, height } => {
+                if let Some(id) = registry.get_tiling(&handle) {
+                    let border = config.border_size;
+                    let width = if width > 0.0 { width + 2.0 * border } else { 0.0 };
+                    let height = if height > 0.0 { height + 2.0 * border } else { 0.0 };
+                    hub.set_min_size(id, width, height);
+                }
+            }
             HubEvent::WindowTitleChanged(handle) => {
                 let _span = tracing::info_span!("window_title_changed", %handle).entered();
                 if registry.contains(&handle) {
@@ -299,15 +338,17 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, main_hwnd:
                 }
                 insert_window(&mut hub, &mut registry, &handle);
                 if let Some(actions) = on_open_actions(&handle, &config.windows.on_open) {
-                    execute_actions(&mut hub, &mut registry, &actions, &main_hwnd);
+                    execute_actions(&mut hub, &mut registry, &actions, app_hwnd);
                 }
             }
             HubEvent::Action(actions) => {
-                execute_actions(&mut hub, &mut registry, &actions, &main_hwnd);
+                execute_actions(&mut hub, &mut registry, &actions, app_hwnd);
             }
         }
-        let frame = build_frame(&hub, &registry, &config, last_focus, previous_displayed);
-        send_frame(frame, &main_hwnd);
+        if let Some(app_hwnd) = app_hwnd {
+            let frame = build_frame(&hub, &registry, &config, last_focus, previous_displayed);
+            send_frame(frame, app_hwnd);
+        }
     }
 }
 
@@ -323,18 +364,18 @@ fn insert_window(hub: &mut Hub, registry: &mut Registry, handle: &WindowHandle) 
     }
 }
 
-fn send_frame(frame: Frame, main_hwnd: &WindowHandle) {
+fn send_frame(frame: Frame, app_hwnd: AppHandle) {
     let cmd = Box::new(frame);
     let ptr = Box::into_raw(cmd) as usize;
-    unsafe { PostMessageW(Some(main_hwnd.hwnd()), WM_APP_FRAME, WPARAM(ptr), LPARAM(0)).ok() };
+    unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_FRAME, WPARAM(ptr), LPARAM(0)).ok() };
 }
 
-#[tracing::instrument(skip(hub, registry, main_hwnd), fields(actions = %actions))]
+#[tracing::instrument(skip(hub, registry, app_hwnd), fields(actions = %actions))]
 fn execute_actions(
     hub: &mut Hub,
     registry: &mut Registry,
     actions: &Actions,
-    main_hwnd: &WindowHandle,
+    app_hwnd: Option<AppHandle>,
 ) {
     for action in actions {
         match action {
@@ -374,7 +415,9 @@ fn execute_actions(
                 }
             }
             Action::Exit => {
-                unsafe { PostMessageW(Some(main_hwnd.hwnd()), WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+                if let Some(hwnd) = app_hwnd {
+                    unsafe { PostMessageW(Some(hwnd.hwnd()), WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+                }
             }
         }
     }
@@ -658,8 +701,8 @@ fn apply_inset(dim: Dimension, border: f32) -> Dimension {
     Dimension {
         x: dim.x + border,
         y: dim.y + border,
-        width: dim.width - 2.0 * border,
-        height: dim.height - 2.0 * border,
+        width: (dim.width - 2.0 * border).max(0.0),
+        height: (dim.height - 2.0 * border).max(0.0),
     }
 }
 
