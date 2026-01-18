@@ -4,6 +4,7 @@ mod keyboard;
 mod listeners;
 mod objc2_wrapper;
 mod overlay;
+mod recovery;
 mod throttle;
 mod window;
 

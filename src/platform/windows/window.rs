@@ -1,6 +1,8 @@
 use crate::core::Dimension;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
+use windows::Win32::Graphics::Dwm::{
+    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
@@ -121,7 +123,14 @@ pub(super) fn get_window_dimension(hwnd: HWND) -> Dimension {
 
 pub(super) fn get_min_size(hwnd: HWND) -> (f32, f32) {
     let mut info = MINMAXINFO::default();
-    unsafe { SendMessageW(hwnd, WM_GETMINMAXINFO, Some(WPARAM(0)), Some(LPARAM(&mut info as *mut _ as isize))) };
+    unsafe {
+        SendMessageW(
+            hwnd,
+            WM_GETMINMAXINFO,
+            Some(WPARAM(0)),
+            Some(LPARAM(&mut info as *mut _ as isize)),
+        )
+    };
     let (left, top, right, bottom) = get_invisible_border(hwnd);
     (
         (info.ptMinTrackSize.x - left - right).max(0) as f32,

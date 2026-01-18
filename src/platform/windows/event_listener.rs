@@ -14,6 +14,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::hub::{HubEvent, WindowHandle};
+use super::recovery;
 use super::throttle::Throttle;
 
 const FOCUS_THROTTLE: Duration = Duration::from_millis(50);
@@ -115,6 +116,7 @@ unsafe extern "system" fn event_hook_proc(
             | EVENT_OBJECT_SHOW
             | EVENT_SYSTEM_MINIMIZEEND
             | EVENT_OBJECT_UNCLOAKED => {
+                recovery::track(hwnd);
                 sender
                     .send(HubEvent::WindowCreated(WindowHandle::new(hwnd)))
                     .ok();
@@ -128,6 +130,7 @@ unsafe extern "system" fn event_hook_proc(
             | EVENT_OBJECT_HIDE
             | EVENT_SYSTEM_MINIMIZESTART
             | EVENT_OBJECT_CLOAKED => {
+                recovery::untrack(hwnd);
                 sender
                     .send(HubEvent::WindowDestroyed(WindowHandle::new(hwnd)))
                     .ok();

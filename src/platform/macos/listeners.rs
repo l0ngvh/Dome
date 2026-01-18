@@ -41,6 +41,7 @@ use super::objc2_wrapper::{
     kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification, kAXWindowRole,
     kAXWindowsAttribute,
 };
+use super::recovery;
 use super::throttle::Throttle;
 use super::window::{AXRegistry, AXWindow};
 use crate::core::Dimension;
@@ -337,6 +338,7 @@ fn handle_app_terminated(ctx: &ListenerCtx, notification: &NSNotification) {
 fn remove_terminated_app(ctx: &ListenerCtx, pid: i32) {
     ctx.observers.borrow_mut().remove(&pid);
     for cg_id in ctx.ax_registry.borrow_mut().remove_by_pid(pid) {
+        recovery::untrack(cg_id);
         send_event(&ctx.hub_sender, HubEvent::WindowDestroyed(cg_id));
     }
 }
@@ -532,6 +534,7 @@ fn sync_app_windows(
     if app.isHidden() {
         for cg_id in tracked_cg_ids {
             ax_registry.remove(cg_id);
+            recovery::untrack(cg_id);
             send_event(hub_sender, HubEvent::WindowDestroyed(cg_id));
         }
         return;
@@ -541,6 +544,7 @@ fn sync_app_windows(
             continue;
         }
         ax_registry.remove(cg_id);
+        recovery::untrack(cg_id);
         send_event(hub_sender, HubEvent::WindowDestroyed(cg_id));
     }
 
@@ -572,6 +576,7 @@ fn sync_app_windows(
             continue;
         }
 
+        let dimension = get_ax_dimension(&ax_window);
         let ax_win = AXWindow::new(
             ax_window.clone(),
             ax_app.clone(),
@@ -580,6 +585,7 @@ fn sync_app_windows(
             app_name.clone(),
             title.clone(),
         );
+        recovery::track(cg_id, ax_win.clone(), dimension, screen);
         ax_registry.insert(cg_id, ax_win);
 
         let info = WindowInfo {
@@ -588,7 +594,7 @@ fn sync_app_windows(
             app_name: app_name.clone(),
             bundle_id: bundle_id.clone(),
             should_tile: should_tile(&ax_window),
-            dimension: get_ax_dimension(&ax_window),
+            dimension,
         };
         send_event(hub_sender, HubEvent::WindowCreated(info));
     }

@@ -608,7 +608,6 @@ pub(crate) fn start_config_watcher(
     Ok(watcher)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

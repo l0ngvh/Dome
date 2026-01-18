@@ -25,6 +25,7 @@ use super::hub::{Frame, HubEvent, HubMessage, HubThread};
 use super::keyboard;
 use super::listeners::EventListener;
 use super::overlay::{OverlayView, create_overlay_window};
+use super::recovery;
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
@@ -144,9 +145,11 @@ fn init_tracing(config: &Config) {
         .with(ErrorLayer::default())
         .init();
     std::panic::set_hook(Box::new(|panic_info| {
+        recovery::restore_all();
         let backtrace = backtrace::Backtrace::new();
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
     }));
+    recovery::install_handlers();
 }
 
 pub(super) struct AppDelegateIvars {
@@ -198,6 +201,7 @@ define_class!(
 
         #[unsafe(method(applicationWillTerminate:))]
         fn will_terminate(&self, _notification: &NSNotification) {
+            recovery::restore_all();
             let _ = self.ivars().hub_sender.send(HubEvent::Shutdown);
         }
     }

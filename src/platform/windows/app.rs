@@ -37,13 +37,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use std::sync::mpsc::Sender;
 
+use super::OFFSCREEN_POS;
 use super::hub::{AppHandle, Frame, HubEvent, Overlays, WM_APP_FRAME, WindowHandle};
-use super::window::{get_min_size, Taskbar};
+use super::window::{Taskbar, get_min_size};
 use crate::core::Dimension;
 
 const OFFSCREEN: Dimension = Dimension {
-    x: -32000.0,
-    y: -32000.0,
+    x: OFFSCREEN_POS,
+    y: OFFSCREEN_POS,
     width: 0.0,
     height: 0.0,
 };

@@ -76,7 +76,11 @@ pub(super) enum HubEvent {
     WindowFocused(WindowHandle),
     WindowTitleChanged(WindowHandle),
     WindowMovedOrResized(WindowHandle),
-    SetMinSize { handle: WindowHandle, width: f32, height: f32 },
+    SetMinSize {
+        handle: WindowHandle,
+        width: f32,
+        height: f32,
+    },
     Action(Actions),
     ConfigChanged(Config),
     Shutdown,
@@ -318,11 +322,23 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>) {
             }
             // TODO: update float window position in hub instead of re-rendering
             HubEvent::WindowMovedOrResized(_) => {}
-            HubEvent::SetMinSize { handle, width, height } => {
+            HubEvent::SetMinSize {
+                handle,
+                width,
+                height,
+            } => {
                 if let Some(id) = registry.get_tiling(&handle) {
                     let border = config.border_size;
-                    let width = if width > 0.0 { width + 2.0 * border } else { 0.0 };
-                    let height = if height > 0.0 { height + 2.0 * border } else { 0.0 };
+                    let width = if width > 0.0 {
+                        width + 2.0 * border
+                    } else {
+                        0.0
+                    };
+                    let height = if height > 0.0 {
+                        height + 2.0 * border
+                    } else {
+                        0.0
+                    };
                     hub.set_min_size(id, width, height);
                 }
             }

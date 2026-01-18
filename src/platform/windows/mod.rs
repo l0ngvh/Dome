@@ -2,6 +2,7 @@ mod app;
 mod event_listener;
 mod hub;
 mod keyboard;
+mod recovery;
 mod throttle;
 mod window;
 
@@ -78,6 +79,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     if let Err(e) = enum_windows(|hwnd| {
         if is_manageable_window(hwnd) {
+            recovery::track(hwnd);
             sender
                 .send(HubEvent::WindowCreated(WindowHandle::new(hwnd)))
                 .ok();
@@ -95,6 +97,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     }
 
     hub_thread.shutdown();
+    recovery::restore_all();
     uninstall_keyboard_hook(keyboard_hook);
 
     Ok(())
@@ -156,7 +159,12 @@ fn init_tracing(config: &Config) {
         .with(ErrorLayer::default())
         .init();
     std::panic::set_hook(Box::new(|panic_info| {
+        recovery::restore_all();
         let backtrace = backtrace::Backtrace::new();
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
     }));
+    recovery::install_handlers();
 }
+
+// Unlike macOS, we are allowed to move windows completely offscreen on Windows
+pub(super) const OFFSCREEN_POS: f32 = -32000.0;

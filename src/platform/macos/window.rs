@@ -15,6 +15,7 @@ use super::objc2_wrapper::{
 };
 use crate::core::Dimension;
 
+#[derive(Clone)]
 pub(super) struct AXWindow {
     window: CFRetained<AXUIElement>,
     app: CFRetained<AXUIElement>,
