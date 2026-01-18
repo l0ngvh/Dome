@@ -12,8 +12,8 @@ use objc2_app_kit::{
 };
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
-    CFDictionary, CFMachPort, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext,
-    kCFBooleanTrue, kCFRunLoopDefaultMode,
+    CFDictionary, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext, kCFBooleanTrue,
+    kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
@@ -22,7 +22,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
 use super::hub::{Frame, HubEvent, HubMessage, HubThread};
-use super::keyboard;
+use super::keyboard::KeyboardListener;
 use super::listeners::EventListener;
 use super::overlay::{OverlayView, create_overlay_window};
 use super::recovery;
@@ -55,13 +55,13 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let (frame_tx, frame_rx) = mpsc::channel();
 
     let hub_config = config.clone();
-    let config = Arc::new(RwLock::new(config));
+    let keymaps = Arc::new(RwLock::new(config.keymaps.clone()));
 
     let _config_watcher = start_config_watcher(&config_path, {
-        let config = config.clone();
+        let keymaps = keymaps.clone();
         let tx = event_tx.clone();
         move |cfg| {
-            *config.write().unwrap() = cfg.clone();
+            *keymaps.write().unwrap() = cfg.keymaps.clone();
             tx.send(HubEvent::ConfigChanged(cfg)).ok();
         }
     })
@@ -80,22 +80,19 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let ax_registry = Rc::new(RefCell::new(AXRegistry::new()));
     let is_suspended = Rc::new(Cell::new(false));
 
-    let _event_listeners = EventListener::new(
+    let _event_listener = EventListener::new(
         screen,
         ax_registry.clone(),
         event_tx.clone(),
         is_suspended.clone(),
     );
 
-    let delegate = AppDelegate::new(
-        mtm,
-        screen,
-        config,
-        event_tx,
-        frame_rx,
-        ax_registry,
-        is_suspended,
-    );
+    let _keyboard_listener =
+        KeyboardListener::new(keymaps, is_suspended, event_tx.clone()).inspect_err(|e| {
+            tracing::error!("Failed to create keyboard listener: {e:#}");
+        });
+
+    let delegate = AppDelegate::new(mtm, screen, event_tx, frame_rx, ax_registry);
     let source = create_frame_source(&delegate);
 
     let main_run_loop = CFRunLoop::main().unwrap();
@@ -154,14 +151,11 @@ fn init_tracing(config: &Config) {
 
 pub(super) struct AppDelegateIvars {
     pub(super) screen: Dimension,
-    pub(super) config: Arc<RwLock<Config>>,
     pub(super) ax_registry: Rc<RefCell<AXRegistry>>,
-    pub(super) is_suspended: Rc<Cell<bool>>,
     pub(super) hub_sender: Sender<HubEvent>,
     pub(super) frame_rx: Receiver<HubMessage>,
     pub(super) overlay_window: OnceCell<Retained<NSWindow>>,
     pub(super) overlay: OnceCell<Retained<OverlayView>>,
-    pub(super) event_tap: OnceCell<CFRetained<CFMachPort>>,
 }
 
 define_class!(
@@ -193,10 +187,6 @@ define_class!(
 
             let _ = delegate.ivars().overlay_window.set(overlay_window);
             let _ = delegate.ivars().overlay.set(overlay);
-
-            if let Err(e) = keyboard::listen_to_input_devices(delegate) {
-                tracing::error!("Failed to listen to input devices: {e:#}");
-            }
         }
 
         #[unsafe(method(applicationWillTerminate:))]
@@ -211,33 +201,32 @@ impl AppDelegate {
     fn new(
         mtm: MainThreadMarker,
         screen: Dimension,
-        config: Arc<RwLock<Config>>,
         hub_sender: Sender<HubEvent>,
         frame_rx: Receiver<HubMessage>,
         ax_registry: Rc<RefCell<AXRegistry>>,
-        is_suspended: Rc<Cell<bool>>,
     ) -> Retained<Self> {
         let ivars = AppDelegateIvars {
             screen,
-            config,
             ax_registry,
-            is_suspended,
             hub_sender,
             frame_rx,
             overlay_window: OnceCell::new(),
             overlay: OnceCell::new(),
-            event_tap: OnceCell::new(),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
     }
 
     pub(super) fn send_event(&self, event: HubEvent) {
-        if self.ivars().hub_sender.send(event).is_err() {
-            tracing::error!("Hub thread died, shutting down");
-            let mtm = MainThreadMarker::new().unwrap();
-            NSApplication::sharedApplication(mtm).terminate(None);
-        }
+        send_hub_event(&self.ivars().hub_sender, event);
+    }
+}
+
+pub(super) fn send_hub_event(hub_sender: &Sender<HubEvent>, event: HubEvent) {
+    if hub_sender.send(event).is_err() {
+        tracing::error!("Hub thread died, shutting down");
+        let mtm = MainThreadMarker::new().unwrap();
+        NSApplication::sharedApplication(mtm).terminate(None);
     }
 }
 

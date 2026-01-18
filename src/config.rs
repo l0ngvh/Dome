@@ -482,7 +482,7 @@ pub(crate) struct WindowsConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Config {
     #[serde(default = "default_keymaps", deserialize_with = "deserialize_keymaps")]
-    keymaps: HashMap<Keymap, Actions>,
+    pub(crate) keymaps: HashMap<Keymap, Actions>,
     #[serde(default = "default_border_size")]
     pub(crate) border_size: f32,
     #[serde(default = "default_tab_bar_height")]
@@ -572,10 +572,6 @@ impl Config {
         let content = std::fs::read_to_string(path)?;
         let config = toml::from_str(&content)?;
         Ok(config)
-    }
-
-    pub(crate) fn get_actions(&self, keymap: &Keymap) -> Actions {
-        self.keymaps.get(keymap).cloned().unwrap_or_default()
     }
 }
 

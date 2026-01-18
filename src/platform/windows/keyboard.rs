@@ -89,7 +89,7 @@ fn get_actions(vk: VIRTUAL_KEY) -> Option<crate::action::Actions> {
 
     let state = STATE.get()?;
     let config = state.config.read().ok()?;
-    let actions = config.get_actions(&keymap);
+    let actions = config.keymaps.get(&keymap).cloned().unwrap_or_default();
     if actions.is_empty() {
         None
     } else {

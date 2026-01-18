@@ -9,14 +9,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 use block2::RcBlock;
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace,
-    NSWorkspaceApplicationKey, NSWorkspaceDidActivateApplicationNotification,
-    NSWorkspaceDidLaunchApplicationNotification, NSWorkspaceDidTerminateApplicationNotification,
-    NSWorkspaceScreensDidSleepNotification, NSWorkspaceWillSleepNotification,
+    NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
+    NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
+    NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceScreensDidSleepNotification,
+    NSWorkspaceWillSleepNotification,
 };
 use objc2_application_services::{AXObserver, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
@@ -29,6 +28,7 @@ use objc2_foundation::{
     NSDistributedNotificationCenter, NSNotification, NSObjectProtocol, NSOperationQueue, NSString,
 };
 
+use super::app::send_hub_event;
 use super::hub::{HubEvent, WindowInfo};
 use super::objc2_wrapper::{
     add_observer_notification, create_observer, get_attribute, get_cg_window_id, get_pid,
@@ -134,11 +134,7 @@ impl Drop for EventListener {
 }
 
 fn send_event(hub_sender: &Sender<HubEvent>, event: HubEvent) {
-    if hub_sender.send(event).is_err() {
-        tracing::error!("Hub thread died, shutting down");
-        let mtm = MainThreadMarker::new().unwrap();
-        NSApplication::sharedApplication(mtm).terminate(None);
-    }
+    send_hub_event(hub_sender, event);
 }
 
 type WorkspaceObservers = Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>;
