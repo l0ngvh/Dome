@@ -1,7 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::ops::ControlFlow;
 use std::sync::mpsc::{Receiver, Sender};
-use std::thread::{self, JoinHandle};
 
 use objc2::rc::Retained;
 use objc2_app_kit::NSRunningApplication;
@@ -56,6 +54,15 @@ pub(super) enum WindowType {
     Float(FloatWindowId),
 }
 
+impl std::fmt::Display for WindowType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WindowType::Tiling(id) => write!(f, "Tiling #{id}"),
+            WindowType::Float(id) => write!(f, "Float #{id}"),
+        }
+    }
+}
+
 struct WindowEntry {
     window: MacWindow,
     window_type: WindowType,
@@ -90,13 +97,13 @@ impl Registry {
         );
     }
 
-    fn remove(&mut self, cg_id: CGWindowID) -> Option<WindowType> {
+    fn remove(&mut self, cg_id: CGWindowID) -> Option<(MacWindow, WindowType)> {
         let entry = self.windows.remove(&cg_id)?;
         self.type_to_cg.remove(&entry.window_type);
         if let Some(ids) = self.pid_to_cg.get_mut(&entry.window.pid()) {
             ids.retain(|&id| id != cg_id);
         }
-        Some(entry.window_type)
+        Some((entry.window, entry.window_type))
     }
 
     fn get(&self, cg_id: CGWindowID) -> Option<&MacWindow> {
@@ -123,7 +130,7 @@ impl Registry {
         self.pid_to_cg.get(&pid).cloned().unwrap_or_default()
     }
 
-    fn remove_by_pid(&mut self, pid: i32) -> Vec<(CGWindowID, WindowType)> {
+    fn remove_by_pid(&mut self, pid: i32) -> Vec<(CGWindowID, MacWindow, WindowType)> {
         let Some(cg_ids) = self.pid_to_cg.remove(&pid) else {
             return Vec::new();
         };
@@ -131,7 +138,7 @@ impl Registry {
         for cg_id in cg_ids {
             if let Some(entry) = self.windows.remove(&cg_id) {
                 self.type_to_cg.remove(&entry.window_type);
-                removed.push((cg_id, entry.window_type));
+                removed.push((cg_id, entry.window, entry.window_type));
             }
         }
         removed
@@ -167,10 +174,10 @@ impl Registry {
     }
 }
 
-struct MessageSender {
-    tx: Sender<HubMessage>,
-    source: CFRetained<CFRunLoopSource>,
-    run_loop: CFRetained<CFRunLoop>,
+pub(super) struct MessageSender {
+    pub(super) tx: Sender<HubMessage>,
+    pub(super) source: CFRetained<CFRunLoopSource>,
+    pub(super) run_loop: CFRetained<CFRunLoop>,
 }
 
 // Safety: CFRunLoopSource and CFRunLoop are thread-safe for signal/wake_up operations
@@ -185,265 +192,378 @@ impl MessageSender {
     }
 }
 
-pub(super) struct HubThread {
-    handle: JoinHandle<()>,
+pub(super) struct Dome {
+    hub: Hub,
+    registry: Registry,
+    config: Config,
+    screen: Dimension,
+    observed_pids: HashSet<i32>,
+    sender: MessageSender,
+    running: bool,
 }
 
-impl HubThread {
-    pub(super) fn spawn(
-        config: Config,
-        screen: Dimension,
-        event_rx: Receiver<HubEvent>,
-        frame_tx: Sender<HubMessage>,
-        source: CFRetained<CFRunLoopSource>,
-        main_run_loop: CFRetained<CFRunLoop>,
-    ) -> Self {
-        let sender = MessageSender {
-            tx: frame_tx,
-            source,
-            run_loop: main_run_loop,
-        };
-        let handle = thread::spawn(move || {
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run(config, screen, event_rx, sender)
-            }))
-            .is_err()
-            {
-                recovery::restore_all();
+impl Dome {
+    pub(super) fn new(config: Config, screen: Dimension, sender: MessageSender) -> Self {
+        let hub = Hub::new(
+            screen,
+            config.tab_bar_height,
+            config.automatic_tiling,
+            config.min_width.resolve(screen.width),
+            config.min_height.resolve(screen.height),
+        );
+        Self {
+            hub,
+            registry: Registry::new(),
+            config,
+            screen,
+            observed_pids: HashSet::new(),
+            sender,
+            running: true,
+        }
+    }
+
+    fn stop(&mut self) {
+        self.running = false;
+    }
+
+    pub(super) fn run(mut self, rx: Receiver<HubEvent>) {
+        self.initial_sync();
+        while self.running {
+            let Ok(event) = rx.recv() else { break };
+            self.handle_event(event);
+        }
+    }
+
+    fn initial_sync(&mut self) {
+        let mut new_apps = Vec::new();
+        for app in running_apps() {
+            if !self.running {
+                return;
             }
-        });
-        Self { handle }
-    }
-
-    pub(super) fn join(self) {
-        self.handle.join().ok();
-    }
-}
-
-fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>, sender: MessageSender) {
-    let mut hub = Hub::new(
-        screen,
-        config.tab_bar_height,
-        config.automatic_tiling,
-        config.min_width.resolve(screen.width),
-        config.min_height.resolve(screen.height),
-    );
-    let mut registry = Registry::new();
-    let mut observed_pids: HashSet<i32> = HashSet::new();
-
-    // Initial sync of all running apps
-    let mut new_apps = Vec::new();
-    for app in running_apps() {
-        let pid = app.processIdentifier();
-        if observed_pids.insert(pid) {
-            new_apps.push(app.clone());
+            let pid = app.processIdentifier();
+            if self.observed_pids.insert(pid) {
+                new_apps.push(app.clone());
+            }
+            self.sync_app_windows(&app);
         }
-        if sync_app_windows(screen, &mut hub, &mut registry, &config, &app).is_break() {
-            sender.send(HubMessage::Shutdown);
-            return;
+        if !new_apps.is_empty() {
+            self.sender.send(HubMessage::RegisterObservers(new_apps));
         }
+        self.process_frame(None, HashSet::new());
+        self.send_overlays();
     }
-    if !new_apps.is_empty() {
-        sender.send(HubMessage::RegisterObservers(new_apps));
-    }
-    let previous_displayed: HashSet<_> = HashSet::new();
-    process_frame(&mut hub, &registry, &config, None, previous_displayed);
 
-    let overlays = build_overlays(&hub, &registry, &config);
-    sender.send(HubMessage::Overlays(overlays));
-
-    while let Ok(event) = rx.recv() {
-        let last_focus = hub.get_workspace(hub.current_workspace()).focused();
-        let previous_displayed: HashSet<_> = get_displayed_cg_ids(&hub, &registry);
+    fn handle_event(&mut self, event: HubEvent) {
+        let last_focus = self
+            .hub
+            .get_workspace(self.hub.current_workspace())
+            .focused();
+        let previous_displayed = get_displayed_cg_ids(&self.hub, &self.registry);
 
         match event {
-            HubEvent::Shutdown => break,
+            HubEvent::Shutdown => {
+                tracing::info!("Shutdown requested");
+                self.stop();
+            }
             HubEvent::ConfigChanged(new_config) => {
-                hub.sync_config(
+                self.hub.sync_config(
                     new_config.tab_bar_height,
                     new_config.automatic_tiling,
-                    new_config.min_width.resolve(screen.width),
-                    new_config.min_height.resolve(screen.height),
+                    new_config.min_width.resolve(self.screen.width),
+                    new_config.min_height.resolve(self.screen.height),
                 );
-                config = new_config;
+                self.config = new_config;
                 tracing::info!("Config reloaded");
             }
             HubEvent::SyncApp { pid } => {
-                if let Some(app) = get_app_by_pid(pid)
-                    && sync_app_windows(screen, &mut hub, &mut registry, &config, &app).is_break()
-                {
-                    break;
+                if let Some(app) = get_app_by_pid(pid) {
+                    self.sync_app_windows(&app);
                 }
             }
             HubEvent::SyncFocus { pid } => {
                 if let Some(app) = get_app_by_pid(pid) {
-                    sync_app_focus(&mut hub, &registry, &app);
+                    self.sync_app_focus(&app);
                 }
             }
             HubEvent::AppTerminated { pid } => {
-                for (cg_id, wt) in registry.remove_by_pid(pid) {
-                    recovery::untrack(cg_id);
-                    match wt {
-                        WindowType::Tiling(id) => hub.delete_window(id),
-                        WindowType::Float(id) => hub.delete_float(id),
-                    }
-                }
+                tracing::debug!(pid, "App terminated");
+                self.remove_app_windows(pid);
             }
             HubEvent::TitleChanged(cg_id) => {
-                if let Some(window) = registry.get_mut(cg_id) {
+                if let Some(window) = self.registry.get_mut(cg_id) {
                     window.update_title();
+                    tracing::trace!(%window, "Title changed");
                 }
             }
             HubEvent::Action(actions) => {
                 tracing::debug!(%actions, "Executing actions");
-                if execute_actions(&mut hub, &mut registry, &actions).is_break() {
-                    tracing::debug!("Exiting hub thread");
-                    break;
-                }
+                self.execute_actions(&actions);
             }
             // AX notifications are unreliable, when new windows are being rapidly created and
             // deleted, macOS may decide skip sending notifications. So we poll periodically to
             // keep the state in sync. https://github.com/nikitabobko/AeroSpace/issues/445
             HubEvent::Sync => {
-                let running: Vec<_> = running_apps().collect();
-                let running_pids: HashSet<_> =
-                    running.iter().map(|app| app.processIdentifier()).collect();
+                self.periodic_sync();
+            }
+        }
 
-                // Cleanup terminated apps
-                let terminated: Vec<_> = observed_pids
-                    .iter()
-                    .filter(|pid| !running_pids.contains(pid))
-                    .copied()
-                    .collect();
-                for pid in terminated {
-                    observed_pids.remove(&pid);
-                    for (cg_id, wt) in registry.remove_by_pid(pid) {
-                        recovery::untrack(cg_id);
-                        match wt {
-                            WindowType::Tiling(id) => hub.delete_window(id),
-                            WindowType::Float(id) => hub.delete_float(id),
+        if !self.running {
+            return;
+        }
+        self.process_frame(last_focus, previous_displayed);
+        self.send_overlays();
+    }
+
+    #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
+    fn sync_app_windows(&mut self, app: &NSRunningApplication) {
+        let pid = app.processIdentifier();
+        let cg_window_ids = list_cg_window_ids();
+
+        // Remove invalid windows
+        let tracked_cg_ids = self.registry.cg_ids_for_pid(pid);
+        if app.isHidden() {
+            for cg_id in tracked_cg_ids {
+                self.remove_window(cg_id);
+            }
+            return;
+        }
+        for cg_id in tracked_cg_ids {
+            if cg_window_ids.contains(&cg_id) && self.registry.is_valid(cg_id) {
+                continue;
+            }
+            self.remove_window(cg_id);
+        }
+
+        // Add new windows
+        for (cg_id, ax_element) in get_ax_windows(pid) {
+            if !self.running {
+                return;
+            }
+            if self.registry.contains(cg_id) {
+                continue;
+            }
+
+            let window = MacWindow::new(ax_element, cg_id, self.screen, app);
+            if !window.is_manageable() {
+                continue;
+            }
+            if should_ignore(&window, &self.config.macos.ignore) {
+                continue;
+            }
+
+            let dimension = window.get_dimension();
+            let window_type = if window.should_tile() {
+                WindowType::Tiling(self.hub.insert_tiling())
+            } else {
+                WindowType::Float(self.hub.insert_float(dimension))
+            };
+
+            recovery::track(cg_id, window.clone(), self.screen);
+            self.registry.insert(window, window_type);
+
+            let window = self.registry.get(cg_id).unwrap();
+            tracing::info!(%window, %window_type, "Window inserted");
+
+            if let Some(actions) = on_open_actions(window, &self.config.macos.on_open) {
+                self.execute_actions(&actions);
+            }
+        }
+    }
+
+    #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
+    fn sync_app_focus(&mut self, app: &NSRunningApplication) {
+        if !app.isActive() {
+            return;
+        }
+        let pid = app.processIdentifier();
+        if let Some(cg_id) = get_focused_window_cg_id(pid)
+            && let Some(wt) = self.registry.get_window_type(cg_id)
+        {
+            match wt {
+                WindowType::Tiling(id) => self.hub.set_focus(id),
+                WindowType::Float(id) => self.hub.set_float_focus(id),
+            }
+        }
+    }
+
+    fn remove_app_windows(&mut self, pid: i32) {
+        for (cg_id, window, window_type) in self.registry.remove_by_pid(pid) {
+            tracing::info!(%window, %window_type, "Window removed");
+            recovery::untrack(cg_id);
+            match window_type {
+                WindowType::Tiling(id) => self.hub.delete_window(id),
+                WindowType::Float(id) => self.hub.delete_float(id),
+            }
+        }
+    }
+
+    fn remove_window(&mut self, cg_id: CGWindowID) {
+        if let Some((window, window_type)) = self.registry.remove(cg_id) {
+            tracing::info!(%window, %window_type, "Window removed");
+            recovery::untrack(cg_id);
+            match window_type {
+                WindowType::Tiling(id) => self.hub.delete_window(id),
+                WindowType::Float(id) => self.hub.delete_float(id),
+            }
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn periodic_sync(&mut self) {
+        let running: Vec<_> = running_apps().collect();
+        let running_pids: HashSet<_> = running.iter().map(|app| app.processIdentifier()).collect();
+
+        // Cleanup terminated apps
+        let terminated: Vec<_> = self
+            .observed_pids
+            .iter()
+            .filter(|pid| !running_pids.contains(pid))
+            .copied()
+            .collect();
+        for pid in terminated {
+            self.observed_pids.remove(&pid);
+            self.remove_app_windows(pid);
+        }
+
+        // Sync running apps
+        let mut new_apps = Vec::new();
+        for app in running {
+            if !self.running {
+                return;
+            }
+            let pid = app.processIdentifier();
+            if self.observed_pids.insert(pid) {
+                new_apps.push(app.clone());
+            }
+            self.sync_app_windows(&app);
+        }
+        if !new_apps.is_empty() {
+            self.sender.send(HubMessage::RegisterObservers(new_apps));
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn execute_actions(&mut self, actions: &Actions) {
+        for action in actions {
+            match action {
+                Action::Focus { target } => match target {
+                    FocusTarget::Up => self.hub.focus_up(),
+                    FocusTarget::Down => self.hub.focus_down(),
+                    FocusTarget::Left => self.hub.focus_left(),
+                    FocusTarget::Right => self.hub.focus_right(),
+                    FocusTarget::Parent => self.hub.focus_parent(),
+                    FocusTarget::NextTab => self.hub.focus_next_tab(),
+                    FocusTarget::PrevTab => self.hub.focus_prev_tab(),
+                    FocusTarget::Workspace { index } => self.hub.focus_workspace(*index),
+                },
+                Action::Move { target } => match target {
+                    MoveTarget::Up => self.hub.move_up(),
+                    MoveTarget::Down => self.hub.move_down(),
+                    MoveTarget::Left => self.hub.move_left(),
+                    MoveTarget::Right => self.hub.move_right(),
+                    MoveTarget::Workspace { index } => self.hub.move_focused_to_workspace(*index),
+                },
+                Action::Toggle { target } => match target {
+                    ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),
+                    ToggleTarget::Direction => self.hub.toggle_direction(),
+                    ToggleTarget::Layout => self.hub.toggle_container_layout(),
+                    ToggleTarget::Float => {
+                        if let Some((window_id, float_id)) = self.hub.toggle_float() {
+                            self.registry.toggle_float(window_id, float_id);
                         }
                     }
-                }
-
-                // Sync running apps
-                let mut should_exit = false;
-                let mut new_apps = Vec::new();
-                for app in running {
-                    let pid = app.processIdentifier();
-                    if observed_pids.insert(pid) {
-                        new_apps.push(app.clone());
-                    }
-                    if sync_app_windows(screen, &mut hub, &mut registry, &config, &app).is_break() {
-                        should_exit = true;
-                        break;
+                },
+                Action::Exec { command } => {
+                    if let Err(e) = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(command)
+                        .spawn()
+                    {
+                        tracing::warn!(%command, "Failed to exec: {e}");
                     }
                 }
-                if !new_apps.is_empty() {
-                    sender.send(HubMessage::RegisterObservers(new_apps));
+                Action::Exit => {
+                    tracing::debug!("Exiting hub thread");
+                    self.stop();
                 }
-                if should_exit {
-                    break;
+            }
+        }
+    }
+
+    fn process_frame(
+        &mut self,
+        last_focus: Option<Focus>,
+        previous_displayed: HashSet<CGWindowID>,
+    ) {
+        let border = self.config.border_size;
+        let screen = self.hub.screen();
+        let current_displayed = get_displayed_cg_ids(&self.hub, &self.registry);
+
+        // Hide windows no longer displayed
+        for cg_id in previous_displayed.difference(&current_displayed) {
+            if let Some(window) = self.registry.get(*cg_id)
+                && let Err(e) = window.hide()
+            {
+                tracing::trace!("Failed to hide window: {e:#}");
+            }
+        }
+
+        // Position tiling windows and discover min sizes. When a window enforces its min size,
+        // it can push siblings which may then hit their own min sizes. Loop until stable, with
+        // a cap of 64 iterations (typical workspaces have fewer than 10 windows).
+        for _ in 0..64 {
+            let min_sizes = position_tiling_windows(&self.hub, &self.registry, border, screen);
+            if min_sizes.is_empty() {
+                break;
+            }
+            for (id, w, h) in min_sizes {
+                self.hub.set_min_size(id, w, h);
+            }
+        }
+
+        // Position float windows
+        let ws = self.hub.get_workspace(self.hub.current_workspace());
+        let focused = ws.focused();
+        let float_windows: Vec<_> = ws.float_windows().to_vec();
+        for float_id in float_windows {
+            if let Some(cg_id) = self.registry.get_cg_id(WindowType::Float(float_id))
+                && let Some(window) = self.registry.get(cg_id)
+            {
+                let dim = apply_inset(self.hub.get_float(float_id).dimension(), border);
+                if let Err(e) = window.set_dimension(dim) {
+                    tracing::trace!("Failed to set float dimension: {e:#}");
                 }
             }
         }
 
-        process_frame(&mut hub, &registry, &config, last_focus, previous_displayed);
-        let overlays = build_overlays(&hub, &registry, &config);
-        sender.send(HubMessage::Overlays(overlays));
+        // Focus window if changed
+        if focused != last_focus {
+            let focus_cg_id = match focused {
+                Some(Focus::Tiling(Child::Window(id))) => {
+                    self.registry.get_cg_id(WindowType::Tiling(id))
+                }
+                Some(Focus::Float(id)) => self.registry.get_cg_id(WindowType::Float(id)),
+                _ => None,
+            };
+            if let Some(cg_id) = focus_cg_id
+                && let Some(window) = self.registry.get(cg_id)
+                && let Err(e) = window.focus()
+            {
+                tracing::trace!("Failed to focus window: {e:#}");
+            }
+        }
     }
 
-    recovery::restore_all();
-    sender.send(HubMessage::Shutdown);
+    fn send_overlays(&self) {
+        let overlays = build_overlays(&self.hub, &self.registry, &self.config);
+        self.sender.send(HubMessage::Overlays(overlays));
+    }
 }
 
-/// Sync windows for an app.
-fn sync_app_windows(
-    screen: Dimension,
-    hub: &mut Hub,
-    registry: &mut Registry,
-    config: &Config,
-    app: &NSRunningApplication,
-) -> ControlFlow<()> {
-    let pid = app.processIdentifier();
-    let cg_window_ids = list_cg_window_ids();
-
-    // Remove invalid windows
-    let tracked_cg_ids = registry.cg_ids_for_pid(pid);
-    if app.isHidden() {
-        for cg_id in tracked_cg_ids {
-            if let Some(wt) = registry.remove(cg_id) {
-                recovery::untrack(cg_id);
-                match wt {
-                    WindowType::Tiling(id) => hub.delete_window(id),
-                    WindowType::Float(id) => hub.delete_float(id),
-                }
-            }
-        }
-        return ControlFlow::Continue(());
-    }
-    for cg_id in tracked_cg_ids {
-        if cg_window_ids.contains(&cg_id) && registry.is_valid(cg_id) {
-            continue;
-        }
-        if let Some(wt) = registry.remove(cg_id) {
-            recovery::untrack(cg_id);
-            match wt {
-                WindowType::Tiling(id) => hub.delete_window(id),
-                WindowType::Float(id) => hub.delete_float(id),
-            }
-        }
-    }
-
-    // Add new windows
-    for (cg_id, ax_element) in get_ax_windows(pid) {
-        if registry.contains(cg_id) {
-            continue;
-        }
-
-        let window = MacWindow::new(ax_element, cg_id, screen, app);
-        if !window.is_manageable() {
-            continue;
-        }
-        if should_ignore(&window, &config.macos.ignore) {
-            continue;
-        }
-
-        let dimension = window.get_dimension();
-        let window_type = if window.should_tile() {
-            WindowType::Tiling(hub.insert_tiling())
-        } else {
-            WindowType::Float(hub.insert_float(dimension))
-        };
-
-        recovery::track(cg_id, window.clone(), screen);
-        registry.insert(window, window_type);
-        tracing::info!(cg_id, "Window inserted");
-
-        let window = registry.get(cg_id).unwrap();
-        if let Some(actions) = on_open_actions(window, &config.macos.on_open)
-            && execute_actions(hub, registry, &actions).is_break()
-        {
-            return ControlFlow::Break(());
-        }
-    }
-
-    ControlFlow::Continue(())
-}
-
-/// Sync focus for an app. ONLY UPDATES HUB FOCUS IF APP IS FRONTMOST.
-fn sync_app_focus(hub: &mut Hub, registry: &Registry, app: &NSRunningApplication) {
-    if !app.isActive() {
-        return;
-    }
-    let pid = app.processIdentifier();
-    if let Some(cg_id) = get_focused_window_cg_id(pid)
-        && let Some(wt) = registry.get_window_type(cg_id)
-    {
-        match wt {
-            WindowType::Tiling(id) => hub.set_focus(id),
-            WindowType::Float(id) => hub.set_float_focus(id),
-        }
+impl Drop for Dome {
+    fn drop(&mut self) {
+        recovery::restore_all();
+        self.sender.send(HubMessage::Shutdown);
     }
 }
 
@@ -456,52 +576,6 @@ fn get_focused_window_cg_id(pid: i32) -> Option<CGWindowID> {
     )
     .ok()?;
     get_cg_window_id(&focused)
-}
-
-#[tracing::instrument(skip(hub, registry))]
-fn execute_actions(hub: &mut Hub, registry: &mut Registry, actions: &Actions) -> ControlFlow<()> {
-    for action in actions {
-        match action {
-            Action::Focus { target } => match target {
-                FocusTarget::Up => hub.focus_up(),
-                FocusTarget::Down => hub.focus_down(),
-                FocusTarget::Left => hub.focus_left(),
-                FocusTarget::Right => hub.focus_right(),
-                FocusTarget::Parent => hub.focus_parent(),
-                FocusTarget::NextTab => hub.focus_next_tab(),
-                FocusTarget::PrevTab => hub.focus_prev_tab(),
-                FocusTarget::Workspace { index } => hub.focus_workspace(*index),
-            },
-            Action::Move { target } => match target {
-                MoveTarget::Up => hub.move_up(),
-                MoveTarget::Down => hub.move_down(),
-                MoveTarget::Left => hub.move_left(),
-                MoveTarget::Right => hub.move_right(),
-                MoveTarget::Workspace { index } => hub.move_focused_to_workspace(*index),
-            },
-            Action::Toggle { target } => match target {
-                ToggleTarget::SpawnDirection => hub.toggle_spawn_mode(),
-                ToggleTarget::Direction => hub.toggle_direction(),
-                ToggleTarget::Layout => hub.toggle_container_layout(),
-                ToggleTarget::Float => {
-                    if let Some((window_id, float_id)) = hub.toggle_float() {
-                        registry.toggle_float(window_id, float_id);
-                    }
-                }
-            },
-            Action::Exec { command } => {
-                if let Err(e) = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(command)
-                    .spawn()
-                {
-                    tracing::warn!(%command, "Failed to exec: {e}");
-                }
-            }
-            Action::Exit => return ControlFlow::Break(()),
-        }
-    }
-    ControlFlow::Continue(())
 }
 
 fn get_displayed_cg_ids(hub: &Hub, registry: &Registry) -> HashSet<CGWindowID> {
@@ -536,71 +610,6 @@ fn get_displayed_cg_ids(hub: &Hub, registry: &Registry) -> HashSet<CGWindowID> {
     }
 
     cg_ids
-}
-
-fn process_frame(
-    hub: &mut Hub,
-    registry: &Registry,
-    config: &Config,
-    last_focus: Option<Focus>,
-    previous_displayed: HashSet<CGWindowID>,
-) {
-    let border = config.border_size;
-    let screen = hub.screen();
-
-    let current_displayed = get_displayed_cg_ids(hub, registry);
-
-    // Hide windows no longer displayed
-    for cg_id in previous_displayed.difference(&current_displayed) {
-        if let Some(window) = registry.get(*cg_id)
-            && let Err(e) = window.hide()
-        {
-            tracing::trace!("Failed to hide window: {e:#}");
-        }
-    }
-
-    // Position tiling windows and discover min sizes. When a window enforces its min size,
-    // it can push siblings which may then hit their own min sizes. Loop until stable, with
-    // a cap of 64 iterations (typical workspaces have fewer than 10 windows).
-    for _ in 0..64 {
-        let min_sizes = position_tiling_windows(hub, registry, border, screen);
-        if min_sizes.is_empty() {
-            break;
-        }
-        for (id, w, h) in min_sizes {
-            hub.set_min_size(id, w, h);
-        }
-    }
-
-    // Position float windows
-    let ws = hub.get_workspace(hub.current_workspace());
-    let focused = ws.focused();
-    let float_windows: Vec<_> = ws.float_windows().to_vec();
-    for float_id in float_windows {
-        if let Some(cg_id) = registry.get_cg_id(WindowType::Float(float_id))
-            && let Some(window) = registry.get(cg_id)
-        {
-            let dim = apply_inset(hub.get_float(float_id).dimension(), border);
-            if let Err(e) = window.set_dimension(dim) {
-                tracing::trace!("Failed to set float dimension: {e:#}");
-            }
-        }
-    }
-
-    // Focus window if changed
-    if focused != last_focus {
-        let focus_cg_id = match focused {
-            Some(Focus::Tiling(Child::Window(id))) => registry.get_cg_id(WindowType::Tiling(id)),
-            Some(Focus::Float(id)) => registry.get_cg_id(WindowType::Float(id)),
-            _ => None,
-        };
-        if let Some(cg_id) = focus_cg_id
-            && let Some(window) = registry.get(cg_id)
-            && let Err(e) = window.focus()
-        {
-            tracing::trace!("Failed to focus window: {e:#}");
-        }
-    }
 }
 
 /// Position tiling windows, returns discovered min sizes

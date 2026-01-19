@@ -15,7 +15,7 @@ use objc2_core_graphics::{
 };
 
 use super::app::send_hub_event;
-use super::hub::HubEvent;
+use super::dome::HubEvent;
 use crate::action::Actions;
 use crate::config::{Keymap, Modifiers};
 
@@ -138,6 +138,8 @@ fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
     if actions.is_empty() {
         return false;
     }
+
+    tracing::debug!(?keymap, %actions, "Keymap matched");
 
     if ctx.is_suspended.get() {
         tracing::info!("Received keymap action, resuming window management");

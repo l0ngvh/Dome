@@ -3,6 +3,7 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
+use std::thread;
 
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
@@ -19,7 +20,7 @@ use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
-use super::hub::{HubEvent, HubMessage, HubThread};
+use super::dome::{Dome, HubEvent, HubMessage, MessageSender};
 use super::keyboard::KeyboardListener;
 use super::listeners::EventListener;
 use super::overlay::{OverlayView, create_overlay_window};
@@ -37,8 +38,10 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     recovery::install_handlers();
     init_tracing(&config);
+    tracing::info!(%config_path, "Loaded config");
 
     std::panic::set_hook(Box::new(|panic_info| {
+        recovery::restore_all();
         let backtrace = backtrace::Backtrace::new();
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
     }));
@@ -95,14 +98,20 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let main_run_loop = CFRunLoop::main().unwrap();
     main_run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
 
-    let hub_thread = HubThread::spawn(
-        hub_config,
-        screen,
-        event_rx,
-        frame_tx,
+    let sender = MessageSender {
+        tx: frame_tx,
         source,
-        main_run_loop,
-    );
+        run_loop: main_run_loop,
+    };
+    let hub_thread = thread::spawn(move || {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Dome::new(hub_config, screen, sender).run(event_rx);
+        }))
+        .is_err()
+        {
+            recovery::restore_all();
+        }
+    });
 
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
@@ -110,7 +119,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
         recovery::restore_all();
     }
 
-    hub_thread.join();
+    hub_thread.join().ok();
     Ok(())
 }
 

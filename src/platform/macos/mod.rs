@@ -1,5 +1,5 @@
 mod app;
-mod hub;
+mod dome;
 mod keyboard;
 mod listeners;
 mod objc2_wrapper;
