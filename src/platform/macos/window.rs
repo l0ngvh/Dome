@@ -1,60 +1,196 @@
 use anyhow::{Context, Result};
-use std::{collections::HashMap, ptr::NonNull};
+use std::collections::HashSet;
+use std::ptr::NonNull;
 
+use objc2::rc::Retained;
+use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFBoolean, CFDictionary, CFRetained, CFString, CFType, CGPoint, CGSize, kCFBooleanFalse,
-    kCFBooleanTrue,
+    CFArray, CFBoolean, CFDictionary, CFEqual, CFNumber, CFRetained, CFString, CFType, CGPoint,
+    CGSize, kCFBooleanFalse, kCFBooleanTrue,
 };
-use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
+use objc2_core_graphics::{
+    CGSessionCopyCurrentDictionary, CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption,
+};
 
 use super::objc2_wrapper::{
-    AXError, get_attribute, kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute,
-    kAXMainAttribute, kAXMinimizedAttribute, kAXPositionAttribute, kAXRoleAttribute,
-    kAXSizeAttribute, set_attribute_value,
+    AXError, get_attribute, get_cg_window_id, is_attribute_settable,
+    kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute, kAXFullScreenAttribute,
+    kAXMainAttribute, kAXMinimizedAttribute, kAXParentAttribute, kAXPositionAttribute,
+    kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
+    kAXTitleAttribute, kAXWindowRole, kAXWindowsAttribute, kCGWindowNumber, set_attribute_value,
 };
 use crate::core::Dimension;
 
 #[derive(Clone)]
-pub(super) struct AXWindow {
-    window: CFRetained<AXUIElement>,
+pub(super) struct MacWindow {
+    element: CFRetained<AXUIElement>,
     app: CFRetained<AXUIElement>,
+    cg_id: CGWindowID,
     pid: i32,
     screen: Dimension,
     app_name: String,
+    bundle_id: Option<String>,
     title: Option<String>,
 }
 
-impl std::fmt::Display for AXWindow {
+// Safety: AXUIElement operations are IPC calls to the accessibility server,
+// safe to use from any thread for manipulating other applications' windows.
+unsafe impl Send for MacWindow {}
+
+impl std::fmt::Display for MacWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.title {
-            Some(title) => write!(f, "AXWindow(app={}, title={})", self.app_name, title),
-            None => write!(f, "AXWindow(app={})", self.app_name),
+        write!(f, "{}", self.app_name)?;
+        if let Some(bundle_id) = &self.bundle_id {
+            write!(f, " ({bundle_id})")?;
         }
+        if let Some(title) = &self.title {
+            write!(f, " - {title}")?;
+        }
+        Ok(())
     }
 }
 
-impl AXWindow {
+impl MacWindow {
     pub(super) fn new(
-        window: CFRetained<AXUIElement>,
-        app: CFRetained<AXUIElement>,
-        pid: i32,
+        element: CFRetained<AXUIElement>,
+        cg_id: CGWindowID,
         screen: Dimension,
-        app_name: String,
-        title: Option<String>,
+        app: &NSRunningApplication,
     ) -> Self {
+        let pid = app.processIdentifier();
+        let ax_app = unsafe { AXUIElement::new_application(pid) };
+        let app_name = app
+            .localizedName()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
+        let title = get_attribute::<CFString>(&element, &kAXTitleAttribute())
+            .map(|t| t.to_string())
+            .ok();
+
         Self {
-            window,
-            app,
+            element,
+            app: ax_app,
+            cg_id,
             pid,
             screen,
             app_name,
+            bundle_id,
             title,
         }
     }
 
+    pub(super) fn cg_id(&self) -> CGWindowID {
+        self.cg_id
+    }
+
     pub(super) fn pid(&self) -> i32 {
         self.pid
+    }
+
+    pub(super) fn app_name(&self) -> &str {
+        &self.app_name
+    }
+
+    pub(super) fn bundle_id(&self) -> Option<&str> {
+        self.bundle_id.as_deref()
+    }
+
+    pub(super) fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    pub(super) fn update_title(&mut self) {
+        self.title = get_attribute::<CFString>(&self.element, &kAXTitleAttribute())
+            .map(|t| t.to_string())
+            .ok();
+    }
+
+    pub(super) fn is_manageable(&self) -> bool {
+        let Some(title) = &self.title else {
+            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, "not manageable: window has no title");
+            return false;
+        };
+
+        let role = get_attribute::<CFString>(&self.element, &kAXRoleAttribute()).ok();
+        let is_window = role
+            .as_ref()
+            .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
+            .unwrap_or(false);
+        if !is_window {
+            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: role is not AXWindow");
+            return false;
+        }
+
+        let subrole = get_attribute::<CFString>(&self.element, &kAXSubroleAttribute()).ok();
+        let is_standard = subrole
+            .as_ref()
+            .map(|sr| CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole())))
+            .unwrap_or(false);
+        if !is_standard {
+            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: subrole is not AXStandardWindow");
+            return false;
+        }
+
+        let is_root = match get_attribute::<AXUIElement>(&self.element, &kAXParentAttribute()) {
+            Err(_) => true,
+            Ok(parent) => CFEqual(Some(&*parent), Some(&*self.app)),
+        };
+        if !is_root {
+            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: window is not root");
+            return false;
+        }
+
+        if !is_attribute_settable(&self.element, &kAXPositionAttribute()) {
+            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: position is not settable");
+            return false;
+        }
+
+        if !is_attribute_settable(&self.element, &kAXSizeAttribute()) {
+            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: size is not settable");
+            return false;
+        }
+
+        if !is_attribute_settable(&self.element, &kAXMainAttribute()) {
+            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: main attribute is not settable");
+            return false;
+        }
+
+        let is_minimized = get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        if is_minimized {
+            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: window is minimized");
+            return false;
+        }
+
+        true
+    }
+
+    pub(super) fn should_tile(&self) -> bool {
+        let is_fullscreen = get_attribute::<CFBoolean>(&self.element, &kAXFullScreenAttribute())
+            .map(|b| b.as_bool())
+            .unwrap_or(false);
+        !is_fullscreen
+    }
+
+    pub(super) fn get_dimension(&self) -> Dimension {
+        let (x, y) = get_attribute::<AXValue>(&self.element, &kAXPositionAttribute())
+            .map(|v| {
+                let mut pos = CGPoint::new(0.0, 0.0);
+                let ptr = NonNull::new(&mut pos as *mut _ as *mut _).unwrap();
+                unsafe { v.value(AXValueType::CGPoint, ptr) };
+                (pos.x as f32, pos.y as f32)
+            })
+            .unwrap_or((0.0, 0.0));
+        let (width, height) = self.get_size().unwrap_or((0.0, 0.0));
+        Dimension {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// As we're tracking windows with CGWindowID, we have to check whether a window is still valid
@@ -64,14 +200,14 @@ impl AXWindow {
             return true;
         }
         let is_deleted = matches!(
-            get_attribute::<CFString>(&self.window, &kAXRoleAttribute()),
+            get_attribute::<CFString>(&self.element, &kAXRoleAttribute()),
             Err(AXError::InvalidUIElement)
         );
         if is_deleted {
             tracing::trace!(app = %self.app_name, title = ?self.title, "not valid: window is deleted");
             return false;
         }
-        let is_minimized = get_attribute::<CFBoolean>(&self.window, &kAXMinimizedAttribute())
+        let is_minimized = get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
             .map(|b| b.as_bool())
             .unwrap_or(false);
         if is_minimized {
@@ -83,6 +219,16 @@ impl AXWindow {
 
     #[tracing::instrument(skip(self))]
     pub(super) fn set_dimension(&self, dim: Dimension) -> Result<()> {
+        let current = self.get_dimension();
+        // Set position/size calls are expensive, and it can trigger a window moved/resize events
+        const EPSILON: f32 = 1.0;
+        if (current.x - dim.x).abs() < EPSILON
+            && (current.y - dim.y).abs() < EPSILON
+            && (current.width - dim.width).abs() < EPSILON
+            && (current.height - dim.height).abs() < EPSILON
+        {
+            return Ok(());
+        }
         self.with_animation_disabled(|| {
             self.set_position(dim.x, dim.y)?;
             self.set_size(dim.width, dim.height)
@@ -100,11 +246,11 @@ impl AXWindow {
             })
             .with_context(|| format!("focus for {} {:?}", self.app_name, self.title))?;
         }
-        let is_main = get_attribute::<CFBoolean>(&self.window, &kAXMainAttribute())
+        let is_main = get_attribute::<CFBoolean>(&self.element, &kAXMainAttribute())
             .map(|b| b.as_bool())
             .unwrap_or(false);
         if !is_main {
-            set_attribute_value(&self.window, &kAXMainAttribute(), unsafe {
+            set_attribute_value(&self.element, &kAXMainAttribute(), unsafe {
                 kCFBooleanTrue.unwrap()
             })
             .with_context(|| format!("focus for {} {:?}", self.app_name, self.title))?;
@@ -127,6 +273,15 @@ impl AXWindow {
             )
         })
         .with_context(|| format!("hide for {} {:?}", self.app_name, self.title))
+    }
+
+    pub(super) fn get_size(&self) -> Result<(f32, f32)> {
+        let size = get_attribute::<AXValue>(&self.element, &kAXSizeAttribute())
+            .with_context(|| format!("get_size for {} {:?}", self.app_name, self.title))?;
+        let mut cg_size = CGSize::new(0.0, 0.0);
+        let ptr = NonNull::new((&mut cg_size as *mut CGSize).cast()).unwrap();
+        unsafe { size.value(AXValueType::CGSize, ptr) };
+        Ok((cg_size.width as f32, cg_size.height as f32))
     }
 
     /// Without this the windows move in a janky way
@@ -154,7 +309,7 @@ impl AXWindow {
         let pos_ptr = NonNull::new(pos_ptr.cast()).unwrap();
         let pos_ptr = unsafe { AXValue::new(AXValueType::CGPoint, pos_ptr) }.unwrap();
         Ok(set_attribute_value(
-            &self.window,
+            &self.element,
             &kAXPositionAttribute(),
             &pos_ptr,
         )?)
@@ -165,77 +320,10 @@ impl AXWindow {
         let size = NonNull::new(size_ptr.cast()).unwrap();
         let size = unsafe { AXValue::new(AXValueType::CGSize, size) }.unwrap();
         Ok(set_attribute_value(
-            &self.window,
+            &self.element,
             &kAXSizeAttribute(),
             &size,
         )?)
-    }
-
-    pub(super) fn get_size(&self) -> Result<(f32, f32)> {
-        let size = get_attribute::<AXValue>(&self.window, &kAXSizeAttribute())
-            .with_context(|| format!("get_size for {} {:?}", self.app_name, self.title))?;
-        let mut cg_size = CGSize::new(0.0, 0.0);
-        let ptr = NonNull::new((&mut cg_size as *mut CGSize).cast()).unwrap();
-        unsafe { size.value(AXValueType::CGSize, ptr) };
-        Ok((cg_size.width as f32, cg_size.height as f32))
-    }
-}
-
-pub(super) struct AXRegistry {
-    windows: HashMap<CGWindowID, AXWindow>,
-    pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
-}
-
-impl AXRegistry {
-    pub(super) fn new() -> Self {
-        Self {
-            windows: HashMap::new(),
-            pid_to_cg: HashMap::new(),
-        }
-    }
-
-    pub(super) fn insert(&mut self, cg_id: CGWindowID, window: AXWindow) {
-        let pid = window.pid();
-        self.pid_to_cg.entry(pid).or_default().push(cg_id);
-        self.windows.insert(cg_id, window);
-    }
-
-    pub(super) fn remove(&mut self, cg_id: CGWindowID) -> Option<AXWindow> {
-        let window = self.windows.remove(&cg_id)?;
-        if let Some(ids) = self.pid_to_cg.get_mut(&window.pid()) {
-            ids.retain(|&id| id != cg_id);
-        }
-        Some(window)
-    }
-
-    pub(super) fn get(&self, cg_id: CGWindowID) -> Option<&AXWindow> {
-        self.windows.get(&cg_id)
-    }
-
-    pub(super) fn contains(&self, cg_id: CGWindowID) -> bool {
-        self.windows.contains_key(&cg_id)
-    }
-
-    pub(super) fn cg_ids_for_pid(&self, pid: i32) -> Vec<CGWindowID> {
-        self.pid_to_cg.get(&pid).cloned().unwrap_or_default()
-    }
-
-    pub(super) fn remove_by_pid(&mut self, pid: i32) -> Vec<CGWindowID> {
-        let Some(cg_ids) = self.pid_to_cg.remove(&pid) else {
-            return Vec::new();
-        };
-        for &cg_id in &cg_ids {
-            self.windows.remove(&cg_id);
-        }
-        cg_ids
-    }
-
-    pub(super) fn is_valid(&self, cg_id: CGWindowID) -> bool {
-        self.windows.get(&cg_id).is_some_and(|w| w.is_valid())
-    }
-
-    pub(super) fn iter(&self) -> impl Iterator<Item = (CGWindowID, &AXWindow)> {
-        self.windows.iter().map(|(&id, w)| (id, w))
     }
 }
 
@@ -260,4 +348,55 @@ fn is_screen_locked() -> bool {
     }
 
     false
+}
+
+pub(super) fn list_cg_window_ids() -> HashSet<CGWindowID> {
+    let Some(window_list) = CGWindowListCopyWindowInfo(CGWindowListOption::OptionAll, 0) else {
+        tracing::warn!("CGWindowListCopyWindowInfo returned None");
+        return HashSet::new();
+    };
+    let window_list: &CFArray<CFDictionary<CFString, CFType>> =
+        unsafe { window_list.cast_unchecked() };
+
+    let mut ids = HashSet::new();
+    let key = kCGWindowNumber();
+    for dict in window_list {
+        // window id is a required attribute
+        // https://developer.apple.com/documentation/coregraphics/kcgwindownumber?language=objc
+        let id = dict
+            .get(&key)
+            .unwrap()
+            .downcast::<CFNumber>()
+            .unwrap()
+            .as_i64()
+            .unwrap();
+        ids.insert(id as CGWindowID);
+    }
+    ids
+}
+
+pub(super) fn running_apps() -> impl Iterator<Item = Retained<NSRunningApplication>> {
+    NSWorkspace::sharedWorkspace()
+        .runningApplications()
+        .into_iter()
+        .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
+        .filter(|app| app.processIdentifier() != -1)
+}
+
+pub(super) fn get_app_by_pid(pid: i32) -> Option<Retained<NSRunningApplication>> {
+    NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+}
+
+pub(super) fn get_ax_windows(pid: i32) -> Vec<(CGWindowID, CFRetained<AXUIElement>)> {
+    let ax_app = unsafe { AXUIElement::new_application(pid) };
+    let Ok(windows) = get_attribute::<CFArray<AXUIElement>>(&ax_app, &kAXWindowsAttribute()) else {
+        return Vec::new();
+    };
+    windows
+        .iter()
+        .filter_map(|w| {
+            let cg_id = get_cg_window_id(&w)?;
+            Some((cg_id, w.clone()))
+        })
+        .collect()
 }

@@ -1,42 +1,31 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 use objc2_core_graphics::CGWindowID;
 
 use crate::core::Dimension;
 
-use super::window::AXWindow;
+use super::window::MacWindow;
 
 struct WindowState {
-    ax_window: AXWindow,
+    window: MacWindow,
     original_dim: Dimension,
 }
 
-thread_local! {
-    static RECOVERY_STATE: RefCell<HashMap<CGWindowID, WindowState>> = RefCell::new(HashMap::new());
-}
+static RECOVERY_STATE: LazyLock<Mutex<HashMap<CGWindowID, WindowState>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 // Unlike on Windows, we can't reliably tell a window is hidden by us, as we can't move windows
 // completely offscreen and have to depend on screen size. Screen size can change, and plugging
 // multiple monitors can make the exact placement of where we hide windows fuzzy
 // This has the side effect of moving all windows from different monitor on exit/crash, but that is
 // acceptable
-pub(super) fn track(
-    cg_id: CGWindowID,
-    ax_window: AXWindow,
-    dimension: Dimension,
-    screen: Dimension,
-) {
+pub(super) fn track(cg_id: CGWindowID, window: MacWindow, screen: Dimension) {
+    let dimension = window.get_dimension();
     let original_dim = default_position(screen, dimension.width, dimension.height);
-    RECOVERY_STATE.with(|state| {
-        state.borrow_mut().insert(
-            cg_id,
-            WindowState {
-                ax_window,
-                original_dim,
-            },
-        );
-    });
+    if let Ok(mut state) = RECOVERY_STATE.lock() {
+        state.insert(cg_id, WindowState { window, original_dim });
+    }
 }
 
 fn default_position(screen: Dimension, width: f32, height: f32) -> Dimension {
@@ -49,19 +38,17 @@ fn default_position(screen: Dimension, width: f32, height: f32) -> Dimension {
 }
 
 pub(super) fn untrack(cg_id: CGWindowID) {
-    RECOVERY_STATE.with(|state| {
-        state.borrow_mut().remove(&cg_id);
-    });
+    if let Ok(mut state) = RECOVERY_STATE.lock() {
+        state.remove(&cg_id);
+    }
 }
 
 pub(super) fn restore_all() {
-    RECOVERY_STATE.with(|state| {
-        for window_state in state.borrow().values() {
-            let _ = window_state
-                .ax_window
-                .set_dimension(window_state.original_dim);
+    if let Ok(state) = RECOVERY_STATE.lock() {
+        for window_state in state.values() {
+            let _ = window_state.window.set_dimension(window_state.original_dim);
         }
-    });
+    }
 }
 
 pub(super) fn install_handlers() {
