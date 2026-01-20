@@ -11,6 +11,11 @@ automatic_tiling = true
 min_width = 200     # 200 logical pixels
 min_height = "10%"  # 10% of screen height
 
+# Maximum window size - float for pixels, string for percentage (default: 0 = no limit)
+# Windows that hit max constraints are centered within their allocated space
+max_width = 800     # 800 logical pixels
+max_height = "50%"  # 50% of screen height
+
 # Focused window border color (default: light blue)
 focused_color = "#6699ff"
 

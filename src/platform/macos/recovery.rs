@@ -24,7 +24,13 @@ pub(super) fn track(cg_id: CGWindowID, window: MacWindow, screen: Dimension) {
     let dimension = window.get_dimension();
     let original_dim = default_position(screen, dimension.width, dimension.height);
     if let Ok(mut state) = RECOVERY_STATE.lock() {
-        state.insert(cg_id, WindowState { window, original_dim });
+        state.insert(
+            cg_id,
+            WindowState {
+                window,
+                original_dim,
+            },
+        );
     }
 }
 
@@ -44,8 +50,8 @@ pub(super) fn untrack(cg_id: CGWindowID) {
 }
 
 pub(super) fn restore_all() {
-    if let Ok(state) = RECOVERY_STATE.lock() {
-        for window_state in state.values() {
+    if let Ok(mut state) = RECOVERY_STATE.lock() {
+        for window_state in state.values_mut() {
             let _ = window_state.window.set_dimension(window_state.original_dim);
         }
     }

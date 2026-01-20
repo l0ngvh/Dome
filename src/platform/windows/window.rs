@@ -121,7 +121,7 @@ pub(super) fn get_window_dimension(hwnd: HWND) -> Dimension {
     }
 }
 
-pub(super) fn get_min_size(hwnd: HWND) -> (f32, f32) {
+pub(super) fn get_size_constraints(hwnd: HWND) -> (f32, f32, f32, f32) {
     let mut info = MINMAXINFO::default();
     unsafe {
         SendMessageW(
@@ -135,6 +135,8 @@ pub(super) fn get_min_size(hwnd: HWND) -> (f32, f32) {
     (
         (info.ptMinTrackSize.x - left - right).max(0) as f32,
         (info.ptMinTrackSize.y - top - bottom).max(0) as f32,
+        (info.ptMaxTrackSize.x - left - right).max(0) as f32,
+        (info.ptMaxTrackSize.y - top - bottom).max(0) as f32,
     )
 }
 

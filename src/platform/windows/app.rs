@@ -39,7 +39,7 @@ use std::sync::mpsc::Sender;
 
 use super::OFFSCREEN_POS;
 use super::hub::{AppHandle, Frame, HubEvent, Overlays, WM_APP_FRAME, WindowHandle};
-use super::window::{Taskbar, get_min_size};
+use super::window::{Taskbar, get_size_constraints};
 use crate::core::Dimension;
 
 const OFFSCREEN: Dimension = Dimension {
@@ -164,14 +164,22 @@ impl App {
         for (handle, dim) in &cmd.tiling_windows {
             self.taskbar.add_tab(handle.hwnd())?;
             set_window_position(handle.hwnd(), dim)?;
-            let (min_w, min_h) = get_min_size(handle.hwnd());
-            let width = if min_w > dim.width { min_w } else { 0.0 };
-            let height = if min_h > dim.height { min_h } else { 0.0 };
-            if width > 0.0 || height > 0.0 {
-                self.send_event(HubEvent::SetMinSize {
+            let (min_w, min_h, max_w, max_h) = get_size_constraints(handle.hwnd());
+            let discovered_min_w = if min_w > dim.width { min_w } else { 0.0 };
+            let discovered_min_h = if min_h > dim.height { min_h } else { 0.0 };
+            let discovered_max_w = if max_w > 0.0 && max_w < dim.width { max_w } else { 0.0 };
+            let discovered_max_h = if max_h > 0.0 && max_h < dim.height { max_h } else { 0.0 };
+            if discovered_min_w > 0.0
+                || discovered_min_h > 0.0
+                || discovered_max_w > 0.0
+                || discovered_max_h > 0.0
+            {
+                self.send_event(HubEvent::SetWindowConstraint {
                     handle: handle.clone(),
-                    width,
-                    height,
+                    min_width: discovered_min_w,
+                    min_height: discovered_min_h,
+                    max_width: discovered_max_w,
+                    max_height: discovered_max_h,
                 });
             }
         }

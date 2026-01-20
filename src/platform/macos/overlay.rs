@@ -97,9 +97,9 @@ impl OverlayView {
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 
-    pub(super) fn set_rects(&self, rects: Vec<OverlayRect>, labels: Vec<OverlayLabel>) {
-        *self.ivars().rects.borrow_mut() = rects;
-        *self.ivars().labels.borrow_mut() = labels;
+    pub(super) fn set_rects(&self, overlays: Overlays) {
+        *self.ivars().rects.borrow_mut() = overlays.rects;
+        *self.ivars().labels.borrow_mut() = overlays.labels;
         self.setNeedsDisplay(true);
     }
 }

@@ -28,7 +28,7 @@ enum Op {
     FocusWorkspace,
     SetFocus,
     SetFloatFocus,
-    SetMinSize,
+    SetWindowConstraint,
     // Note: Exec is not included because it's a platform-specific action
     // that spawns external processes, not a core hub operation.
 }
@@ -57,7 +57,7 @@ const ALL_OPS: &[Op] = &[
     Op::FocusWorkspace,
     Op::SetFocus,
     Op::SetFloatFocus,
-    Op::SetMinSize,
+    Op::SetWindowConstraint,
 ];
 
 fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
@@ -206,16 +206,25 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                     hub.set_float_focus(id);
                     format!("SetFloatFocus({id})")
                 }
-                Op::SetMinSize => {
+                Op::SetWindowConstraint => {
                     if windows.is_empty() {
                         continue;
                     }
                     let idx = rng.random_range(0..windows.len());
                     let id = windows[idx];
-                    let w = rng.random_range(0.0..100.0);
-                    let h = rng.random_range(0.0..20.0);
-                    hub.set_min_size(id, w, h);
-                    format!("SetMinSize({id}, {w:.1}, {h:.1})")
+                    let mut rand_or_clear = |lo: f32, hi: f32| -> Option<f32> {
+                        match rng.random_range(0..3) {
+                            0 => None,
+                            1 => Some(0.0),
+                            _ => Some(rng.random_range(lo..hi)),
+                        }
+                    };
+                    let min_w = rand_or_clear(1.0, 50.0);
+                    let min_h = rand_or_clear(1.0, 10.0);
+                    let max_w = rand_or_clear(1.0, 100.0);
+                    let max_h = rand_or_clear(1.0, 20.0);
+                    hub.set_window_constraint(id, min_w, min_h, max_w, max_h);
+                    format!("SetWindowConstraint({id}, min=({min_w:?}, {min_h:?}), max=({max_w:?}, {max_h:?}))")
                 }
             };
 

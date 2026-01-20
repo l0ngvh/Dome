@@ -7,10 +7,10 @@ mod focus_direction;
 mod focus_parent;
 mod focus_workspace;
 mod insert_window;
-mod min_size;
 mod move_in_direction;
 mod move_to_workspace;
 mod set_focus;
+mod set_window_constraint;
 mod smoke;
 mod sync_config;
 mod tabbed;
@@ -429,6 +429,41 @@ fn validate_hub(hub: &Hub) {
                         dim.height,
                         min_h
                     );
+                    // Validate window dimension <= max size (if set)
+                    let (max_w, max_h) = window.max_size();
+                    if max_w > 0.0 {
+                        assert!(
+                            dim.width <= max_w + 0.01,
+                            "Window {wid} width {:.2} > max_width {:.2}",
+                            dim.width,
+                            max_w
+                        );
+                    }
+                    if max_h > 0.0 {
+                        assert!(
+                            dim.height <= max_h + 0.01,
+                            "Window {wid} height {:.2} > max_height {:.2}",
+                            dim.height,
+                            max_h
+                        );
+                    }
+                    // Validate max >= min when both are set
+                    if max_w > 0.0 {
+                        assert!(
+                            max_w >= min_w,
+                            "Window {wid} max_width {:.2} < min_width {:.2}",
+                            max_w,
+                            min_w
+                        );
+                    }
+                    if max_h > 0.0 {
+                        assert!(
+                            max_h >= min_h,
+                            "Window {wid} max_height {:.2} < min_height {:.2}",
+                            max_h,
+                            min_h
+                        );
+                    }
                 }
                 Child::Container(cid) => {
                     let container = hub.get_container(cid);
@@ -504,17 +539,25 @@ fn validate_hub(hub: &Hub) {
                     match container.direction() {
                         Some(Direction::Horizontal) => {
                             let sum_width: f32 = child_dims.iter().map(|d| d.width).sum();
+                            // With max_size, windows can be smaller than allocated space (centered)
+                            // So sum of children widths <= container width
                             assert!(
-                                (dim.width - sum_width).abs() < 0.01,
-                                "Container {cid} width {:.2} != sum of children widths {:.2}",
-                                dim.width,
-                                sum_width
+                                sum_width <= dim.width + 0.01,
+                                "Container {cid} children total width {:.2} > container width {:.2}",
+                                sum_width,
+                                dim.width
                             );
                             for (i, (d, (_, min_h))) in
                                 child_dims.iter().zip(child_mins.iter()).enumerate()
                             {
+                                // Child height can be smaller if max_height is set
+                                let child_max_h = match children[i] {
+                                    Child::Window(wid) => hub.get_window(wid).max_size().1,
+                                    Child::Container(_) => 0.0,
+                                };
+                                let allows_smaller = child_max_h > 0.0 && child_max_h < dim.height;
                                 assert!(
-                                    d.height >= dim.height - 0.01 || d.height >= *min_h - 0.01,
+                                    d.height >= dim.height - 0.01 || d.height >= *min_h - 0.01 || allows_smaller,
                                     "Container {cid} child {i} height {:.2} < container height {:.2} and < min_height {:.2}",
                                     d.height,
                                     dim.height,
@@ -524,17 +567,24 @@ fn validate_hub(hub: &Hub) {
                         }
                         Some(Direction::Vertical) => {
                             let sum_height: f32 = child_dims.iter().map(|d| d.height).sum();
+                            // With max_size, windows can be smaller than allocated space (centered)
                             assert!(
-                                (dim.height - sum_height).abs() < 0.01,
-                                "Container {cid} height {:.2} != sum of children heights {:.2}",
-                                dim.height,
-                                sum_height
+                                sum_height <= dim.height + 0.01,
+                                "Container {cid} children total height {:.2} > container height {:.2}",
+                                sum_height,
+                                dim.height
                             );
                             for (i, (d, (min_w, _))) in
                                 child_dims.iter().zip(child_mins.iter()).enumerate()
                             {
+                                // Child width can be smaller if max_width is set
+                                let child_max_w = match children[i] {
+                                    Child::Window(wid) => hub.get_window(wid).max_size().0,
+                                    Child::Container(_) => 0.0,
+                                };
+                                let allows_smaller = child_max_w > 0.0 && child_max_w < dim.width;
                                 assert!(
-                                    d.width >= dim.width - 0.01 || d.width >= *min_w - 0.01,
+                                    d.width >= dim.width - 0.01 || d.width >= *min_w - 0.01 || allows_smaller,
                                     "Container {cid} child {i} width {:.2} < container width {:.2} and < min_width {:.2}",
                                     d.width,
                                     dim.width,
@@ -543,17 +593,23 @@ fn validate_hub(hub: &Hub) {
                             }
                         }
                         None => {
-                            // Tabbed: all children same size
+                            // Tabbed: children can be smaller if max_size is set
                             let expected_height = dim.height - TAB_BAR_HEIGHT;
                             for (i, d) in child_dims.iter().enumerate() {
+                                let (child_max_w, child_max_h) = match children[i] {
+                                    Child::Window(wid) => hub.get_window(wid).max_size(),
+                                    Child::Container(_) => (0.0, 0.0),
+                                };
+                                let allows_smaller_w = child_max_w > 0.0 && child_max_w < dim.width;
+                                let allows_smaller_h = child_max_h > 0.0 && child_max_h < expected_height;
                                 assert!(
-                                    (d.width - dim.width).abs() < 0.01,
+                                    (d.width - dim.width).abs() < 0.01 || allows_smaller_w,
                                     "Container {cid} tabbed child {i} width {:.2} != container width {:.2}",
                                     d.width,
                                     dim.width
                                 );
                                 assert!(
-                                    (d.height - expected_height).abs() < 0.01,
+                                    (d.height - expected_height).abs() < 0.01 || allows_smaller_h,
                                     "Container {cid} tabbed child {i} height {:.2} != expected {:.2}",
                                     d.height,
                                     expected_height
@@ -641,6 +697,8 @@ pub(super) fn setup_hub() -> Hub {
         false,
         0.0,
         0.0,
+        0.0,
+        0.0,
     )
 }
 
@@ -661,6 +719,8 @@ pub(super) fn setup_with_auto_tile() -> Hub {
         },
         TAB_BAR_HEIGHT,
         true,
+        0.0,
+        0.0,
         0.0,
         0.0,
     )

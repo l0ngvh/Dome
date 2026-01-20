@@ -8,7 +8,9 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
-use crate::core::{Child, Container, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId};
+use crate::core::{
+    Child, Container, Dimension, FloatWindowId, Focus, Hub, SpawnMode, Window, WindowId,
+};
 
 use super::overlay::{OverlayLabel, OverlayRect, Overlays};
 use super::recovery;
@@ -33,6 +35,9 @@ pub(super) enum HubEvent {
         pid: i32,
     },
     TitleChanged(CGWindowID),
+    WindowMovedOrResized {
+        pid: i32,
+    },
     Action(Actions),
     ConfigChanged(Config),
     /// Periodic sync to catch missed AX notifications, as AX notifications are unreliable. Only
@@ -112,6 +117,10 @@ impl Registry {
 
     fn get_mut(&mut self, cg_id: CGWindowID) -> Option<&mut MacWindow> {
         self.windows.get_mut(&cg_id).map(|e| &mut e.window)
+    }
+
+    fn get_entry(&self, cg_id: CGWindowID) -> Option<&WindowEntry> {
+        self.windows.get(&cg_id)
     }
 
     fn get_cg_id(&self, window_type: WindowType) -> Option<CGWindowID> {
@@ -210,6 +219,8 @@ impl Dome {
             config.automatic_tiling,
             config.min_width.resolve(screen.width),
             config.min_height.resolve(screen.height),
+            config.max_width.resolve(screen.width),
+            config.max_height.resolve(screen.height),
         );
         Self {
             hub,
@@ -271,6 +282,8 @@ impl Dome {
                     new_config.automatic_tiling,
                     new_config.min_width.resolve(self.screen.width),
                     new_config.min_height.resolve(self.screen.height),
+                    new_config.max_width.resolve(self.screen.width),
+                    new_config.max_height.resolve(self.screen.height),
                 );
                 self.config = new_config;
                 tracing::info!("Config reloaded");
@@ -294,6 +307,9 @@ impl Dome {
                     window.update_title();
                     tracing::trace!(%window, "Title changed");
                 }
+            }
+            HubEvent::WindowMovedOrResized { pid } => {
+                self.handle_window_moved(pid);
             }
             HubEvent::Action(actions) => {
                 tracing::debug!(%actions, "Executing actions");
@@ -408,6 +424,41 @@ impl Dome {
         }
     }
 
+    fn handle_window_moved(&mut self, pid: i32) {
+        let border = self.config.border_size;
+        for cg_id in self.registry.cg_ids_for_pid(pid) {
+            let Some(entry) = self.registry.get_entry(cg_id) else {
+                continue;
+            };
+            let WindowType::Tiling(id) = entry.window_type else {
+                continue;
+            };
+            let window = self.hub.get_window(id);
+            tracing::debug!(
+                %pid,
+                mac_window = %entry.window,
+                ?window,
+                "Handling window moved"
+            );
+            let Some((min_w, min_h, max_w, max_h)) = entry.window.check_placement(window) else {
+                continue;
+            };
+            // Convert actual window size back to frame size by adding border back.
+            // Frame dimensions have border inset applied. If in the original frame,
+            // window width is smaller than sum of borders, then we will request a size
+            // that can accommodate the borders here.
+            let remove_inset = |v: f32| v + 2.0 * border;
+            self.hub.set_window_constraint(
+                id,
+                min_w.map(remove_inset),
+                min_h.map(remove_inset),
+                max_w.map(remove_inset),
+                max_h.map(remove_inset),
+            );
+        }
+    }
+
+    // TODO: this is not hiding unmaximized windows, like zoom
     #[tracing::instrument(skip_all)]
     fn periodic_sync(&mut self) {
         let running: Vec<_> = running_apps().collect();
@@ -496,30 +547,20 @@ impl Dome {
         previous_displayed: HashSet<CGWindowID>,
     ) {
         let border = self.config.border_size;
-        let screen = self.hub.screen();
         let current_displayed = get_displayed_cg_ids(&self.hub, &self.registry);
 
         // Hide windows no longer displayed
         for cg_id in previous_displayed.difference(&current_displayed) {
-            if let Some(window) = self.registry.get(*cg_id)
+            if let Some(window) = self.registry.get_mut(*cg_id)
                 && let Err(e) = window.hide()
             {
                 tracing::trace!("Failed to hide window: {e:#}");
             }
         }
 
-        // Position tiling windows and discover min sizes. When a window enforces its min size,
-        // it can push siblings which may then hit their own min sizes. Loop until stable, with
-        // a cap of 64 iterations (typical workspaces have fewer than 10 windows).
-        for _ in 0..64 {
-            let min_sizes = position_tiling_windows(&self.hub, &self.registry, border, screen);
-            if min_sizes.is_empty() {
-                break;
-            }
-            for (id, w, h) in min_sizes {
-                self.hub.set_min_size(id, w, h);
-            }
-        }
+        // Position tiling windows
+        let windows = collect_tiling_windows(&self.hub, &self.registry);
+        position_tiling_windows(windows, &mut self.registry, border);
 
         // Position float windows
         let ws = self.hub.get_workspace(self.hub.current_workspace());
@@ -527,7 +568,7 @@ impl Dome {
         let float_windows: Vec<_> = ws.float_windows().to_vec();
         for float_id in float_windows {
             if let Some(cg_id) = self.registry.get_cg_id(WindowType::Float(float_id))
-                && let Some(window) = self.registry.get(cg_id)
+                && let Some(window) = self.registry.get_mut(cg_id)
             {
                 let dim = apply_inset(self.hub.get_float(float_id).dimension(), border);
                 if let Err(e) = window.set_dimension(dim) {
@@ -612,50 +653,17 @@ fn get_displayed_cg_ids(hub: &Hub, registry: &Registry) -> HashSet<CGWindowID> {
     cg_ids
 }
 
-/// Position tiling windows, returns discovered min sizes
-fn position_tiling_windows(
-    hub: &Hub,
-    registry: &Registry,
-    border: f32,
-    screen: Dimension,
-) -> Vec<(WindowId, f32, f32)> {
-    let mut min_sizes = Vec::new();
+/// Position tiling windows, returns discovered size constraints and clipped window ids
+fn collect_tiling_windows(hub: &Hub, registry: &Registry) -> Vec<(CGWindowID, WindowId, Window)> {
     let ws = hub.get_workspace(hub.current_workspace());
     let mut stack: Vec<Child> = ws.root().into_iter().collect();
+    let mut result = Vec::new();
 
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(id) => {
-                if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id))
-                    && let Some(window) = registry.get(cg_id)
-                {
-                    let dim = apply_inset(hub.get_window(id).dimension(), border);
-                    if is_completely_offscreen(dim, screen) {
-                        if let Err(e) = window.hide() {
-                            tracing::trace!("Failed to hide offscreen window: {e:#}");
-                        }
-                    } else if let Err(e) = window.set_dimension(dim) {
-                        tracing::trace!("Failed to set dimension: {e:#}");
-                    } else if let Ok((actual_w, actual_h)) = window.get_size() {
-                        // Min size discovery: check if window resized itself larger
-                        const EPSILON: f32 = 1.0;
-                        // Add border back since frame dimensions have border inset applied. If in the
-                        // original frame, window width is smaller than sum of borders, then we will
-                        // request a size that can accommodate the borders here
-                        let discovered_w = if actual_w > dim.width + EPSILON {
-                            actual_w + 2.0 * border
-                        } else {
-                            0.0
-                        };
-                        let discovered_h = if actual_h > dim.height + EPSILON {
-                            actual_h + 2.0 * border
-                        } else {
-                            0.0
-                        };
-                        if discovered_w > 0.0 || discovered_h > 0.0 {
-                            min_sizes.push((id, discovered_w, discovered_h));
-                        }
-                    }
+                if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id)) {
+                    result.push((cg_id, id, hub.get_window(id).clone()));
                 }
             }
             Child::Container(id) => {
@@ -670,7 +678,20 @@ fn position_tiling_windows(
             }
         }
     }
-    min_sizes
+    result
+}
+
+fn position_tiling_windows(
+    windows: Vec<(CGWindowID, WindowId, Window)>,
+    registry: &mut Registry,
+    border: f32,
+) {
+    for (cg_id, _id, core_window) in windows {
+        let Some(mac_window) = registry.get_mut(cg_id) else {
+            continue;
+        };
+        mac_window.try_placement(&core_window, border);
+    }
 }
 
 fn build_tab_bar(
@@ -863,13 +884,6 @@ fn apply_inset(dim: Dimension, border: f32) -> Dimension {
         width: (dim.width - 2.0 * border).max(0.0),
         height: (dim.height - 2.0 * border).max(0.0),
     }
-}
-
-fn is_completely_offscreen(dim: Dimension, screen: Dimension) -> bool {
-    dim.x + dim.width <= screen.x
-        || dim.x >= screen.x + screen.width
-        || dim.y + dim.height <= screen.y
-        || dim.y >= screen.y + screen.height
 }
 
 // colors: [top, bottom, left, right]

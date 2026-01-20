@@ -309,35 +309,39 @@ fn default_active_tab_background_color() -> Color {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum MinSize {
+pub(crate) enum SizeConstraint {
     Pixels(f32),
     Percent(f32),
 }
 
-impl Default for MinSize {
+impl Default for SizeConstraint {
     fn default() -> Self {
-        MinSize::Percent(5.0)
+        SizeConstraint::Pixels(0.0)
     }
 }
 
-impl MinSize {
+impl SizeConstraint {
     pub(crate) fn resolve(&self, screen_size: f32) -> f32 {
         match self {
-            MinSize::Pixels(px) => *px,
-            MinSize::Percent(pct) => screen_size * pct / 100.0,
+            SizeConstraint::Pixels(px) => *px,
+            SizeConstraint::Percent(pct) => screen_size * pct / 100.0,
         }
+    }
+
+    pub(crate) fn default_min() -> Self {
+        SizeConstraint::Percent(5.0)
     }
 }
 
-impl<'de> Deserialize<'de> for MinSize {
+impl<'de> Deserialize<'de> for SizeConstraint {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct MinSizeVisitor;
+        struct SizeConstraintVisitor;
 
-        impl<'de> serde::de::Visitor<'de> for MinSizeVisitor {
-            type Value = MinSize;
+        impl<'de> serde::de::Visitor<'de> for SizeConstraintVisitor {
+            type Value = SizeConstraint;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a float for pixels or a string percentage (e.g., \"10%\")")
@@ -348,7 +352,7 @@ impl<'de> Deserialize<'de> for MinSize {
                 if val < 0.0 {
                     return Err(E::custom("pixel value must be non-negative"));
                 }
-                Ok(MinSize::Pixels(val))
+                Ok(SizeConstraint::Pixels(val))
             }
 
             fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
@@ -365,14 +369,14 @@ impl<'de> Deserialize<'de> for MinSize {
                     if !(0.0..=100.0).contains(&val) {
                         return Err(E::custom("percentage must be between 0 and 100"));
                     }
-                    Ok(MinSize::Percent(val))
+                    Ok(SizeConstraint::Percent(val))
                 } else {
                     Err(E::custom("string must be a percentage (e.g., \"10%\")"))
                 }
             }
         }
 
-        deserializer.deserialize_any(MinSizeVisitor)
+        deserializer.deserialize_any(SizeConstraintVisitor)
     }
 }
 
@@ -480,6 +484,7 @@ pub(crate) struct WindowsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     #[serde(default = "default_keymaps", deserialize_with = "deserialize_keymaps")]
     pub(crate) keymaps: HashMap<Keymap, Actions>,
@@ -489,10 +494,14 @@ pub(crate) struct Config {
     pub(crate) tab_bar_height: f32,
     #[serde(default = "default_automatic_tiling")]
     pub(crate) automatic_tiling: bool,
+    #[serde(default = "SizeConstraint::default_min")]
+    pub(crate) min_width: SizeConstraint,
+    #[serde(default = "SizeConstraint::default_min")]
+    pub(crate) min_height: SizeConstraint,
     #[serde(default)]
-    pub(crate) min_width: MinSize,
+    pub(crate) max_width: SizeConstraint,
     #[serde(default)]
-    pub(crate) min_height: MinSize,
+    pub(crate) max_height: SizeConstraint,
     #[serde(default = "default_focused_color")]
     pub(crate) focused_color: Color,
     #[serde(default = "default_spawn_indicator_color")]
@@ -532,8 +541,10 @@ impl Default for Config {
             border_size: default_border_size(),
             tab_bar_height: default_tab_bar_height(),
             automatic_tiling: default_automatic_tiling(),
-            min_width: MinSize::default(),
-            min_height: MinSize::default(),
+            min_width: SizeConstraint::default_min(),
+            min_height: SizeConstraint::default_min(),
+            max_width: SizeConstraint::default(),
+            max_height: SizeConstraint::default(),
             focused_color: default_focused_color(),
             spawn_indicator_color: default_spawn_indicator_color(),
             border_color: default_border_color(),
@@ -570,8 +581,27 @@ impl Config {
 
     pub(crate) fn load(path: &str) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let config = toml::from_str(&content)?;
+        let config: Config = toml::from_str(&content)?;
+        config.validate()?;
         Ok(config)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
+            (self.min_width, self.max_width)
+        {
+            if max > 0.0 && min > max {
+                anyhow::bail!("min_width ({min}) cannot be greater than max_width ({max})");
+            }
+        }
+        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
+            (self.min_height, self.max_height)
+        {
+            if max > 0.0 && min > max {
+                anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
+            }
+        }
+        Ok(())
     }
 }
 
@@ -611,48 +641,73 @@ mod tests {
     #[test]
     fn min_size_default() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.min_width, MinSize::Percent(5.0));
-        assert_eq!(config.min_height, MinSize::Percent(5.0));
+        assert_eq!(config.min_width, SizeConstraint::Percent(5.0));
+        assert_eq!(config.min_height, SizeConstraint::Percent(5.0));
     }
 
     #[test]
-    fn min_size_parses_float_as_pixels() {
+    fn max_size_default() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.max_width, SizeConstraint::Pixels(0.0));
+        assert_eq!(config.max_height, SizeConstraint::Pixels(0.0));
+    }
+
+    #[test]
+    fn size_constraint_parses_float_as_pixels() {
         let config: Config = toml::from_str("min_width = 200.0").unwrap();
-        assert_eq!(config.min_width, MinSize::Pixels(200.0));
+        assert_eq!(config.min_width, SizeConstraint::Pixels(200.0));
     }
 
     #[test]
-    fn min_size_parses_int_as_pixels() {
+    fn size_constraint_parses_int_as_pixels() {
         let config: Config = toml::from_str("min_width = 200").unwrap();
-        assert_eq!(config.min_width, MinSize::Pixels(200.0));
+        assert_eq!(config.min_width, SizeConstraint::Pixels(200.0));
     }
 
     #[test]
-    fn min_size_parses_string_percent() {
+    fn size_constraint_parses_string_percent() {
         let config: Config = toml::from_str(r#"min_width = "10%""#).unwrap();
-        assert_eq!(config.min_width, MinSize::Percent(10.0));
+        assert_eq!(config.min_width, SizeConstraint::Percent(10.0));
     }
 
     #[test]
-    fn min_size_rejects_invalid_percent() {
+    fn size_constraint_rejects_invalid_percent() {
         assert!(toml::from_str::<Config>(r#"min_width = "101%""#).is_err());
         assert!(toml::from_str::<Config>(r#"min_width = "-5%""#).is_err());
     }
 
     #[test]
-    fn min_size_rejects_negative_pixels() {
+    fn size_constraint_rejects_negative_pixels() {
         assert!(toml::from_str::<Config>("min_width = -100").is_err());
     }
 
     #[test]
-    fn min_size_rejects_string_without_percent() {
+    fn size_constraint_rejects_string_without_percent() {
         assert!(toml::from_str::<Config>(r#"min_width = "200""#).is_err());
     }
 
     #[test]
-    fn min_size_resolve() {
-        assert_eq!(MinSize::Pixels(200.0).resolve(1000.0), 200.0);
-        assert_eq!(MinSize::Percent(10.0).resolve(1000.0), 100.0);
-        assert_eq!(MinSize::Percent(5.0).resolve(1920.0), 96.0);
+    fn size_constraint_resolve() {
+        assert_eq!(SizeConstraint::Pixels(200.0).resolve(1000.0), 200.0);
+        assert_eq!(SizeConstraint::Percent(10.0).resolve(1000.0), 100.0);
+        assert_eq!(SizeConstraint::Percent(5.0).resolve(1920.0), 96.0);
+    }
+
+    #[test]
+    fn validation_rejects_min_greater_than_max_width() {
+        let config: Config = toml::from_str("min_width = 200\nmax_width = 100").unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validation_rejects_min_greater_than_max_height() {
+        let config: Config = toml::from_str("min_height = 200\nmax_height = 100").unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validation_allows_zero_max() {
+        let config: Config = toml::from_str("min_width = 200\nmax_width = 0").unwrap();
+        assert!(config.validate().is_ok());
     }
 }

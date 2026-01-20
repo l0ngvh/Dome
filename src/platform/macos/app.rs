@@ -233,7 +233,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
         match msg {
             HubMessage::Overlays(overlays) => {
                 if let Some(overlay) = delegate.ivars().overlay.get() {
-                    overlay.set_rects(overlays.rects, overlays.labels);
+                    overlay.set_rects(overlays);
                 }
             }
             HubMessage::RegisterObservers(apps) => {

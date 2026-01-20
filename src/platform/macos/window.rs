@@ -20,7 +20,7 @@ use super::objc2_wrapper::{
     kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
     kAXTitleAttribute, kAXWindowRole, kAXWindowsAttribute, kCGWindowNumber, set_attribute_value,
 };
-use crate::core::Dimension;
+use crate::core::{Dimension, Window};
 
 #[derive(Clone)]
 pub(super) struct MacWindow {
@@ -32,6 +32,8 @@ pub(super) struct MacWindow {
     app_name: String,
     bundle_id: Option<String>,
     title: Option<String>,
+    logical_placement: Option<Dimension>,
+    is_hidden: bool,
 }
 
 // Safety: AXUIElement operations are IPC calls to the accessibility server,
@@ -78,6 +80,8 @@ impl MacWindow {
             app_name,
             bundle_id,
             title,
+            logical_placement: None,
+            is_hidden: false,
         }
     }
 
@@ -218,15 +222,12 @@ impl MacWindow {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(super) fn set_dimension(&self, dim: Dimension) -> Result<()> {
-        let current = self.get_dimension();
+    pub(super) fn set_dimension(&mut self, dim: Dimension) -> Result<()> {
+        // Round to avoid floating point comparison issues when checking if window settled at expected position
+        let dim = round_dim(dim);
+        self.is_hidden = false;
         // Set position/size calls are expensive, and it can trigger a window moved/resize events
-        const EPSILON: f32 = 1.0;
-        if (current.x - dim.x).abs() < EPSILON
-            && (current.y - dim.y).abs() < EPSILON
-            && (current.width - dim.width).abs() < EPSILON
-            && (current.height - dim.height).abs() < EPSILON
-        {
+        if self.approx_eq(dim) {
             return Ok(());
         }
         self.with_animation_disabled(|| {
@@ -234,6 +235,80 @@ impl MacWindow {
             self.set_size(dim.width, dim.height)
         })
         .with_context(|| format!("set_dimension for {} {:?}", self.app_name, self.title))
+    }
+
+    /// Try to place this physical window on the logical placement. Mac has restrictions on how
+    /// windows can be placed, so if we try to put a window above menu bar, or stretch a window
+    /// taller than screen height, Mac will instead come up with an alternative placement. For our
+    /// use case, the alternative placements are acceptable, albeit they will mess a little with
+    /// our border rendering
+    pub(super) fn try_placement(&mut self, window: &Window, border: f32) {
+        let dim = apply_inset(window.dimension(), border);
+
+        if is_completely_offscreen(dim, self.screen) {
+            // TODO: if hide fail to move the window to offscreen position, this window is clearly
+            // trying to take focus, so we should pop it to float or something.
+            // Exception is full screen window, which, should be handled differently as a first
+            // party citizen
+            if let Err(e) = self.hide() {
+                tracing::trace!("Failed to hide window: {e:#}");
+            }
+            return;
+        }
+
+        let rounded = round_dim(dim);
+        if self.logical_placement == Some(rounded) && !self.is_hidden {
+            return;
+        }
+
+        // Mac prevents putting windows above menu bar
+        let target = if dim.y < self.screen.y {
+            Dimension {
+                y: self.screen.y,
+                height: dim.height - (self.screen.y - dim.y),
+                ..dim
+            }
+        }
+        // Mac will try to snap a window to full screen if it's taller than screen size
+        else if dim.height >= self.screen.height {
+            Dimension {
+                height: self.screen.height - 1.0,
+                ..dim
+            }
+        } else {
+            dim
+        };
+
+        if self.set_dimension(target).is_err() {
+            return;
+        }
+        self.logical_placement = Some(rounded);
+    }
+
+    /// Check if window settled at expected position and detect constraints
+    pub(super) fn check_placement(&self, window: &Window) -> Option<RawConstraint> {
+        let expected = self.logical_placement?;
+        let actual = self.get_dimension();
+
+        // At least one edge must match on each axis - user resize moves both edges on one axis
+        let left = pixel_eq(actual.x, expected.x);
+        let right = pixel_eq(actual.x + actual.width, expected.x + expected.width);
+        let top = pixel_eq(actual.y, expected.y);
+        let bottom = pixel_eq(actual.y + actual.height, expected.y + expected.height);
+        tracing::debug!(
+            ?actual,
+            ?expected,
+            left,
+            right,
+            top,
+            bottom,
+            "check_placement"
+        );
+        if !((left || right) && (top || bottom)) {
+            return None;
+        }
+
+        compute_constraint(actual, expected, window)
     }
 
     pub(super) fn focus(&self) -> Result<()> {
@@ -262,7 +337,8 @@ impl MacWindow {
     /// We don't minimize windows as there is no way to disable minimizing animation. When hiding
     /// multiple windows, it gets triggered in a staggered manner, which is extremely slow, and
     /// causes event tap to be timed out
-    pub(super) fn hide(&self) -> Result<()> {
+    pub(super) fn hide(&mut self) -> Result<()> {
+        self.is_hidden = true;
         // MacOS doesn't allow completely set windows offscreen, so we need to leave at
         // least one pixel left
         // https://nikitabobko.github.io/AeroSpace/guide#emulation-of-virtual-workspaces
@@ -324,6 +400,83 @@ impl MacWindow {
             &kAXSizeAttribute(),
             &size,
         )?)
+    }
+
+    fn approx_eq(&self, other: Dimension) -> bool {
+        let s = self.get_dimension();
+        pixel_eq(s.x, other.x)
+            && pixel_eq(s.y, other.y)
+            && pixel_eq(s.width, other.width)
+            && pixel_eq(s.height, other.height)
+    }
+}
+
+// For comparing actual window position/size from macOS vs what we requested.
+const PIXEL_EPSILON: f32 = 1.0;
+
+fn pixel_eq(a: f32, b: f32) -> bool {
+    (a - b).abs() <= PIXEL_EPSILON
+}
+
+fn exceeds_by_pixel(actual: f32, expected: f32) -> bool {
+    actual > expected + PIXEL_EPSILON
+}
+
+fn falls_short_by_pixel(actual: f32, expected: f32) -> bool {
+    actual < expected - PIXEL_EPSILON
+}
+
+fn round_dim(dim: Dimension) -> Dimension {
+    Dimension {
+        x: dim.x.round(),
+        y: dim.y.round(),
+        width: dim.width.round(),
+        height: dim.height.round(),
+    }
+}
+
+fn apply_inset(dim: Dimension, border: f32) -> Dimension {
+    Dimension {
+        x: dim.x + border,
+        y: dim.y + border,
+        width: (dim.width - 2.0 * border).max(0.0),
+        height: (dim.height - 2.0 * border).max(0.0),
+    }
+}
+
+fn is_completely_offscreen(dim: Dimension, screen: Dimension) -> bool {
+    dim.x + dim.width <= screen.x
+        || dim.x >= screen.x + screen.width
+        || dim.y + dim.height <= screen.y
+        || dim.y >= screen.y + screen.height
+}
+
+/// Constraint on raw window size (min_w, min_h, max_w, max_h).
+pub(super) type RawConstraint = (Option<f32>, Option<f32>, Option<f32>, Option<f32>);
+
+fn compute_constraint(
+    actual: Dimension,
+    expected: Dimension,
+    existing: &Window,
+) -> Option<RawConstraint> {
+    let (cur_min_w, cur_min_h) = existing.min_size();
+    let (cur_max_w, cur_max_h) = existing.max_size();
+    let min_w = exceeds_by_pixel(actual.width, expected.width)
+        .then_some(actual.width)
+        .filter(|&w| !pixel_eq(w, cur_min_w));
+    let min_h = exceeds_by_pixel(actual.height, expected.height)
+        .then_some(actual.height)
+        .filter(|&h| !pixel_eq(h, cur_min_h));
+    let max_w = falls_short_by_pixel(actual.width, expected.width)
+        .then_some(actual.width)
+        .filter(|&w| !pixel_eq(w, cur_max_w));
+    let max_h = falls_short_by_pixel(actual.height, expected.height)
+        .then_some(actual.height)
+        .filter(|&h| !pixel_eq(h, cur_max_h));
+    if min_w.is_some() || min_h.is_some() || max_w.is_some() || max_h.is_some() {
+        Some((min_w, min_h, max_w, max_h))
+    } else {
+        None
     }
 }
 

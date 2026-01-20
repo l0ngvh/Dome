@@ -76,10 +76,12 @@ pub(super) enum HubEvent {
     WindowFocused(WindowHandle),
     WindowTitleChanged(WindowHandle),
     WindowMovedOrResized(WindowHandle),
-    SetMinSize {
+    SetWindowConstraint {
         handle: WindowHandle,
-        width: f32,
-        height: f32,
+        min_width: f32,
+        min_height: f32,
+        max_width: f32,
+        max_height: f32,
     },
     Action(Actions),
     ConfigChanged(Config),
@@ -260,6 +262,8 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>) {
         config.automatic_tiling,
         config.min_width.resolve(screen.width),
         config.min_height.resolve(screen.height),
+        config.max_width.resolve(screen.width),
+        config.max_height.resolve(screen.height),
     );
     let mut registry = Registry::new();
     let mut app_hwnd: Option<AppHandle> = None;
@@ -283,6 +287,8 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>) {
                     new_config.automatic_tiling,
                     new_config.min_width.resolve(screen.width),
                     new_config.min_height.resolve(screen.height),
+                    new_config.max_width.resolve(screen.width),
+                    new_config.max_height.resolve(screen.height),
                 );
                 config = new_config;
                 tracing::info!("Config reloaded");
@@ -322,24 +328,19 @@ fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>) {
             }
             // TODO: update float window position in hub instead of re-rendering
             HubEvent::WindowMovedOrResized(_) => {}
-            HubEvent::SetMinSize {
+            HubEvent::SetWindowConstraint {
                 handle,
-                width,
-                height,
+                min_width,
+                min_height,
+                max_width,
+                max_height,
             } => {
                 if let Some(id) = registry.get_tiling(&handle) {
                     let border = config.border_size;
-                    let width = if width > 0.0 {
-                        width + 2.0 * border
-                    } else {
-                        0.0
+                    let to_opt = |v: f32| {
+                        if v > 0.0 { Some(v + 2.0 * border) } else { None }
                     };
-                    let height = if height > 0.0 {
-                        height + 2.0 * border
-                    } else {
-                        0.0
-                    };
-                    hub.set_min_size(id, width, height);
+                    hub.set_window_constraint(id, to_opt(min_width), to_opt(min_height), to_opt(max_width), to_opt(max_height));
                 }
             }
             HubEvent::WindowTitleChanged(handle) => {

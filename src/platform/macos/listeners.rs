@@ -53,7 +53,6 @@ struct ListenerCtx {
     // long as the processing of each focus event is shorter than the throttle duration, the
     // feedback loop can't be formed.
     focus_throttle: FocusThrottle,
-    resize_throttle: ResizeThrottle,
     title_throttle: TitleThrottle,
     hub_sender: Sender<HubEvent>,
 }
@@ -67,18 +66,16 @@ pub(super) struct EventListener {
 
 type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;
 type FocusThrottle = Pin<Box<Throttle<i32>>>;
-type ResizeThrottle = Pin<Box<Throttle<i32>>>;
 type TitleThrottle = Pin<Box<Throttle<CGWindowID>>>;
 
 impl EventListener {
     pub(super) fn new(hub_sender: Sender<HubEvent>, is_suspended: Rc<Cell<bool>>) -> Self {
-        let (focus_throttle, resize_throttle, title_throttle) = setup_throttles(hub_sender.clone());
+        let (focus_throttle, title_throttle) = setup_throttles(hub_sender.clone());
 
         let mut ctx = Box::new(ListenerCtx {
             is_suspended,
             observers: Rc::new(RefCell::new(HashMap::new())),
             focus_throttle,
-            resize_throttle,
             title_throttle,
             hub_sender,
         });
@@ -222,23 +219,18 @@ fn setup_app_observers(ctx: &mut ListenerCtx) -> (WorkspaceObservers, Distribute
     (workspace_observers, distributed_observers)
 }
 
-fn setup_throttles(hub_sender: Sender<HubEvent>) -> (FocusThrottle, ResizeThrottle, TitleThrottle) {
+fn setup_throttles(hub_sender: Sender<HubEvent>) -> (FocusThrottle, TitleThrottle) {
     let hub_sender2 = hub_sender.clone();
-    let hub_sender3 = hub_sender.clone();
 
     let focus_throttle = Throttle::new(Duration::from_millis(500), move |pid: i32| {
         send_hub_event(&hub_sender, HubEvent::SyncFocus { pid });
     });
 
-    let resize_throttle = Throttle::new(FRAME_THROTTLE, move |pid: i32| {
-        send_hub_event(&hub_sender2, HubEvent::SyncApp { pid });
-    });
-
     let title_throttle = Throttle::new(FRAME_THROTTLE, move |cg_id: CGWindowID| {
-        send_hub_event(&hub_sender3, HubEvent::TitleChanged(cg_id));
+        send_hub_event(&hub_sender2, HubEvent::TitleChanged(cg_id));
     });
 
-    (focus_throttle, resize_throttle, title_throttle)
+    (focus_throttle, title_throttle)
 }
 
 fn schedule_sync_timer(ctx: &ListenerCtx) -> Option<CFRetained<CFRunLoopTimer>> {
@@ -442,13 +434,14 @@ unsafe extern "C-unwind" fn observer_callback(
         || CFEqual(Some(notification), Some(&*kAXResizedNotification()))
     {
         if let Ok(pid) = get_pid(&element) {
-            ctx.resize_throttle.submit(pid);
+            send_hub_event(&ctx.hub_sender, HubEvent::WindowMovedOrResized { pid });
         }
         return;
     }
 
     if CFEqual(Some(notification), Some(&*kAXTitleChangedNotification()))
-        && let Some(cg_id) = get_cg_window_id(&element) {
-            ctx.title_throttle.submit(cg_id);
-        }
+        && let Some(cg_id) = get_cg_window_id(&element)
+    {
+        ctx.title_throttle.submit(cg_id);
+    }
 }

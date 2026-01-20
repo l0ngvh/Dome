@@ -380,6 +380,8 @@ pub(crate) struct Window {
     spawn_mode: SpawnMode,
     pub(super) min_width: f32,
     pub(super) min_height: f32,
+    pub(super) max_width: f32,
+    pub(super) max_height: f32,
 }
 
 impl Node for Window {
@@ -395,6 +397,8 @@ impl Window {
             spawn_mode,
             min_width: 0.0,
             min_height: 0.0,
+            max_width: 0.0,
+            max_height: 0.0,
         }
     }
 
@@ -404,6 +408,10 @@ impl Window {
 
     pub(crate) fn min_size(&self) -> (f32, f32) {
         (self.min_width, self.min_height)
+    }
+
+    pub(crate) fn max_size(&self) -> (f32, f32) {
+        (self.max_width, self.max_height)
     }
 
     pub(crate) fn spawn_mode(&self) -> SpawnMode {
@@ -443,7 +451,7 @@ impl FloatWindow {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct Dimension {
     pub(crate) width: f32,
     pub(crate) height: f32,

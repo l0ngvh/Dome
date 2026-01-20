@@ -12,6 +12,8 @@ pub(crate) struct Hub {
     auto_tile: bool,
     min_width: f32,
     min_height: f32,
+    max_width: f32,
+    max_height: f32,
 
     workspaces: Allocator<Workspace>,
     windows: Allocator<Window>,
@@ -26,6 +28,8 @@ impl Hub {
         auto_tile: bool,
         min_width: f32,
         min_height: f32,
+        max_width: f32,
+        max_height: f32,
     ) -> Self {
         let mut workspace_allocator: Allocator<Workspace> = Allocator::new();
         let window_allocator: Allocator<Window> = Allocator::new();
@@ -43,6 +47,8 @@ impl Hub {
             auto_tile,
             min_width,
             min_height,
+            max_width,
+            max_height,
             windows: window_allocator,
             float_windows: float_window_allocator,
             containers: container_allocator,
@@ -93,11 +99,15 @@ impl Hub {
         auto_tile: bool,
         min_width: f32,
         min_height: f32,
+        max_width: f32,
+        max_height: f32,
     ) {
         self.tab_bar_height = tab_bar_height;
         self.auto_tile = auto_tile;
         self.min_width = min_width;
         self.min_height = min_height;
+        self.max_width = max_width;
+        self.max_height = max_height;
         for (ws_id, _) in self.workspaces.all_active() {
             self.adjust_workspace(ws_id);
         }
@@ -355,16 +365,56 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn set_min_size(&mut self, window_id: WindowId, width: f32, height: f32) {
+    /// Set size constraints for a window.
+    ///
+    /// - `None`: don't change existing value
+    /// - `Some(0.0)`: clear constraint
+    /// - `Some(x)`: set constraint to x
+    ///
+    /// If setting min above existing max, max is raised to match min.
+    pub(crate) fn set_window_constraint(
+        &mut self,
+        window_id: WindowId,
+        min_width: Option<f32>,
+        min_height: Option<f32>,
+        max_width: Option<f32>,
+        max_height: Option<f32>,
+    ) {
         let window = self.windows.get_mut(window_id);
-        if width > 0.0 {
-            window.min_width = width;
-        }
-        if height > 0.0 {
-            window.min_height = height;
-        }
 
-        tracing::debug!(%window_id, width, height, "Min size set");
+        let update = |name: &str, min: &mut f32, max: &mut f32, new_min: Option<f32>, new_max: Option<f32>| {
+            if let Some(new_min) = new_min {
+                *min = new_min;
+                if *max > 0.0 && *max < new_min {
+                    tracing::debug!(window_id = %window_id, "{name}: existing max {:.2} < new min {:.2}, raising max", *max, new_min);
+                    *max = new_min;
+                }
+            }
+            if let Some(new_max) = new_max {
+                *max = if new_max > 0.0 { new_max } else { 0.0 };
+                if *max > 0.0 && *min > *max {
+                    tracing::debug!(window_id = %window_id, "{name}: existing min {:.2} > new max {:.2}, lowering min", *min, *max);
+                    *min = *max;
+                }
+            }
+        };
+
+        update(
+            "width",
+            &mut window.min_width,
+            &mut window.max_width,
+            min_width,
+            max_width,
+        );
+        update(
+            "height",
+            &mut window.min_height,
+            &mut window.max_height,
+            min_height,
+            max_height,
+        );
+
+        tracing::debug!(%window_id, ?min_width, ?min_height, ?max_width, ?max_height, "Window constraint set");
 
         let workspace_id = window.workspace;
         self.adjust_workspace(workspace_id);
@@ -731,14 +781,37 @@ impl Hub {
     // Windows can extend beyond screen visible area
     fn set_root_dimension(&mut self, root: Child, screen: Dimension) {
         let (min_w, min_h) = self.get_effective_min_size(root);
-        self.set_child_dimension(
-            root,
-            Dimension {
-                width: screen.width.max(min_w),
-                height: screen.height.max(min_h),
-                ..screen
-            },
-        );
+        let base_dim = Dimension {
+            width: screen.width.max(min_w),
+            height: screen.height.max(min_h),
+            ..screen
+        };
+
+        // Apply max_size centering for single window at root
+        let dim = match root {
+            Child::Window(id) => {
+                let (max_w, max_h) = self.get_effective_max_size(id);
+                let w = if max_w > 0.0 && max_w < base_dim.width {
+                    max_w
+                } else {
+                    base_dim.width
+                };
+                let h = if max_h > 0.0 && max_h < base_dim.height {
+                    max_h
+                } else {
+                    base_dim.height
+                };
+                Dimension {
+                    x: base_dim.x + (base_dim.width - w) / 2.0,
+                    y: base_dim.y + (base_dim.height - h) / 2.0,
+                    width: w,
+                    height: h,
+                }
+            }
+            Child::Container(_) => base_dim,
+        };
+
+        self.set_child_dimension(root, dim);
     }
 
     fn layout_children(
@@ -749,24 +822,51 @@ impl Hub {
     ) -> Vec<Dimension> {
         match direction {
             Some(Direction::Horizontal) => {
-                let mins: Vec<_> = children
+                let constraints: Vec<_> = children
                     .iter()
-                    .map(|&c| self.get_effective_min_size(c))
+                    .map(|&c| {
+                        let (min_w, min_h) = self.get_effective_min_size(c);
+                        let (max_w, max_h) = match c {
+                            Child::Window(id) => self.get_effective_max_size(id),
+                            Child::Container(_) => (0.0, 0.0),
+                        };
+                        (min_w, max_w, min_h, max_h)
+                    })
                     .collect();
-                let height = dim
-                    .height
-                    .max(mins.iter().map(|(_, h)| *h).fold(0.0, f32::max));
-                let widths =
-                    distribute_space(&mins.iter().map(|(w, _)| *w).collect::<Vec<_>>(), dim.width);
-                let mut x = dim.x;
-                widths
-                    .into_iter()
-                    .map(|w| {
+                let height = dim.height.max(
+                    constraints
+                        .iter()
+                        .map(|(_, _, min_h, _)| *min_h)
+                        .fold(0.0, f32::max),
+                );
+                let width_constraints: Vec<_> = constraints
+                    .iter()
+                    .map(|(min_w, max_w, _, _)| (*min_w, *max_w))
+                    .collect();
+                let widths = distribute_space(&width_constraints, dim.width);
+                let total_width: f32 = widths.iter().sum();
+                let x_start = dim.x + (dim.width - total_width) / 2.0;
+                let mut x = x_start;
+                children
+                    .iter()
+                    .zip(widths)
+                    .zip(constraints.iter())
+                    .map(|((&child, w), (_, _, _, max_h))| {
+                        let (actual_height, y_offset) = match child {
+                            Child::Window(_) => {
+                                if *max_h > 0.0 && *max_h < height {
+                                    (*max_h, (height - *max_h) / 2.0)
+                                } else {
+                                    (height, 0.0)
+                                }
+                            }
+                            Child::Container(_) => (height, 0.0),
+                        };
                         let d = Dimension {
                             x,
+                            y: dim.y + y_offset,
                             width: w,
-                            height,
-                            ..dim
+                            height: actual_height,
                         };
                         x += w;
                         d
@@ -774,40 +874,89 @@ impl Hub {
                     .collect()
             }
             Some(Direction::Vertical) => {
-                let mins: Vec<_> = children
+                let constraints: Vec<_> = children
                     .iter()
-                    .map(|&c| self.get_effective_min_size(c))
+                    .map(|&c| {
+                        let (min_w, min_h) = self.get_effective_min_size(c);
+                        let (max_w, max_h) = match c {
+                            Child::Window(id) => self.get_effective_max_size(id),
+                            Child::Container(_) => (0.0, 0.0),
+                        };
+                        (min_w, max_w, min_h, max_h)
+                    })
                     .collect();
-                let width = dim
-                    .width
-                    .max(mins.iter().map(|(w, _)| *w).fold(0.0, f32::max));
-                let heights = distribute_space(
-                    &mins.iter().map(|(_, h)| *h).collect::<Vec<_>>(),
-                    dim.height,
+                let width = dim.width.max(
+                    constraints
+                        .iter()
+                        .map(|(min_w, _, _, _)| *min_w)
+                        .fold(0.0, f32::max),
                 );
-                let mut y = dim.y;
-                heights
-                    .into_iter()
-                    .map(|h| {
+                let height_constraints: Vec<_> = constraints
+                    .iter()
+                    .map(|(_, _, min_h, max_h)| (*min_h, *max_h))
+                    .collect();
+                let heights = distribute_space(&height_constraints, dim.height);
+                let total_height: f32 = heights.iter().sum();
+                let y_start = dim.y + (dim.height - total_height) / 2.0;
+                let mut y = y_start;
+                children
+                    .iter()
+                    .zip(heights)
+                    .zip(constraints.iter())
+                    .map(|((&child, h), (_, max_w, _, _))| {
+                        let (actual_width, x_offset) = match child {
+                            Child::Window(_) => {
+                                if *max_w > 0.0 && *max_w < width {
+                                    (*max_w, (width - *max_w) / 2.0)
+                                } else {
+                                    (width, 0.0)
+                                }
+                            }
+                            Child::Container(_) => (width, 0.0),
+                        };
                         let d = Dimension {
+                            x: dim.x + x_offset,
                             y,
+                            width: actual_width,
                             height: h,
-                            width,
-                            ..dim
                         };
                         y += h;
                         d
                     })
                     .collect()
             }
-            None => vec![
-                Dimension {
-                    y: dim.y + self.tab_bar_height,
-                    height: dim.height - self.tab_bar_height,
-                    ..dim
-                };
-                children.len()
-            ],
+            None => {
+                let content_y = dim.y + self.tab_bar_height;
+                let content_height = dim.height - self.tab_bar_height;
+                children
+                    .iter()
+                    .map(|&child| {
+                        let (actual_width, x_offset, actual_height, y_offset) = match child {
+                            Child::Window(id) => {
+                                let (max_w, max_h) = self.get_effective_max_size(id);
+                                let w = if max_w > 0.0 && max_w < dim.width {
+                                    max_w
+                                } else {
+                                    dim.width
+                                };
+                                let h = if max_h > 0.0 && max_h < content_height {
+                                    max_h
+                                } else {
+                                    content_height
+                                };
+                                (w, (dim.width - w) / 2.0, h, (content_height - h) / 2.0)
+                            }
+                            Child::Container(_) => (dim.width, 0.0, content_height, 0.0),
+                        };
+                        Dimension {
+                            x: dim.x + x_offset,
+                            y: content_y + y_offset,
+                            width: actual_width,
+                            height: actual_height,
+                        }
+                    })
+                    .collect()
+            }
         }
     }
 
@@ -1118,6 +1267,21 @@ impl Hub {
         }
     }
 
+    fn get_effective_max_size(&self, window_id: WindowId) -> (f32, f32) {
+        let window = self.windows.get(window_id);
+        let w = if window.max_width > 0.0 {
+            window.max_width
+        } else {
+            self.max_width
+        };
+        let h = if window.max_height > 0.0 {
+            window.max_height
+        } else {
+            self.max_height
+        };
+        (w, h)
+    }
+
     fn update_container_min_size(&mut self, container_id: ContainerId) {
         let container = self.containers.get(container_id);
         let children = container.children.clone();
@@ -1221,10 +1385,27 @@ impl Hub {
     }
 }
 
-fn distribute_space(child_mins: &[f32], container_size: f32) -> Vec<f32> {
-    let sum_mins: f32 = child_mins.iter().sum();
+fn distribute_space(constraints: &[(f32, f32)], container_size: f32) -> Vec<f32> {
+    let constraints: Vec<(f32, f32)> = constraints
+        .iter()
+        .map(|&(min, max)| {
+            let max = if max == 0.0 { f32::INFINITY } else { max };
+            let max = if min > max { min } else { max };
+            (min, max)
+        })
+        .collect();
+
+    let sum_mins: f32 = constraints.iter().map(|(min, _)| min).sum();
     if sum_mins >= container_size {
-        return child_mins.to_vec();
+        return constraints.iter().map(|(min, _)| *min).collect();
+    }
+
+    let all_finite = constraints.iter().all(|(_, max)| max.is_finite());
+    if all_finite {
+        let sum_maxes: f32 = constraints.iter().map(|(_, max)| max).sum();
+        if sum_maxes <= container_size {
+            return constraints.iter().map(|(_, max)| *max).collect();
+        }
     }
 
     let mut low = 0.0;
@@ -1233,7 +1414,10 @@ fn distribute_space(child_mins: &[f32], container_size: f32) -> Vec<f32> {
 
     while high - low > EPSILON {
         let mid = (low + high) / 2.0;
-        let total: f32 = child_mins.iter().map(|&m| mid.max(m)).sum();
+        let total: f32 = constraints
+            .iter()
+            .map(|(min, max)| mid.clamp(*min, *max))
+            .sum();
         if total > container_size {
             high = mid;
         } else {
@@ -1241,5 +1425,8 @@ fn distribute_space(child_mins: &[f32], container_size: f32) -> Vec<f32> {
         }
     }
 
-    child_mins.iter().map(|&m| low.max(m)).collect()
+    constraints
+        .iter()
+        .map(|(min, max)| low.clamp(*min, *max))
+        .collect()
 }
