@@ -33,6 +33,7 @@ pub(super) struct MacWindow {
     bundle_id: Option<String>,
     title: Option<String>,
     logical_placement: Option<Dimension>,
+    physical_placement: Option<Dimension>,
     is_hidden: bool,
 }
 
@@ -81,6 +82,7 @@ impl MacWindow {
             bundle_id,
             title,
             logical_placement: None,
+            physical_placement: None,
             is_hidden: false,
         }
     }
@@ -261,33 +263,36 @@ impl MacWindow {
             return;
         }
 
+        let mut target = dim;
+
         // Mac prevents putting windows above menu bar
-        let target = if dim.y < self.screen.y {
-            Dimension {
-                y: self.screen.y,
-                height: dim.height - (self.screen.y - dim.y),
-                ..dim
-            }
+        if target.y < self.screen.y {
+            target.height -= self.screen.y - target.y;
+            target.y = self.screen.y;
         }
-        // Mac will try to snap a window to full screen if it's taller than screen size
-        else if dim.height >= self.screen.height {
-            Dimension {
-                height: self.screen.height - 1.0,
-                ..dim
-            }
-        } else {
-            dim
-        };
+        // Clip to fit within screen, as Mac sometime snap windows to fit within screen, which
+        // might be confused with user setting size manually
+        if target.y + target.height > self.screen.y + self.screen.height {
+            target.height = self.screen.y + self.screen.height - target.y;
+        }
+        if target.x < self.screen.x {
+            target.width -= self.screen.x - target.x;
+            target.x = self.screen.x;
+        }
+        if target.x + target.width > self.screen.x + self.screen.width {
+            target.width = self.screen.x + self.screen.width - target.x;
+        }
 
         if self.set_dimension(target).is_err() {
             return;
         }
         self.logical_placement = Some(rounded);
+        self.physical_placement = Some(target);
     }
 
     /// Check if window settled at expected position and detect constraints
     pub(super) fn check_placement(&self, window: &Window) -> Option<RawConstraint> {
-        let expected = self.logical_placement?;
+        let expected = self.physical_placement?;
         let actual = self.get_dimension();
 
         // At least one edge must match on each axis - user resize moves both edges on one axis
@@ -302,6 +307,7 @@ impl MacWindow {
             right,
             top,
             bottom,
+            screen = ?self.screen,
             "check_placement"
         );
         if !((left || right) && (top || bottom)) {
