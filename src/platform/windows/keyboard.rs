@@ -9,7 +9,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_KEYDOWN, WM_SYSKEYDOWN,
 };
 
-use super::hub::HubEvent;
+use super::dome::HubEvent;
 use crate::config::{Config, Keymap, Modifiers};
 
 struct KeyboardState {

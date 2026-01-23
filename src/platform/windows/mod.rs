@@ -1,25 +1,29 @@
 mod app;
+mod dome;
 mod event_listener;
-mod hub;
 mod keyboard;
 mod recovery;
 mod throttle;
 mod window;
 
+use std::sync::mpsc;
+use std::thread;
+
 use anyhow::Result;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
-use windows::Win32::Foundation::{LPARAM, RECT};
+use windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, MSG, TranslateMessage,
+    DispatchMessageW, GetMessageW, MSG, PostThreadMessageW, TranslateMessage, WM_QUIT,
 };
 use windows::core::BOOL;
 
@@ -27,16 +31,14 @@ use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
 use app::App;
+use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
-use hub::{HubEvent, HubThread, WindowHandle};
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
-use window::{Taskbar, enum_windows, is_manageable_window};
 
 pub fn run_app(config_path: Option<String>) -> Result<()> {
     unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).ok() };
 
-    // All windows objects manipulation happen on the main thread anyway, so we don't need
-    // multithreading for now
+    // COM needed for Direct2D rendering on main thread
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
 
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -46,14 +48,33 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     });
 
     init_tracing(&config);
+    recovery::install_handlers();
+
+    std::panic::set_hook(Box::new(|panic_info| {
+        let backtrace = backtrace::Backtrace::new();
+        tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
+    }));
 
     let screen = get_primary_screen()?;
-    let taskbar = Taskbar::new()?;
 
-    let hub_thread = HubThread::spawn(config.clone(), screen);
-    let sender = hub_thread.sender();
+    let (tx, rx) = mpsc::channel();
+    let sender = tx.clone();
+    let config_clone = config.clone();
+    let main_thread_id = unsafe { GetCurrentThreadId() };
+    let dome_thread = thread::spawn(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+                .ok()
+                .expect("CoInitializeEx failed");
+            Dome::new(config_clone, screen).run(rx);
+        }));
+        if result.is_err() {
+            recovery::restore_all();
+        }
+        unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+    });
 
-    let _app = App::new(taskbar, screen, sender.clone())?;
+    let _app = App::new(screen, sender.clone())?;
 
     let keyboard_hook = install_keyboard_hook(sender.clone(), config)?;
     let _event_hooks = install_event_hooks(sender.clone())?;
@@ -77,17 +98,6 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
     .ok();
 
-    if let Err(e) = enum_windows(|hwnd| {
-        if is_manageable_window(hwnd) {
-            recovery::track(hwnd);
-            sender
-                .send(HubEvent::WindowCreated(WindowHandle::new(hwnd)))
-                .ok();
-        }
-    }) {
-        tracing::warn!("Failed to enumerate windows: {e}");
-    }
-
     let mut msg = MSG::default();
     unsafe {
         while GetMessageW(&mut msg, None, 0, 0).into() {
@@ -96,8 +106,8 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
         }
     }
 
-    hub_thread.shutdown();
-    recovery::restore_all();
+    sender.send(HubEvent::Shutdown).ok();
+    dome_thread.join().ok();
     uninstall_keyboard_hook(keyboard_hook);
 
     Ok(())
@@ -158,12 +168,6 @@ fn init_tracing(config: &Config) {
         .with(fmt::layer())
         .with(ErrorLayer::default())
         .init();
-    std::panic::set_hook(Box::new(|panic_info| {
-        recovery::restore_all();
-        let backtrace = backtrace::Backtrace::new();
-        tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
-    }));
-    recovery::install_handlers();
 }
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows

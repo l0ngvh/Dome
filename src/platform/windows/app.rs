@@ -1,5 +1,6 @@
 use std::mem::size_of;
 use std::ptr;
+use std::sync::mpsc::Sender;
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{
@@ -15,7 +16,6 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWriteCreateFactory, IDWriteFactory,
     IDWriteTextFormat,
 };
-use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
@@ -23,31 +23,16 @@ use windows::Win32::Graphics::Gdi::{
     SelectObject,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
-};
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HWND_TOPMOST, PostMessageW,
-    RegisterClassW, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, ULW_ALPHA,
+    GetWindowLongPtrW, HWND_TOPMOST, PostMessageW, RegisterClassW, SW_SHOWNA, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, ShowWindow, ULW_ALPHA,
     UpdateLayeredWindow, WM_PAINT, WM_QUIT, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
     WS_EX_TRANSPARENT, WS_POPUP,
 };
 
-use std::sync::mpsc::Sender;
-
-use super::OFFSCREEN_POS;
-use super::hub::{AppHandle, Frame, HubEvent, Overlays, WM_APP_FRAME, WindowHandle};
-use super::window::{Taskbar, get_size_constraints};
+use super::dome::{AppHandle, HubEvent, Overlays, WM_APP_FRAME};
 use crate::core::Dimension;
-
-const OFFSCREEN: Dimension = Dimension {
-    x: OFFSCREEN_POS,
-    y: OFFSCREEN_POS,
-    width: 0.0,
-    height: 0.0,
-};
 
 pub(super) struct App {
     hwnd: HWND,
@@ -56,14 +41,12 @@ pub(super) struct App {
     bitmap: HGDIOBJ,
     text_format: IDWriteTextFormat,
     text_format_bold: IDWriteTextFormat,
-    taskbar: Taskbar,
     screen: Dimension,
     hub_sender: Sender<HubEvent>,
 }
 
 impl App {
     pub(super) fn new(
-        taskbar: Taskbar,
         screen: Dimension,
         hub_sender: Sender<HubEvent>,
     ) -> windows::core::Result<Box<Self>> {
@@ -133,7 +116,6 @@ impl App {
             bitmap,
             text_format,
             text_format_bold,
-            taskbar,
             screen,
             hub_sender,
         });
@@ -153,64 +135,7 @@ impl App {
         }
     }
 
-    fn process_frame(&mut self, cmd: Frame) -> anyhow::Result<()> {
-        for handle in &cmd.hide {
-            if let Err(e) = set_window_position(handle.hwnd(), &OFFSCREEN) {
-                tracing::trace!("Failed to hide window: {e}");
-            }
-            self.taskbar.delete_tab(handle.hwnd())?;
-        }
-
-        for (handle, dim) in &cmd.tiling_windows {
-            self.taskbar.add_tab(handle.hwnd())?;
-            set_window_position(handle.hwnd(), dim)?;
-            let (min_w, min_h, max_w, max_h) = get_size_constraints(handle.hwnd());
-            let discovered_min_w = if min_w > dim.width { min_w } else { 0.0 };
-            let discovered_min_h = if min_h > dim.height { min_h } else { 0.0 };
-            let discovered_max_w = if max_w > 0.0 && max_w < dim.width { max_w } else { 0.0 };
-            let discovered_max_h = if max_h > 0.0 && max_h < dim.height { max_h } else { 0.0 };
-            if discovered_min_w > 0.0
-                || discovered_min_h > 0.0
-                || discovered_max_w > 0.0
-                || discovered_max_h > 0.0
-            {
-                self.send_event(HubEvent::SetWindowConstraint {
-                    handle: handle.clone(),
-                    min_width: discovered_min_w,
-                    min_height: discovered_min_h,
-                    max_width: discovered_max_w,
-                    max_height: discovered_max_h,
-                });
-            }
-        }
-
-        for (handle, dim) in &cmd.float_windows {
-            self.taskbar.add_tab(handle.hwnd())?;
-            set_window_position(handle.hwnd(), dim)?;
-            unsafe {
-                SetWindowPos(
-                    handle.hwnd(),
-                    Some(HWND_TOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                )
-                .ok()
-            };
-        }
-
-        if let Some(ref handle) = cmd.focus
-            && let Err(e) = focus_window(handle)
-        {
-            tracing::warn!("{handle}: {e}");
-        }
-
-        self.set_overlays(cmd.overlays)
-    }
-
-    fn set_overlays(&mut self, overlays: Overlays) -> anyhow::Result<()> {
+    fn process_overlays(&mut self, overlays: Overlays) -> anyhow::Result<()> {
         self.render(&overlays)?;
         let _ = unsafe { ShowWindow(self.hwnd, SW_SHOWNA) };
         unsafe {
@@ -400,98 +325,13 @@ unsafe extern "system" fn wnd_proc(
     match msg {
         WM_APP_FRAME => {
             let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
-            let frame = unsafe { *Box::from_raw(wparam.0 as *mut Frame) };
-            if let Err(e) = unsafe { (*ptr).process_frame(frame) } {
-                tracing::warn!("process_frame failed: {e}");
+            let overlays = unsafe { *Box::from_raw(wparam.0 as *mut Overlays) };
+            if let Err(e) = unsafe { (*ptr).process_overlays(overlays) } {
+                tracing::warn!("process_overlays failed: {e}");
             }
             LRESULT(0)
         }
         WM_PAINT => LRESULT(0),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
-    }
-}
-
-fn focus_window(handle: &WindowHandle) -> anyhow::Result<()> {
-    let hwnd = handle.hwnd();
-    if unsafe { GetForegroundWindow() } == hwnd {
-        return Ok(());
-    }
-
-    // Simulate ALT key press to bypass SetForegroundWindow restrictions
-    // https://gist.github.com/Aetopia/1581b40f00cc0cadc93a0e8ccb65dc8c
-    let inputs = [
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VK_MENU,
-                    ..Default::default()
-                },
-            },
-        },
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VK_MENU,
-                    dwFlags: KEYEVENTF_KEYUP,
-                    ..Default::default()
-                },
-            },
-        },
-    ];
-    unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
-
-    if unsafe { SetForegroundWindow(hwnd) }.as_bool() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "SetForegroundWindow failed, another app may have focus lock"
-        ))
-    }
-}
-
-pub(super) fn set_window_position(hwnd: HWND, dim: &Dimension) -> windows::core::Result<()> {
-    let (left, top, right, bottom) = get_invisible_border(hwnd);
-
-    unsafe {
-        SetWindowPos(
-            hwnd,
-            None,
-            dim.x as i32 - left,
-            dim.y as i32 - top,
-            dim.width as i32 + left + right,
-            dim.height as i32 + top + bottom,
-            SWP_NOZORDER | SWP_NOACTIVATE,
-        )
-    }
-}
-
-fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
-    unsafe {
-        let mut window_rect = RECT::default();
-        let mut frame_rect = RECT::default();
-
-        if GetWindowRect(hwnd, &mut window_rect).is_err() {
-            return (0, 0, 0, 0);
-        }
-
-        if DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_EXTENDED_FRAME_BOUNDS,
-            &mut frame_rect as *mut _ as *mut _,
-            size_of::<RECT>() as u32,
-        )
-        .is_err()
-        {
-            return (0, 0, 0, 0);
-        }
-
-        (
-            frame_rect.left - window_rect.left,
-            frame_rect.top - window_rect.top,
-            window_rect.right - frame_rect.right,
-            window_rect.bottom - frame_rect.bottom,
-        )
     }
 }

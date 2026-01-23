@@ -41,7 +41,6 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     tracing::info!(%config_path, "Loaded config");
 
     std::panic::set_hook(Box::new(|panic_info| {
-        recovery::restore_all();
         let backtrace = backtrace::Backtrace::new();
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
     }));

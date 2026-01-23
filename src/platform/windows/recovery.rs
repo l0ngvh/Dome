@@ -11,7 +11,7 @@ use windows::core::BOOL;
 use crate::core::Dimension;
 
 use super::OFFSCREEN_POS;
-use super::window::get_window_dimension;
+use super::window::WindowHandle;
 
 const DEFAULT_WIDTH: f32 = 800.0;
 const DEFAULT_HEIGHT: f32 = 600.0;
@@ -20,8 +20,9 @@ thread_local! {
     static RECOVERY_STATE: RefCell<HashMap<isize, Dimension>> = RefCell::new(HashMap::new());
 }
 
-pub(super) fn track(hwnd: HWND) {
-    let dim = get_window_dimension(hwnd);
+pub(super) fn track(handle: &WindowHandle) {
+    let dim = handle.dimension();
+    let hwnd = handle.hwnd();
     // These windows belongs to previous crashed Dome instances
     let original_dim = if dim.x <= OFFSCREEN_POS || dim.y <= OFFSCREEN_POS {
         Dimension {
@@ -46,9 +47,9 @@ pub(super) fn track(hwnd: HWND) {
     });
 }
 
-pub(super) fn untrack(hwnd: HWND) {
+pub(super) fn untrack(handle: &WindowHandle) {
     RECOVERY_STATE.with(|state| {
-        state.borrow_mut().remove(&(hwnd.0 as isize));
+        state.borrow_mut().remove(&(handle.hwnd().0 as isize));
     });
 }
 

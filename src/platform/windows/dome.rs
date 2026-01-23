@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread::{self, JoinHandle};
+use std::sync::mpsc::Receiver;
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
@@ -9,9 +8,8 @@ use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{Child, Container, Dimension, FloatWindowId, Focus, Hub, SpawnMode, WindowId};
 
-use super::window::{
-    get_process_name, get_window_dimension, get_window_title, is_manageable_window, should_tile,
-};
+use super::recovery;
+use super::window::{Taskbar, WindowHandle, enum_windows, get_size_constraints};
 
 pub(super) const WM_APP_FRAME: u32 = 0x8000;
 
@@ -25,50 +23,16 @@ impl From<HWND> for WindowKey {
     }
 }
 
-// HWND is safe to send across threads, but doesn't implement Send
-// https://users.rust-lang.org/t/moving-window-hwnd-or-handle-from-one-thread-to-a-new-one/126341/2
-#[derive(Clone)]
-pub(super) struct WindowHandle {
-    hwnd: HWND,
-    title: Option<String>,
-    process: String,
-}
-
-impl WindowHandle {
-    pub(super) fn new(hwnd: HWND) -> Self {
-        Self {
-            hwnd,
-            title: get_window_title(hwnd),
-            process: get_process_name(hwnd).unwrap_or_default(),
-        }
-    }
-
-    pub(super) fn hwnd(&self) -> HWND {
-        self.hwnd
-    }
-
-    pub(super) fn title(&self) -> Option<&str> {
-        self.title.as_deref()
-    }
-
-    pub(super) fn process(&self) -> &str {
-        &self.process
-    }
-
-    fn key(&self) -> WindowKey {
-        WindowKey::from(self.hwnd)
+impl From<&WindowHandle> for WindowKey {
+    fn from(handle: &WindowHandle) -> Self {
+        Self(handle.hwnd().0 as isize)
     }
 }
 
-unsafe impl Send for WindowHandle {}
-
-impl std::fmt::Display for WindowHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let title = self.title().unwrap_or("<no title>");
-        write!(f, "'{title}' from '{}'", self.process)
-    }
-}
-
+#[expect(
+    clippy::large_enum_variant,
+    reason = "These messages aren't bottleneck right now"
+)]
 pub(super) enum HubEvent {
     AppInitialized(AppHandle),
     WindowCreated(WindowHandle),
@@ -76,13 +40,6 @@ pub(super) enum HubEvent {
     WindowFocused(WindowHandle),
     WindowTitleChanged(WindowHandle),
     WindowMovedOrResized(WindowHandle),
-    SetWindowConstraint {
-        handle: WindowHandle,
-        min_width: f32,
-        min_height: f32,
-        max_width: f32,
-        max_height: f32,
-    },
     Action(Actions),
     ConfigChanged(Config),
     Shutdown,
@@ -102,14 +59,6 @@ impl AppHandle {
 }
 
 unsafe impl Send for AppHandle {}
-
-pub(super) struct Frame {
-    pub(super) tiling_windows: Vec<(WindowHandle, Dimension)>,
-    pub(super) float_windows: Vec<(WindowHandle, Dimension)>,
-    pub(super) hide: Vec<WindowHandle>,
-    pub(super) overlays: Overlays,
-    pub(super) focus: Option<WindowHandle>,
-}
 
 #[derive(Clone)]
 pub(super) struct OverlayRect {
@@ -153,17 +102,17 @@ impl Registry {
     }
 
     fn insert_tiling(&mut self, handle: WindowHandle, id: WindowId) {
-        self.tiling.insert(handle.key(), id);
+        self.tiling.insert(WindowKey::from(&handle), id);
         self.tiling_rev.insert(id, handle);
     }
 
     fn insert_float(&mut self, handle: WindowHandle, id: FloatWindowId) {
-        self.float.insert(handle.key(), id);
+        self.float.insert(WindowKey::from(&handle), id);
         self.float_rev.insert(id, handle);
     }
 
     fn remove(&mut self, handle: &WindowHandle) -> Option<WindowType> {
-        let key = handle.key();
+        let key = WindowKey::from(handle);
         if let Some(id) = self.tiling.remove(&key) {
             self.tiling_rev.remove(&id);
             return Some(WindowType::Tiling(id));
@@ -176,11 +125,11 @@ impl Registry {
     }
 
     fn get_tiling(&self, handle: &WindowHandle) -> Option<WindowId> {
-        self.tiling.get(&handle.key()).copied()
+        self.tiling.get(&WindowKey::from(handle)).copied()
     }
 
     fn get_float(&self, handle: &WindowHandle) -> Option<FloatWindowId> {
-        self.float.get(&handle.key()).copied()
+        self.float.get(&WindowKey::from(handle)).copied()
     }
 
     fn get_handle(&self, id: WindowId) -> Option<WindowHandle> {
@@ -202,12 +151,12 @@ impl Registry {
     }
 
     fn contains(&self, handle: &WindowHandle) -> bool {
-        let key = handle.key();
+        let key = WindowKey::from(handle);
         self.tiling.contains_key(&key) || self.float.contains_key(&key)
     }
 
     fn update_title(&mut self, handle: &WindowHandle) {
-        let key = handle.key();
+        let key = WindowKey::from(handle);
         if let Some(&id) = self.tiling.get(&key) {
             self.tiling_rev.insert(id, handle.clone());
         } else if let Some(&id) = self.float.get(&key) {
@@ -217,12 +166,14 @@ impl Registry {
 
     fn toggle(&mut self, window_id: WindowId, float_id: FloatWindowId) {
         if let Some(handle) = self.tiling_rev.remove(&window_id) {
-            self.tiling.remove(&handle.key());
-            self.float.insert(handle.key(), float_id);
+            let key = WindowKey::from(&handle);
+            self.tiling.remove(&key);
+            self.float.insert(key, float_id);
             self.float_rev.insert(float_id, handle);
         } else if let Some(handle) = self.float_rev.remove(&float_id) {
-            self.float.remove(&handle.key());
-            self.tiling.insert(handle.key(), window_id);
+            let key = WindowKey::from(&handle);
+            self.float.remove(&key);
+            self.tiling.insert(key, window_id);
             self.tiling_rev.insert(window_id, handle);
         }
     }
@@ -233,263 +184,331 @@ enum WindowType {
     Float(FloatWindowId),
 }
 
-pub(super) struct HubThread {
-    sender: Sender<HubEvent>,
-    handle: JoinHandle<()>,
-}
-
-impl HubThread {
-    pub(super) fn spawn(config: Config, screen: Dimension) -> Self {
-        let (tx, rx) = mpsc::channel();
-        let handle = thread::spawn(move || run(config, screen, rx));
-        Self { sender: tx, handle }
-    }
-
-    pub(super) fn sender(&self) -> Sender<HubEvent> {
-        self.sender.clone()
-    }
-
-    pub(super) fn shutdown(self) {
-        self.sender.send(HubEvent::Shutdown).ok();
-        self.handle.join().ok();
+impl std::fmt::Display for WindowType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WindowType::Tiling(id) => write!(f, "Tiling #{id}"),
+            WindowType::Float(id) => write!(f, "Float #{id}"),
+        }
     }
 }
 
-fn run(mut config: Config, screen: Dimension, rx: Receiver<HubEvent>) {
-    let mut hub = Hub::new(
-        screen,
-        config.tab_bar_height,
-        config.automatic_tiling,
-        config.min_width.resolve(screen.width),
-        config.min_height.resolve(screen.height),
-        config.max_width.resolve(screen.width),
-        config.max_height.resolve(screen.height),
-    );
-    let mut registry = Registry::new();
-    let mut app_hwnd: Option<AppHandle> = None;
+pub(super) struct Dome {
+    hub: Hub,
+    registry: Registry,
+    taskbar: Taskbar,
+    config: Config,
+    screen: Dimension,
+    app_hwnd: Option<AppHandle>,
+    running: bool,
+}
 
-    while let Ok(event) = rx.recv() {
-        let last_focus = hub.get_workspace(hub.current_workspace()).focused();
-        let previous_displayed: HashSet<_> = get_displayed_windows(&hub, &registry)
+impl Dome {
+    pub(super) fn new(config: Config, screen: Dimension) -> Self {
+        let hub = Hub::new(
+            screen,
+            config.tab_bar_height,
+            config.automatic_tiling,
+            config.min_width.resolve(screen.width),
+            config.min_height.resolve(screen.height),
+            config.max_width.resolve(screen.width),
+            config.max_height.resolve(screen.height),
+        );
+        Self {
+            hub,
+            registry: Registry::new(),
+            taskbar: Taskbar::new().expect("Failed to create taskbar"),
+            config,
+            screen,
+            app_hwnd: None,
+            running: true,
+        }
+    }
+
+    pub(super) fn run(mut self, rx: Receiver<HubEvent>) {
+        self.enumerate_windows();
+        while self.running {
+            if let Ok(event) = rx.recv() {
+                self.handle_event(event);
+            }
+        }
+    }
+
+    fn enumerate_windows(&mut self) {
+        if let Err(e) = enum_windows(|hwnd| {
+            let handle = WindowHandle::new(hwnd);
+            if handle.is_manageable() && !should_ignore(&handle, &self.config.windows.ignore) {
+                self.insert_window(&handle);
+            }
+        }) {
+            tracing::warn!("Failed to enumerate windows: {e}");
+        }
+    }
+
+    fn handle_event(&mut self, event: HubEvent) {
+        let last_focus = self
+            .hub
+            .get_workspace(self.hub.current_workspace())
+            .focused();
+        let previous_displayed: HashSet<_> = get_displayed_windows(&self.hub, &self.registry)
             .into_iter()
-            .map(|(handle, _)| handle.key())
+            .map(|(handle, _)| WindowKey::from(&handle))
             .collect();
+
         match event {
             HubEvent::AppInitialized(hwnd) => {
-                app_hwnd = Some(hwnd);
-                let frame = build_frame(&hub, &registry, &config, None, HashSet::new());
-                send_frame(frame, hwnd);
+                self.app_hwnd = Some(hwnd);
+                let overlays = build_overlays(&self.hub, &self.registry, &self.config);
+                send_overlays(overlays, hwnd);
             }
-            HubEvent::Shutdown => break,
+            HubEvent::Shutdown => self.running = false,
             HubEvent::ConfigChanged(new_config) => {
-                hub.sync_config(
+                self.hub.sync_config(
                     new_config.tab_bar_height,
                     new_config.automatic_tiling,
-                    new_config.min_width.resolve(screen.width),
-                    new_config.min_height.resolve(screen.height),
-                    new_config.max_width.resolve(screen.width),
-                    new_config.max_height.resolve(screen.height),
+                    new_config.min_width.resolve(self.screen.width),
+                    new_config.min_height.resolve(self.screen.height),
+                    new_config.max_width.resolve(self.screen.width),
+                    new_config.max_height.resolve(self.screen.height),
                 );
-                config = new_config;
+                self.config = new_config;
                 tracing::info!("Config reloaded");
             }
             HubEvent::WindowCreated(handle) => {
                 let _span = tracing::info_span!("window_created", %handle).entered();
-                if registry.contains(&handle) {
-                    continue;
+                if self.registry.contains(&handle) {
+                    return;
                 }
-                if should_ignore(&handle, &config.windows.ignore) {
-                    continue;
+                if should_ignore(&handle, &self.config.windows.ignore) {
+                    return;
                 }
-                insert_window(&mut hub, &mut registry, &handle);
-                if let Some(actions) = on_open_actions(&handle, &config.windows.on_open) {
-                    execute_actions(&mut hub, &mut registry, &actions, app_hwnd);
+                self.insert_window(&handle);
+                if let Some(actions) = on_open_actions(&handle, &self.config.windows.on_open) {
+                    self.execute_actions(&actions);
                 }
             }
             HubEvent::WindowDestroyed(handle) => {
                 let _span = tracing::info_span!("window_destroyed", %handle).entered();
-                if let Some(wt) = registry.remove(&handle) {
-                    match wt {
-                        WindowType::Tiling(id) => hub.delete_window(id),
-                        WindowType::Float(id) => hub.delete_float(id),
-                    }
-                    tracing::info!("Window deleted");
-                }
+                self.remove_window(&handle);
             }
             HubEvent::WindowFocused(handle) => {
                 let _span = tracing::info_span!("window_focused", %handle).entered();
-                if let Some(id) = registry.get_tiling(&handle) {
-                    hub.set_focus(id);
+                if let Some(id) = self.registry.get_tiling(&handle) {
+                    self.hub.set_focus(id);
                     tracing::info!("Tiling window focused");
-                } else if let Some(id) = registry.get_float(&handle) {
-                    hub.set_float_focus(id);
+                } else if let Some(id) = self.registry.get_float(&handle) {
+                    self.hub.set_float_focus(id);
                     tracing::info!("Float window focused");
                 }
             }
             // TODO: update float window position in hub instead of re-rendering
             HubEvent::WindowMovedOrResized(_) => {}
-            HubEvent::SetWindowConstraint {
-                handle,
-                min_width,
-                min_height,
-                max_width,
-                max_height,
-            } => {
-                if let Some(id) = registry.get_tiling(&handle) {
-                    let border = config.border_size;
-                    let to_opt = |v: f32| {
-                        if v > 0.0 { Some(v + 2.0 * border) } else { None }
-                    };
-                    hub.set_window_constraint(id, to_opt(min_width), to_opt(min_height), to_opt(max_width), to_opt(max_height));
-                }
-            }
             HubEvent::WindowTitleChanged(handle) => {
                 let _span = tracing::info_span!("window_title_changed", %handle).entered();
-                if registry.contains(&handle) {
-                    registry.update_title(&handle);
-                    continue;
+                if self.registry.contains(&handle) {
+                    self.registry.update_title(&handle);
+                    return;
                 }
                 // Some apps have a brief moment where their title is empty
-                if should_ignore(&handle, &config.windows.ignore) {
-                    continue;
+                if should_ignore(&handle, &self.config.windows.ignore) {
+                    return;
                 }
-                insert_window(&mut hub, &mut registry, &handle);
-                if let Some(actions) = on_open_actions(&handle, &config.windows.on_open) {
-                    execute_actions(&mut hub, &mut registry, &actions, app_hwnd);
+                self.insert_window(&handle);
+                if let Some(actions) = on_open_actions(&handle, &self.config.windows.on_open) {
+                    self.execute_actions(&actions);
                 }
             }
             HubEvent::Action(actions) => {
-                execute_actions(&mut hub, &mut registry, &actions, app_hwnd);
+                self.execute_actions(&actions);
             }
         }
-        if let Some(app_hwnd) = app_hwnd {
-            let frame = build_frame(&hub, &registry, &config, last_focus, previous_displayed);
-            send_frame(frame, app_hwnd);
+
+        self.process_frame(last_focus, previous_displayed);
+    }
+
+    fn insert_window(&mut self, handle: &WindowHandle) {
+        recovery::track(handle);
+        if handle.should_tile() {
+            let id = self.hub.insert_tiling();
+            self.registry.insert_tiling(handle.clone(), id);
+            tracing::info!("Tiling window inserted");
+        } else {
+            let id = self.hub.insert_float(handle.dimension());
+            self.registry.insert_float(handle.clone(), id);
+            tracing::info!("Float window inserted");
         }
     }
-}
 
-fn insert_window(hub: &mut Hub, registry: &mut Registry, handle: &WindowHandle) {
-    if should_tile(handle.hwnd()) {
-        let id = hub.insert_tiling();
-        registry.insert_tiling(handle.clone(), id);
-        tracing::info!("Tiling window inserted");
-    } else {
-        let id = hub.insert_float(get_window_dimension(handle.hwnd()));
-        registry.insert_float(handle.clone(), id);
-        tracing::info!("Float window inserted");
+    fn remove_window(&mut self, handle: &WindowHandle) {
+        if let Some(wt) = self.registry.remove(handle) {
+            recovery::untrack(handle);
+            match wt {
+                WindowType::Tiling(id) => self.hub.delete_window(id),
+                WindowType::Float(id) => self.hub.delete_float(id),
+            }
+            tracing::info!("Window deleted");
+        }
     }
-}
 
-fn send_frame(frame: Frame, app_hwnd: AppHandle) {
-    let cmd = Box::new(frame);
-    let ptr = Box::into_raw(cmd) as usize;
-    unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_FRAME, WPARAM(ptr), LPARAM(0)).ok() };
-}
-
-#[tracing::instrument(skip(hub, registry, app_hwnd), fields(actions = %actions))]
-fn execute_actions(
-    hub: &mut Hub,
-    registry: &mut Registry,
-    actions: &Actions,
-    app_hwnd: Option<AppHandle>,
-) {
-    for action in actions {
-        match action {
-            Action::Focus { target } => match target {
-                FocusTarget::Up => hub.focus_up(),
-                FocusTarget::Down => hub.focus_down(),
-                FocusTarget::Left => hub.focus_left(),
-                FocusTarget::Right => hub.focus_right(),
-                FocusTarget::Parent => hub.focus_parent(),
-                FocusTarget::NextTab => hub.focus_next_tab(),
-                FocusTarget::PrevTab => hub.focus_prev_tab(),
-                FocusTarget::Workspace { index } => hub.focus_workspace(*index),
-            },
-            Action::Move { target } => match target {
-                MoveTarget::Up => hub.move_up(),
-                MoveTarget::Down => hub.move_down(),
-                MoveTarget::Left => hub.move_left(),
-                MoveTarget::Right => hub.move_right(),
-                MoveTarget::Workspace { index } => hub.move_focused_to_workspace(*index),
-            },
-            Action::Toggle { target } => match target {
-                ToggleTarget::SpawnDirection => hub.toggle_spawn_mode(),
-                ToggleTarget::Direction => hub.toggle_direction(),
-                ToggleTarget::Layout => hub.toggle_container_layout(),
-                ToggleTarget::Float => {
-                    if let Some((window_id, float_id)) = hub.toggle_float() {
-                        registry.toggle(window_id, float_id);
+    #[tracing::instrument(skip(self), fields(actions = %actions))]
+    fn execute_actions(&mut self, actions: &Actions) {
+        for action in actions {
+            match action {
+                Action::Focus { target } => match target {
+                    FocusTarget::Up => self.hub.focus_up(),
+                    FocusTarget::Down => self.hub.focus_down(),
+                    FocusTarget::Left => self.hub.focus_left(),
+                    FocusTarget::Right => self.hub.focus_right(),
+                    FocusTarget::Parent => self.hub.focus_parent(),
+                    FocusTarget::NextTab => self.hub.focus_next_tab(),
+                    FocusTarget::PrevTab => self.hub.focus_prev_tab(),
+                    FocusTarget::Workspace { index } => self.hub.focus_workspace(*index),
+                },
+                Action::Move { target } => match target {
+                    MoveTarget::Up => self.hub.move_up(),
+                    MoveTarget::Down => self.hub.move_down(),
+                    MoveTarget::Left => self.hub.move_left(),
+                    MoveTarget::Right => self.hub.move_right(),
+                    MoveTarget::Workspace { index } => self.hub.move_focused_to_workspace(*index),
+                },
+                Action::Toggle { target } => match target {
+                    ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),
+                    ToggleTarget::Direction => self.hub.toggle_direction(),
+                    ToggleTarget::Layout => self.hub.toggle_container_layout(),
+                    ToggleTarget::Float => {
+                        if let Some((window_id, float_id)) = self.hub.toggle_float() {
+                            self.registry.toggle(window_id, float_id);
+                        }
+                    }
+                },
+                Action::Exec { command } => {
+                    if let Err(e) = std::process::Command::new("cmd")
+                        .args(["/C", command])
+                        .spawn()
+                    {
+                        tracing::warn!(%command, "Failed to exec: {e}");
                     }
                 }
-            },
-            Action::Exec { command } => {
-                if let Err(e) = std::process::Command::new("cmd")
-                    .args(["/C", command])
-                    .spawn()
-                {
-                    tracing::warn!(%command, "Failed to exec: {e}");
+                Action::Exit => {
+                    if let Some(hwnd) = self.app_hwnd {
+                        unsafe {
+                            PostMessageW(Some(hwnd.hwnd()), WM_QUIT, WPARAM(0), LPARAM(0)).ok()
+                        };
+                    }
                 }
             }
-            Action::Exit => {
-                if let Some(hwnd) = app_hwnd {
-                    unsafe { PostMessageW(Some(hwnd.hwnd()), WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+        }
+    }
+
+    fn process_frame(&mut self, last_focus: Option<Focus>, previous_displayed: HashSet<WindowKey>) {
+        let border = self.config.border_size;
+
+        let tiling_windows: Vec<_> = get_tiling_windows(&self.hub, &self.registry)
+            .into_iter()
+            .map(|(handle, dim)| (handle, apply_inset(dim, border)))
+            .collect();
+
+        let float_windows: Vec<_> = get_float_windows(&self.hub, &self.registry)
+            .into_iter()
+            .map(|(handle, dim)| (handle, apply_inset(dim, border)))
+            .collect();
+
+        let current: HashSet<_> = tiling_windows
+            .iter()
+            .chain(float_windows.iter())
+            .map(|(h, _)| WindowKey::from(h))
+            .collect();
+
+        for key in &previous_displayed {
+            if !current.contains(key)
+                && let Some(handle) = self.registry.get_handle_by_key(*key)
+            {
+                handle.hide();
+                self.taskbar.delete_tab(handle.hwnd()).ok();
+            }
+        }
+
+        for (handle, dim) in &tiling_windows {
+            self.check_and_set_constraints(handle, dim);
+            handle.set_position(dim);
+            self.taskbar.add_tab(handle.hwnd()).ok();
+        }
+
+        for (handle, dim) in &float_windows {
+            handle.set_position(dim);
+            handle.set_topmost();
+            self.taskbar.add_tab(handle.hwnd()).ok();
+        }
+
+        let ws = self.hub.get_workspace(self.hub.current_workspace());
+        if ws.focused() != last_focus {
+            match ws.focused() {
+                Some(Focus::Tiling(Child::Window(id))) => {
+                    if let Some(handle) = self.registry.get_handle(id) {
+                        handle.focus();
+                    }
                 }
+                Some(Focus::Float(id)) => {
+                    if let Some(handle) = self.registry.get_float_handle(id) {
+                        handle.focus();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(app_hwnd) = self.app_hwnd {
+            let overlays = build_overlays(&self.hub, &self.registry, &self.config);
+            send_overlays(overlays, app_hwnd);
+        }
+    }
+
+    fn check_and_set_constraints(&mut self, handle: &WindowHandle, dim: &Dimension) {
+        let (min_w, min_h, max_w, max_h) = get_size_constraints(handle.hwnd());
+        let min_w = if min_w > dim.width { min_w } else { 0.0 };
+        let min_h = if min_h > dim.height { min_h } else { 0.0 };
+        let max_w = if max_w > 0.0 && max_w < dim.width {
+            max_w
+        } else {
+            0.0
+        };
+        let max_h = if max_h > 0.0 && max_h < dim.height {
+            max_h
+        } else {
+            0.0
+        };
+        if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
+            let border = self.config.border_size;
+            let to_opt = |v: f32| {
+                if v > 0.0 {
+                    Some(v + 2.0 * border)
+                } else {
+                    None
+                }
+            };
+            if let Some(id) = self.registry.get_tiling(handle) {
+                self.hub.set_window_constraint(
+                    id,
+                    to_opt(min_w),
+                    to_opt(min_h),
+                    to_opt(max_w),
+                    to_opt(max_h),
+                );
             }
         }
     }
 }
 
-fn build_frame(
-    hub: &Hub,
-    registry: &Registry,
-    config: &Config,
-    last_focus: Option<Focus>,
-    previous_displayed: HashSet<WindowKey>,
-) -> Frame {
-    let ws = hub.get_workspace(hub.current_workspace());
-    let border = config.border_size;
-
-    let tiling_windows: Vec<_> = get_tiling_windows(hub, registry)
-        .into_iter()
-        .map(|(handle, dim)| (handle, apply_inset(dim, border)))
-        .collect();
-
-    let float_windows: Vec<_> = get_float_windows(hub, registry)
-        .into_iter()
-        .map(|(handle, dim)| (handle, apply_inset(dim, border)))
-        .collect();
-
-    let overlays = build_overlays(hub, registry, config);
-
-    let focus = if ws.focused() != last_focus {
-        match ws.focused() {
-            Some(Focus::Tiling(Child::Window(id))) => registry.get_handle(id),
-            Some(Focus::Float(id)) => registry.get_float_handle(id),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    let current: HashSet<_> = tiling_windows
-        .iter()
-        .chain(float_windows.iter())
-        .map(|(h, _)| h.key())
-        .collect();
-    let hide = previous_displayed
-        .into_iter()
-        .filter(|key| !current.contains(key))
-        .filter_map(|key| registry.get_handle_by_key(key))
-        .collect();
-
-    Frame {
-        tiling_windows,
-        float_windows,
-        hide,
-        overlays,
-        focus,
+impl Drop for Dome {
+    fn drop(&mut self) {
+        recovery::restore_all();
     }
+}
+
+fn send_overlays(overlays: Overlays, app_hwnd: AppHandle) {
+    let cmd = Box::new(overlays);
+    let ptr = Box::into_raw(cmd) as usize;
+    unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_FRAME, WPARAM(ptr), LPARAM(0)).ok() };
 }
 
 fn get_tiling_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimension)> {
@@ -765,7 +784,7 @@ fn on_open_actions(handle: &WindowHandle, rules: &[WindowsOnOpenRule]) -> Option
 }
 
 fn should_ignore(handle: &WindowHandle, rules: &[WindowsWindow]) -> bool {
-    if !is_manageable_window(handle.hwnd()) {
+    if !handle.is_manageable() {
         tracing::debug!(%handle, "Window ignored: not manageable");
         return true;
     }
