@@ -7,6 +7,7 @@ mod focus_direction;
 mod focus_parent;
 mod focus_workspace;
 mod insert_window;
+mod monitor;
 mod move_in_direction;
 mod move_to_workspace;
 mod set_focus;

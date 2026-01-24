@@ -90,9 +90,61 @@ impl Hub {
         self.monitors.get(self.focused_monitor).dimension
     }
 
+    #[cfg(test)]
+    pub(super) fn focused_monitor(&self) -> MonitorId {
+        self.focused_monitor
+    }
+
     fn workspace_screen(&self, workspace_id: WorkspaceId) -> Dimension {
         let monitor_id = self.workspaces.get(workspace_id).monitor;
         self.monitors.get(monitor_id).dimension
+    }
+
+    pub(crate) fn add_monitor(&mut self, name: String, dimension: Dimension) -> MonitorId {
+        let ws_id = self
+            .workspaces
+            .allocate(Workspace::new(name.clone(), self.focused_monitor));
+        let monitor_id = self.monitors.allocate(Monitor {
+            name,
+            dimension,
+            active_workspace: ws_id,
+        });
+        self.workspaces.get_mut(ws_id).monitor = monitor_id;
+        monitor_id
+    }
+
+    pub(crate) fn remove_monitor(&mut self, monitor_id: MonitorId, fallback_id: MonitorId) {
+        assert!(
+            fallback_id != monitor_id,
+            "fallback must differ from removed monitor"
+        );
+
+        let workspaces_to_migrate: Vec<WorkspaceId> = self
+            .workspaces
+            .all_active()
+            .iter()
+            .filter(|(_, ws)| ws.monitor == monitor_id)
+            .map(|(id, _)| *id)
+            .collect();
+
+        for ws_id in workspaces_to_migrate {
+            self.workspaces.get_mut(ws_id).monitor = fallback_id;
+            self.adjust_workspace(ws_id);
+        }
+
+        if self.focused_monitor == monitor_id {
+            self.focused_monitor = fallback_id;
+        }
+        self.monitors.delete(monitor_id);
+    }
+
+    pub(crate) fn update_monitor_dimension(&mut self, monitor_id: MonitorId, dimension: Dimension) {
+        self.monitors.get_mut(monitor_id).dimension = dimension;
+        for (ws_id, ws) in self.workspaces.all_active() {
+            if ws.monitor == monitor_id {
+                self.adjust_workspace(ws_id);
+            }
+        }
     }
 
     pub(crate) fn sync_config(&mut self, config: HubConfig) {
