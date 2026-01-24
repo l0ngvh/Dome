@@ -158,7 +158,7 @@ fn move_float_to_workspace() {
         width: 40.0,
         height: 15.0,
     });
-    hub.move_focused_to_workspace(1);
+    hub.move_focused_to_workspace("1");
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
@@ -573,7 +573,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
 
     hub.insert_tiling();
 
-    hub.focus_workspace(1);
+    hub.focus_workspace("1");
     let f0 = hub.insert_float(Dimension {
         x: 10.0,
         y: 5.0,
@@ -627,7 +627,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     ******************************************************************************************************************************************************
     ");
 
-    hub.focus_workspace(0);
+    hub.focus_workspace("0");
 
     // Delete the tiling window on workspace 1 (workspace 1 should NOT be deleted because it has a float)
     hub.delete_window(w1);
@@ -851,7 +851,7 @@ fn delete_float_keeps_workspace_with_tiling() {
     let mut hub = setup();
 
     // Create float and tiling on workspace 1, then switch away
-    hub.focus_workspace(1);
+    hub.focus_workspace("1");
     hub.insert_tiling();
     let f0 = hub.insert_float(Dimension {
         x: 10.0,
@@ -859,7 +859,7 @@ fn delete_float_keeps_workspace_with_tiling() {
         width: 30.0,
         height: 20.0,
     });
-    hub.focus_workspace(0);
+    hub.focus_workspace("0");
 
     // Delete float - workspace 1 should remain because it has tiling
     hub.delete_float(f0);
@@ -880,7 +880,7 @@ fn delete_float_keeps_workspace_with_other_floats() {
     let mut hub = setup();
 
     // Create two floats on workspace 1, then switch away
-    hub.focus_workspace(1);
+    hub.focus_workspace("1");
     let f0 = hub.insert_float(Dimension {
         x: 10.0,
         y: 5.0,
@@ -893,7 +893,7 @@ fn delete_float_keeps_workspace_with_other_floats() {
         width: 30.0,
         height: 20.0,
     });
-    hub.focus_workspace(0);
+    hub.focus_workspace("0");
 
     // Delete one float - workspace 1 should remain because it has another float
     hub.delete_float(f0);
@@ -914,14 +914,14 @@ fn delete_float_removes_empty_non_current_workspace() {
     let mut hub = setup();
 
     // Create float on workspace 1, then switch away
-    hub.focus_workspace(1);
+    hub.focus_workspace("1");
     let f0 = hub.insert_float(Dimension {
         x: 10.0,
         y: 5.0,
         width: 30.0,
         height: 20.0,
     });
-    hub.focus_workspace(0);
+    hub.focus_workspace("0");
 
     // Delete float - workspace 1 should be removed (empty and not current)
     hub.delete_float(f0);

@@ -8,12 +8,12 @@ fn switch_workspace_attaches_windows_correctly() {
     hub.insert_tiling();
     hub.insert_tiling();
 
-    hub.focus_workspace(1);
+    hub.focus_workspace("1");
 
     hub.insert_tiling();
     hub.insert_tiling();
 
-    hub.focus_workspace(0);
+    hub.focus_workspace("0");
 
     hub.insert_tiling();
 
@@ -73,7 +73,7 @@ fn focus_same_workspace() {
 
     hub.insert_tiling();
     let initial_workspace = hub.current_workspace();
-    hub.focus_workspace(0);
+    hub.focus_workspace("0");
 
     assert_eq!(hub.current_workspace(), initial_workspace);
     assert_snapshot!(snapshot(&hub), @r"

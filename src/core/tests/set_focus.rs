@@ -100,7 +100,7 @@ fn set_focus_switches_workspace() {
     let mut hub = setup();
 
     let w0 = hub.insert_tiling();
-    hub.focus_workspace(1);
+    hub.focus_workspace("1");
     hub.insert_tiling();
 
     hub.set_focus(w0);
@@ -212,7 +212,7 @@ fn set_float_focus_switches_workspace() {
         width: 30.0,
         height: 10.0,
     });
-    hub.focus_workspace(1);
+    hub.focus_workspace("1");
     hub.insert_tiling();
 
     hub.set_float_focus(f0);

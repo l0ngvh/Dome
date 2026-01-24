@@ -2,7 +2,7 @@ use crate::core::allocator::{Node, NodeId};
 
 #[derive(Debug, Clone)]
 pub(crate) struct Workspace {
-    pub(super) name: usize,
+    pub(super) name: String,
     pub(super) screen: Dimension,
     pub(super) root: Option<Child>,
     pub(super) focused: Option<Focus>,
@@ -14,7 +14,7 @@ impl Node for Workspace {
 }
 
 impl Workspace {
-    pub(super) fn new(screen: Dimension, name: usize) -> Self {
+    pub(super) fn new(screen: Dimension, name: String) -> Self {
         Self {
             root: None,
             focused: None,

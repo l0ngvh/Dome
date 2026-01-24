@@ -56,14 +56,14 @@ fn sync_config_recalculates_all_workspaces() {
     hub.insert_tiling();
     hub.toggle_container_layout();
 
-    hub.focus_workspace(1);
+    hub.focus_workspace("1");
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_container_layout();
 
     hub.sync_config(5.0, true, 0.0, 0.0, 0.0, 0.0);
 
-    hub.focus_workspace(0);
+    hub.focus_workspace("0");
     assert_snapshot!(snapshot_text(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=50.00 h=50.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),

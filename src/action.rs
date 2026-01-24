@@ -89,7 +89,7 @@ impl<'de> serde::Deserialize<'de> for Actions {
     }
 }
 
-#[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
+#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 pub enum FocusTarget {
     Up,
     Down,
@@ -98,7 +98,7 @@ pub enum FocusTarget {
     Parent,
     NextTab,
     PrevTab,
-    Workspace { index: usize },
+    Workspace { name: String },
 }
 
 impl fmt::Display for FocusTarget {
@@ -111,18 +111,18 @@ impl fmt::Display for FocusTarget {
             FocusTarget::Parent => write!(f, "parent"),
             FocusTarget::NextTab => write!(f, "next_tab"),
             FocusTarget::PrevTab => write!(f, "prev_tab"),
-            FocusTarget::Workspace { index } => write!(f, "workspace {index}"),
+            FocusTarget::Workspace { name } => write!(f, "workspace {name}"),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
+#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 pub enum MoveTarget {
     Up,
     Down,
     Left,
     Right,
-    Workspace { index: usize },
+    Workspace { name: String },
 }
 
 impl fmt::Display for MoveTarget {
@@ -132,7 +132,7 @@ impl fmt::Display for MoveTarget {
             MoveTarget::Down => write!(f, "down"),
             MoveTarget::Left => write!(f, "left"),
             MoveTarget::Right => write!(f, "right"),
-            MoveTarget::Workspace { index } => write!(f, "workspace {index}"),
+            MoveTarget::Workspace { name } => write!(f, "workspace {name}"),
         }
     }
 }
@@ -185,7 +185,7 @@ impl FromStr for Action {
                 target: FocusTarget::Parent,
             }),
             ["focus", "workspace", n] => Ok(Action::Focus {
-                target: FocusTarget::Workspace { index: n.parse()? },
+                target: FocusTarget::Workspace { name: n.to_string() },
             }),
             ["focus", "next_tab"] => Ok(Action::Focus {
                 target: FocusTarget::NextTab,
@@ -206,7 +206,7 @@ impl FromStr for Action {
                 target: MoveTarget::Right,
             }),
             ["move", "workspace", n] => Ok(Action::Move {
-                target: MoveTarget::Workspace { index: n.parse()? },
+                target: MoveTarget::Workspace { name: n.to_string() },
             }),
             ["toggle", "spawn_direction"] => Ok(Action::Toggle {
                 target: ToggleTarget::SpawnDirection,

@@ -55,7 +55,7 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
                 modifiers: Modifiers::CMD,
             },
             Actions::new(vec![Action::Focus {
-                target: FocusTarget::Workspace { index: i },
+                target: FocusTarget::Workspace { name: i.to_string() },
             }]),
         );
         keymaps.insert(
@@ -64,7 +64,7 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
                 modifiers: Modifiers::CMD | Modifiers::SHIFT,
             },
             Actions::new(vec![Action::Move {
-                target: MoveTarget::Workspace { index: i },
+                target: MoveTarget::Workspace { name: i.to_string() },
             }]),
         );
     }

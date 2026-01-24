@@ -180,12 +180,12 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                 }
                 Op::MoveToWorkspace => {
                     let ws = rng.random_range(0..5);
-                    hub.move_focused_to_workspace(ws);
+                    hub.move_focused_to_workspace(&ws.to_string());
                     format!("MoveToWorkspace({ws})")
                 }
                 Op::FocusWorkspace => {
                     let ws = rng.random_range(0..5);
-                    hub.focus_workspace(ws);
+                    hub.focus_workspace(&ws.to_string());
                     format!("FocusWorkspace({ws})")
                 }
                 Op::SetFocus => {

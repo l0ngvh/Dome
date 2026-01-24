@@ -362,14 +362,14 @@ impl Dome {
                     FocusTarget::Parent => self.hub.focus_parent(),
                     FocusTarget::NextTab => self.hub.focus_next_tab(),
                     FocusTarget::PrevTab => self.hub.focus_prev_tab(),
-                    FocusTarget::Workspace { index } => self.hub.focus_workspace(*index),
+                    FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
                 },
                 Action::Move { target } => match target {
                     MoveTarget::Up => self.hub.move_up(),
                     MoveTarget::Down => self.hub.move_down(),
                     MoveTarget::Left => self.hub.move_left(),
                     MoveTarget::Right => self.hub.move_right(),
-                    MoveTarget::Workspace { index } => self.hub.move_focused_to_workspace(*index),
+                    MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
                 },
                 Action::Toggle { target } => match target {
                     ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),

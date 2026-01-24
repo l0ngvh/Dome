@@ -35,7 +35,7 @@ impl Hub {
         let window_allocator: Allocator<Window> = Allocator::new();
         let float_window_allocator: Allocator<FloatWindow> = Allocator::new();
         let container_allocator: Allocator<Container> = Allocator::new();
-        let default_workspace_name = 0;
+        let default_workspace_name = "0".to_string();
         let initial_workspace =
             workspace_allocator.allocate(Workspace::new(screen, default_workspace_name));
 
@@ -56,7 +56,7 @@ impl Hub {
     }
 
     // TODO: Close empty workspaces on switching out
-    pub(crate) fn focus_workspace(&mut self, name: usize) {
+    pub(crate) fn focus_workspace(&mut self, name: &str) {
         let workspace_id = match self.workspaces.find(|w| w.name == name) {
             Some(workspace_id) => {
                 if workspace_id == self.current {
@@ -64,7 +64,7 @@ impl Hub {
                 }
                 workspace_id
             }
-            None => self.workspaces.allocate(Workspace::new(self.screen, name)),
+            None => self.workspaces.allocate(Workspace::new(self.screen, name.to_string())),
         };
 
         tracing::debug!(name, %workspace_id, "Focusing workspace");
@@ -333,7 +333,7 @@ impl Hub {
         self.move_in_direction(Direction::Vertical, true);
     }
 
-    pub(crate) fn move_focused_to_workspace(&mut self, target_workspace: usize) {
+    pub(crate) fn move_focused_to_workspace(&mut self, target_workspace: &str) {
         let Some(focused) = self.workspaces.get(self.current).focused else {
             return;
         };
@@ -343,7 +343,7 @@ impl Hub {
             Some(id) => id,
             None => self
                 .workspaces
-                .allocate(Workspace::new(self.screen, target_workspace)),
+                .allocate(Workspace::new(self.screen, target_workspace.to_string())),
         };
         if current_workspace_id == target_workspace_id {
             return;

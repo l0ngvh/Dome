@@ -118,7 +118,7 @@ fn delete_all_windows_cleanup_unfocused_workspace() {
     let mut hub = setup();
     let w0 = hub.insert_tiling();
     let w1 = hub.insert_tiling();
-    hub.focus_workspace(1);
+    hub.focus_workspace("1");
     hub.delete_window(w0);
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
