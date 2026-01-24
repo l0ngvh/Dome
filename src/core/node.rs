@@ -1,9 +1,38 @@
 use crate::core::allocator::{Node, NodeId};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct MonitorId(usize);
+
+impl NodeId for MonitorId {
+    fn new(id: usize) -> Self {
+        Self(id)
+    }
+    fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl std::fmt::Display for MonitorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MonitorId({})", self.0)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Monitor {
+    pub(super) name: String,
+    pub(super) dimension: Dimension,
+    pub(super) active_workspace: WorkspaceId,
+}
+
+impl Node for Monitor {
+    type Id = MonitorId;
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Workspace {
     pub(super) name: String,
-    pub(super) screen: Dimension,
+    pub(super) monitor: MonitorId,
     pub(super) root: Option<Child>,
     pub(super) focused: Option<Focus>,
     pub(super) float_windows: Vec<FloatWindowId>,
@@ -14,12 +43,12 @@ impl Node for Workspace {
 }
 
 impl Workspace {
-    pub(super) fn new(screen: Dimension, name: String) -> Self {
+    pub(super) fn new(name: String, monitor: MonitorId) -> Self {
         Self {
             root: None,
             focused: None,
-            screen,
             name,
+            monitor,
             float_windows: Vec::new(),
         }
     }

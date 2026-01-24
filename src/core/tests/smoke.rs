@@ -224,7 +224,9 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                     let max_w = rand_or_clear(1.0, 100.0);
                     let max_h = rand_or_clear(1.0, 20.0);
                     hub.set_window_constraint(id, min_w, min_h, max_w, max_h);
-                    format!("SetWindowConstraint({id}, min=({min_w:?}, {min_h:?}), max=({max_w:?}, {max_h:?}))")
+                    format!(
+                        "SetWindowConstraint({id}, min=({min_w:?}, {min_h:?}), max=({max_w:?}, {max_h:?}))"
+                    )
                 }
             };
 

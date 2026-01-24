@@ -38,7 +38,9 @@ impl Drop for KeyboardListener {
     fn drop(&mut self) {
         CFRunLoop::current()
             .unwrap()
-            .remove_source(Some(&self.run_loop_source), unsafe { kCFRunLoopDefaultMode });
+            .remove_source(Some(&self.run_loop_source), unsafe {
+                kCFRunLoopDefaultMode
+            });
     }
 }
 
@@ -81,7 +83,10 @@ impl KeyboardListener {
 
         ctx.event_tap.set(event_tap).ok();
 
-        Ok(Self { ctx, run_loop_source })
+        Ok(Self {
+            ctx,
+            run_loop_source,
+        })
     }
 }
 

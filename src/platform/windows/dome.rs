@@ -205,15 +205,7 @@ pub(super) struct Dome {
 
 impl Dome {
     pub(super) fn new(config: Config, screen: Dimension) -> Self {
-        let hub = Hub::new(
-            screen,
-            config.tab_bar_height,
-            config.automatic_tiling,
-            config.min_width.resolve(screen.width),
-            config.min_height.resolve(screen.height),
-            config.max_width.resolve(screen.width),
-            config.max_height.resolve(screen.height),
-        );
+        let hub = Hub::new(screen, config.clone().into());
         Self {
             hub,
             registry: Registry::new(),
@@ -263,14 +255,7 @@ impl Dome {
             }
             HubEvent::Shutdown => self.running = false,
             HubEvent::ConfigChanged(new_config) => {
-                self.hub.sync_config(
-                    new_config.tab_bar_height,
-                    new_config.automatic_tiling,
-                    new_config.min_width.resolve(self.screen.width),
-                    new_config.min_height.resolve(self.screen.height),
-                    new_config.max_width.resolve(self.screen.width),
-                    new_config.max_height.resolve(self.screen.height),
-                );
+                self.hub.sync_config(new_config.clone().into());
                 self.config = new_config;
                 tracing::info!("Config reloaded");
             }

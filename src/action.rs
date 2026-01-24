@@ -185,7 +185,9 @@ impl FromStr for Action {
                 target: FocusTarget::Parent,
             }),
             ["focus", "workspace", n] => Ok(Action::Focus {
-                target: FocusTarget::Workspace { name: n.to_string() },
+                target: FocusTarget::Workspace {
+                    name: n.to_string(),
+                },
             }),
             ["focus", "next_tab"] => Ok(Action::Focus {
                 target: FocusTarget::NextTab,
@@ -206,7 +208,9 @@ impl FromStr for Action {
                 target: MoveTarget::Right,
             }),
             ["move", "workspace", n] => Ok(Action::Move {
-                target: MoveTarget::Workspace { name: n.to_string() },
+                target: MoveTarget::Workspace {
+                    name: n.to_string(),
+                },
             }),
             ["toggle", "spawn_direction"] => Ok(Action::Toggle {
                 target: ToggleTarget::SpawnDirection,

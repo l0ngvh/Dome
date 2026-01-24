@@ -55,7 +55,9 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
                 modifiers: Modifiers::CMD,
             },
             Actions::new(vec![Action::Focus {
-                target: FocusTarget::Workspace { name: i.to_string() },
+                target: FocusTarget::Workspace {
+                    name: i.to_string(),
+                },
             }]),
         );
         keymaps.insert(
@@ -64,7 +66,9 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
                 modifiers: Modifiers::CMD | Modifiers::SHIFT,
             },
             Actions::new(vec![Action::Move {
-                target: MoveTarget::Workspace { name: i.to_string() },
+                target: MoveTarget::Workspace {
+                    name: i.to_string(),
+                },
             }]),
         );
     }
@@ -589,17 +593,17 @@ impl Config {
     fn validate(&self) -> Result<()> {
         if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
             (self.min_width, self.max_width)
+            && max > 0.0
+            && min > max
         {
-            if max > 0.0 && min > max {
-                anyhow::bail!("min_width ({min}) cannot be greater than max_width ({max})");
-            }
+            anyhow::bail!("min_width ({min}) cannot be greater than max_width ({max})");
         }
         if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
             (self.min_height, self.max_height)
+            && max > 0.0
+            && min > max
         {
-            if max > 0.0 && min > max {
-                anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
-            }
+            anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
         }
         Ok(())
     }

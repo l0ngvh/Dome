@@ -17,9 +17,10 @@ mod tabbed;
 mod toggle_direction;
 mod toggle_spawn_mode;
 
+use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
-use crate::core::hub::Hub;
-use crate::core::node::{Child, Direction, FloatWindowId, Focus, Parent};
+use crate::core::hub::{Hub, HubConfig};
+use crate::core::node::{Child, Dimension, Direction, FloatWindowId, Focus, Parent};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
@@ -557,7 +558,9 @@ fn validate_hub(hub: &Hub) {
                                 };
                                 let allows_smaller = child_max_h > 0.0 && child_max_h < dim.height;
                                 assert!(
-                                    d.height >= dim.height - 0.01 || d.height >= *min_h - 0.01 || allows_smaller,
+                                    d.height >= dim.height - 0.01
+                                        || d.height >= *min_h - 0.01
+                                        || allows_smaller,
                                     "Container {cid} child {i} height {:.2} < container height {:.2} and < min_height {:.2}",
                                     d.height,
                                     dim.height,
@@ -584,7 +587,9 @@ fn validate_hub(hub: &Hub) {
                                 };
                                 let allows_smaller = child_max_w > 0.0 && child_max_w < dim.width;
                                 assert!(
-                                    d.width >= dim.width - 0.01 || d.width >= *min_w - 0.01 || allows_smaller,
+                                    d.width >= dim.width - 0.01
+                                        || d.width >= *min_w - 0.01
+                                        || allows_smaller,
                                     "Container {cid} child {i} width {:.2} < container width {:.2} and < min_width {:.2}",
                                     d.width,
                                     dim.width,
@@ -601,7 +606,8 @@ fn validate_hub(hub: &Hub) {
                                     Child::Container(_) => (0.0, 0.0),
                                 };
                                 let allows_smaller_w = child_max_w > 0.0 && child_max_w < dim.width;
-                                let allows_smaller_h = child_max_h > 0.0 && child_max_h < expected_height;
+                                let allows_smaller_h =
+                                    child_max_h > 0.0 && child_max_h < expected_height;
                                 assert!(
                                     (d.width - dim.width).abs() < 0.01 || allows_smaller_w,
                                     "Container {cid} tabbed child {i} width {:.2} != container width {:.2}",
@@ -684,8 +690,20 @@ pub(super) fn setup_logger_with_level(level: &str) {
     }));
 }
 
+impl Default for HubConfig {
+    fn default() -> Self {
+        Self {
+            tab_bar_height: TAB_BAR_HEIGHT,
+            auto_tile: false,
+            min_width: SizeConstraint::Pixels(0.0),
+            min_height: SizeConstraint::Pixels(0.0),
+            max_width: SizeConstraint::Pixels(0.0),
+            max_height: SizeConstraint::Pixels(0.0),
+        }
+    }
+}
+
 pub(super) fn setup_hub() -> Hub {
-    use crate::core::node::Dimension;
     Hub::new(
         Dimension {
             x: 0.0,
@@ -693,12 +711,7 @@ pub(super) fn setup_hub() -> Hub {
             width: ASCII_WIDTH as f32,
             height: ASCII_HEIGHT as f32,
         },
-        TAB_BAR_HEIGHT,
-        false,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        HubConfig::default(),
     )
 }
 
@@ -709,7 +722,6 @@ pub(super) fn setup() -> Hub {
 
 pub(super) fn setup_with_auto_tile() -> Hub {
     setup_logger();
-    use crate::core::node::Dimension;
     Hub::new(
         Dimension {
             x: 0.0,
@@ -717,11 +729,9 @@ pub(super) fn setup_with_auto_tile() -> Hub {
             width: ASCII_WIDTH as f32,
             height: ASCII_HEIGHT as f32,
         },
-        TAB_BAR_HEIGHT,
-        true,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        HubConfig {
+            auto_tile: true,
+            ..Default::default()
+        },
     )
 }

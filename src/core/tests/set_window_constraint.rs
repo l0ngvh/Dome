@@ -1,6 +1,8 @@
 use insta::assert_snapshot;
 
-use super::{TAB_BAR_HEIGHT, setup, snapshot};
+use crate::config::SizeConstraint;
+
+use super::{HubConfig, setup, snapshot};
 
 #[test]
 fn set_min_size_respects_minimum_width() {
@@ -398,7 +400,11 @@ fn set_min_size_global_exceeds_screen_size() {
     hub.insert_tiling();
     hub.insert_tiling();
 
-    hub.sync_config(2.0, false, 100.0, 0.0, 0.0, 0.0);
+    hub.sync_config(HubConfig {
+        tab_bar_height: 2.0,
+        min_width: SizeConstraint::Pixels(100.0),
+        ..Default::default()
+    });
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1348,7 +1354,11 @@ fn global_max_applies_to_all_windows() {
     hub.insert_tiling();
     hub.insert_tiling();
 
-    hub.sync_config(TAB_BAR_HEIGHT, true, 0.0, 0.0, 60.0, 0.0);
+    hub.sync_config(HubConfig {
+        auto_tile: true,
+        max_width: SizeConstraint::Pixels(60.0),
+        ..Default::default()
+    });
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1399,7 +1409,11 @@ fn per_window_max_overrides_global() {
     let w0 = hub.insert_tiling();
     hub.insert_tiling();
 
-    hub.sync_config(TAB_BAR_HEIGHT, true, 0.0, 0.0, 60.0, 0.0);
+    hub.sync_config(HubConfig {
+        auto_tile: true,
+        max_width: SizeConstraint::Pixels(60.0),
+        ..Default::default()
+    });
     hub.set_window_constraint(w0, None, None, Some(30.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -1508,7 +1522,6 @@ fn raising_min_above_existing_max_raises_max() {
         "max_height should be raised to match min_height"
     );
 }
-
 
 #[test]
 fn clearing_constraint_allows_window_to_resize() {
