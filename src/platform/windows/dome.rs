@@ -348,6 +348,7 @@ impl Dome {
                     FocusTarget::NextTab => self.hub.focus_next_tab(),
                     FocusTarget::PrevTab => self.hub.focus_prev_tab(),
                     FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
+                    FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
                 },
                 Action::Move { target } => match target {
                     MoveTarget::Up => self.hub.move_up(),
@@ -355,6 +356,7 @@ impl Dome {
                     MoveTarget::Left => self.hub.move_left(),
                     MoveTarget::Right => self.hub.move_right(),
                     MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
+                    MoveTarget::Monitor { target } => self.hub.move_to_monitor(target),
                 },
                 Action::Toggle { target } => match target {
                     ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),

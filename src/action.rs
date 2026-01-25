@@ -24,6 +24,15 @@ pub enum Action {
     Exit,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MonitorTarget {
+    Up,
+    Down,
+    Left,
+    Right,
+    Name(String),
+}
+
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -98,7 +107,13 @@ pub enum FocusTarget {
     Parent,
     NextTab,
     PrevTab,
-    Workspace { name: String },
+    Workspace {
+        name: String,
+    },
+    Monitor {
+        #[arg(value_parser = parse_monitor_target)]
+        target: MonitorTarget,
+    },
 }
 
 impl fmt::Display for FocusTarget {
@@ -112,6 +127,7 @@ impl fmt::Display for FocusTarget {
             FocusTarget::NextTab => write!(f, "next_tab"),
             FocusTarget::PrevTab => write!(f, "prev_tab"),
             FocusTarget::Workspace { name } => write!(f, "workspace {name}"),
+            FocusTarget::Monitor { target } => write!(f, "monitor {target}"),
         }
     }
 }
@@ -122,7 +138,13 @@ pub enum MoveTarget {
     Down,
     Left,
     Right,
-    Workspace { name: String },
+    Workspace {
+        name: String,
+    },
+    Monitor {
+        #[arg(value_parser = parse_monitor_target)]
+        target: MonitorTarget,
+    },
 }
 
 impl fmt::Display for MoveTarget {
@@ -133,6 +155,19 @@ impl fmt::Display for MoveTarget {
             MoveTarget::Left => write!(f, "left"),
             MoveTarget::Right => write!(f, "right"),
             MoveTarget::Workspace { name } => write!(f, "workspace {name}"),
+            MoveTarget::Monitor { target } => write!(f, "monitor {target}"),
+        }
+    }
+}
+
+impl fmt::Display for MonitorTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MonitorTarget::Up => write!(f, "up"),
+            MonitorTarget::Down => write!(f, "down"),
+            MonitorTarget::Left => write!(f, "left"),
+            MonitorTarget::Right => write!(f, "right"),
+            MonitorTarget::Name(name) => write!(f, "{name}"),
         }
     }
 }
@@ -195,6 +230,11 @@ impl FromStr for Action {
             ["focus", "prev_tab"] => Ok(Action::Focus {
                 target: FocusTarget::PrevTab,
             }),
+            ["focus", "monitor", target] => Ok(Action::Focus {
+                target: FocusTarget::Monitor {
+                    target: parse_monitor_target(target)?,
+                },
+            }),
             ["move", "up"] => Ok(Action::Move {
                 target: MoveTarget::Up,
             }),
@@ -212,6 +252,11 @@ impl FromStr for Action {
                     name: n.to_string(),
                 },
             }),
+            ["move", "monitor", target] => Ok(Action::Move {
+                target: MoveTarget::Monitor {
+                    target: parse_monitor_target(target)?,
+                },
+            }),
             ["toggle", "spawn_direction"] => Ok(Action::Toggle {
                 target: ToggleTarget::SpawnDirection,
             }),
@@ -227,5 +272,20 @@ impl FromStr for Action {
             ["exit"] => Ok(Action::Exit),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
+    }
+}
+
+// MonitorTarget is parsed here instead of using clap's Subcommand derive.
+// Deriving Subcommand would require nested subcommands (e.g., `dome focus monitor up`
+// becoming `dome focus monitor up` with `up` as its own subcommand), which is overly
+// complex. Since actions are primarily parsed from config files and IPC strings anyway,
+// manual parsing is simpler and more flexible.
+fn parse_monitor_target(s: &str) -> Result<MonitorTarget> {
+    match s {
+        "up" => Ok(MonitorTarget::Up),
+        "down" => Ok(MonitorTarget::Down),
+        "left" => Ok(MonitorTarget::Left),
+        "right" => Ok(MonitorTarget::Right),
+        name => Ok(MonitorTarget::Name(name.to_string())),
     }
 }

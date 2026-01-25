@@ -1,5 +1,6 @@
 use super::{setup_hub, setup_logger_with_level, snapshot_text, validate_hub};
-use crate::core::node::{Dimension, FloatWindowId, WindowId};
+use crate::action::MonitorTarget;
+use crate::core::node::{Dimension, FloatWindowId, MonitorId, WindowId};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
@@ -26,6 +27,10 @@ enum Op {
     ToggleFloat,
     MoveToWorkspace,
     FocusWorkspace,
+    AddMonitor,
+    RemoveMonitor,
+    FocusMonitor,
+    MoveToMonitor,
     SetFocus,
     SetFloatFocus,
     SetWindowConstraint,
@@ -55,6 +60,10 @@ const ALL_OPS: &[Op] = &[
     Op::ToggleFloat,
     Op::MoveToWorkspace,
     Op::FocusWorkspace,
+    Op::AddMonitor,
+    Op::RemoveMonitor,
+    Op::FocusMonitor,
+    Op::MoveToMonitor,
     Op::SetFocus,
     Op::SetFloatFocus,
     Op::SetWindowConstraint,
@@ -64,6 +73,7 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
     let mut hub = setup_hub();
     let mut windows: Vec<WindowId> = Vec::new();
     let mut floats: Vec<FloatWindowId> = Vec::new();
+    let mut monitors: Vec<MonitorId> = vec![hub.focused_monitor()];
     let mut history: Vec<String> = Vec::new();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -187,6 +197,37 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                     let ws = rng.random_range(0..5);
                     hub.focus_workspace(&ws.to_string());
                     format!("FocusWorkspace({ws})")
+                }
+                Op::AddMonitor => {
+                    let x = monitors.len() as f32 * 150.0;
+                    let id = hub.add_monitor(
+                        format!("monitor-{}", monitors.len()),
+                        Dimension { x, y: 0.0, width: 150.0, height: 30.0 },
+                    );
+                    monitors.push(id);
+                    format!("AddMonitor({id})")
+                }
+                Op::RemoveMonitor => {
+                    if monitors.len() <= 1 {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..monitors.len());
+                    let id = monitors.remove(idx);
+                    let fallback = monitors[0];
+                    hub.remove_monitor(id, fallback);
+                    format!("RemoveMonitor({id})")
+                }
+                Op::FocusMonitor => {
+                    let targets = [MonitorTarget::Up, MonitorTarget::Down, MonitorTarget::Left, MonitorTarget::Right];
+                    let target = &targets[rng.random_range(0..targets.len())];
+                    hub.focus_monitor(target);
+                    format!("FocusMonitor({target:?})")
+                }
+                Op::MoveToMonitor => {
+                    let targets = [MonitorTarget::Up, MonitorTarget::Down, MonitorTarget::Left, MonitorTarget::Right];
+                    let target = &targets[rng.random_range(0..targets.len())];
+                    hub.move_to_monitor(target);
+                    format!("MoveToMonitor({target:?})")
                 }
                 Op::SetFocus => {
                     if windows.is_empty() {

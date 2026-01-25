@@ -1,3 +1,4 @@
+use crate::action::MonitorTarget;
 use crate::config::SizeConstraint;
 
 use super::allocator::{Allocator, NodeId};
@@ -95,9 +96,9 @@ impl Hub {
         self.focused_monitor
     }
 
-    fn workspace_screen(&self, workspace_id: WorkspaceId) -> Dimension {
-        let monitor_id = self.workspaces.get(workspace_id).monitor;
-        self.monitors.get(monitor_id).dimension
+    #[cfg(test)]
+    pub(super) fn all_monitors(&self) -> Vec<(MonitorId, Monitor)> {
+        self.monitors.all_active()
     }
 
     pub(crate) fn add_monitor(&mut self, name: String, dimension: Dimension) -> MonitorId {
@@ -145,6 +146,46 @@ impl Hub {
                 self.adjust_workspace(ws_id);
             }
         }
+    }
+
+    pub(crate) fn focus_monitor(&mut self, target: &MonitorTarget) {
+        let Some(target_id) = self.find_monitor_by_target(target) else {
+            return;
+        };
+        if target_id == self.focused_monitor {
+            return;
+        }
+        tracing::debug!(?target, "Focusing monitor");
+        self.focused_monitor = target_id;
+    }
+
+    pub(crate) fn move_to_monitor(&mut self, target: &MonitorTarget) {
+        let Some(target_id) = self.find_monitor_by_target(target) else {
+            return;
+        };
+        if target_id == self.focused_monitor {
+            return;
+        }
+
+        let current_ws = self.current_workspace();
+        let Some(focused) = self.workspaces.get(current_ws).focused else {
+            return;
+        };
+        let target_ws = self.monitors.get(target_id).active_workspace;
+
+        tracing::debug!(?target, ?focused, "Moving to monitor");
+        match focused {
+            Focus::Tiling(child) => {
+                self.detach_child_from_workspace(child);
+                self.attach_child_to_workspace(child, target_ws);
+            }
+            Focus::Float(float_id) => {
+                self.detach_float_from_workspace(float_id);
+                self.float_windows.get_mut(float_id).workspace = target_ws;
+                self.attach_float_to_workspace(target_ws, float_id);
+            }
+        }
+        self.focused_monitor = target_id;
     }
 
     pub(crate) fn sync_config(&mut self, config: HubConfig) {
@@ -1050,18 +1091,17 @@ impl Hub {
             Parent::Workspace(workspace_id) => {
                 self.workspaces.get_mut(workspace_id).root = None;
 
-                let ws = self.workspaces.get(workspace_id);
-                let has_floats = !ws.float_windows.is_empty();
-
                 // Set focus to a float if available, otherwise None
-                let new_focus = ws.float_windows.last().map(|&f| Focus::Float(f));
+                let new_focus = self
+                    .workspaces
+                    .get(workspace_id)
+                    .float_windows
+                    .last()
+                    .map(|&f| Focus::Float(f));
                 self.workspaces.get_mut(workspace_id).focused = new_focus;
 
-                if workspace_id != self.current_workspace() && !has_floats {
-                    self.workspaces.delete(workspace_id);
-                } else {
-                    self.adjust_workspace(workspace_id);
-                }
+                self.adjust_workspace(workspace_id);
+                self.prune_workspace(workspace_id);
             }
         }
     }
@@ -1307,14 +1347,7 @@ impl Hub {
             tracing::debug!(%id, %ws, "Detached unfocused float");
         }
 
-        // Delete workspace if empty and not current
-        let workspace = self.workspaces.get(ws);
-        if ws != self.current_workspace()
-            && workspace.root.is_none()
-            && workspace.float_windows.is_empty()
-        {
-            self.workspaces.delete(ws);
-        }
+        self.prune_workspace(ws);
     }
 
     fn get_effective_min_size(&self, child: Child) -> (f32, f32) {
@@ -1452,6 +1485,61 @@ impl Hub {
                     c.dimension.y += offset_y;
                     stack.extend(c.children.iter().copied());
                 }
+            }
+        }
+    }
+
+    /// Deletes workspace if empty and not active on its monitor
+    fn prune_workspace(&mut self, ws_id: WorkspaceId) {
+        let ws = self.workspaces.get(ws_id);
+        if ws.root.is_some() || !ws.float_windows.is_empty() {
+            return;
+        }
+        let monitor_id = ws.monitor;
+        if self.monitors.get(monitor_id).active_workspace != ws_id {
+            self.workspaces.delete(ws_id);
+        }
+    }
+
+    fn workspace_screen(&self, workspace_id: WorkspaceId) -> Dimension {
+        let monitor_id = self.workspaces.get(workspace_id).monitor;
+        self.monitors.get(monitor_id).dimension
+    }
+
+    fn find_monitor_by_target(&self, target: &MonitorTarget) -> Option<MonitorId> {
+        match target {
+            MonitorTarget::Name(name) => self
+                .monitors
+                .all_active()
+                .iter()
+                .find(|(_, m)| m.name == *name)
+                .map(|(id, _)| *id),
+            direction => {
+                let current = self.monitors.get(self.focused_monitor);
+                let cx = current.dimension.x + current.dimension.width / 2.0;
+                let cy = current.dimension.y + current.dimension.height / 2.0;
+
+                self.monitors
+                    .all_active()
+                    .iter()
+                    .filter(|(id, _)| *id != self.focused_monitor)
+                    .filter_map(|(id, m)| {
+                        let mx = m.dimension.x + m.dimension.width / 2.0;
+                        let my = m.dimension.y + m.dimension.height / 2.0;
+                        let dx = mx - cx;
+                        let dy = my - cy;
+
+                        let valid = match direction {
+                            MonitorTarget::Left => dx < 0.0,
+                            MonitorTarget::Right => dx > 0.0,
+                            MonitorTarget::Up => dy < 0.0,
+                            MonitorTarget::Down => dy > 0.0,
+                            MonitorTarget::Name(_) => false,
+                        };
+                        valid.then_some((*id, dx * dx + dy * dy))
+                    })
+                    .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                    .map(|(id, _)| id)
             }
         }
     }

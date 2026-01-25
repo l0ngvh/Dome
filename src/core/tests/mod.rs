@@ -73,9 +73,16 @@ pub(super) fn snapshot(hub: &Hub) -> String {
 }
 
 pub(super) fn snapshot_text(hub: &Hub) -> String {
+    let monitors = hub.all_monitors();
+    let monitor_info = if monitors.len() > 1 {
+        format!(", monitor={}", hub.focused_monitor())
+    } else {
+        String::new()
+    };
     let mut s = format!(
-        "Hub(focused={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
+        "Hub(focused={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
         hub.current_workspace(),
+        monitor_info,
         hub.screen().x,
         hub.screen().y,
         hub.screen().width,
@@ -685,10 +692,6 @@ pub(super) fn setup_logger_with_level(level: &str) {
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
-    std::panic::set_hook(Box::new(|panic_info| {
-        let backtrace = backtrace::Backtrace::new();
-        tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
-    }));
 }
 
 impl Default for HubConfig {

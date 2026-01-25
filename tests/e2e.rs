@@ -287,3 +287,26 @@ fn test_exec() {
 
     std::fs::remove_file(&marker).ok();
 }
+
+
+#[test]
+fn test_focus_monitor() {
+    let _env = TestEnv::new();
+    spawn_test_window();
+
+    // Should not panic even with single monitor
+    assert!(dome(&["focus", "monitor", "left"]));
+    assert!(dome(&["focus", "monitor", "right"]));
+    assert!(dome(&["focus", "monitor", "up"]));
+    assert!(dome(&["focus", "monitor", "down"]));
+}
+
+#[test]
+fn test_move_to_monitor() {
+    let _env = TestEnv::new();
+    spawn_test_window();
+
+    // Should not panic even with single monitor
+    assert!(dome(&["move", "monitor", "left"]));
+    assert!(dome(&["move", "monitor", "right"]));
+}
