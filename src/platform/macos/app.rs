@@ -10,12 +10,13 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_se
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSScreen, NSWindow,
 };
+use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
     CFDictionary, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext, kCFBooleanTrue,
     kCFRunLoopDefaultMode,
 };
-use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
+use objc2_foundation::{NSNotification, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
@@ -80,7 +81,12 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
                 .or(Err(anyhow::anyhow!("channel closed")))
         }
     })?;
-    let screen = get_main_screen(mtm);
+
+    let screens = get_all_screens(mtm);
+    if screens.is_empty() {
+        return Err(anyhow::anyhow!("No monitors detected"));
+    }
+    let global_bounds = compute_global_bounds(&screens);
 
     let is_suspended = Rc::new(Cell::new(false));
 
@@ -91,7 +97,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
             tracing::error!("Failed to create keyboard listener: {e:#}");
         });
 
-    let delegate = AppDelegate::new(mtm, screen, event_tx, frame_rx, event_listener);
+    let delegate = AppDelegate::new(mtm, global_bounds, event_tx, frame_rx, event_listener);
     let source = create_frame_source(&delegate);
 
     let main_run_loop = CFRunLoop::main().unwrap();
@@ -102,9 +108,10 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
         source,
         run_loop: main_run_loop,
     };
+
     let hub_thread = thread::spawn(move || {
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Dome::new(hub_config, screen, sender).run(event_rx);
+            Dome::new(hub_config, screens, global_bounds, sender).run(event_rx);
         }))
         .is_err()
         {
@@ -152,7 +159,7 @@ fn init_tracing(config: &Config) {
 }
 
 pub(super) struct AppDelegateIvars {
-    pub(super) screen: Dimension,
+    pub(super) global_bounds: Dimension,
     pub(super) hub_sender: Sender<HubEvent>,
     pub(super) frame_rx: Receiver<HubMessage>,
     pub(super) overlay_window: OnceCell<Retained<NSWindow>>,
@@ -174,10 +181,10 @@ define_class!(
             tracing::info!("Application did finish launching");
             let mtm = self.mtm();
 
-            let screen = self.ivars().screen;
+            let bounds = self.ivars().global_bounds;
             let frame = NSRect::new(
-                NSPoint::new(screen.x as f64, 0.0),
-                NSSize::new(screen.width as f64, screen.height as f64),
+                NSPoint::new(bounds.x as f64, 0.0),
+                NSSize::new(bounds.width as f64, bounds.height as f64),
             );
 
             let overlay_window = create_overlay_window(mtm, frame);
@@ -199,13 +206,13 @@ define_class!(
 impl AppDelegate {
     fn new(
         mtm: MainThreadMarker,
-        screen: Dimension,
+        global_bounds: Dimension,
         hub_sender: Sender<HubEvent>,
         frame_rx: Receiver<HubMessage>,
         event_listener: EventListener,
     ) -> Retained<Self> {
         let ivars = AppDelegateIvars {
-            screen,
+            global_bounds,
             hub_sender,
             frame_rx,
             overlay_window: OnceCell::new(),
@@ -249,14 +256,73 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     }
 }
 
-fn get_main_screen(mtm: MainThreadMarker) -> Dimension {
-    let screen = NSScreen::mainScreen(mtm).expect("No main screen found");
-    let frame = screen.frame();
-    let visible = screen.visibleFrame();
+#[derive(Clone)]
+pub(super) struct ScreenInfo {
+    pub display_id: CGDirectDisplayID,
+    pub name: String,
+    pub dimension: Dimension,
+    pub full_height: f32,
+    pub is_primary: bool,
+}
+
+fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
+    let desc = screen.deviceDescription();
+    let key = NSString::from_str("NSScreenNumber");
+    desc.objectForKey(&key)
+        .and_then(|obj| {
+            let num: Option<&NSNumber> = obj.downcast_ref();
+            num.map(|n| n.unsignedIntValue())
+        })
+        .unwrap_or(0)
+}
+
+pub(super) fn get_all_screens(mtm: MainThreadMarker) -> Vec<ScreenInfo> {
+    let primary_id = CGMainDisplayID();
+
+    NSScreen::screens(mtm)
+        .iter()
+        .map(|screen| {
+            let display_id = get_display_id(&screen);
+            let name = screen.localizedName().to_string();
+            let bounds = CGDisplayBounds(display_id);
+            let frame = screen.frame();
+            let visible = screen.visibleFrame();
+
+            let top_inset = (frame.origin.y + frame.size.height)
+                - (visible.origin.y + visible.size.height);
+            let bottom_inset = visible.origin.y - frame.origin.y;
+
+            ScreenInfo {
+                display_id,
+                name,
+                dimension: Dimension {
+                    x: bounds.origin.x as f32,
+                    y: (bounds.origin.y + top_inset) as f32,
+                    width: bounds.size.width as f32,
+                    height: (bounds.size.height - top_inset - bottom_inset) as f32,
+                },
+                full_height: bounds.size.height as f32,
+                is_primary: display_id == primary_id,
+            }
+        })
+        .collect()
+}
+
+pub(super) fn compute_global_bounds(screens: &[ScreenInfo]) -> Dimension {
+    let min_x = screens.iter().map(|s| s.dimension.x).fold(f32::MAX, f32::min);
+    let min_y = screens.iter().map(|s| s.dimension.y).fold(f32::MAX, f32::min);
+    let max_x = screens
+        .iter()
+        .map(|s| s.dimension.x + s.dimension.width)
+        .fold(f32::MIN, f32::max);
+    let max_y = screens
+        .iter()
+        .map(|s| s.dimension.y + s.dimension.height)
+        .fold(f32::MIN, f32::max);
     Dimension {
-        x: visible.origin.x as f32,
-        y: (frame.size.height - visible.origin.y - visible.size.height) as f32,
-        width: visible.size.width as f32,
-        height: visible.size.height as f32,
+        x: min_x,
+        y: min_y,
+        width: max_x - min_x,
+        height: max_y - min_y,
     }
 }

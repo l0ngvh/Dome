@@ -9,9 +9,10 @@ use objc2_core_graphics::CGWindowID;
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
-    Child, Container, Dimension, FloatWindowId, Focus, Hub, SpawnMode, Window, WindowId,
+    Child, Container, Dimension, FloatWindowId, Focus, Hub, MonitorId, SpawnMode, Window, WindowId,
 };
 
+use super::app::{ScreenInfo, compute_global_bounds};
 use super::overlay::{OverlayLabel, OverlayRect, Overlays};
 use super::recovery;
 use super::window::{MacWindow, get_app_by_pid, get_ax_windows, list_cg_window_ids, running_apps};
@@ -44,6 +45,7 @@ pub(super) enum HubEvent {
     /// syncs window state, not focus, as focus changes should come from user interactions. Beside
     /// we receive plenty of focus events, so missing them isn't a concern.
     Sync,
+    ScreensChanged(Vec<ScreenInfo>),
     Shutdown,
 }
 
@@ -201,24 +203,83 @@ impl MessageSender {
     }
 }
 
+type DisplayId = u32;
+
+struct MonitorRegistry {
+    map: HashMap<DisplayId, MonitorId>,
+    reverse: HashMap<MonitorId, DisplayId>,
+    primary_display_id: DisplayId,
+}
+
+impl MonitorRegistry {
+    fn new(primary_display_id: DisplayId, primary_monitor_id: MonitorId) -> Self {
+        let mut map = HashMap::new();
+        let mut reverse = HashMap::new();
+        map.insert(primary_display_id, primary_monitor_id);
+        reverse.insert(primary_monitor_id, primary_display_id);
+        Self {
+            map,
+            reverse,
+            primary_display_id,
+        }
+    }
+
+    fn insert(&mut self, display_id: DisplayId, monitor_id: MonitorId) {
+        self.map.insert(display_id, monitor_id);
+        self.reverse.insert(monitor_id, display_id);
+    }
+
+    fn remove_by_id(&mut self, monitor_id: MonitorId) {
+        if let Some(display_id) = self.reverse.remove(&monitor_id) {
+            self.map.remove(&display_id);
+        }
+    }
+}
+
 pub(super) struct Dome {
     hub: Hub,
     registry: Registry,
+    monitor_registry: MonitorRegistry,
     config: Config,
-    screen: Dimension,
+    /// Work area of the primary monitor, used for crash recovery positioning.
+    primary_screen: Dimension,
+    /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
+    /// coordinate conversion in overlay rendering.
+    primary_full_height: f32,
+    /// Bounding box of all monitors, used for hiding windows offscreen.
+    global_bounds: Dimension,
     observed_pids: HashSet<i32>,
     sender: MessageSender,
     running: bool,
 }
 
 impl Dome {
-    pub(super) fn new(config: Config, screen: Dimension, sender: MessageSender) -> Self {
-        let hub = Hub::new(screen, config.clone().into());
+    pub(super) fn new(
+        config: Config,
+        screens: Vec<ScreenInfo>,
+        global_bounds: Dimension,
+        sender: MessageSender,
+    ) -> Self {
+        let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
+        let mut hub = Hub::new(primary.dimension, config.clone().into());
+        let primary_monitor_id = hub.focused_monitor();
+        let mut monitor_registry = MonitorRegistry::new(primary.display_id, primary_monitor_id);
+
+        for screen in &screens {
+            if screen.display_id != primary.display_id {
+                let id = hub.add_monitor(screen.name.clone(), screen.dimension);
+                monitor_registry.insert(screen.display_id, id);
+            }
+        }
+
         Self {
             hub,
             registry: Registry::new(),
+            monitor_registry,
             config,
-            screen,
+            primary_screen: primary.dimension,
+            primary_full_height: primary.full_height,
+            global_bounds,
             observed_pids: HashSet::new(),
             sender,
             running: true,
@@ -306,6 +367,10 @@ impl Dome {
             HubEvent::Sync => {
                 self.periodic_sync();
             }
+            HubEvent::ScreensChanged(screens) => {
+                tracing::info!(count = screens.len(), "Screens changed");
+                self.update_screens(screens);
+            }
         }
 
         if !self.running {
@@ -344,7 +409,7 @@ impl Dome {
                 continue;
             }
 
-            let window = MacWindow::new(ax_element, cg_id, self.screen, app);
+            let window = MacWindow::new(ax_element, cg_id, self.global_bounds, app);
             if !window.is_manageable() {
                 continue;
             }
@@ -359,7 +424,7 @@ impl Dome {
                 WindowType::Float(self.hub.insert_float(dimension))
             };
 
-            recovery::track(cg_id, window.clone(), self.screen);
+            recovery::track(cg_id, window.clone(), self.primary_screen);
             self.registry.insert(window, window_type);
 
             let window = self.registry.get(cg_id).unwrap();
@@ -478,6 +543,25 @@ impl Dome {
         }
     }
 
+    fn update_screens(&mut self, screens: Vec<ScreenInfo>) {
+        if screens.is_empty() {
+            tracing::warn!("Empty screen list, skipping reconciliation");
+            return;
+        }
+
+        if let Some(primary) = screens.iter().find(|s| s.is_primary) {
+            self.primary_screen = primary.dimension;
+            self.primary_full_height = primary.full_height;
+        }
+        self.global_bounds = compute_global_bounds(&screens);
+
+        for entry in self.registry.windows.values_mut() {
+            entry.window.set_global_bounds(self.global_bounds);
+        }
+
+        reconcile_monitors(&mut self.hub, &mut self.monitor_registry, &screens);
+    }
+
     #[tracing::instrument(skip(self))]
     fn execute_actions(&mut self, actions: &Actions) {
         for action in actions {
@@ -550,21 +634,23 @@ impl Dome {
         position_tiling_windows(windows, &mut self.registry, border);
 
         // Position float windows
-        let ws = self.hub.get_workspace(self.hub.current_workspace());
-        let focused = ws.focused();
-        let float_windows: Vec<_> = ws.float_windows().to_vec();
-        for float_id in float_windows {
-            if let Some(cg_id) = self.registry.get_cg_id(WindowType::Float(float_id))
-                && let Some(window) = self.registry.get_mut(cg_id)
-            {
-                let dim = apply_inset(self.hub.get_float(float_id).dimension(), border);
-                if let Err(e) = window.set_dimension(dim) {
-                    tracing::trace!("Failed to set float dimension: {e:#}");
+        for ws_id in self.hub.visible_workspaces() {
+            let ws = self.hub.get_workspace(ws_id);
+            for &float_id in ws.float_windows() {
+                if let Some(cg_id) = self.registry.get_cg_id(WindowType::Float(float_id))
+                    && let Some(window) = self.registry.get_mut(cg_id)
+                {
+                    let dim = apply_inset(self.hub.get_float(float_id).dimension(), border);
+                    if let Err(e) = window.set_dimension(dim) {
+                        tracing::trace!("Failed to set float dimension: {e:#}");
+                    }
                 }
             }
         }
 
         // Focus window if changed
+        let ws = self.hub.get_workspace(self.hub.current_workspace());
+        let focused = ws.focused();
         if focused != last_focus {
             let focus_cg_id = match focused {
                 Some(Focus::Tiling(Child::Window(id))) => {
@@ -583,7 +669,12 @@ impl Dome {
     }
 
     fn send_overlays(&self) {
-        let overlays = build_overlays(&self.hub, &self.registry, &self.config);
+        let overlays = build_overlays(
+            &self.hub,
+            &self.registry,
+            &self.config,
+            self.primary_full_height,
+        );
         self.sender.send(HubMessage::Overlays(overlays));
     }
 }
@@ -607,33 +698,35 @@ fn get_focused_window_cg_id(pid: i32) -> Option<CGWindowID> {
 }
 
 fn get_displayed_cg_ids(hub: &Hub, registry: &Registry) -> HashSet<CGWindowID> {
-    let ws = hub.get_workspace(hub.current_workspace());
     let mut cg_ids = HashSet::new();
 
-    let mut stack: Vec<Child> = ws.root().into_iter().collect();
-    while let Some(child) = stack.pop() {
-        match child {
-            Child::Window(id) => {
-                if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id)) {
-                    cg_ids.insert(cg_id);
+    for ws_id in hub.visible_workspaces() {
+        let ws = hub.get_workspace(ws_id);
+        let mut stack: Vec<Child> = ws.root().into_iter().collect();
+        while let Some(child) = stack.pop() {
+            match child {
+                Child::Window(id) => {
+                    if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id)) {
+                        cg_ids.insert(cg_id);
+                    }
                 }
-            }
-            Child::Container(id) => {
-                let container = hub.get_container(id);
-                if let Some(active) = container.active_tab() {
-                    stack.push(active);
-                } else {
-                    for &c in container.children() {
-                        stack.push(c);
+                Child::Container(id) => {
+                    let container = hub.get_container(id);
+                    if let Some(active) = container.active_tab() {
+                        stack.push(active);
+                    } else {
+                        for &c in container.children() {
+                            stack.push(c);
+                        }
                     }
                 }
             }
         }
-    }
 
-    for &float_id in ws.float_windows() {
-        if let Some(cg_id) = registry.get_cg_id(WindowType::Float(float_id)) {
-            cg_ids.insert(cg_id);
+        for &float_id in ws.float_windows() {
+            if let Some(cg_id) = registry.get_cg_id(WindowType::Float(float_id)) {
+                cg_ids.insert(cg_id);
+            }
         }
     }
 
@@ -642,24 +735,27 @@ fn get_displayed_cg_ids(hub: &Hub, registry: &Registry) -> HashSet<CGWindowID> {
 
 /// Position tiling windows, returns discovered size constraints and clipped window ids
 fn collect_tiling_windows(hub: &Hub, registry: &Registry) -> Vec<(CGWindowID, WindowId, Window)> {
-    let ws = hub.get_workspace(hub.current_workspace());
-    let mut stack: Vec<Child> = ws.root().into_iter().collect();
     let mut result = Vec::new();
 
-    while let Some(child) = stack.pop() {
-        match child {
-            Child::Window(id) => {
-                if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id)) {
-                    result.push((cg_id, id, hub.get_window(id).clone()));
+    for ws_id in hub.visible_workspaces() {
+        let ws = hub.get_workspace(ws_id);
+        let mut stack: Vec<Child> = ws.root().into_iter().collect();
+
+        while let Some(child) = stack.pop() {
+            match child {
+                Child::Window(id) => {
+                    if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id)) {
+                        result.push((cg_id, id, hub.get_window(id).clone()));
+                    }
                 }
-            }
-            Child::Container(id) => {
-                let container = hub.get_container(id);
-                if let Some(active) = container.active_tab() {
-                    stack.push(active);
-                } else {
-                    for &c in container.children() {
-                        stack.push(c);
+                Child::Container(id) => {
+                    let container = hub.get_container(id);
+                    if let Some(active) = container.active_tab() {
+                        stack.push(active);
+                    } else {
+                        for &c in container.children() {
+                            stack.push(c);
+                        }
                     }
                 }
             }
@@ -682,7 +778,7 @@ fn position_tiling_windows(
 }
 
 fn build_tab_bar(
-    screen: Dimension,
+    primary_full_height: f32,
     container: &Container,
     registry: &Registry,
     config: &Config,
@@ -699,7 +795,7 @@ fn build_tab_bar(
 
     let mut rects = vec![OverlayRect {
         x: dim.x,
-        y: flip_y(screen, dim.y, height),
+        y: flip_y(primary_full_height, dim.y, height),
         width: dim.width,
         height,
         color: config.tab_bar_background_color,
@@ -711,7 +807,7 @@ fn build_tab_bar(
         width: dim.width,
         height,
     };
-    rects.extend(border_rects(screen, tab_dim, border, [tab_color; 4]));
+    rects.extend(border_rects(primary_full_height, tab_dim, border, [tab_color; 4]));
 
     let children = container.children();
     if children.is_empty() {
@@ -723,7 +819,7 @@ fn build_tab_bar(
 
     rects.push(OverlayRect {
         x: dim.x + active_tab as f32 * tab_width,
-        y: flip_y(screen, dim.y, height),
+        y: flip_y(primary_full_height, dim.y, height),
         width: tab_width,
         height,
         color: config.active_tab_background_color,
@@ -732,7 +828,7 @@ fn build_tab_bar(
     for i in 1..children.len() {
         rects.push(OverlayRect {
             x: dim.x + i as f32 * tab_width - border / 2.0,
-            y: flip_y(screen, dim.y, height),
+            y: flip_y(primary_full_height, dim.y, height),
             width: border,
             height,
             color: tab_color,
@@ -756,7 +852,7 @@ fn build_tab_bar(
             let x = dim.x + i as f32 * tab_width + tab_width / 2.0 - text.len() as f32 * 3.5;
             OverlayLabel {
                 x,
-                y: flip_y(screen, dim.y + height / 2.0 - 6.0, 12.0),
+                y: flip_y(primary_full_height, dim.y + height / 2.0 - 6.0, 12.0),
                 text,
                 color: Color {
                     r: 1.0,
@@ -772,9 +868,13 @@ fn build_tab_bar(
     (rects, labels)
 }
 
-fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
+fn build_overlays(
+    hub: &Hub,
+    registry: &Registry,
+    config: &Config,
+    primary_full_height: f32,
+) -> Overlays {
     let ws = hub.get_workspace(hub.current_workspace());
-    let screen = hub.screen();
     let border = config.border_size;
     let focused = ws.focused();
 
@@ -789,7 +889,12 @@ fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
                     && focused != Some(Focus::Tiling(Child::Window(id)))
                 {
                     let dim = hub.get_window(id).dimension();
-                    rects.extend(border_rects(screen, dim, border, [config.border_color; 4]));
+                    rects.extend(border_rects(
+                        primary_full_height,
+                        dim,
+                        border,
+                        [config.border_color; 4],
+                    ));
                 }
             }
             Child::Container(id) => {
@@ -798,7 +903,7 @@ fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
                     stack.push(active);
                     let is_focused = focused == Some(Focus::Tiling(Child::Container(id)));
                     let (tab_rects, tab_labels) =
-                        build_tab_bar(screen, container, registry, config, is_focused);
+                        build_tab_bar(primary_full_height, container, registry, config, is_focused);
                     rects.extend(tab_rects);
                     labels.extend(tab_labels);
                 } else {
@@ -814,7 +919,7 @@ fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
         Some(Focus::Tiling(Child::Window(id))) => {
             let w = hub.get_window(id);
             rects.extend(border_rects(
-                screen,
+                primary_full_height,
                 w.dimension(),
                 border,
                 spawn_colors(w.spawn_mode(), config),
@@ -823,7 +928,7 @@ fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
         Some(Focus::Tiling(Child::Container(id))) => {
             let c = hub.get_container(id);
             rects.extend(border_rects(
-                screen,
+                primary_full_height,
                 c.dimension(),
                 border,
                 spawn_colors(c.spawn_mode(), config),
@@ -840,7 +945,7 @@ fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
             } else {
                 config.border_color
             };
-            rects.extend(border_rects(screen, dim, border, [color; 4]));
+            rects.extend(border_rects(primary_full_height, dim, border, [color; 4]));
         }
     }
 
@@ -860,8 +965,8 @@ fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
 
 // macOS uses bottom-left origin, so we flip y here.
 // Windows uses top-left origin, so no flip needed there.
-fn flip_y(screen: Dimension, y: f32, height: f32) -> f32 {
-    screen.y + screen.height - y - height
+fn flip_y(primary_full_height: f32, y: f32, height: f32) -> f32 {
+    primary_full_height - y - height
 }
 
 fn apply_inset(dim: Dimension, border: f32) -> Dimension {
@@ -875,7 +980,7 @@ fn apply_inset(dim: Dimension, border: f32) -> Dimension {
 
 // colors: [top, bottom, left, right]
 fn border_rects(
-    screen: Dimension,
+    primary_full_height: f32,
     dim: Dimension,
     border: f32,
     colors: [Color; 4],
@@ -883,28 +988,28 @@ fn border_rects(
     [
         OverlayRect {
             x: dim.x,
-            y: flip_y(screen, dim.y, border),
+            y: flip_y(primary_full_height, dim.y, border),
             width: dim.width,
             height: border,
             color: colors[0],
         },
         OverlayRect {
             x: dim.x,
-            y: flip_y(screen, dim.y + dim.height - border, border),
+            y: flip_y(primary_full_height, dim.y + dim.height - border, border),
             width: dim.width,
             height: border,
             color: colors[1],
         },
         OverlayRect {
             x: dim.x,
-            y: flip_y(screen, dim.y + border, dim.height - 2.0 * border),
+            y: flip_y(primary_full_height, dim.y + border, dim.height - 2.0 * border),
             width: border,
             height: dim.height - 2.0 * border,
             color: colors[2],
         },
         OverlayRect {
             x: dim.x + dim.width - border,
-            y: flip_y(screen, dim.y + border, dim.height - 2.0 * border),
+            y: flip_y(primary_full_height, dim.y + border, dim.height - 2.0 * border),
             width: border,
             height: dim.height - 2.0 * border,
             color: colors[3],
@@ -930,4 +1035,45 @@ fn should_ignore(window: &MacWindow, rules: &[MacosWindow]) -> bool {
         return true;
     }
     false
+}
+
+fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[ScreenInfo]) {
+    if let Some(new_primary) = screens.iter().find(|s| s.is_primary) {
+        registry.primary_display_id = new_primary.display_id;
+    }
+
+    let current_keys: HashSet<_> = screens.iter().map(|s| s.display_id).collect();
+
+    // Add new monitors first
+    for screen in screens {
+        if !registry.map.contains_key(&screen.display_id) {
+            let id = hub.add_monitor(screen.name.clone(), screen.dimension);
+            registry.insert(screen.display_id, id);
+            tracing::info!(name = %screen.name, "Added monitor");
+        }
+    }
+
+    // Remove monitors that no longer exist
+    let to_remove: Vec<_> = registry
+        .map
+        .iter()
+        .filter(|(key, _)| !current_keys.contains(key))
+        .map(|(_, id)| *id)
+        .collect();
+
+    let fallback_id = registry.map.get(&registry.primary_display_id).copied();
+    for monitor_id in to_remove {
+        if let Some(fallback) = fallback_id.filter(|&f| f != monitor_id) {
+            hub.remove_monitor(monitor_id, fallback);
+            registry.remove_by_id(monitor_id);
+            tracing::info!(%monitor_id, "Removed monitor");
+        }
+    }
+
+    // Update dimensions
+    for screen in screens {
+        if let Some(&monitor_id) = registry.map.get(&screen.display_id) {
+            hub.update_monitor_dimension(monitor_id, screen.dimension);
+        }
+    }
 }

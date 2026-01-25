@@ -27,11 +27,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
     GetWindowLongPtrW, HWND_TOPMOST, PostMessageW, RegisterClassW, SW_SHOWNA, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, ShowWindow, ULW_ALPHA,
-    UpdateLayeredWindow, WM_PAINT, WM_QUIT, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-    WS_EX_TRANSPARENT, WS_POPUP,
+    UpdateLayeredWindow, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT, WNDCLASSW, WS_EX_LAYERED,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 use super::dome::{AppHandle, HubEvent, Overlays, WM_APP_FRAME};
+use super::get_all_screens;
 use crate::core::Dimension;
 
 pub(super) struct App {
@@ -330,6 +331,18 @@ unsafe extern "system" fn wnd_proc(
                 tracing::warn!("process_overlays failed: {e}");
             }
             LRESULT(0)
+        }
+        // Don't know if this is still relevant
+        // https://stackoverflow.com/questions/33762140/what-is-the-notification-when-the-number-of-monitors-changes
+        WM_DISPLAYCHANGE => {
+            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
+            if !ptr.is_null() {
+                match get_all_screens() {
+                    Ok(screens) => unsafe { (*ptr).send_event(HubEvent::ScreensChanged(screens)) },
+                    Err(e) => tracing::warn!("Failed to enumerate screens: {e}"),
+                }
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
         WM_PAINT => LRESULT(0),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },

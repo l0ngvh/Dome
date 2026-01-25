@@ -91,9 +91,16 @@ impl Hub {
         self.monitors.get(self.focused_monitor).dimension
     }
 
-    #[cfg(test)]
-    pub(super) fn focused_monitor(&self) -> MonitorId {
+    pub(crate) fn focused_monitor(&self) -> MonitorId {
         self.focused_monitor
+    }
+
+    pub(crate) fn visible_workspaces(&self) -> Vec<WorkspaceId> {
+        self.monitors
+            .all_active()
+            .into_iter()
+            .map(|(_, m)| m.active_workspace)
+            .collect()
     }
 
     #[cfg(test)]

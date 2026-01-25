@@ -28,7 +28,7 @@ pub(super) struct MacWindow {
     app: CFRetained<AXUIElement>,
     cg_id: CGWindowID,
     pid: i32,
-    screen: Dimension,
+    global_bounds: Dimension,
     app_name: String,
     bundle_id: Option<String>,
     title: Option<String>,
@@ -58,7 +58,7 @@ impl MacWindow {
     pub(super) fn new(
         element: CFRetained<AXUIElement>,
         cg_id: CGWindowID,
-        screen: Dimension,
+        global_bounds: Dimension,
         app: &NSRunningApplication,
     ) -> Self {
         let pid = app.processIdentifier();
@@ -77,7 +77,7 @@ impl MacWindow {
             app: ax_app,
             cg_id,
             pid,
-            screen,
+            global_bounds,
             app_name,
             bundle_id,
             title,
@@ -247,7 +247,7 @@ impl MacWindow {
     pub(super) fn try_placement(&mut self, window: &Window, border: f32) {
         let dim = apply_inset(window.dimension(), border);
 
-        if is_completely_offscreen(dim, self.screen) {
+        if is_completely_offscreen(dim, self.global_bounds) {
             // TODO: if hide fail to move the window to offscreen position, this window is clearly
             // trying to take focus, so we should pop it to float or something.
             // Exception is full screen window, which, should be handled differently as a first
@@ -266,21 +266,21 @@ impl MacWindow {
         let mut target = dim;
 
         // Mac prevents putting windows above menu bar
-        if target.y < self.screen.y {
-            target.height -= self.screen.y - target.y;
-            target.y = self.screen.y;
+        if target.y < self.global_bounds.y {
+            target.height -= self.global_bounds.y - target.y;
+            target.y = self.global_bounds.y;
         }
         // Clip to fit within screen, as Mac sometime snap windows to fit within screen, which
         // might be confused with user setting size manually
-        if target.y + target.height > self.screen.y + self.screen.height {
-            target.height = self.screen.y + self.screen.height - target.y;
+        if target.y + target.height > self.global_bounds.y + self.global_bounds.height {
+            target.height = self.global_bounds.y + self.global_bounds.height - target.y;
         }
-        if target.x < self.screen.x {
-            target.width -= self.screen.x - target.x;
-            target.x = self.screen.x;
+        if target.x < self.global_bounds.x {
+            target.width -= self.global_bounds.x - target.x;
+            target.x = self.global_bounds.x;
         }
-        if target.x + target.width > self.screen.x + self.screen.width {
-            target.width = self.screen.x + self.screen.width - target.x;
+        if target.x + target.width > self.global_bounds.x + self.global_bounds.width {
+            target.width = self.global_bounds.x + self.global_bounds.width - target.x;
         }
 
         if self.set_dimension(target).is_err() {
@@ -307,7 +307,7 @@ impl MacWindow {
             right,
             top,
             bottom,
-            screen = ?self.screen,
+            global_bounds = ?self.global_bounds,
             "check_placement"
         );
         if !((left || right) && (top || bottom)) {
@@ -350,11 +350,15 @@ impl MacWindow {
         // https://nikitabobko.github.io/AeroSpace/guide#emulation-of-virtual-workspaces
         self.with_animation_disabled(|| {
             self.set_position(
-                self.screen.x + self.screen.width - 1.0,
-                self.screen.y + self.screen.height - 1.0,
+                self.global_bounds.x + self.global_bounds.width - 1.0,
+                self.global_bounds.y + self.global_bounds.height - 1.0,
             )
         })
         .with_context(|| format!("hide for {} {:?}", self.app_name, self.title))
+    }
+
+    pub(super) fn set_global_bounds(&mut self, bounds: Dimension) {
+        self.global_bounds = bounds;
     }
 
     pub(super) fn get_size(&self) -> Result<(f32, f32)> {
