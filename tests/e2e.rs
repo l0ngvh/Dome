@@ -288,7 +288,6 @@ fn test_exec() {
     std::fs::remove_file(&marker).ok();
 }
 
-
 #[test]
 fn test_focus_monitor() {
     let _env = TestEnv::new();

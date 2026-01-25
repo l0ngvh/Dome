@@ -202,7 +202,12 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                     let x = monitors.len() as f32 * 150.0;
                     let id = hub.add_monitor(
                         format!("monitor-{}", monitors.len()),
-                        Dimension { x, y: 0.0, width: 150.0, height: 30.0 },
+                        Dimension {
+                            x,
+                            y: 0.0,
+                            width: 150.0,
+                            height: 30.0,
+                        },
                     );
                     monitors.push(id);
                     format!("AddMonitor({id})")
@@ -218,13 +223,23 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                     format!("RemoveMonitor({id})")
                 }
                 Op::FocusMonitor => {
-                    let targets = [MonitorTarget::Up, MonitorTarget::Down, MonitorTarget::Left, MonitorTarget::Right];
+                    let targets = [
+                        MonitorTarget::Up,
+                        MonitorTarget::Down,
+                        MonitorTarget::Left,
+                        MonitorTarget::Right,
+                    ];
                     let target = &targets[rng.random_range(0..targets.len())];
                     hub.focus_monitor(target);
                     format!("FocusMonitor({target:?})")
                 }
                 Op::MoveToMonitor => {
-                    let targets = [MonitorTarget::Up, MonitorTarget::Down, MonitorTarget::Left, MonitorTarget::Right];
+                    let targets = [
+                        MonitorTarget::Up,
+                        MonitorTarget::Down,
+                        MonitorTarget::Left,
+                        MonitorTarget::Right,
+                    ];
                     let target = &targets[rng.random_range(0..targets.len())];
                     hub.move_to_monitor(target);
                     format!("MoveToMonitor({target:?})")

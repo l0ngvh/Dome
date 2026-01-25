@@ -2049,56 +2049,58 @@ fn toggle_container_layout_in_nested_tabbed_maintain_direction_invariant() {
 }
 
 #[test]
-fn toggle_container_layout_after_direct_focused_child_deleted_and_focused_passed_to_direct_child_container_focused()
- {
+fn toggle_tabbed_when_focused_is_inside_child_container() {
     let mut hub = setup();
 
     hub.insert_tiling();
     let w1 = hub.insert_tiling();
     let w2 = hub.insert_tiling();
+    let w3 = hub.insert_tiling();
+    // Creating multiple nested container to cover non focused container branch
     hub.set_focus(w1);
     hub.toggle_spawn_mode();
     hub.insert_tiling();
     hub.insert_tiling();
-
     hub.set_focus(w2);
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+    hub.insert_tiling();
+
+    hub.set_focus(w3);
     hub.focus_parent();
-    hub.delete_window(w2);
+
+    // After this focus will be on w7
+    hub.delete_window(w3);
 
     hub.toggle_container_layout();
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
           Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
             Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=2.00, w=150.00, h=9.33)
-            Window(id=WindowId(3), parent=ContainerId(1), x=0.00, y=11.33, w=150.00, h=9.33)
-            Window(id=WindowId(4), parent=ContainerId(1), x=0.00, y=20.67, w=150.00, h=9.33)
+            Window(id=WindowId(4), parent=ContainerId(1), x=0.00, y=11.33, w=150.00, h=9.33)
+            Window(id=WindowId(5), parent=ContainerId(1), x=0.00, y=20.67, w=150.00, h=9.33)
+          )
+          Container(id=ContainerId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
+            Window(id=WindowId(2), parent=ContainerId(2), x=0.00, y=2.00, w=150.00, h=9.33)
+            Window(id=WindowId(6), parent=ContainerId(2), x=0.00, y=11.33, w=150.00, h=9.33)
+            Window(id=WindowId(7), parent=ContainerId(2), x=0.00, y=20.67, w=150.00, h=9.33)
           )
         )
       )
     )
 
     ******************************************************************************************************************************************************
-    *                                   W0                                     |                                 [C1]                                    *
+    *                       W0                        |                      C1                        |                     [C2]                        *
     *----------------------------------------------------------------------------------------------------------------------------------------------------*
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
-    *                                                                         W1                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *----------------------------------------------------------------------------------------------------------------------------------------------------*
-    *----------------------------------------------------------------------------------------------------------------------------------------------------*
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W3                                                                         *
-    *                                                                                                                                                    *
+    *                                                                         W2                                                                         *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *----------------------------------------------------------------------------------------------------------------------------------------------------*
@@ -2106,7 +2108,17 @@ fn toggle_container_layout_after_direct_focused_child_deleted_and_focused_passed
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
-    *                                                                         W4                                                                         *
+    *                                                                                                                                                    *
+    *                                                                         W6                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *----------------------------------------------------------------------------------------------------------------------------------------------------*
+    *----------------------------------------------------------------------------------------------------------------------------------------------------*
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W7                                                                         *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *

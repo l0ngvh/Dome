@@ -884,174 +884,98 @@ impl Hub {
         };
 
         // Apply max_size centering for single window at root
-        let dim = match root {
-            Child::Window(id) => {
-                let (max_w, max_h) = self.get_effective_max_size(id);
-                let w = if max_w > 0.0 && max_w < base_dim.width {
-                    max_w
-                } else {
-                    base_dim.width
-                };
-                let h = if max_h > 0.0 && max_h < base_dim.height {
-                    max_h
-                } else {
-                    base_dim.height
-                };
-                Dimension {
-                    x: base_dim.x + (base_dim.width - w) / 2.0,
-                    y: base_dim.y + (base_dim.height - h) / 2.0,
-                    width: w,
-                    height: h,
-                }
+        let dim = {
+            let (max_w, max_h) = self.get_effective_max_size(root);
+            let (w, x_off) = Self::apply_max_constraint(max_w, base_dim.width);
+            let (h, y_off) = Self::apply_max_constraint(max_h, base_dim.height);
+            Dimension {
+                x: base_dim.x + x_off,
+                y: base_dim.y + y_off,
+                width: w,
+                height: h,
             }
-            Child::Container(_) => base_dim,
         };
 
         self.set_child_dimension(root, dim);
     }
 
+    /// Lays out children within the given dimension.
+    ///
+    /// For split containers, space is distributed along the split axis while
+    /// respecting min/max constraints. If total size is less than available
+    /// (due to max constraints), the group is centered. Windows hitting max
+    /// size on the perpendicular axis are also centered. For tabbed containers,
+    /// each child is assigned the full area below the tab bar, centered if
+    /// constrained.
     fn layout_children(
         &self,
         children: &[Child],
         dim: Dimension,
         direction: Option<Direction>,
     ) -> Vec<Dimension> {
+        let constraints = self.collect_constraints(children);
+
         match direction {
             Some(Direction::Horizontal) => {
-                let constraints: Vec<_> = children
-                    .iter()
-                    .map(|&c| {
-                        let (min_w, min_h) = self.get_effective_min_size(c);
-                        let (max_w, max_h) = match c {
-                            Child::Window(id) => self.get_effective_max_size(id),
-                            Child::Container(_) => (0.0, 0.0),
-                        };
-                        (min_w, max_w, min_h, max_h)
-                    })
-                    .collect();
                 let height = dim.height.max(
-                    constraints
-                        .iter()
-                        .map(|(_, _, min_h, _)| *min_h)
-                        .fold(0.0, f32::max),
+                    constraints.iter().map(|c| c.2).fold(0.0, f32::max), // max of min_h
                 );
-                let width_constraints: Vec<_> = constraints
-                    .iter()
-                    .map(|(min_w, max_w, _, _)| (*min_w, *max_w))
-                    .collect();
+                let width_constraints: Vec<_> = constraints.iter().map(|c| (c.0, c.1)).collect(); // (min_w, max_w)
                 let widths = distribute_space(&width_constraints, dim.width);
-                let total_width: f32 = widths.iter().sum();
-                let x_start = dim.x + (dim.width - total_width) / 2.0;
-                let mut x = x_start;
-                children
-                    .iter()
-                    .zip(widths)
-                    .zip(constraints.iter())
-                    .map(|((&child, w), (_, _, _, max_h))| {
-                        let (actual_height, y_offset) = match child {
-                            Child::Window(_) => {
-                                if *max_h > 0.0 && *max_h < height {
-                                    (*max_h, (height - *max_h) / 2.0)
-                                } else {
-                                    (height, 0.0)
-                                }
-                            }
-                            Child::Container(_) => (height, 0.0),
-                        };
-                        let d = Dimension {
-                            x,
-                            y: dim.y + y_offset,
-                            width: w,
-                            height: actual_height,
-                        };
-                        x += w;
-                        d
-                    })
-                    .collect()
+                let mut x = dim.x + (dim.width - widths.iter().sum::<f32>()) / 2.0;
+
+                let mut result = Vec::with_capacity(children.len());
+                for i in 0..children.len() {
+                    let (_, _, _, max_h) = constraints[i];
+                    let (h, y_off) = Self::apply_max_constraint(max_h, height);
+                    result.push(Dimension {
+                        x,
+                        y: dim.y + y_off,
+                        width: widths[i],
+                        height: h,
+                    });
+                    x += widths[i];
+                }
+                result
             }
             Some(Direction::Vertical) => {
-                let constraints: Vec<_> = children
-                    .iter()
-                    .map(|&c| {
-                        let (min_w, min_h) = self.get_effective_min_size(c);
-                        let (max_w, max_h) = match c {
-                            Child::Window(id) => self.get_effective_max_size(id),
-                            Child::Container(_) => (0.0, 0.0),
-                        };
-                        (min_w, max_w, min_h, max_h)
-                    })
-                    .collect();
                 let width = dim.width.max(
-                    constraints
-                        .iter()
-                        .map(|(min_w, _, _, _)| *min_w)
-                        .fold(0.0, f32::max),
+                    constraints.iter().map(|c| c.0).fold(0.0, f32::max), // max of min_w
                 );
-                let height_constraints: Vec<_> = constraints
-                    .iter()
-                    .map(|(_, _, min_h, max_h)| (*min_h, *max_h))
-                    .collect();
+                let height_constraints: Vec<_> = constraints.iter().map(|c| (c.2, c.3)).collect(); // (min_h, max_h)
                 let heights = distribute_space(&height_constraints, dim.height);
-                let total_height: f32 = heights.iter().sum();
-                let y_start = dim.y + (dim.height - total_height) / 2.0;
-                let mut y = y_start;
-                children
-                    .iter()
-                    .zip(heights)
-                    .zip(constraints.iter())
-                    .map(|((&child, h), (_, max_w, _, _))| {
-                        let (actual_width, x_offset) = match child {
-                            Child::Window(_) => {
-                                if *max_w > 0.0 && *max_w < width {
-                                    (*max_w, (width - *max_w) / 2.0)
-                                } else {
-                                    (width, 0.0)
-                                }
-                            }
-                            Child::Container(_) => (width, 0.0),
-                        };
-                        let d = Dimension {
-                            x: dim.x + x_offset,
-                            y,
-                            width: actual_width,
-                            height: h,
-                        };
-                        y += h;
-                        d
-                    })
-                    .collect()
+                let mut y = dim.y + (dim.height - heights.iter().sum::<f32>()) / 2.0;
+
+                let mut result = Vec::with_capacity(children.len());
+                for i in 0..children.len() {
+                    let (_, max_w, _, _) = constraints[i];
+                    let (w, x_off) = Self::apply_max_constraint(max_w, width);
+                    result.push(Dimension {
+                        x: dim.x + x_off,
+                        y,
+                        width: w,
+                        height: heights[i],
+                    });
+                    y += heights[i];
+                }
+                result
             }
             None => {
                 let content_y = dim.y + self.config.tab_bar_height;
                 let content_height = dim.height - self.config.tab_bar_height;
-                children
-                    .iter()
-                    .map(|&child| {
-                        let (actual_width, x_offset, actual_height, y_offset) = match child {
-                            Child::Window(id) => {
-                                let (max_w, max_h) = self.get_effective_max_size(id);
-                                let w = if max_w > 0.0 && max_w < dim.width {
-                                    max_w
-                                } else {
-                                    dim.width
-                                };
-                                let h = if max_h > 0.0 && max_h < content_height {
-                                    max_h
-                                } else {
-                                    content_height
-                                };
-                                (w, (dim.width - w) / 2.0, h, (content_height - h) / 2.0)
-                            }
-                            Child::Container(_) => (dim.width, 0.0, content_height, 0.0),
-                        };
-                        Dimension {
-                            x: dim.x + x_offset,
-                            y: content_y + y_offset,
-                            width: actual_width,
-                            height: actual_height,
-                        }
-                    })
-                    .collect()
+
+                let mut result = Vec::with_capacity(children.len());
+                for (_, max_w, _, max_h) in constraints {
+                    let (w, x_off) = Self::apply_max_constraint(max_w, dim.width);
+                    let (h, y_off) = Self::apply_max_constraint(max_h, content_height);
+                    result.push(Dimension {
+                        x: dim.x + x_off,
+                        y: content_y + y_off,
+                        width: w,
+                        height: h,
+                    });
+                }
+                result
             }
         }
     }
@@ -1368,23 +1292,47 @@ impl Hub {
         }
     }
 
-    fn get_effective_max_size(&self, window_id: WindowId) -> (f32, f32) {
-        let window = self.windows.get(window_id);
-        let screen = self.workspace_screen(window.workspace);
-        let global_max_w = self.config.max_width.resolve(screen.width);
-        let global_max_h = self.config.max_height.resolve(screen.height);
+    fn get_effective_max_size(&self, child: Child) -> (f32, f32) {
+        match child {
+            Child::Window(id) => {
+                let window = self.windows.get(id);
+                let screen = self.workspace_screen(window.workspace);
+                let global_max_w = self.config.max_width.resolve(screen.width);
+                let global_max_h = self.config.max_height.resolve(screen.height);
+                let w = if window.max_width > 0.0 {
+                    window.max_width
+                } else {
+                    global_max_w
+                };
+                let h = if window.max_height > 0.0 {
+                    window.max_height
+                } else {
+                    global_max_h
+                };
+                (w, h)
+            }
+            Child::Container(_) => (0.0, 0.0),
+        }
+    }
 
-        let w = if window.max_width > 0.0 {
-            window.max_width
+    fn collect_constraints(&self, children: &[Child]) -> Vec<(f32, f32, f32, f32)> {
+        children
+            .iter()
+            .map(|&c| {
+                let (min_w, min_h) = self.get_effective_min_size(c);
+                let (max_w, max_h) = self.get_effective_max_size(c);
+                (min_w, max_w, min_h, max_h)
+            })
+            .collect()
+    }
+
+    /// Returns (size, offset) where offset is for centering within available space.
+    fn apply_max_constraint(max: f32, available: f32) -> (f32, f32) {
+        if max > 0.0 && max < available {
+            (max, (available - max) / 2.0)
         } else {
-            global_max_w
-        };
-        let h = if window.max_height > 0.0 {
-            window.max_height
-        } else {
-            global_max_h
-        };
-        (w, h)
+            (available, 0.0)
+        }
     }
 
     fn update_container_min_size(&mut self, container_id: ContainerId) {
@@ -1573,7 +1521,6 @@ fn distribute_space(constraints: &[(f32, f32)], container_size: f32) -> Vec<f32>
         .iter()
         .map(|&(min, max)| {
             let max = if max == 0.0 { f32::INFINITY } else { max };
-            let max = if min > max { min } else { max };
             (min, max)
         })
         .collect();
