@@ -1,4 +1,4 @@
-use std::cell::{Cell, OnceCell};
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -8,7 +8,7 @@ use std::thread;
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSScreen, NSWindow,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSScreen,
 };
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
@@ -17,7 +17,7 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{
-    NSNotification, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+    NSNotification, NSNumber, NSObject, NSObjectProtocol, NSString,
 };
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -26,7 +26,7 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 use super::dome::{Dome, HubEvent, HubMessage, MessageSender};
 use super::keyboard::KeyboardListener;
 use super::listeners::EventListener;
-use super::overlay::{OverlayView, create_overlay_window};
+use super::overlay::OverlayManager;
 use super::recovery;
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
@@ -99,7 +99,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
             tracing::error!("Failed to create keyboard listener: {e:#}");
         });
 
-    let delegate = AppDelegate::new(mtm, global_bounds, event_tx, frame_rx, event_listener);
+    let delegate = AppDelegate::new(mtm, event_tx, frame_rx, event_listener);
     let source = create_frame_source(&delegate);
 
     let main_run_loop = CFRunLoop::main().unwrap();
@@ -161,11 +161,9 @@ fn init_tracing(config: &Config) {
 }
 
 pub(super) struct AppDelegateIvars {
-    pub(super) global_bounds: Dimension,
     pub(super) hub_sender: Sender<HubEvent>,
     pub(super) frame_rx: Receiver<HubMessage>,
-    pub(super) overlay_window: OnceCell<Retained<NSWindow>>,
-    pub(super) overlay: OnceCell<Retained<OverlayView>>,
+    pub(super) overlay_manager: RefCell<OverlayManager>,
     pub(super) event_listener: EventListener,
 }
 
@@ -181,21 +179,6 @@ define_class!(
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
             tracing::info!("Application did finish launching");
-            let mtm = self.mtm();
-
-            let bounds = self.ivars().global_bounds;
-            let frame = NSRect::new(
-                NSPoint::new(bounds.x as f64, 0.0),
-                NSSize::new(bounds.width as f64, bounds.height as f64),
-            );
-
-            let overlay_window = create_overlay_window(mtm, frame);
-            let overlay = OverlayView::new(mtm, frame);
-            overlay_window.setContentView(Some(&overlay));
-            overlay_window.makeKeyAndOrderFront(None);
-
-            let _ = self.ivars().overlay_window.set(overlay_window);
-            let _ = self.ivars().overlay.set(overlay);
         }
 
         #[unsafe(method(applicationWillTerminate:))]
@@ -208,17 +191,14 @@ define_class!(
 impl AppDelegate {
     fn new(
         mtm: MainThreadMarker,
-        global_bounds: Dimension,
         hub_sender: Sender<HubEvent>,
         frame_rx: Receiver<HubMessage>,
         event_listener: EventListener,
     ) -> Retained<Self> {
         let ivars = AppDelegateIvars {
-            global_bounds,
             hub_sender,
             frame_rx,
-            overlay_window: OnceCell::new(),
-            overlay: OnceCell::new(),
+            overlay_manager: RefCell::new(OverlayManager::new()),
             event_listener,
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
@@ -236,13 +216,15 @@ pub(super) fn send_hub_event(hub_sender: &Sender<HubEvent>, event: HubEvent) {
 
 unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     let delegate: &AppDelegate = unsafe { &*(info as *const AppDelegate) };
-
+    let mtm = delegate.mtm();
     while let Ok(msg) = delegate.ivars().frame_rx.try_recv() {
         match msg {
             HubMessage::Overlays(overlays) => {
-                if let Some(overlay) = delegate.ivars().overlay.get() {
-                    overlay.set_rects(overlays);
-                }
+                delegate
+                    .ivars()
+                    .overlay_manager
+                    .borrow_mut()
+                    .process(mtm, overlays);
             }
             HubMessage::RegisterObservers(apps) => {
                 for app in &apps {
@@ -250,7 +232,6 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 }
             }
             HubMessage::Shutdown => {
-                let mtm = MainThreadMarker::new().unwrap();
                 NSApplication::sharedApplication(mtm).terminate(None);
                 return;
             }

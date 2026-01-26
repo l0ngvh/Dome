@@ -5,15 +5,19 @@ use objc2::rc::Retained;
 use objc2_app_kit::NSRunningApplication;
 use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource};
 use objc2_core_graphics::CGWindowID;
+use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
-    Child, Container, Dimension, FloatWindowId, Focus, Hub, MonitorId, SpawnMode, Window, WindowId,
+    Child, Container, ContainerId, Dimension, FloatWindowId, Focus, Hub, MonitorId, SpawnMode,
+    Window, WindowId,
 };
 
 use super::app::{ScreenInfo, compute_global_bounds};
-use super::overlay::{OverlayLabel, OverlayRect, Overlays};
+use super::overlay::{
+    ContainerBorder, FloatBorder, Overlays, TabBarOverlay, TabInfo, TilingBorder,
+};
 use super::recovery;
 use super::window::{MacWindow, get_app_by_pid, get_ax_windows, list_cg_window_ids, running_apps};
 
@@ -821,98 +825,58 @@ fn position_tiling_windows(
 
 fn build_tab_bar(
     primary_full_height: f32,
+    id: ContainerId,
     container: &Container,
     registry: &Registry,
     config: &Config,
-    is_focused: bool,
-) -> (Vec<OverlayRect>, Vec<OverlayLabel>) {
+) -> TabBarOverlay {
     let dim = container.dimension();
-    let border = config.border_size;
     let height = config.tab_bar_height;
-    let tab_color = if is_focused {
-        config.focused_color
-    } else {
-        config.border_color
-    };
-
-    let mut rects = vec![OverlayRect {
-        x: dim.x,
-        y: flip_y(primary_full_height, dim.y, height),
-        width: dim.width,
-        height,
-        color: config.tab_bar_background_color,
-    }];
-
-    let tab_dim = Dimension {
-        x: dim.x,
-        y: dim.y,
-        width: dim.width,
-        height,
-    };
-    rects.extend(border_rects(
-        primary_full_height,
-        tab_dim,
-        border,
-        [tab_color; 4],
-    ));
-
     let children = container.children();
-    if children.is_empty() {
-        return (rects, Vec::new());
-    }
-
-    let tab_width = dim.width / children.len() as f32;
     let active_tab = container.active_tab_index();
+    let tab_width = if children.is_empty() {
+        0.0
+    } else {
+        dim.width / children.len() as f32
+    };
 
-    rects.push(OverlayRect {
-        x: dim.x + active_tab as f32 * tab_width,
-        y: flip_y(primary_full_height, dim.y, height),
-        width: tab_width,
-        height,
-        color: config.active_tab_background_color,
-    });
-
-    for i in 1..children.len() {
-        rects.push(OverlayRect {
-            x: dim.x + i as f32 * tab_width - border / 2.0,
-            y: flip_y(primary_full_height, dim.y, height),
-            width: border,
-            height,
-            color: tab_color,
-        });
-    }
-
-    let labels = children
+    let tabs = children
         .iter()
         .enumerate()
         .map(|(i, c)| {
             let title = match c {
-                Child::Window(wid) => registry.get_title(*wid).unwrap_or("Unknown"),
-                Child::Container(_) => "Container",
+                Child::Window(wid) => registry.get_title(*wid).unwrap_or("Unknown").to_owned(),
+                Child::Container(_) => "Container".to_owned(),
             };
-            let is_active = i == active_tab;
-            let text = if is_active {
-                format!("[{title}]")
-            } else {
-                title.to_owned()
-            };
-            let x = dim.x + i as f32 * tab_width + tab_width / 2.0 - text.len() as f32 * 3.5;
-            OverlayLabel {
-                x,
-                y: flip_y(primary_full_height, dim.y + height / 2.0 - 6.0, 12.0),
-                text,
-                color: Color {
-                    r: 1.0,
-                    g: 1.0,
-                    b: 1.0,
-                    a: 1.0,
-                },
-                bold: is_active,
+            TabInfo {
+                title,
+                x: i as f32 * tab_width,
+                width: tab_width,
+                is_active: i == active_tab,
             }
         })
         .collect();
 
-    (rects, labels)
+    TabBarOverlay {
+        key: id,
+        frame: to_ns_rect(primary_full_height, Dimension {
+            x: dim.x,
+            y: dim.y,
+            width: dim.width,
+            height,
+        }),
+        tabs,
+        background_color: config.tab_bar_background_color,
+        active_background_color: config.active_tab_background_color,
+    }
+}
+
+// Quartz uses top-left origin, Cocoa uses bottom-left origin
+fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
+    NSRect::new(
+        NSPoint::new(dim.x as f64, (primary_full_height - dim.y - dim.height) as f64),
+        NSSize::new(dim.width as f64, dim.height as f64),
+    )
 }
 
 fn build_overlays(
@@ -922,37 +886,42 @@ fn build_overlays(
     primary_full_height: f32,
 ) -> Overlays {
     let ws = hub.get_workspace(hub.current_workspace());
-    let border = config.border_size;
     let focused = ws.focused();
 
-    let mut rects = Vec::new();
-    let mut labels = Vec::new();
+    let mut tiling_borders = Vec::new();
+    let mut float_borders = Vec::new();
+    let mut container_borders = Vec::new();
+    let mut tab_bars = Vec::new();
 
     let mut stack: Vec<Child> = ws.root().into_iter().collect();
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(id) => {
-                if registry.get_cg_id(WindowType::Tiling(id)).is_some()
-                    && focused != Some(Focus::Tiling(Child::Window(id)))
-                {
-                    let dim = hub.get_window(id).dimension();
-                    rects.extend(border_rects(
-                        primary_full_height,
-                        dim,
-                        border,
-                        [config.border_color; 4],
-                    ));
+                if registry.get_cg_id(WindowType::Tiling(id)).is_some() {
+                    let w = hub.get_window(id);
+                    let colors = if focused == Some(Focus::Tiling(Child::Window(id))) {
+                        spawn_colors(w.spawn_mode(), config)
+                    } else {
+                        [config.border_color; 4]
+                    };
+                    tiling_borders.push(TilingBorder {
+                        key: id,
+                        frame: to_ns_rect(primary_full_height, w.dimension()),
+                        colors,
+                    });
                 }
             }
             Child::Container(id) => {
                 let container = hub.get_container(id);
                 if let Some(active) = container.active_tab() {
                     stack.push(active);
-                    let is_focused = focused == Some(Focus::Tiling(Child::Container(id)));
-                    let (tab_rects, tab_labels) =
-                        build_tab_bar(primary_full_height, container, registry, config, is_focused);
-                    rects.extend(tab_rects);
-                    labels.extend(tab_labels);
+                    tab_bars.push(build_tab_bar(
+                        primary_full_height,
+                        id,
+                        container,
+                        registry,
+                        config,
+                    ));
                 } else {
                     for &c in container.children() {
                         stack.push(c);
@@ -962,26 +931,13 @@ fn build_overlays(
         }
     }
 
-    match focused {
-        Some(Focus::Tiling(Child::Window(id))) => {
-            let w = hub.get_window(id);
-            rects.extend(border_rects(
-                primary_full_height,
-                w.dimension(),
-                border,
-                spawn_colors(w.spawn_mode(), config),
-            ));
-        }
-        Some(Focus::Tiling(Child::Container(id))) => {
-            let c = hub.get_container(id);
-            rects.extend(border_rects(
-                primary_full_height,
-                c.dimension(),
-                border,
-                spawn_colors(c.spawn_mode(), config),
-            ));
-        }
-        _ => {}
+    if let Some(Focus::Tiling(Child::Container(id))) = focused {
+        let c = hub.get_container(id);
+        container_borders.push(ContainerBorder {
+            key: id,
+            frame: to_ns_rect(primary_full_height, c.dimension()),
+            colors: spawn_colors(c.spawn_mode(), config),
+        });
     }
 
     for &float_id in ws.float_windows() {
@@ -992,28 +948,33 @@ fn build_overlays(
             } else {
                 config.border_color
             };
-            rects.extend(border_rects(primary_full_height, dim, border, [color; 4]));
+            float_borders.push(FloatBorder {
+                key: float_id,
+                frame: to_ns_rect(primary_full_height, dim),
+                colors: [color; 4],
+            });
         }
     }
 
-    Overlays { rects, labels }
+    Overlays {
+        tiling_borders,
+        float_borders,
+        container_borders,
+        tab_bars,
+        border_size: config.border_size,
+    }
 }
 
 fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
     let f = config.focused_color;
     let s = config.spawn_indicator_color;
+    // [top, right, bottom, left] to match BorderView draw order
     [
         if spawn.is_tab() { s } else { f },
+        if spawn.is_horizontal() { s } else { f },
         if spawn.is_vertical() { s } else { f },
         f,
-        if spawn.is_horizontal() { s } else { f },
     ]
-}
-
-// macOS uses bottom-left origin, so we flip y here.
-// Windows uses top-left origin, so no flip needed there.
-fn flip_y(primary_full_height: f32, y: f32, height: f32) -> f32 {
-    primary_full_height - y - height
 }
 
 fn apply_inset(dim: Dimension, border: f32) -> Dimension {
@@ -1023,53 +984,6 @@ fn apply_inset(dim: Dimension, border: f32) -> Dimension {
         width: (dim.width - 2.0 * border).max(0.0),
         height: (dim.height - 2.0 * border).max(0.0),
     }
-}
-
-// colors: [top, bottom, left, right]
-fn border_rects(
-    primary_full_height: f32,
-    dim: Dimension,
-    border: f32,
-    colors: [Color; 4],
-) -> [OverlayRect; 4] {
-    [
-        OverlayRect {
-            x: dim.x,
-            y: flip_y(primary_full_height, dim.y, border),
-            width: dim.width,
-            height: border,
-            color: colors[0],
-        },
-        OverlayRect {
-            x: dim.x,
-            y: flip_y(primary_full_height, dim.y + dim.height - border, border),
-            width: dim.width,
-            height: border,
-            color: colors[1],
-        },
-        OverlayRect {
-            x: dim.x,
-            y: flip_y(
-                primary_full_height,
-                dim.y + border,
-                dim.height - 2.0 * border,
-            ),
-            width: border,
-            height: dim.height - 2.0 * border,
-            color: colors[2],
-        },
-        OverlayRect {
-            x: dim.x + dim.width - border,
-            y: flip_y(
-                primary_full_height,
-                dim.y + border,
-                dim.height - 2.0 * border,
-            ),
-            width: border,
-            height: dim.height - 2.0 * border,
-            color: colors[3],
-        },
-    ]
 }
 
 fn on_open_actions(window: &MacWindow, rules: &[MacosOnOpenRule]) -> Option<Actions> {
