@@ -1,13 +1,16 @@
 # Dome
 
 A cross-platform tiling window manager written in Rust.
-Currently only support macOS, with Window and Linux next on the roadmap
+Currently support macOS and Windows, with Linux next on the roadmap
 
 ## Features
 
 - Automatic tiling
 - Native tabbed layout
 - Hot-reload configuration
+- Support for multiple monitors
+- Respect windows desired size
+- Scrolling
 
 ## Installation
 
