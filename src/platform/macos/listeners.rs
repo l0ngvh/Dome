@@ -8,9 +8,9 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use block2::RcBlock;
+use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::{MainThreadMarker};
 use objc2_app_kit::{
     NSApplicationActivationPolicy, NSApplicationDidChangeScreenParametersNotification,
     NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
@@ -240,7 +240,6 @@ fn setup_screen_observer(ctx: &ListenerCtx) -> ScreenObserver {
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 let mtm = MainThreadMarker::new().unwrap();
                 let screens = get_all_screens(mtm);
-                tracing::info!(count = screens.len(), "Screen parameters changed");
                 send_hub_event(&(*ctx_ptr).hub_sender, HubEvent::ScreensChanged(screens));
             }),
         )

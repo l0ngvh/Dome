@@ -10,19 +10,21 @@ use std::sync::mpsc;
 use std::thread;
 
 use anyhow::Result;
+use std::mem::size_of;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
-use std::mem::size_of;
 
 use windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW};
-use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
+use windows::Win32::Graphics::Gdi::{
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
+};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
+use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MSG, PostThreadMessageW, TranslateMessage, WM_QUIT,
 };
@@ -184,8 +186,14 @@ fn compute_global_bounds(screens: &[ScreenInfo]) -> Dimension {
     if screens.is_empty() {
         return Dimension::default();
     }
-    let min_x = screens.iter().map(|s| s.dimension.x).fold(f32::MAX, f32::min);
-    let min_y = screens.iter().map(|s| s.dimension.y).fold(f32::MAX, f32::min);
+    let min_x = screens
+        .iter()
+        .map(|s| s.dimension.x)
+        .fold(f32::MAX, f32::min);
+    let min_y = screens
+        .iter()
+        .map(|s| s.dimension.y)
+        .fold(f32::MAX, f32::min);
     let max_x = screens
         .iter()
         .map(|s| s.dimension.x + s.dimension.width)

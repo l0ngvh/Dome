@@ -244,10 +244,10 @@ impl MacWindow {
     /// taller than screen height, Mac will instead come up with an alternative placement. For our
     /// use case, the alternative placements are acceptable, albeit they will mess a little with
     /// our border rendering
-    pub(super) fn try_placement(&mut self, window: &Window, border: f32) {
+    pub(super) fn try_placement(&mut self, window: &Window, border: f32, monitor: Dimension) {
         let dim = apply_inset(window.dimension(), border);
 
-        if is_completely_offscreen(dim, self.global_bounds) {
+        if is_completely_offscreen(dim, monitor) {
             // TODO: if hide fail to move the window to offscreen position, this window is clearly
             // trying to take focus, so we should pop it to float or something.
             // Exception is full screen window, which, should be handled differently as a first
@@ -295,21 +295,16 @@ impl MacWindow {
         let expected = self.physical_placement?;
         let actual = self.get_dimension();
 
+        tracing::trace!(
+            "Window {self} moved from {expected:?} to {actual:?}, with logical placement at {:?}",
+            window.dimension()
+        );
+
         // At least one edge must match on each axis - user resize moves both edges on one axis
         let left = pixel_eq(actual.x, expected.x);
         let right = pixel_eq(actual.x + actual.width, expected.x + expected.width);
         let top = pixel_eq(actual.y, expected.y);
         let bottom = pixel_eq(actual.y + actual.height, expected.y + expected.height);
-        tracing::debug!(
-            ?actual,
-            ?expected,
-            left,
-            right,
-            top,
-            bottom,
-            global_bounds = ?self.global_bounds,
-            "check_placement"
-        );
         if !((left || right) && (top || bottom)) {
             return None;
         }

@@ -25,6 +25,12 @@ pub(crate) struct Monitor {
     pub(super) active_workspace: WorkspaceId,
 }
 
+impl Monitor {
+    pub(crate) fn dimension(&self) -> Dimension {
+        self.dimension
+    }
+}
+
 impl Node for Monitor {
     type Id = MonitorId;
 }
@@ -63,6 +69,10 @@ impl Workspace {
 
     pub(crate) fn float_windows(&self) -> &[FloatWindowId] {
         &self.float_windows
+    }
+
+    pub(crate) fn monitor(&self) -> MonitorId {
+        self.monitor
     }
 }
 

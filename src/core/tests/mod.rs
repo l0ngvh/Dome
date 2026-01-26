@@ -79,14 +79,15 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     } else {
         String::new()
     };
+    let screen = hub.get_monitor(hub.focused_monitor()).dimension();
     let mut s = format!(
         "Hub(focused={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
         hub.current_workspace(),
         monitor_info,
-        hub.screen().x,
-        hub.screen().y,
-        hub.screen().width,
-        hub.screen().height
+        screen.x,
+        screen.y,
+        screen.width,
+        screen.height
     );
     for (workspace_id, workspace) in hub.all_workspaces() {
         let focused = if let Some(current) = workspace.focused {
@@ -366,7 +367,29 @@ fn fmt_float_str(hub: &Hub, s: &mut String, float_id: FloatWindowId, indent: usi
 }
 
 fn validate_hub(hub: &Hub) {
+    // Validate monitors
+    let monitors = hub.all_monitors();
+    let monitor_ids: Vec<_> = monitors.iter().map(|(id, _)| *id).collect();
+    assert!(
+        monitor_ids.contains(&hub.focused_monitor()),
+        "Focused monitor {} not in monitors",
+        hub.focused_monitor()
+    );
+    for (monitor_id, monitor) in &monitors {
+        let ws = hub.get_workspace(monitor.active_workspace);
+        assert_eq!(
+            ws.monitor, *monitor_id,
+            "Monitor {monitor_id} active_workspace {} points to workspace with monitor {}",
+            monitor.active_workspace, ws.monitor
+        );
+    }
+
     for (workspace_id, workspace) in hub.all_workspaces() {
+        assert!(
+            monitor_ids.contains(&workspace.monitor),
+            "Workspace {workspace_id} has invalid monitor {}",
+            workspace.monitor
+        );
         if let Some(Focus::Tiling(child)) = workspace.focused() {
             validate_child_exists(hub, child);
             if let Some(root) = workspace.root() {

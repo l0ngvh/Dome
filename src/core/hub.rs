@@ -70,25 +70,21 @@ impl Hub {
     }
 
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
+        self.focus_child(Child::Window(window_id));
         let workspace_id = self.windows.get(window_id).workspace;
         let monitor_id = self.workspaces.get(workspace_id).monitor;
         tracing::debug!(%window_id, %workspace_id, "Setting focus to window");
         self.focused_monitor = monitor_id;
         self.monitors.get_mut(monitor_id).active_workspace = workspace_id;
-        self.focus_child(Child::Window(window_id));
     }
 
     pub(crate) fn set_float_focus(&mut self, float_id: FloatWindowId) {
         let workspace_id = self.float_windows.get(float_id).workspace;
         let monitor_id = self.workspaces.get(workspace_id).monitor;
+        self.workspaces.get_mut(workspace_id).focused = Some(Focus::Float(float_id));
         tracing::debug!(%float_id, %workspace_id, "Setting focus to float");
         self.focused_monitor = monitor_id;
         self.monitors.get_mut(monitor_id).active_workspace = workspace_id;
-        self.workspaces.get_mut(workspace_id).focused = Some(Focus::Float(float_id));
-    }
-
-    pub(crate) fn screen(&self) -> Dimension {
-        self.monitors.get(self.focused_monitor).dimension
     }
 
     pub(crate) fn focused_monitor(&self) -> MonitorId {
@@ -103,21 +99,23 @@ impl Hub {
             .collect()
     }
 
+    pub(crate) fn get_monitor(&self, id: MonitorId) -> &Monitor {
+        self.monitors.get(id)
+    }
+
     #[cfg(test)]
     pub(super) fn all_monitors(&self) -> Vec<(MonitorId, Monitor)> {
         self.monitors.all_active()
     }
 
     pub(crate) fn add_monitor(&mut self, name: String, dimension: Dimension) -> MonitorId {
-        let ws_id = self
-            .workspaces
-            .allocate(Workspace::new(name.clone(), self.focused_monitor));
         let monitor_id = self.monitors.allocate(Monitor {
-            name,
+            name: name.clone(),
             dimension,
-            active_workspace: ws_id,
+            active_workspace: WorkspaceId::new(0),
         });
-        self.workspaces.get_mut(ws_id).monitor = monitor_id;
+        let ws_id = self.workspaces.allocate(Workspace::new(name, monitor_id));
+        self.monitors.get_mut(monitor_id).active_workspace = ws_id;
         monitor_id
     }
 
@@ -383,7 +381,7 @@ impl Hub {
             Focus::Tiling(Child::Window(window_id)) => {
                 let dim = self.windows.get(window_id).dimension;
                 self.delete_window(window_id);
-                let screen = self.screen();
+                let screen = self.monitors.get(self.focused_monitor).dimension;
                 let dimension = Dimension {
                     width: dim.width,
                     height: dim.height,
@@ -838,7 +836,7 @@ impl Hub {
     fn adjust_workspace(&mut self, ws_id: WorkspaceId) {
         let ws = self.workspaces.get(ws_id);
         let Some(root) = ws.root else { return };
-        let screen = self.workspace_screen(ws_id);
+        let screen = self.monitors.get(ws.monitor).dimension;
 
         let Child::Container(root_id) = root else {
             self.set_root_dimension(root, screen);
@@ -1286,7 +1284,10 @@ impl Hub {
             Child::Window(id) => self.windows.get(id).workspace,
             Child::Container(id) => self.containers.get(id).workspace,
         };
-        let screen = self.workspace_screen(ws_id);
+        let screen = self
+            .monitors
+            .get(self.workspaces.get(ws_id).monitor)
+            .dimension;
         let global_min_w = self.config.min_width.resolve(screen.width);
         let global_min_h = self.config.min_height.resolve(screen.height);
 
@@ -1303,19 +1304,15 @@ impl Hub {
         match child {
             Child::Window(id) => {
                 let window = self.windows.get(id);
-                let screen = self.workspace_screen(window.workspace);
+                let (max_w, max_h) = window.max_size();
+                let screen = self
+                    .monitors
+                    .get(self.workspaces.get(window.workspace).monitor)
+                    .dimension;
                 let global_max_w = self.config.max_width.resolve(screen.width);
                 let global_max_h = self.config.max_height.resolve(screen.height);
-                let w = if window.max_width > 0.0 {
-                    window.max_width
-                } else {
-                    global_max_w
-                };
-                let h = if window.max_height > 0.0 {
-                    window.max_height
-                } else {
-                    global_max_h
-                };
+                let w = if max_w > 0.0 { max_w } else { global_max_w };
+                let h = if max_h > 0.0 { max_h } else { global_max_h };
                 (w, h)
             }
             Child::Container(_) => (0.0, 0.0),
@@ -1385,7 +1382,7 @@ impl Hub {
 
     fn scroll_into_view(&mut self, workspace_id: WorkspaceId) {
         let ws = self.workspaces.get(workspace_id);
-        let screen = self.workspace_screen(workspace_id);
+        let screen = self.monitors.get(ws.monitor).dimension;
 
         let Some(Focus::Tiling(focused)) = ws.focused else {
             return;
@@ -1450,15 +1447,9 @@ impl Hub {
         if ws.root.is_some() || !ws.float_windows.is_empty() {
             return;
         }
-        let monitor_id = ws.monitor;
-        if self.monitors.get(monitor_id).active_workspace != ws_id {
+        if self.monitors.get(ws.monitor).active_workspace != ws_id {
             self.workspaces.delete(ws_id);
         }
-    }
-
-    fn workspace_screen(&self, workspace_id: WorkspaceId) -> Dimension {
-        let monitor_id = self.workspaces.get(workspace_id).monitor;
-        self.monitors.get(monitor_id).dimension
     }
 
     fn find_monitor_by_target(&self, target: &MonitorTarget) -> Option<MonitorId> {

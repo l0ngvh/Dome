@@ -209,7 +209,11 @@ impl MonitorRegistry {
         let mut reverse = HashMap::new();
         map.insert(primary_handle, primary_monitor_id);
         reverse.insert(primary_monitor_id, primary_handle);
-        Self { map, reverse, primary_handle }
+        Self {
+            map,
+            reverse,
+            primary_handle,
+        }
     }
 
     fn insert(&mut self, handle: isize, monitor_id: MonitorId) {
@@ -239,20 +243,28 @@ pub(super) struct Dome {
 }
 
 impl Dome {
-    pub(super) fn new(
-        config: Config,
-        screens: Vec<ScreenInfo>,
-        global_bounds: Dimension,
-    ) -> Self {
+    pub(super) fn new(config: Config, screens: Vec<ScreenInfo>, global_bounds: Dimension) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary.handle, primary_monitor_id);
+        tracing::info!(
+            name = %primary.name,
+            handle = ?primary.handle,
+            dimension = ?primary.dimension,
+            "Primary monitor"
+        );
 
         for screen in &screens {
             if screen.handle != primary.handle {
                 let id = hub.add_monitor(screen.name.clone(), screen.dimension);
                 monitor_registry.insert(screen.handle, id);
+                tracing::info!(
+                    name = %screen.name,
+                    handle = ?screen.handle,
+                    dimension = ?screen.dimension,
+                    "Monitor"
+                );
             }
         }
 
@@ -872,6 +884,12 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Ve
         if !registry.map.contains_key(&screen.handle) {
             let id = hub.add_monitor(screen.name.clone(), screen.dimension);
             registry.insert(screen.handle, id);
+            tracing::info!(
+                name = %screen.name,
+                handle = ?screen.handle,
+                dimension = ?screen.dimension,
+                "Monitor added"
+            );
         }
     }
 
@@ -890,12 +908,22 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Ve
         {
             hub.remove_monitor(monitor_id, fallback);
             registry.remove_by_id(monitor_id);
+            tracing::info!(%monitor_id, fallback = %fallback, "Monitor removed");
         }
     }
 
     // Update dimensions for existing monitors
     for screen in &screens {
         if let Some(&monitor_id) = registry.map.get(&screen.handle) {
+            let old_dim = hub.get_monitor(monitor_id).dimension();
+            if old_dim != screen.dimension {
+                tracing::info!(
+                    name = %screen.name,
+                    ?old_dim,
+                    new_dim = ?screen.dimension,
+                    "Monitor dimension changed"
+                );
+            }
             hub.update_monitor_dimension(monitor_id, screen.dimension);
         }
     }

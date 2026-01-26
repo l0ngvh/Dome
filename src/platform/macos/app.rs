@@ -10,13 +10,15 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_se
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSScreen, NSWindow,
 };
-use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
     CFDictionary, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext, kCFBooleanTrue,
     kCFRunLoopDefaultMode,
 };
-use objc2_foundation::{NSNotification, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
+use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
+use objc2_foundation::{
+    NSNotification, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
@@ -288,8 +290,8 @@ pub(super) fn get_all_screens(mtm: MainThreadMarker) -> Vec<ScreenInfo> {
             let frame = screen.frame();
             let visible = screen.visibleFrame();
 
-            let top_inset = (frame.origin.y + frame.size.height)
-                - (visible.origin.y + visible.size.height);
+            let top_inset =
+                (frame.origin.y + frame.size.height) - (visible.origin.y + visible.size.height);
             let bottom_inset = visible.origin.y - frame.origin.y;
 
             ScreenInfo {
@@ -309,8 +311,14 @@ pub(super) fn get_all_screens(mtm: MainThreadMarker) -> Vec<ScreenInfo> {
 }
 
 pub(super) fn compute_global_bounds(screens: &[ScreenInfo]) -> Dimension {
-    let min_x = screens.iter().map(|s| s.dimension.x).fold(f32::MAX, f32::min);
-    let min_y = screens.iter().map(|s| s.dimension.y).fold(f32::MAX, f32::min);
+    let min_x = screens
+        .iter()
+        .map(|s| s.dimension.x)
+        .fold(f32::MAX, f32::min);
+    let min_y = screens
+        .iter()
+        .map(|s| s.dimension.y)
+        .fold(f32::MAX, f32::min);
     let max_x = screens
         .iter()
         .map(|s| s.dimension.x + s.dimension.width)

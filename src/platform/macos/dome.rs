@@ -224,6 +224,18 @@ impl MonitorRegistry {
         }
     }
 
+    fn contains(&self, display_id: DisplayId) -> bool {
+        self.map.contains_key(&display_id)
+    }
+
+    fn get(&self, display_id: DisplayId) -> Option<MonitorId> {
+        self.map.get(&display_id).copied()
+    }
+
+    fn primary_monitor_id(&self) -> MonitorId {
+        self.get(self.primary_display_id).unwrap()
+    }
+
     fn insert(&mut self, display_id: DisplayId, monitor_id: MonitorId) {
         self.map.insert(display_id, monitor_id);
         self.reverse.insert(monitor_id, display_id);
@@ -233,6 +245,26 @@ impl MonitorRegistry {
         if let Some(display_id) = self.reverse.remove(&monitor_id) {
             self.map.remove(&display_id);
         }
+    }
+
+    fn replace(&mut self, old_display_id: DisplayId, new_display_id: DisplayId) {
+        if let Some(monitor_id) = self.map.remove(&old_display_id) {
+            self.map.insert(new_display_id, monitor_id);
+            self.reverse.insert(monitor_id, new_display_id);
+        }
+    }
+
+    fn remove_stale(&mut self, current: &HashSet<DisplayId>) -> Vec<MonitorId> {
+        let stale: Vec<_> = self
+            .map
+            .iter()
+            .filter(|(key, _)| !current.contains(key))
+            .map(|(_, &id)| id)
+            .collect();
+        for &id in &stale {
+            self.remove_by_id(id);
+        }
+        stale
     }
 }
 
@@ -264,11 +296,23 @@ impl Dome {
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary.display_id, primary_monitor_id);
+        tracing::info!(
+            name = %primary.name,
+            display_id = primary.display_id,
+            dimension = ?primary.dimension,
+            "Primary monitor"
+        );
 
         for screen in &screens {
             if screen.display_id != primary.display_id {
                 let id = hub.add_monitor(screen.name.clone(), screen.dimension);
                 monitor_registry.insert(screen.display_id, id);
+                tracing::info!(
+                    name = %screen.name,
+                    display_id = screen.display_id,
+                    dimension = ?screen.dimension,
+                    "Monitor"
+                );
             }
         }
 
@@ -484,12 +528,6 @@ impl Dome {
                 continue;
             };
             let window = self.hub.get_window(id);
-            tracing::debug!(
-                %pid,
-                mac_window = %entry.window,
-                ?window,
-                "Handling window moved"
-            );
             let Some((min_w, min_h, max_w, max_h)) = entry.window.check_placement(window) else {
                 continue;
             };
@@ -734,18 +772,22 @@ fn get_displayed_cg_ids(hub: &Hub, registry: &Registry) -> HashSet<CGWindowID> {
 }
 
 /// Position tiling windows, returns discovered size constraints and clipped window ids
-fn collect_tiling_windows(hub: &Hub, registry: &Registry) -> Vec<(CGWindowID, WindowId, Window)> {
+fn collect_tiling_windows(
+    hub: &Hub,
+    registry: &Registry,
+) -> Vec<(CGWindowID, WindowId, Window, Dimension)> {
     let mut result = Vec::new();
 
     for ws_id in hub.visible_workspaces() {
         let ws = hub.get_workspace(ws_id);
+        let monitor_dim = hub.get_monitor(ws.monitor()).dimension();
         let mut stack: Vec<Child> = ws.root().into_iter().collect();
 
         while let Some(child) = stack.pop() {
             match child {
                 Child::Window(id) => {
                     if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id)) {
-                        result.push((cg_id, id, hub.get_window(id).clone()));
+                        result.push((cg_id, id, hub.get_window(id).clone(), monitor_dim));
                     }
                 }
                 Child::Container(id) => {
@@ -765,15 +807,15 @@ fn collect_tiling_windows(hub: &Hub, registry: &Registry) -> Vec<(CGWindowID, Wi
 }
 
 fn position_tiling_windows(
-    windows: Vec<(CGWindowID, WindowId, Window)>,
+    windows: Vec<(CGWindowID, WindowId, Window, Dimension)>,
     registry: &mut Registry,
     border: f32,
 ) {
-    for (cg_id, _id, core_window) in windows {
+    for (cg_id, _id, core_window, monitor_dim) in windows {
         let Some(mac_window) = registry.get_mut(cg_id) else {
             continue;
         };
-        mac_window.try_placement(&core_window, border);
+        mac_window.try_placement(&core_window, border, monitor_dim);
     }
 }
 
@@ -807,7 +849,12 @@ fn build_tab_bar(
         width: dim.width,
         height,
     };
-    rects.extend(border_rects(primary_full_height, tab_dim, border, [tab_color; 4]));
+    rects.extend(border_rects(
+        primary_full_height,
+        tab_dim,
+        border,
+        [tab_color; 4],
+    ));
 
     let children = container.children();
     if children.is_empty() {
@@ -1002,14 +1049,22 @@ fn border_rects(
         },
         OverlayRect {
             x: dim.x,
-            y: flip_y(primary_full_height, dim.y + border, dim.height - 2.0 * border),
+            y: flip_y(
+                primary_full_height,
+                dim.y + border,
+                dim.height - 2.0 * border,
+            ),
             width: border,
             height: dim.height - 2.0 * border,
             color: colors[2],
         },
         OverlayRect {
             x: dim.x + dim.width - border,
-            y: flip_y(primary_full_height, dim.y + border, dim.height - 2.0 * border),
+            y: flip_y(
+                primary_full_height,
+                dim.y + border,
+                dim.height - 2.0 * border,
+            ),
             width: border,
             height: dim.height - 2.0 * border,
             color: colors[3],
@@ -1038,41 +1093,53 @@ fn should_ignore(window: &MacWindow, rules: &[MacosWindow]) -> bool {
 }
 
 fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[ScreenInfo]) {
-    if let Some(new_primary) = screens.iter().find(|s| s.is_primary) {
-        registry.primary_display_id = new_primary.display_id;
-    }
-
     let current_keys: HashSet<_> = screens.iter().map(|s| s.display_id).collect();
 
-    // Add new monitors first
+    // Special handling for when the primary monitor got replaced, i.e. due to mirroring to prevent
+    // disruption due to removal and addition of workspaces.
+    if let Some(new_primary) = screens.iter().find(|s| s.is_primary) {
+        if !registry.contains(new_primary.display_id) {
+            let old_display_id = registry.primary_display_id;
+            registry.replace(old_display_id, new_primary.display_id);
+            registry.primary_display_id = new_primary.display_id;
+            hub.update_monitor_dimension(registry.primary_monitor_id(), new_primary.dimension);
+        } else {
+            registry.primary_display_id = new_primary.display_id;
+        }
+    }
+
+    // Add new monitors first to prevent exhausting all monitors
     for screen in screens {
-        if !registry.map.contains_key(&screen.display_id) {
+        if !registry.contains(screen.display_id) {
             let id = hub.add_monitor(screen.name.clone(), screen.dimension);
             registry.insert(screen.display_id, id);
-            tracing::info!(name = %screen.name, "Added monitor");
+            tracing::info!(
+                name = %screen.name,
+                display_id = screen.display_id,
+                dimension = ?screen.dimension,
+                "Monitor added"
+            );
         }
     }
 
     // Remove monitors that no longer exist
-    let to_remove: Vec<_> = registry
-        .map
-        .iter()
-        .filter(|(key, _)| !current_keys.contains(key))
-        .map(|(_, id)| *id)
-        .collect();
-
-    let fallback_id = registry.map.get(&registry.primary_display_id).copied();
-    for monitor_id in to_remove {
-        if let Some(fallback) = fallback_id.filter(|&f| f != monitor_id) {
-            hub.remove_monitor(monitor_id, fallback);
-            registry.remove_by_id(monitor_id);
-            tracing::info!(%monitor_id, "Removed monitor");
-        }
+    for monitor_id in registry.remove_stale(&current_keys) {
+        hub.remove_monitor(monitor_id, registry.primary_monitor_id());
+        tracing::info!(%monitor_id, fallback = %registry.primary_monitor_id(), "Monitor removed");
     }
 
     // Update dimensions
     for screen in screens {
-        if let Some(&monitor_id) = registry.map.get(&screen.display_id) {
+        if let Some(monitor_id) = registry.get(screen.display_id) {
+            let old_dim = hub.get_monitor(monitor_id).dimension();
+            if old_dim != screen.dimension {
+                tracing::info!(
+                    name = %screen.name,
+                    ?old_dim,
+                    new_dim = ?screen.dimension,
+                    "Monitor dimension changed"
+                );
+            }
             hub.update_monitor_dimension(monitor_id, screen.dimension);
         }
     }
