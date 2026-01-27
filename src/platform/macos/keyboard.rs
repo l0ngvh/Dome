@@ -160,29 +160,64 @@ fn get_key_from_event(event: *mut CGEvent) -> String {
         CGEvent::integer_value_field(Some(unsafe { &*event }), CGEventField::KeyboardEventKeycode);
 
     match keycode {
-        0x24 => return "return".to_string(),
-        0x4C => return "enter".to_string(),
-        0x33 => return "backspace".to_string(),
-        0x35 => return "escape".to_string(),
-        0x30 => return "tab".to_string(),
-        0x31 => return "space".to_string(),
-        0x7E => return "up".to_string(),
-        0x7D => return "down".to_string(),
-        0x7B => return "left".to_string(),
-        0x7C => return "right".to_string(),
-        _ => {}
+        0x00 => "a",
+        0x01 => "s",
+        0x02 => "d",
+        0x03 => "f",
+        0x04 => "h",
+        0x05 => "g",
+        0x06 => "z",
+        0x07 => "x",
+        0x08 => "c",
+        0x09 => "v",
+        0x0B => "b",
+        0x0C => "q",
+        0x0D => "w",
+        0x0E => "e",
+        0x0F => "r",
+        0x10 => "y",
+        0x11 => "t",
+        0x12 => "1",
+        0x13 => "2",
+        0x14 => "3",
+        0x15 => "4",
+        0x16 => "6",
+        0x17 => "5",
+        0x18 => "=",
+        0x19 => "9",
+        0x1A => "7",
+        0x1B => "-",
+        0x1C => "8",
+        0x1D => "0",
+        0x1E => "]",
+        0x1F => "o",
+        0x20 => "u",
+        0x21 => "[",
+        0x22 => "i",
+        0x23 => "p",
+        0x25 => "l",
+        0x26 => "j",
+        0x27 => "'",
+        0x28 => "k",
+        0x29 => ";",
+        0x2A => "\\",
+        0x2B => ",",
+        0x2C => "/",
+        0x2D => "n",
+        0x2E => "m",
+        0x2F => ".",
+        0x32 => "`",
+        0x24 => "return",
+        0x4C => "enter",
+        0x33 => "backspace",
+        0x35 => "escape",
+        0x30 => "tab",
+        0x31 => "space",
+        0x7E => "up",
+        0x7D => "down",
+        0x7B => "left",
+        0x7C => "right",
+        _ => return format!("keycode_{keycode}"),
     }
-
-    let max_len: usize = 256;
-    let mut buffer: Vec<u16> = vec![0; max_len];
-    let mut actual_len: std::ffi::c_ulong = 0;
-    unsafe {
-        CGEvent::keyboard_get_unicode_string(
-            Some(&*event),
-            max_len as std::ffi::c_ulong,
-            &mut actual_len as *mut std::ffi::c_ulong,
-            buffer.as_mut_ptr(),
-        )
-    };
-    String::from_utf16(&buffer[..actual_len as usize]).unwrap()
+    .to_string()
 }
