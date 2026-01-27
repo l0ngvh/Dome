@@ -15,6 +15,24 @@ use objc2_foundation::{
 use crate::config::Color;
 use crate::core::{ContainerId, FloatWindowId, WindowId};
 
+fn clip_to_bounds(rect: NSRect, bounds: NSRect) -> Option<NSRect> {
+    if rect.origin.x >= bounds.origin.x + bounds.size.width
+        || rect.origin.y >= bounds.origin.y + bounds.size.height
+        || rect.origin.x + rect.size.width <= bounds.origin.x
+        || rect.origin.y + rect.size.height <= bounds.origin.y
+    {
+        return None;
+    }
+    let x = rect.origin.x.max(bounds.origin.x);
+    let y = rect.origin.y.max(bounds.origin.y);
+    let right = (rect.origin.x + rect.size.width).min(bounds.origin.x + bounds.size.width);
+    let top = (rect.origin.y + rect.size.height).min(bounds.origin.y + bounds.size.height);
+    Some(NSRect::new(
+        NSPoint::new(x, y),
+        NSSize::new(right - x, top - y),
+    ))
+}
+
 fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> Retained<NSWindow> {
     let window = unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -34,6 +52,53 @@ fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> 
     );
     unsafe { window.setReleasedWhenClosed(false) };
     window
+}
+
+fn compute_border_edges(
+    frame: NSRect,
+    bounds: NSRect,
+    colors: [Color; 4],
+    b: f64,
+) -> Vec<(NSRect, Color)> {
+    let w = frame.size.width;
+    let h = frame.size.height;
+
+    // Monitor bounds in local coordinates
+    let local_bounds = NSRect::new(
+        NSPoint::new(
+            bounds.origin.x - frame.origin.x,
+            bounds.origin.y - frame.origin.y,
+        ),
+        bounds.size,
+    );
+
+    let mut edges = Vec::new();
+
+    // top
+    let top = NSRect::new(NSPoint::new(0.0, h - b), NSSize::new(w, b));
+    if let Some(r) = clip_to_bounds(top, local_bounds) {
+        edges.push((r, colors[0]));
+    }
+
+    // bottom
+    let bottom = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, b));
+    if let Some(r) = clip_to_bounds(bottom, local_bounds) {
+        edges.push((r, colors[2]));
+    }
+
+    // right (exclude corners)
+    let right = NSRect::new(NSPoint::new(w - b, b), NSSize::new(b, h - 2.0 * b));
+    if let Some(r) = clip_to_bounds(right, local_bounds) {
+        edges.push((r, colors[1]));
+    }
+
+    // left (exclude corners)
+    let left = NSRect::new(NSPoint::new(0.0, b), NSSize::new(b, h - 2.0 * b));
+    if let Some(r) = clip_to_bounds(left, local_bounds) {
+        edges.push((r, colors[3]));
+    }
+
+    edges
 }
 
 pub(super) struct TilingBorder {
@@ -75,12 +140,13 @@ pub(super) struct Overlays {
     pub container_borders: Vec<ContainerBorder>,
     pub tab_bars: Vec<TabBarOverlay>,
     pub border_size: f32,
+    /// Monitor bounds to clip overlays, preventing them from spilling to other monitors
+    pub monitor_bounds: NSRect,
 }
 
 // BorderView
 struct BorderViewIvars {
-    colors: RefCell<[Color; 4]>,
-    border_size: Cell<f32>,
+    edges: RefCell<Vec<(NSRect, Color)>>,
 }
 
 define_class!(
@@ -94,39 +160,24 @@ define_class!(
     impl BorderView {
         #[unsafe(method(drawRect:))]
         fn draw_rect(&self, _dirty_rect: NSRect) {
-            let frame = self.bounds();
-            let colors = self.ivars().colors.borrow();
-            let b = self.ivars().border_size.get() as f64;
-            let w = frame.size.width;
-            let h = frame.size.height;
-
-            draw_rect(0.0, h - b, w, b, colors[0]); // top
-            draw_rect(0.0, 0.0, w, b, colors[2]);   // bottom
-            // left/right exclude corners to avoid overlap with different spawn indicator colors
-            draw_rect(w - b, b, b, h - 2.0 * b, colors[1]); // right
-            draw_rect(0.0, b, b, h - 2.0 * b, colors[3]);   // left
+            for (rect, color) in self.ivars().edges.borrow().iter() {
+                draw_rect(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height, *color);
+            }
         }
     }
 );
 
 impl BorderView {
-    fn new(
-        mtm: MainThreadMarker,
-        frame: NSRect,
-        colors: [Color; 4],
-        border_size: f32,
-    ) -> Retained<Self> {
+    fn new(mtm: MainThreadMarker, frame: NSRect, edges: Vec<(NSRect, Color)>) -> Retained<Self> {
         let ivars = BorderViewIvars {
-            colors: RefCell::new(colors),
-            border_size: Cell::new(border_size),
+            edges: RefCell::new(edges),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 
-    fn set_data(&self, colors: [Color; 4], border_size: f32) {
-        *self.ivars().colors.borrow_mut() = colors;
-        self.ivars().border_size.set(border_size);
+    fn set_data(&self, edges: Vec<(NSRect, Color)>) {
+        *self.ivars().edges.borrow_mut() = edges;
         self.setNeedsDisplay(true);
     }
 }
@@ -190,10 +241,17 @@ impl TabBarView {
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 
-    fn set_data(&self, tabs: Vec<TabInfo>, background_color: Color, active_background_color: Color) {
+    fn set_data(
+        &self,
+        tabs: Vec<TabInfo>,
+        background_color: Color,
+        active_background_color: Color,
+    ) {
         *self.ivars().tabs.borrow_mut() = tabs;
         self.ivars().background_color.set(background_color);
-        self.ivars().active_background_color.set(active_background_color);
+        self.ivars()
+            .active_background_color
+            .set(active_background_color);
         self.setNeedsDisplay(true);
     }
 }
@@ -206,10 +264,7 @@ fn draw_rect(x: f64, y: f64, width: f64, height: f64, color: Color) {
         color.a as CGFloat,
     );
     ns_color.setFill();
-    NSBezierPath::fillRect(NSRect::new(
-        NSPoint::new(x, y),
-        NSSize::new(width, height),
-    ));
+    NSBezierPath::fillRect(NSRect::new(NSPoint::new(x, y), NSSize::new(width, height)));
 }
 
 fn draw_label(text: &str, x: f32, y: f32, color: Color, bold: bool) {
@@ -258,6 +313,7 @@ impl OverlayManager {
 
     pub(super) fn process(&mut self, mtm: MainThreadMarker, overlays: Overlays) {
         let b = overlays.border_size;
+        let bounds = overlays.monitor_bounds;
 
         // Collect new keys
         let new_tiling: std::collections::HashSet<_> =
@@ -272,36 +328,51 @@ impl OverlayManager {
         // Remove stale
         self.tiling.retain(|k, w| {
             let keep = new_tiling.contains(k);
-            if !keep { w.close(); }
+            if !keep {
+                w.close();
+            }
             keep
         });
         self.float.retain(|k, w| {
             let keep = new_float.contains(k);
-            if !keep { w.close(); }
+            if !keep {
+                w.close();
+            }
             keep
         });
         self.container.retain(|k, w| {
             let keep = new_container.contains(k);
-            if !keep { w.close(); }
+            if !keep {
+                w.close();
+            }
             keep
         });
         self.tab_bars.retain(|k, w| {
             let keep = new_tab_bars.contains(k);
-            if !keep { w.close(); }
+            if !keep {
+                w.close();
+            }
             keep
         });
 
         // Tiling borders
         for border in overlays.tiling_borders {
+            let edges = compute_border_edges(border.frame, bounds, border.colors, b as f64);
+            if edges.is_empty() {
+                if let Some(w) = self.tiling.remove(&border.key) {
+                    w.close();
+                }
+                continue;
+            }
             if let Some(window) = self.tiling.get(&border.key) {
                 window.setFrame_display(border.frame, true);
                 if let Some(view) = window.contentView() {
                     let v: &BorderView = unsafe { std::mem::transmute(&*view) };
-                    v.set_data(border.colors, b);
+                    v.set_data(edges);
                 }
             } else {
                 let window = create_overlay_window(mtm, border.frame, NSNormalWindowLevel - 1);
-                let view = BorderView::new(mtm, border.frame, border.colors, b);
+                let view = BorderView::new(mtm, border.frame, edges);
                 window.setContentView(Some(&view));
                 window.orderFront(None);
                 self.tiling.insert(border.key, window);
@@ -310,15 +381,22 @@ impl OverlayManager {
 
         // Float borders
         for border in overlays.float_borders {
+            let edges = compute_border_edges(border.frame, bounds, border.colors, b as f64);
+            if edges.is_empty() {
+                if let Some(w) = self.float.remove(&border.key) {
+                    w.close();
+                }
+                continue;
+            }
             if let Some(window) = self.float.get(&border.key) {
                 window.setFrame_display(border.frame, true);
                 if let Some(view) = window.contentView() {
                     let v: &BorderView = unsafe { std::mem::transmute(&*view) };
-                    v.set_data(border.colors, b);
+                    v.set_data(edges);
                 }
             } else {
                 let window = create_overlay_window(mtm, border.frame, NSFloatingWindowLevel);
-                let view = BorderView::new(mtm, border.frame, border.colors, b);
+                let view = BorderView::new(mtm, border.frame, edges);
                 window.setContentView(Some(&view));
                 window.orderFront(None);
                 self.float.insert(border.key, window);
@@ -327,15 +405,22 @@ impl OverlayManager {
 
         // Container borders
         for border in overlays.container_borders {
+            let edges = compute_border_edges(border.frame, bounds, border.colors, b as f64);
+            if edges.is_empty() {
+                if let Some(w) = self.container.remove(&border.key) {
+                    w.close();
+                }
+                continue;
+            }
             if let Some(window) = self.container.get(&border.key) {
                 window.setFrame_display(border.frame, true);
                 if let Some(view) = window.contentView() {
                     let v: &BorderView = unsafe { std::mem::transmute(&*view) };
-                    v.set_data(border.colors, b);
+                    v.set_data(edges);
                 }
             } else {
                 let window = create_overlay_window(mtm, border.frame, NSNormalWindowLevel - 1);
-                let view = BorderView::new(mtm, border.frame, border.colors, b);
+                let view = BorderView::new(mtm, border.frame, edges);
                 window.setContentView(Some(&view));
                 window.orderFront(None);
                 self.container.insert(border.key, window);
@@ -344,17 +429,27 @@ impl OverlayManager {
 
         // Tab bars
         for tab_bar in overlays.tab_bars {
+            let Some(frame) = clip_to_bounds(tab_bar.frame, bounds) else {
+                if let Some(w) = self.tab_bars.remove(&tab_bar.key) {
+                    w.close();
+                }
+                continue;
+            };
             if let Some(window) = self.tab_bars.get(&tab_bar.key) {
-                window.setFrame_display(tab_bar.frame, true);
+                window.setFrame_display(frame, true);
                 if let Some(view) = window.contentView() {
                     let v: &TabBarView = unsafe { std::mem::transmute(&*view) };
-                    v.set_data(tab_bar.tabs, tab_bar.background_color, tab_bar.active_background_color);
+                    v.set_data(
+                        tab_bar.tabs,
+                        tab_bar.background_color,
+                        tab_bar.active_background_color,
+                    );
                 }
             } else {
-                let window = create_overlay_window(mtm, tab_bar.frame, NSFloatingWindowLevel);
+                let window = create_overlay_window(mtm, frame, NSFloatingWindowLevel);
                 let view = TabBarView::new(
                     mtm,
-                    tab_bar.frame,
+                    frame,
                     tab_bar.tabs,
                     tab_bar.background_color,
                     tab_bar.active_background_color,

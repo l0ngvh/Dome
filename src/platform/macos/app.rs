@@ -16,9 +16,7 @@ use objc2_core_foundation::{
     kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
-use objc2_foundation::{
-    NSNotification, NSNumber, NSObject, NSObjectProtocol, NSString,
-};
+use objc2_foundation::{NSNotification, NSNumber, NSObject, NSObjectProtocol, NSString};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};

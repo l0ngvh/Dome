@@ -266,21 +266,21 @@ impl MacWindow {
         let mut target = dim;
 
         // Mac prevents putting windows above menu bar
-        if target.y < self.global_bounds.y {
-            target.height -= self.global_bounds.y - target.y;
-            target.y = self.global_bounds.y;
+        if target.y < monitor.y {
+            target.height -= monitor.y - target.y;
+            target.y = monitor.y;
         }
-        // Clip to fit within screen, as Mac sometime snap windows to fit within screen, which
-        // might be confused with user setting size manually
-        if target.y + target.height > self.global_bounds.y + self.global_bounds.height {
-            target.height = self.global_bounds.y + self.global_bounds.height - target.y;
+        // Clip to fit within monitor bounds, as Mac sometimes snaps windows to fit within screen,
+        // which might be confused with user setting size manually
+        if target.y + target.height > monitor.y + monitor.height {
+            target.height = monitor.y + monitor.height - target.y;
         }
-        if target.x < self.global_bounds.x {
-            target.width -= self.global_bounds.x - target.x;
-            target.x = self.global_bounds.x;
+        if target.x < monitor.x {
+            target.width -= monitor.x - target.x;
+            target.x = monitor.x;
         }
-        if target.x + target.width > self.global_bounds.x + self.global_bounds.width {
-            target.width = self.global_bounds.x + self.global_bounds.width - target.x;
+        if target.x + target.width > monitor.x + monitor.width {
+            target.width = monitor.x + monitor.width - target.x;
         }
 
         if self.set_dimension(target).is_err() {

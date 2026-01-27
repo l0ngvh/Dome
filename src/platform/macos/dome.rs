@@ -859,12 +859,15 @@ fn build_tab_bar(
 
     TabBarOverlay {
         key: id,
-        frame: to_ns_rect(primary_full_height, Dimension {
-            x: dim.x,
-            y: dim.y,
-            width: dim.width,
-            height,
-        }),
+        frame: to_ns_rect(
+            primary_full_height,
+            Dimension {
+                x: dim.x,
+                y: dim.y,
+                width: dim.width,
+                height,
+            },
+        ),
         tabs,
         background_color: config.tab_bar_background_color,
         active_background_color: config.active_tab_background_color,
@@ -874,7 +877,10 @@ fn build_tab_bar(
 // Quartz uses top-left origin, Cocoa uses bottom-left origin
 fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
     NSRect::new(
-        NSPoint::new(dim.x as f64, (primary_full_height - dim.y - dim.height) as f64),
+        NSPoint::new(
+            dim.x as f64,
+            (primary_full_height - dim.y - dim.height) as f64,
+        ),
         NSSize::new(dim.width as f64, dim.height as f64),
     )
 }
@@ -886,6 +892,7 @@ fn build_overlays(
     primary_full_height: f32,
 ) -> Overlays {
     let ws = hub.get_workspace(hub.current_workspace());
+    let monitor = hub.get_monitor(ws.monitor()).dimension();
     let focused = ws.focused();
 
     let mut tiling_borders = Vec::new();
@@ -962,6 +969,7 @@ fn build_overlays(
         container_borders,
         tab_bars,
         border_size: config.border_size,
+        monitor_bounds: to_ns_rect(primary_full_height, monitor),
     }
 }
 
