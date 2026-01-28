@@ -38,10 +38,12 @@ Dome supports IPC commands that can be sent while the window manager is running:
 dome focus up|down|left|right
 dome focus parent
 dome focus next_tab|prev_tab
-dome focus workspace <0-9>
+dome focus workspace <name>
+dome focus monitor up|down|left|right|<name>
 
 dome move up|down|left|right
-dome move workspace <0-9>
+dome move workspace <name>
+dome move monitor up|down|left|right|<name>
 
 dome toggle spawn_direction  # Toggle between horizontal/vertical/tabbed
 dome toggle direction
@@ -107,6 +109,16 @@ active_tab_background_color = "#4d4d66"
 "cmd+shift+j" = ["move down"]
 "cmd+shift+k" = ["move up"]
 "cmd+shift+l" = ["move right"]
+
+"cmd+alt+h" = ["focus monitor left"]
+"cmd+alt+j" = ["focus monitor down"]
+"cmd+alt+k" = ["focus monitor up"]
+"cmd+alt+l" = ["focus monitor right"]
+
+"cmd+alt+shift+h" = ["move monitor left"]
+"cmd+alt+shift+j" = ["move monitor down"]
+"cmd+alt+shift+k" = ["move monitor up"]
+"cmd+alt+shift+l" = ["move monitor right"]
 
 "cmd+e" = ["toggle spawn_direction"]
 "cmd+d" = ["toggle direction"]

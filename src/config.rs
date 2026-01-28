@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
+use crate::action::{Action, Actions, FocusTarget, MonitorTarget, MoveTarget, ToggleTarget};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -214,6 +214,34 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
         },
         Actions::new(vec![Action::Exit]),
     );
+    // Monitor focus: Cmd+Alt+hjkl
+    for (key, target) in [
+        ("h", MonitorTarget::Left),
+        ("j", MonitorTarget::Down),
+        ("k", MonitorTarget::Up),
+        ("l", MonitorTarget::Right),
+    ] {
+        keymaps.insert(
+            Keymap {
+                key: key.into(),
+                modifiers: Modifiers::CMD | Modifiers::ALT,
+            },
+            Actions::new(vec![Action::Focus {
+                target: FocusTarget::Monitor {
+                    target: target.clone(),
+                },
+            }]),
+        );
+        keymaps.insert(
+            Keymap {
+                key: key.into(),
+                modifiers: Modifiers::CMD | Modifiers::ALT | Modifiers::SHIFT,
+            },
+            Actions::new(vec![Action::Move {
+                target: MoveTarget::Monitor { target },
+            }]),
+        );
+    }
     keymaps
 }
 
