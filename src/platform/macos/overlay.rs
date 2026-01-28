@@ -102,46 +102,48 @@ fn compute_border_edges(
 }
 
 pub(super) struct TilingBorder {
-    pub key: WindowId,
-    pub frame: NSRect,
-    pub colors: [Color; 4],
+    pub(super) key: WindowId,
+    pub(super) frame: NSRect,
+    pub(super) bounds: NSRect,
+    pub(super) colors: [Color; 4],
 }
 
 pub(super) struct FloatBorder {
-    pub key: FloatWindowId,
-    pub frame: NSRect,
-    pub colors: [Color; 4],
+    pub(super) key: FloatWindowId,
+    pub(super) frame: NSRect,
+    pub(super) bounds: NSRect,
+    pub(super) colors: [Color; 4],
 }
 
 pub(super) struct ContainerBorder {
-    pub key: ContainerId,
-    pub frame: NSRect,
-    pub colors: [Color; 4],
+    pub(super) key: ContainerId,
+    pub(super) frame: NSRect,
+    pub(super) bounds: NSRect,
+    pub(super) colors: [Color; 4],
 }
 
 pub(super) struct TabInfo {
-    pub title: String,
-    pub x: f32,
-    pub width: f32,
-    pub is_active: bool,
+    pub(super) title: String,
+    pub(super) x: f32,
+    pub(super) width: f32,
+    pub(super) is_active: bool,
 }
 
 pub(super) struct TabBarOverlay {
-    pub key: ContainerId,
-    pub frame: NSRect,
-    pub tabs: Vec<TabInfo>,
-    pub background_color: Color,
-    pub active_background_color: Color,
+    pub(super) key: ContainerId,
+    pub(super) frame: NSRect,
+    pub(super) bounds: NSRect,
+    pub(super) tabs: Vec<TabInfo>,
+    pub(super) background_color: Color,
+    pub(super) active_background_color: Color,
 }
 
 pub(super) struct Overlays {
-    pub tiling_borders: Vec<TilingBorder>,
-    pub float_borders: Vec<FloatBorder>,
-    pub container_borders: Vec<ContainerBorder>,
-    pub tab_bars: Vec<TabBarOverlay>,
-    pub border_size: f32,
-    /// Monitor bounds to clip overlays, preventing them from spilling to other monitors
-    pub monitor_bounds: NSRect,
+    pub(super) tiling_borders: Vec<TilingBorder>,
+    pub(super) float_borders: Vec<FloatBorder>,
+    pub(super) container_borders: Vec<ContainerBorder>,
+    pub(super) tab_bars: Vec<TabBarOverlay>,
+    pub(super) border_size: f32,
 }
 
 // BorderView
@@ -313,7 +315,6 @@ impl OverlayManager {
 
     pub(super) fn process(&mut self, mtm: MainThreadMarker, overlays: Overlays) {
         let b = overlays.border_size;
-        let bounds = overlays.monitor_bounds;
 
         // Collect new keys
         let new_tiling: std::collections::HashSet<_> =
@@ -357,7 +358,7 @@ impl OverlayManager {
 
         // Tiling borders
         for border in overlays.tiling_borders {
-            let edges = compute_border_edges(border.frame, bounds, border.colors, b as f64);
+            let edges = compute_border_edges(border.frame, border.bounds, border.colors, b as f64);
             if edges.is_empty() {
                 if let Some(w) = self.tiling.remove(&border.key) {
                     w.close();
@@ -381,7 +382,7 @@ impl OverlayManager {
 
         // Float borders
         for border in overlays.float_borders {
-            let edges = compute_border_edges(border.frame, bounds, border.colors, b as f64);
+            let edges = compute_border_edges(border.frame, border.bounds, border.colors, b as f64);
             if edges.is_empty() {
                 if let Some(w) = self.float.remove(&border.key) {
                     w.close();
@@ -405,7 +406,7 @@ impl OverlayManager {
 
         // Container borders
         for border in overlays.container_borders {
-            let edges = compute_border_edges(border.frame, bounds, border.colors, b as f64);
+            let edges = compute_border_edges(border.frame, border.bounds, border.colors, b as f64);
             if edges.is_empty() {
                 if let Some(w) = self.container.remove(&border.key) {
                     w.close();
@@ -429,7 +430,7 @@ impl OverlayManager {
 
         // Tab bars
         for tab_bar in overlays.tab_bars {
-            let Some(frame) = clip_to_bounds(tab_bar.frame, bounds) else {
+            let Some(frame) = clip_to_bounds(tab_bar.frame, tab_bar.bounds) else {
                 if let Some(w) = self.tab_bars.remove(&tab_bar.key) {
                     w.close();
                 }

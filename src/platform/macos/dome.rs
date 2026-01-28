@@ -825,6 +825,7 @@ fn position_tiling_windows(
 
 fn build_tab_bar(
     primary_full_height: f32,
+    bounds: NSRect,
     id: ContainerId,
     container: &Container,
     registry: &Registry,
@@ -868,6 +869,7 @@ fn build_tab_bar(
                 height,
             },
         ),
+        bounds,
         tabs,
         background_color: config.tab_bar_background_color,
         active_background_color: config.active_tab_background_color,
@@ -891,75 +893,82 @@ fn build_overlays(
     config: &Config,
     primary_full_height: f32,
 ) -> Overlays {
-    let ws = hub.get_workspace(hub.current_workspace());
-    let monitor = hub.get_monitor(ws.monitor()).dimension();
-    let focused = ws.focused();
-
+    let current_ws_id = hub.current_workspace();
     let mut tiling_borders = Vec::new();
     let mut float_borders = Vec::new();
     let mut container_borders = Vec::new();
     let mut tab_bars = Vec::new();
 
-    let mut stack: Vec<Child> = ws.root().into_iter().collect();
-    while let Some(child) = stack.pop() {
-        match child {
-            Child::Window(id) => {
-                if registry.get_cg_id(WindowType::Tiling(id)).is_some() {
-                    let w = hub.get_window(id);
-                    let colors = if focused == Some(Focus::Tiling(Child::Window(id))) {
-                        spawn_colors(w.spawn_mode(), config)
-                    } else {
-                        [config.border_color; 4]
-                    };
-                    tiling_borders.push(TilingBorder {
-                        key: id,
-                        frame: to_ns_rect(primary_full_height, w.dimension()),
-                        colors,
-                    });
+    for ws_id in hub.visible_workspaces() {
+        let ws = hub.get_workspace(ws_id);
+        let bounds = to_ns_rect(primary_full_height, hub.get_monitor(ws.monitor()).dimension());
+        let focused = if ws_id == current_ws_id { ws.focused() } else { None };
+
+        let mut stack: Vec<Child> = ws.root().into_iter().collect();
+        while let Some(child) = stack.pop() {
+            match child {
+                Child::Window(id) => {
+                    if registry.get_cg_id(WindowType::Tiling(id)).is_some() {
+                        let w = hub.get_window(id);
+                        let colors = if focused == Some(Focus::Tiling(Child::Window(id))) {
+                            spawn_colors(w.spawn_mode(), config)
+                        } else {
+                            [config.border_color; 4]
+                        };
+                        tiling_borders.push(TilingBorder {
+                            key: id,
+                            frame: to_ns_rect(primary_full_height, w.dimension()),
+                            bounds,
+                            colors,
+                        });
+                    }
                 }
-            }
-            Child::Container(id) => {
-                let container = hub.get_container(id);
-                if let Some(active) = container.active_tab() {
-                    stack.push(active);
-                    tab_bars.push(build_tab_bar(
-                        primary_full_height,
-                        id,
-                        container,
-                        registry,
-                        config,
-                    ));
-                } else {
-                    for &c in container.children() {
-                        stack.push(c);
+                Child::Container(id) => {
+                    let container = hub.get_container(id);
+                    if let Some(active) = container.active_tab() {
+                        stack.push(active);
+                        tab_bars.push(build_tab_bar(
+                            primary_full_height,
+                            bounds,
+                            id,
+                            container,
+                            registry,
+                            config,
+                        ));
+                    } else {
+                        for &c in container.children() {
+                            stack.push(c);
+                        }
                     }
                 }
             }
         }
-    }
 
-    if let Some(Focus::Tiling(Child::Container(id))) = focused {
-        let c = hub.get_container(id);
-        container_borders.push(ContainerBorder {
-            key: id,
-            frame: to_ns_rect(primary_full_height, c.dimension()),
-            colors: spawn_colors(c.spawn_mode(), config),
-        });
-    }
-
-    for &float_id in ws.float_windows() {
-        if registry.get_cg_id(WindowType::Float(float_id)).is_some() {
-            let dim = hub.get_float(float_id).dimension();
-            let color = if focused == Some(Focus::Float(float_id)) {
-                config.focused_color
-            } else {
-                config.border_color
-            };
-            float_borders.push(FloatBorder {
-                key: float_id,
-                frame: to_ns_rect(primary_full_height, dim),
-                colors: [color; 4],
+        if let Some(Focus::Tiling(Child::Container(id))) = focused {
+            let c = hub.get_container(id);
+            container_borders.push(ContainerBorder {
+                key: id,
+                frame: to_ns_rect(primary_full_height, c.dimension()),
+                bounds,
+                colors: spawn_colors(c.spawn_mode(), config),
             });
+        }
+
+        for &float_id in ws.float_windows() {
+            if registry.get_cg_id(WindowType::Float(float_id)).is_some() {
+                let dim = hub.get_float(float_id).dimension();
+                let color = if focused == Some(Focus::Float(float_id)) {
+                    config.focused_color
+                } else {
+                    config.border_color
+                };
+                float_borders.push(FloatBorder {
+                    key: float_id,
+                    frame: to_ns_rect(primary_full_height, dim),
+                    bounds,
+                    colors: [color; 4],
+                });
+            }
         }
     }
 
@@ -969,7 +978,6 @@ fn build_overlays(
         container_borders,
         tab_bars,
         border_size: config.border_size,
-        monitor_bounds: to_ns_rect(primary_full_height, monitor),
     }
 }
 
