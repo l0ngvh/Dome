@@ -539,7 +539,10 @@ impl Dome {
                 continue;
             };
             let window = self.hub.get_window(id);
-            let Some((min_w, min_h, max_w, max_h)) = entry.window.check_placement(window) else {
+            let Some(mac_window) = self.registry.get_mut(cg_id) else {
+                continue;
+            };
+            let Some((min_w, min_h, max_w, max_h)) = mac_window.check_placement(window) else {
                 continue;
             };
             // Convert actual window size back to frame size by adding border back.

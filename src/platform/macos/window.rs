@@ -32,8 +32,8 @@ pub(super) struct MacWindow {
     app_name: String,
     bundle_id: Option<String>,
     title: Option<String>,
-    logical_placement: Option<(Dimension, u8)>,
-    physical_placement: Option<Dimension>,
+    /// Target position and retry count. Used to detect if window moved itself.
+    physical_placement: Option<(Dimension, u8)>,
     is_hidden: bool,
 }
 
@@ -81,7 +81,6 @@ impl MacWindow {
             app_name,
             bundle_id,
             title,
-            logical_placement: None,
             physical_placement: None,
             is_hidden: false,
         }
@@ -265,21 +264,6 @@ impl MacWindow {
             return;
         }
 
-        let rounded = round_dim(dim);
-        if let Some((prev, count)) = &mut self.logical_placement {
-            if *prev == rounded && !self.is_hidden {
-                if *count >= 5 {
-                    tracing::trace!("Window {self} already at correct position");
-                    return;
-                }
-                *count += 1;
-            } else {
-                self.logical_placement = Some((rounded, 0));
-            }
-        } else {
-            self.logical_placement = Some((rounded, 0));
-        }
-
         let mut target = dim;
 
         // Mac prevents putting windows above menu bar
@@ -300,23 +284,48 @@ impl MacWindow {
             target.width = monitor.x + monitor.width - target.x;
         }
 
+        let rounded = round_dim(target);
+        if let Some((prev, count)) = &mut self.physical_placement {
+            if *prev == rounded && !self.is_hidden {
+                if *count >= 5 {
+                    tracing::trace!("Window {self} already at correct position");
+                    return;
+                }
+                *count += 1;
+            } else {
+                self.physical_placement = Some((rounded, 0));
+            }
+        } else {
+            self.physical_placement = Some((rounded, 0));
+        }
+
         tracing::trace!(
             "Window {self} placing at {target:?} (was_hidden={})",
             self.is_hidden
         );
-        if self.set_dimension(target).is_err() {
-            tracing::trace!("Window {self} set_dimension failed");
-            return;
+        if let Err(e) = self.set_dimension(rounded) {
+            tracing::trace!("Window {self} set_dimension failed: {e}");
         }
-        self.physical_placement = Some(target);
     }
 
-    /// Check if window settled at expected position and detect constraints
-    pub(super) fn check_placement(&self, window: &Window) -> Option<RawConstraint> {
+    /// Check if window settled at expected position and detect constraints.
+    /// If position doesn't align, attempts to move window back.
+    /// Had to make sure to only call this function once this window has finished moving/resizing
+    pub(super) fn check_placement(&mut self, window: &Window) -> Option<RawConstraint> {
         if self.is_hidden {
+            // When spaces change or monitors are connected/disconnected, hidden windows
+            // may be moved to visible state, so we need to re-hide them
+            let actual = self.get_dimension();
+            let hidden_x = self.global_bounds.x + self.global_bounds.width - 1.0;
+            let hidden_y = self.global_bounds.y + self.global_bounds.height - 1.0;
+            if !pixel_eq(actual.x, hidden_x) || !pixel_eq(actual.y, hidden_y) {
+                if let Err(e) = self.hide() {
+                    tracing::trace!("Window {self} hide failed: {e}");
+                }
+            }
             return None;
         }
-        let expected = self.physical_placement?;
+        let (expected, count) = self.physical_placement?;
         let actual = self.get_dimension();
 
         tracing::trace!(
@@ -330,6 +339,12 @@ impl MacWindow {
         let top = pixel_eq(actual.y, expected.y);
         let bottom = pixel_eq(actual.y + actual.height, expected.y + expected.height);
         if !((left || right) && (top || bottom)) {
+            if count < 5 {
+                self.physical_placement = Some((expected, count + 1));
+                if let Err(e) = self.set_dimension(expected) {
+                    tracing::trace!("Window {self} set_dimension failed: {e}");
+                }
+            }
             return None;
         }
 
