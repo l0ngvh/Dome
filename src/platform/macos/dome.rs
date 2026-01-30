@@ -40,6 +40,11 @@ pub(super) enum HubEvent {
         pid: i32,
     },
     TitleChanged(CGWindowID),
+    /// One or more windows of app with pid got resized or moved.
+    /// This can't be on a per CGWindowID basis, as these events are unreliable and are often fired
+    /// on the wrong window. For example, Slack doesn't emit this event on the main application
+    /// window. This can however create a scenario when one window in the app finishes
+    /// moving/resizing and send this notification, but other windows are not finish yet.
     WindowMovedOrResized {
         pid: i32,
     },
@@ -522,9 +527,11 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     fn handle_window_moved(&mut self, pid: i32) {
         let border = self.config.border_size;
         for cg_id in self.registry.cg_ids_for_pid(pid) {
+            let _span = tracing::trace_span!("check_placement", %cg_id).entered();
             let Some(entry) = self.registry.get_entry(cg_id) else {
                 continue;
             };
@@ -654,6 +661,7 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     fn process_frame(
         &mut self,
         last_focus: Option<Focus>,
@@ -901,8 +909,15 @@ fn build_overlays(
 
     for ws_id in hub.visible_workspaces() {
         let ws = hub.get_workspace(ws_id);
-        let bounds = to_ns_rect(primary_full_height, hub.get_monitor(ws.monitor()).dimension());
-        let focused = if ws_id == current_ws_id { ws.focused() } else { None };
+        let bounds = to_ns_rect(
+            primary_full_height,
+            hub.get_monitor(ws.monitor()).dimension(),
+        );
+        let focused = if ws_id == current_ws_id {
+            ws.focused()
+        } else {
+            None
+        };
 
         let mut stack: Vec<Child> = ws.root().into_iter().collect();
         while let Some(child) = stack.pop() {

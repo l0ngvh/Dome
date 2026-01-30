@@ -32,7 +32,7 @@ pub(super) struct MacWindow {
     app_name: String,
     bundle_id: Option<String>,
     title: Option<String>,
-    logical_placement: Option<Dimension>,
+    logical_placement: Option<(Dimension, u8)>,
     physical_placement: Option<Dimension>,
     is_hidden: bool,
 }
@@ -244,14 +244,21 @@ impl MacWindow {
     /// taller than screen height, Mac will instead come up with an alternative placement. For our
     /// use case, the alternative placements are acceptable, albeit they will mess a little with
     /// our border rendering
+    #[tracing::instrument(skip(self))]
     pub(super) fn try_placement(&mut self, window: &Window, border: f32, monitor: Dimension) {
         let dim = apply_inset(window.dimension(), border);
 
         if is_completely_offscreen(dim, monitor) {
+            if self.is_hidden {
+                return;
+            }
             // TODO: if hide fail to move the window to offscreen position, this window is clearly
             // trying to take focus, so we should pop it to float or something.
             // Exception is full screen window, which, should be handled differently as a first
             // party citizen
+            tracing::trace!(
+                "Window {self} is offscreen (dim={dim:?}, monitor={monitor:?}), hiding"
+            );
             if let Err(e) = self.hide() {
                 tracing::trace!("Failed to hide window: {e:#}");
             }
@@ -259,8 +266,18 @@ impl MacWindow {
         }
 
         let rounded = round_dim(dim);
-        if self.logical_placement == Some(rounded) && !self.is_hidden {
-            return;
+        if let Some((prev, count)) = &mut self.logical_placement {
+            if *prev == rounded && !self.is_hidden {
+                if *count >= 5 {
+                    tracing::trace!("Window {self} already at correct position");
+                    return;
+                }
+                *count += 1;
+            } else {
+                self.logical_placement = Some((rounded, 0));
+            }
+        } else {
+            self.logical_placement = Some((rounded, 0));
         }
 
         let mut target = dim;
@@ -283,15 +300,22 @@ impl MacWindow {
             target.width = monitor.x + monitor.width - target.x;
         }
 
+        tracing::trace!(
+            "Window {self} placing at {target:?} (was_hidden={})",
+            self.is_hidden
+        );
         if self.set_dimension(target).is_err() {
+            tracing::trace!("Window {self} set_dimension failed");
             return;
         }
-        self.logical_placement = Some(rounded);
         self.physical_placement = Some(target);
     }
 
     /// Check if window settled at expected position and detect constraints
     pub(super) fn check_placement(&self, window: &Window) -> Option<RawConstraint> {
+        if self.is_hidden {
+            return None;
+        }
         let expected = self.physical_placement?;
         let actual = self.get_dimension();
 
@@ -339,6 +363,7 @@ impl MacWindow {
     /// multiple windows, it gets triggered in a staggered manner, which is extremely slow, and
     /// causes event tap to be timed out
     pub(super) fn hide(&mut self) -> Result<()> {
+        tracing::trace!("Hiding window {self}");
         self.is_hidden = true;
         // MacOS doesn't allow completely set windows offscreen, so we need to leave at
         // least one pixel left

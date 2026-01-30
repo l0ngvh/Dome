@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::ffi::c_void;
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
@@ -109,4 +111,77 @@ unsafe extern "C-unwind" fn throttle_timer_callback<T: 'static>(
 ) {
     let throttle = unsafe { &mut *(info as *mut Throttle<T>) };
     throttle.on_timer();
+}
+
+pub(super) struct Debounce<T: 'static + Eq + Hash + Copy> {
+    interval: Duration,
+    pending: HashMap<T, CFRetained<CFRunLoopTimer>>,
+    run_loop: CFRetained<CFRunLoop>,
+    callback: Box<dyn Fn(T)>,
+    _bound_to_thread: PhantomData<*const ()>,
+}
+
+impl<T: 'static + Eq + Hash + Copy> Debounce<T> {
+    pub(super) fn new(interval: Duration, callback: impl Fn(T) + 'static) -> Pin<Box<Self>> {
+        Box::pin(Self {
+            interval,
+            pending: HashMap::new(),
+            run_loop: CFRunLoop::current().expect("No run loop on current thread"),
+            callback: Box::new(callback),
+            _bound_to_thread: PhantomData,
+        })
+    }
+
+    pub(super) fn submit(self: &mut Pin<Box<Self>>, value: T) {
+        let this = unsafe { self.as_mut().get_unchecked_mut() };
+        if let Some(timer) = this.pending.remove(&value) {
+            CFRunLoopTimer::invalidate(&timer);
+        }
+        let ptr = Box::into_raw(Box::new((this as *mut Self, value)));
+        let mut context = CFRunLoopTimerContext {
+            version: 0,
+            info: ptr as *mut c_void,
+            retain: None,
+            release: None,
+            copyDescription: None,
+        };
+        let timer = unsafe {
+            CFRunLoopTimer::new(
+                None,
+                CFAbsoluteTimeGetCurrent() + this.interval.as_secs_f64(),
+                0.0,
+                0,
+                0,
+                Some(debounce_timer_callback::<T>),
+                &mut context,
+            )
+        }
+        .expect("Failed to create timer");
+
+        this.run_loop
+            .add_timer(Some(&timer), unsafe { kCFRunLoopDefaultMode });
+        this.pending.insert(value, timer);
+    }
+
+    fn on_timer(&mut self, value: T) {
+        self.pending.remove(&value);
+        (self.callback)(value);
+    }
+}
+
+impl<T: Eq + Hash + Copy> Drop for Debounce<T> {
+    fn drop(&mut self) {
+        for timer in self.pending.values() {
+            CFRunLoopTimer::invalidate(timer);
+        }
+    }
+}
+
+unsafe extern "C-unwind" fn debounce_timer_callback<T: 'static + Eq + Hash + Copy>(
+    _timer: *mut CFRunLoopTimer,
+    info: *mut c_void,
+) {
+    let (debounce_ptr, value) = *unsafe { Box::from_raw(info as *mut (*mut Debounce<T>, T)) };
+    let debounce = unsafe { &mut *debounce_ptr };
+    debounce.on_timer(value);
 }
