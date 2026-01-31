@@ -6,9 +6,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsOnOpenRule, WindowsWindow};
-use crate::core::{
-    Child, Container, Dimension, FloatWindowId, Focus, Hub, MonitorId, SpawnMode, WindowId,
-};
+use crate::core::{Child, Container, Dimension, Hub, MonitorId, SpawnMode, WindowId};
 
 use super::recovery;
 use super::window::{Taskbar, WindowHandle, enum_windows, get_size_constraints};
@@ -89,110 +87,55 @@ pub(super) struct Overlays {
 }
 
 struct Registry {
-    tiling: HashMap<WindowKey, WindowId>,
-    float: HashMap<WindowKey, FloatWindowId>,
-    tiling_rev: HashMap<WindowId, WindowHandle>,
-    float_rev: HashMap<FloatWindowId, WindowHandle>,
+    windows: HashMap<WindowKey, WindowId>,
+    reverse: HashMap<WindowId, WindowHandle>,
 }
 
 impl Registry {
     fn new() -> Self {
         Self {
-            tiling: HashMap::new(),
-            float: HashMap::new(),
-            tiling_rev: HashMap::new(),
-            float_rev: HashMap::new(),
+            windows: HashMap::new(),
+            reverse: HashMap::new(),
         }
     }
 
-    fn insert_tiling(&mut self, handle: WindowHandle, id: WindowId) {
-        self.tiling.insert(WindowKey::from(&handle), id);
-        self.tiling_rev.insert(id, handle);
+    fn insert(&mut self, handle: WindowHandle, id: WindowId) {
+        self.windows.insert(WindowKey::from(&handle), id);
+        self.reverse.insert(id, handle);
     }
 
-    fn insert_float(&mut self, handle: WindowHandle, id: FloatWindowId) {
-        self.float.insert(WindowKey::from(&handle), id);
-        self.float_rev.insert(id, handle);
-    }
-
-    fn remove(&mut self, handle: &WindowHandle) -> Option<WindowType> {
+    fn remove(&mut self, handle: &WindowHandle) -> Option<WindowId> {
         let key = WindowKey::from(handle);
-        if let Some(id) = self.tiling.remove(&key) {
-            self.tiling_rev.remove(&id);
-            return Some(WindowType::Tiling(id));
-        }
-        if let Some(id) = self.float.remove(&key) {
-            self.float_rev.remove(&id);
-            return Some(WindowType::Float(id));
+        if let Some(id) = self.windows.remove(&key) {
+            self.reverse.remove(&id);
+            return Some(id);
         }
         None
     }
 
-    fn get_tiling(&self, handle: &WindowHandle) -> Option<WindowId> {
-        self.tiling.get(&WindowKey::from(handle)).copied()
-    }
-
-    fn get_float(&self, handle: &WindowHandle) -> Option<FloatWindowId> {
-        self.float.get(&WindowKey::from(handle)).copied()
+    fn get_id(&self, handle: &WindowHandle) -> Option<WindowId> {
+        self.windows.get(&WindowKey::from(handle)).copied()
     }
 
     fn get_handle(&self, id: WindowId) -> Option<WindowHandle> {
-        self.tiling_rev.get(&id).cloned()
-    }
-
-    fn get_float_handle(&self, id: FloatWindowId) -> Option<WindowHandle> {
-        self.float_rev.get(&id).cloned()
+        self.reverse.get(&id).cloned()
     }
 
     fn get_handle_by_key(&self, key: WindowKey) -> Option<WindowHandle> {
-        if let Some(&id) = self.tiling.get(&key) {
-            return self.tiling_rev.get(&id).cloned();
-        }
-        if let Some(&id) = self.float.get(&key) {
-            return self.float_rev.get(&id).cloned();
+        if let Some(&id) = self.windows.get(&key) {
+            return self.reverse.get(&id).cloned();
         }
         None
     }
 
     fn contains(&self, handle: &WindowHandle) -> bool {
-        let key = WindowKey::from(handle);
-        self.tiling.contains_key(&key) || self.float.contains_key(&key)
+        self.windows.contains_key(&WindowKey::from(handle))
     }
 
     fn update_title(&mut self, handle: &WindowHandle) {
         let key = WindowKey::from(handle);
-        if let Some(&id) = self.tiling.get(&key) {
-            self.tiling_rev.insert(id, handle.clone());
-        } else if let Some(&id) = self.float.get(&key) {
-            self.float_rev.insert(id, handle.clone());
-        }
-    }
-
-    fn toggle(&mut self, window_id: WindowId, float_id: FloatWindowId) {
-        if let Some(handle) = self.tiling_rev.remove(&window_id) {
-            let key = WindowKey::from(&handle);
-            self.tiling.remove(&key);
-            self.float.insert(key, float_id);
-            self.float_rev.insert(float_id, handle);
-        } else if let Some(handle) = self.float_rev.remove(&float_id) {
-            let key = WindowKey::from(&handle);
-            self.float.remove(&key);
-            self.tiling.insert(key, window_id);
-            self.tiling_rev.insert(window_id, handle);
-        }
-    }
-}
-
-enum WindowType {
-    Tiling(WindowId),
-    Float(FloatWindowId),
-}
-
-impl std::fmt::Display for WindowType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WindowType::Tiling(id) => write!(f, "Tiling #{id}"),
-            WindowType::Float(id) => write!(f, "Float #{id}"),
+        if let Some(&id) = self.windows.get(&key) {
+            self.reverse.insert(id, handle.clone());
         }
     }
 }
@@ -354,12 +297,9 @@ impl Dome {
             }
             HubEvent::WindowFocused(handle) => {
                 let _span = tracing::info_span!("window_focused", %handle).entered();
-                if let Some(id) = self.registry.get_tiling(&handle) {
+                if let Some(id) = self.registry.get_id(&handle) {
                     self.hub.set_focus(id);
-                    tracing::info!("Tiling window focused");
-                } else if let Some(id) = self.registry.get_float(&handle) {
-                    self.hub.set_float_focus(id);
-                    tracing::info!("Float window focused");
+                    tracing::info!("Window focused");
                 }
             }
             // TODO: update float window position in hub instead of re-rendering
@@ -393,24 +333,19 @@ impl Dome {
 
     fn insert_window(&mut self, handle: &WindowHandle) {
         recovery::track(handle);
-        if handle.should_tile() {
-            let id = self.hub.insert_tiling();
-            self.registry.insert_tiling(handle.clone(), id);
-            tracing::info!("Tiling window inserted");
+        let id = if handle.should_tile() {
+            self.hub.insert_tiling()
         } else {
-            let id = self.hub.insert_float(handle.dimension());
-            self.registry.insert_float(handle.clone(), id);
-            tracing::info!("Float window inserted");
-        }
+            self.hub.insert_float(handle.dimension())
+        };
+        self.registry.insert(handle.clone(), id);
+        tracing::info!("Window inserted");
     }
 
     fn remove_window(&mut self, handle: &WindowHandle) {
-        if let Some(wt) = self.registry.remove(handle) {
+        if let Some(id) = self.registry.remove(handle) {
             recovery::untrack(handle);
-            match wt {
-                WindowType::Tiling(id) => self.hub.delete_window(id),
-                WindowType::Float(id) => self.hub.delete_float(id),
-            }
+            self.hub.delete_window(id);
             tracing::info!("Window deleted");
         }
     }
@@ -436,17 +371,13 @@ impl Dome {
                     MoveTarget::Left => self.hub.move_left(),
                     MoveTarget::Right => self.hub.move_right(),
                     MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
-                    MoveTarget::Monitor { target } => self.hub.move_to_monitor(target),
+                    MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
                 },
                 Action::Toggle { target } => match target {
                     ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),
                     ToggleTarget::Direction => self.hub.toggle_direction(),
                     ToggleTarget::Layout => self.hub.toggle_container_layout(),
-                    ToggleTarget::Float => {
-                        if let Some((window_id, float_id)) = self.hub.toggle_float() {
-                            self.registry.toggle(window_id, float_id);
-                        }
-                    }
+                    ToggleTarget::Float => self.hub.toggle_float(),
                 },
                 Action::Exec { command } => {
                     if let Err(e) = std::process::Command::new("cmd")
@@ -467,7 +398,7 @@ impl Dome {
         }
     }
 
-    fn process_frame(&mut self, last_focus: Option<Focus>, previous_displayed: HashSet<WindowKey>) {
+    fn process_frame(&mut self, last_focus: Option<Child>, previous_displayed: HashSet<WindowKey>) {
         let border = self.config.border_size;
 
         let tiling_windows: Vec<_> = get_tiling_windows(&self.hub, &self.registry)
@@ -502,26 +433,18 @@ impl Dome {
         }
 
         for (handle, dim) in &float_windows {
+            self.check_and_set_constraints(handle, dim);
             handle.set_position(dim);
             handle.set_topmost();
             self.taskbar.add_tab(handle.hwnd()).ok();
         }
 
         let ws = self.hub.get_workspace(self.hub.current_workspace());
-        if ws.focused() != last_focus {
-            match ws.focused() {
-                Some(Focus::Tiling(Child::Window(id))) => {
-                    if let Some(handle) = self.registry.get_handle(id) {
-                        handle.focus();
-                    }
-                }
-                Some(Focus::Float(id)) => {
-                    if let Some(handle) = self.registry.get_float_handle(id) {
-                        handle.focus();
-                    }
-                }
-                _ => {}
-            }
+        if ws.focused() != last_focus
+            && let Some(Child::Window(id)) = ws.focused()
+            && let Some(handle) = self.registry.get_handle(id)
+        {
+            handle.focus();
         }
 
         if let Some(app_hwnd) = self.app_hwnd {
@@ -553,7 +476,7 @@ impl Dome {
                     None
                 }
             };
-            if let Some(id) = self.registry.get_tiling(handle) {
+            if let Some(id) = self.registry.get_id(handle) {
                 self.hub.set_window_constraint(
                     id,
                     to_opt(min_w),
@@ -613,8 +536,8 @@ fn get_float_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimen
     for ws_id in hub.visible_workspaces() {
         let ws = hub.get_workspace(ws_id);
         for &id in ws.float_windows() {
-            if let Some(handle) = registry.get_float_handle(id) {
-                windows.push((handle, hub.get_float(id).dimension()));
+            if let Some(handle) = registry.get_handle(id) {
+                windows.push((handle, hub.get_window(id).dimension()));
             }
         }
     }
@@ -639,9 +562,7 @@ fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
     while let Some(child) = stack.pop() {
         match child {
             Child::Window(id) => {
-                if registry.get_handle(id).is_some()
-                    && focused != Some(Focus::Tiling(Child::Window(id)))
-                {
+                if registry.get_handle(id).is_some() && focused != Some(Child::Window(id)) {
                     let dim = hub.get_window(id).dimension();
                     rects.extend(border_rects(dim, border, [config.border_color; 4]));
                 }
@@ -650,7 +571,7 @@ fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
                 let container = hub.get_container(id);
                 if let Some(active) = container.active_tab() {
                     stack.push(active);
-                    let is_focused = focused == Some(Focus::Tiling(Child::Container(id)));
+                    let is_focused = focused == Some(Child::Container(id));
                     let (tab_rects, tab_labels) =
                         build_tab_bar(container, registry, config, is_focused);
                     rects.extend(tab_rects);
@@ -665,15 +586,23 @@ fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
     }
 
     match focused {
-        Some(Focus::Tiling(Child::Window(id))) => {
+        Some(Child::Window(id)) => {
             let w = hub.get_window(id);
-            rects.extend(border_rects(
-                w.dimension(),
-                border,
-                spawn_colors(w.spawn_mode(), config),
-            ));
+            if w.is_float() {
+                rects.extend(border_rects(
+                    w.dimension(),
+                    border,
+                    [config.focused_color; 4],
+                ));
+            } else {
+                rects.extend(border_rects(
+                    w.dimension(),
+                    border,
+                    spawn_colors(w.spawn_mode(), config),
+                ));
+            }
         }
-        Some(Focus::Tiling(Child::Container(id))) => {
+        Some(Child::Container(id)) => {
             let c = hub.get_container(id);
             rects.extend(border_rects(
                 c.dimension(),
@@ -681,18 +610,13 @@ fn build_overlays(hub: &Hub, registry: &Registry, config: &Config) -> Overlays {
                 spawn_colors(c.spawn_mode(), config),
             ));
         }
-        _ => {}
+        None => {}
     }
 
     for &float_id in ws.float_windows() {
-        if registry.get_float_handle(float_id).is_some() {
-            let dim = hub.get_float(float_id).dimension();
-            let color = if focused == Some(Focus::Float(float_id)) {
-                config.focused_color
-            } else {
-                config.border_color
-            };
-            rects.extend(border_rects(dim, border, [color; 4]));
+        if registry.get_handle(float_id).is_some() && focused != Some(Child::Window(float_id)) {
+            let dim = hub.get_window(float_id).dimension();
+            rects.extend(border_rects(dim, border, [config.border_color; 4]));
         }
     }
 

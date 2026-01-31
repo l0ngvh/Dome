@@ -10,8 +10,7 @@ use objc2_foundation::{NSPoint, NSRect, NSSize};
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
-    Child, Container, ContainerId, Dimension, FloatWindowId, Focus, Hub, MonitorId, SpawnMode,
-    Window, WindowId,
+    Child, Container, ContainerId, Dimension, Hub, MonitorId, SpawnMode, Window, WindowId,
 };
 
 use super::app::{ScreenInfo, compute_global_bounds};
@@ -64,29 +63,14 @@ pub(super) enum HubMessage {
     Shutdown,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum WindowType {
-    Tiling(WindowId),
-    Float(FloatWindowId),
-}
-
-impl std::fmt::Display for WindowType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WindowType::Tiling(id) => write!(f, "Tiling #{id}"),
-            WindowType::Float(id) => write!(f, "Float #{id}"),
-        }
-    }
-}
-
 struct WindowEntry {
     window: MacWindow,
-    window_type: WindowType,
+    window_id: WindowId,
 }
 
 struct Registry {
     windows: HashMap<CGWindowID, WindowEntry>,
-    type_to_cg: HashMap<WindowType, CGWindowID>,
+    id_to_cg: HashMap<WindowId, CGWindowID>,
     pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
 }
 
@@ -94,32 +78,27 @@ impl Registry {
     fn new() -> Self {
         Self {
             windows: HashMap::new(),
-            type_to_cg: HashMap::new(),
+            id_to_cg: HashMap::new(),
             pid_to_cg: HashMap::new(),
         }
     }
 
-    fn insert(&mut self, window: MacWindow, window_type: WindowType) {
+    fn insert(&mut self, window: MacWindow, window_id: WindowId) {
         let cg_id = window.cg_id();
         let pid = window.pid();
-        self.type_to_cg.insert(window_type, cg_id);
+        self.id_to_cg.insert(window_id, cg_id);
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
-        self.windows.insert(
-            cg_id,
-            WindowEntry {
-                window,
-                window_type,
-            },
-        );
+        self.windows
+            .insert(cg_id, WindowEntry { window, window_id });
     }
 
-    fn remove(&mut self, cg_id: CGWindowID) -> Option<(MacWindow, WindowType)> {
+    fn remove(&mut self, cg_id: CGWindowID) -> Option<(MacWindow, WindowId)> {
         let entry = self.windows.remove(&cg_id)?;
-        self.type_to_cg.remove(&entry.window_type);
+        self.id_to_cg.remove(&entry.window_id);
         if let Some(ids) = self.pid_to_cg.get_mut(&entry.window.pid()) {
             ids.retain(|&id| id != cg_id);
         }
-        Some((entry.window, entry.window_type))
+        Some((entry.window, entry.window_id))
     }
 
     fn get(&self, cg_id: CGWindowID) -> Option<&MacWindow> {
@@ -130,16 +109,12 @@ impl Registry {
         self.windows.get_mut(&cg_id).map(|e| &mut e.window)
     }
 
-    fn get_entry(&self, cg_id: CGWindowID) -> Option<&WindowEntry> {
-        self.windows.get(&cg_id)
+    fn get_cg_id(&self, window_id: WindowId) -> Option<CGWindowID> {
+        self.id_to_cg.get(&window_id).copied()
     }
 
-    fn get_cg_id(&self, window_type: WindowType) -> Option<CGWindowID> {
-        self.type_to_cg.get(&window_type).copied()
-    }
-
-    fn get_window_type(&self, cg_id: CGWindowID) -> Option<WindowType> {
-        self.windows.get(&cg_id).map(|e| e.window_type)
+    fn get_window_id(&self, cg_id: CGWindowID) -> Option<WindowId> {
+        self.windows.get(&cg_id).map(|e| e.window_id)
     }
 
     fn contains(&self, cg_id: CGWindowID) -> bool {
@@ -150,15 +125,15 @@ impl Registry {
         self.pid_to_cg.get(&pid).cloned().unwrap_or_default()
     }
 
-    fn remove_by_pid(&mut self, pid: i32) -> Vec<(CGWindowID, MacWindow, WindowType)> {
+    fn remove_by_pid(&mut self, pid: i32) -> Vec<(CGWindowID, MacWindow, WindowId)> {
         let Some(cg_ids) = self.pid_to_cg.remove(&pid) else {
             return Vec::new();
         };
         let mut removed = Vec::new();
         for cg_id in cg_ids {
             if let Some(entry) = self.windows.remove(&cg_id) {
-                self.type_to_cg.remove(&entry.window_type);
-                removed.push((cg_id, entry.window, entry.window_type));
+                self.id_to_cg.remove(&entry.window_id);
+                removed.push((cg_id, entry.window, entry.window_id));
             }
         }
         removed
@@ -170,25 +145,9 @@ impl Registry {
             .is_some_and(|e| e.window.is_valid())
     }
 
-    fn toggle_float(&mut self, window_id: WindowId, float_id: FloatWindowId) {
-        let tiling = WindowType::Tiling(window_id);
-        let float = WindowType::Float(float_id);
-        if let Some(cg_id) = self.type_to_cg.remove(&tiling) {
-            self.type_to_cg.insert(float, cg_id);
-            if let Some(entry) = self.windows.get_mut(&cg_id) {
-                entry.window_type = float;
-            }
-        } else if let Some(cg_id) = self.type_to_cg.remove(&float) {
-            self.type_to_cg.insert(tiling, cg_id);
-            if let Some(entry) = self.windows.get_mut(&cg_id) {
-                entry.window_type = tiling;
-            }
-        }
-    }
-
     fn get_title(&self, window_id: WindowId) -> Option<&str> {
-        self.type_to_cg
-            .get(&WindowType::Tiling(window_id))
+        self.id_to_cg
+            .get(&window_id)
             .and_then(|cg_id| self.windows.get(cg_id))
             .and_then(|e| e.window.title())
     }
@@ -471,17 +430,17 @@ impl Dome {
             }
 
             let dimension = window.get_dimension();
-            let window_type = if window.should_tile() {
-                WindowType::Tiling(self.hub.insert_tiling())
+            let window_id = if window.should_tile() {
+                self.hub.insert_tiling()
             } else {
-                WindowType::Float(self.hub.insert_float(dimension))
+                self.hub.insert_float(dimension)
             };
 
             recovery::track(cg_id, window.clone(), self.primary_screen);
-            self.registry.insert(window, window_type);
+            self.registry.insert(window, window_id);
 
             let window = self.registry.get(cg_id).unwrap();
-            tracing::info!(%window, %window_type, "Window inserted");
+            tracing::info!(%window, %window_id, "Window inserted");
 
             if let Some(actions) = on_open_actions(window, &self.config.macos.on_open) {
                 self.execute_actions(&actions);
@@ -496,34 +455,25 @@ impl Dome {
         }
         let pid = app.processIdentifier();
         if let Some(cg_id) = get_focused_window_cg_id(pid)
-            && let Some(wt) = self.registry.get_window_type(cg_id)
+            && let Some(window_id) = self.registry.get_window_id(cg_id)
         {
-            match wt {
-                WindowType::Tiling(id) => self.hub.set_focus(id),
-                WindowType::Float(id) => self.hub.set_float_focus(id),
-            }
+            self.hub.set_focus(window_id);
         }
     }
 
     fn remove_app_windows(&mut self, pid: i32) {
-        for (cg_id, window, window_type) in self.registry.remove_by_pid(pid) {
-            tracing::info!(%window, %window_type, "Window removed");
+        for (cg_id, window, window_id) in self.registry.remove_by_pid(pid) {
+            tracing::info!(%window, %window_id, "Window removed");
             recovery::untrack(cg_id);
-            match window_type {
-                WindowType::Tiling(id) => self.hub.delete_window(id),
-                WindowType::Float(id) => self.hub.delete_float(id),
-            }
+            self.hub.delete_window(window_id);
         }
     }
 
     fn remove_window(&mut self, cg_id: CGWindowID) {
-        if let Some((window, window_type)) = self.registry.remove(cg_id) {
-            tracing::info!(%window, %window_type, "Window removed");
+        if let Some((window, window_id)) = self.registry.remove(cg_id) {
+            tracing::info!(%window, %window_id, "Window removed");
             recovery::untrack(cg_id);
-            match window_type {
-                WindowType::Tiling(id) => self.hub.delete_window(id),
-                WindowType::Float(id) => self.hub.delete_float(id),
-            }
+            self.hub.delete_window(window_id);
         }
     }
 
@@ -532,13 +482,13 @@ impl Dome {
         let border = self.config.border_size;
         for cg_id in self.registry.cg_ids_for_pid(pid) {
             let _span = tracing::trace_span!("check_placement", %cg_id).entered();
-            let Some(entry) = self.registry.get_entry(cg_id) else {
+            let Some(window_id) = self.registry.get_window_id(cg_id) else {
                 continue;
             };
-            let WindowType::Tiling(id) = entry.window_type else {
+            if self.hub.get_window(window_id).is_float() {
                 continue;
-            };
-            let window = self.hub.get_window(id);
+            }
+            let window = self.hub.get_window(window_id);
             let Some(mac_window) = self.registry.get_mut(cg_id) else {
                 continue;
             };
@@ -551,7 +501,7 @@ impl Dome {
             // that can accommodate the borders here.
             let remove_inset = |v: f32| v + 2.0 * border;
             self.hub.set_window_constraint(
-                id,
+                window_id,
                 min_w.map(remove_inset),
                 min_h.map(remove_inset),
                 max_w.map(remove_inset),
@@ -635,17 +585,13 @@ impl Dome {
                     MoveTarget::Left => self.hub.move_left(),
                     MoveTarget::Right => self.hub.move_right(),
                     MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
-                    MoveTarget::Monitor { target } => self.hub.move_to_monitor(target),
+                    MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
                 },
                 Action::Toggle { target } => match target {
                     ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),
                     ToggleTarget::Direction => self.hub.toggle_direction(),
                     ToggleTarget::Layout => self.hub.toggle_container_layout(),
-                    ToggleTarget::Float => {
-                        if let Some((window_id, float_id)) = self.hub.toggle_float() {
-                            self.registry.toggle_float(window_id, float_id);
-                        }
-                    }
+                    ToggleTarget::Float => self.hub.toggle_float(),
                 },
                 Action::Exec { command } => {
                     if let Err(e) = std::process::Command::new("sh")
@@ -667,7 +613,7 @@ impl Dome {
     #[tracing::instrument(skip_all)]
     fn process_frame(
         &mut self,
-        last_focus: Option<Focus>,
+        last_focus: Option<Child>,
         previous_displayed: HashSet<CGWindowID>,
     ) {
         let border = self.config.border_size;
@@ -690,10 +636,10 @@ impl Dome {
         for ws_id in self.hub.visible_workspaces() {
             let ws = self.hub.get_workspace(ws_id);
             for &float_id in ws.float_windows() {
-                if let Some(cg_id) = self.registry.get_cg_id(WindowType::Float(float_id))
+                if let Some(cg_id) = self.registry.get_cg_id(float_id)
                     && let Some(window) = self.registry.get_mut(cg_id)
                 {
-                    let dim = apply_inset(self.hub.get_float(float_id).dimension(), border);
+                    let dim = apply_inset(self.hub.get_window(float_id).dimension(), border);
                     if let Err(e) = window.set_dimension(dim) {
                         tracing::trace!("Failed to set float dimension: {e:#}");
                     }
@@ -706,11 +652,9 @@ impl Dome {
         let focused = ws.focused();
         if focused != last_focus {
             let focus_cg_id = match focused {
-                Some(Focus::Tiling(Child::Window(id))) => {
-                    self.registry.get_cg_id(WindowType::Tiling(id))
-                }
-                Some(Focus::Float(id)) => self.registry.get_cg_id(WindowType::Float(id)),
-                _ => None,
+                Some(Child::Window(id)) => self.registry.get_cg_id(id),
+                Some(Child::Container(_)) => None,
+                None => None,
             };
             if let Some(cg_id) = focus_cg_id
                 && let Some(window) = self.registry.get(cg_id)
@@ -759,7 +703,7 @@ fn get_displayed_cg_ids(hub: &Hub, registry: &Registry) -> HashSet<CGWindowID> {
         while let Some(child) = stack.pop() {
             match child {
                 Child::Window(id) => {
-                    if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id)) {
+                    if let Some(cg_id) = registry.get_cg_id(id) {
                         cg_ids.insert(cg_id);
                     }
                 }
@@ -777,7 +721,7 @@ fn get_displayed_cg_ids(hub: &Hub, registry: &Registry) -> HashSet<CGWindowID> {
         }
 
         for &float_id in ws.float_windows() {
-            if let Some(cg_id) = registry.get_cg_id(WindowType::Float(float_id)) {
+            if let Some(cg_id) = registry.get_cg_id(float_id) {
                 cg_ids.insert(cg_id);
             }
         }
@@ -801,7 +745,7 @@ fn collect_tiling_windows(
         while let Some(child) = stack.pop() {
             match child {
                 Child::Window(id) => {
-                    if let Some(cg_id) = registry.get_cg_id(WindowType::Tiling(id)) {
+                    if let Some(cg_id) = registry.get_cg_id(id) {
                         result.push((cg_id, id, hub.get_window(id).clone(), monitor_dim));
                     }
                 }
@@ -926,9 +870,9 @@ fn build_overlays(
         while let Some(child) = stack.pop() {
             match child {
                 Child::Window(id) => {
-                    if registry.get_cg_id(WindowType::Tiling(id)).is_some() {
+                    if registry.get_cg_id(id).is_some() {
                         let w = hub.get_window(id);
-                        let colors = if focused == Some(Focus::Tiling(Child::Window(id))) {
+                        let colors = if focused == Some(Child::Window(id)) {
                             spawn_colors(w.spawn_mode(), config)
                         } else {
                             [config.border_color; 4]
@@ -962,7 +906,7 @@ fn build_overlays(
             }
         }
 
-        if let Some(Focus::Tiling(Child::Container(id))) = focused {
+        if let Some(Child::Container(id)) = focused {
             let c = hub.get_container(id);
             container_borders.push(ContainerBorder {
                 key: id,
@@ -973,9 +917,9 @@ fn build_overlays(
         }
 
         for &float_id in ws.float_windows() {
-            if registry.get_cg_id(WindowType::Float(float_id)).is_some() {
-                let dim = hub.get_float(float_id).dimension();
-                let color = if focused == Some(Focus::Float(float_id)) {
+            if registry.get_cg_id(float_id).is_some() {
+                let dim = hub.get_window(float_id).dimension();
+                let color = if focused == Some(Child::Window(float_id)) {
                     config.focused_color
                 } else {
                     config.border_color

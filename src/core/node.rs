@@ -40,8 +40,9 @@ pub(crate) struct Workspace {
     pub(super) name: String,
     pub(super) monitor: MonitorId,
     pub(super) root: Option<Child>,
-    pub(super) focused: Option<Focus>,
-    pub(super) float_windows: Vec<FloatWindowId>,
+    pub(super) focused: Option<Child>,
+    /// All floats in this workspace. Source of truth for rendering.
+    pub(super) float_windows: Vec<WindowId>,
 }
 
 impl Node for Workspace {
@@ -63,11 +64,11 @@ impl Workspace {
         self.root
     }
 
-    pub(crate) fn focused(&self) -> Option<Focus> {
+    pub(crate) fn focused(&self) -> Option<Child> {
         self.focused
     }
 
-    pub(crate) fn float_windows(&self) -> &[FloatWindowId] {
+    pub(crate) fn float_windows(&self) -> &[WindowId] {
         &self.float_windows
     }
 
@@ -399,6 +400,13 @@ pub(crate) enum Parent {
     Workspace(WorkspaceId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum DisplayMode {
+    #[default]
+    Tiling,
+    Float,
+}
+
 impl std::fmt::Display for Parent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -411,11 +419,11 @@ impl std::fmt::Display for Parent {
 /// Represents a single application window
 #[derive(Debug, Clone)]
 pub(crate) struct Window {
+    /// Parent in the tiling tree for split windows, the containing workspace for floating windows
     pub(super) parent: Parent,
     pub(super) workspace: WorkspaceId,
     pub(super) dimension: Dimension,
-    // Don't allow directly set spawn_mode, otherwise that spawn mode will carry over other
-    // spawn mode history
+    pub(super) mode: DisplayMode,
     spawn_mode: SpawnMode,
     pub(super) min_width: f32,
     pub(super) min_height: f32,
@@ -428,12 +436,27 @@ impl Node for Window {
 }
 
 impl Window {
-    pub(super) fn new(parent: Parent, workspace: WorkspaceId, spawn_mode: SpawnMode) -> Self {
+    pub(super) fn tiling(workspace: WorkspaceId) -> Self {
         Self {
-            parent,
+            parent: Parent::Workspace(workspace),
             workspace,
             dimension: Dimension::default(),
-            spawn_mode,
+            mode: DisplayMode::Tiling,
+            spawn_mode: SpawnMode::default(),
+            min_width: 0.0,
+            min_height: 0.0,
+            max_width: 0.0,
+            max_height: 0.0,
+        }
+    }
+
+    pub(super) fn float(workspace: WorkspaceId, dimension: Dimension) -> Self {
+        Self {
+            parent: Parent::Workspace(workspace),
+            workspace,
+            dimension,
+            mode: DisplayMode::Float,
+            spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
             max_width: 0.0,
@@ -457,6 +480,10 @@ impl Window {
         self.spawn_mode
     }
 
+    pub(crate) fn is_float(&self) -> bool {
+        self.mode == DisplayMode::Float
+    }
+
     // Reset spawn mode
     pub(super) fn set_spawn_mode(&mut self, spawn_mode: SpawnMode) {
         self.spawn_mode = SpawnMode::clean(spawn_mode)
@@ -464,29 +491,6 @@ impl Window {
 
     pub(crate) fn switch_spawn_mode(&mut self, spawn_mode: SpawnMode) {
         self.spawn_mode = self.spawn_mode.switch_to(spawn_mode)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct FloatWindow {
-    pub(super) workspace: WorkspaceId,
-    pub(super) dimension: Dimension,
-}
-
-impl Node for FloatWindow {
-    type Id = FloatWindowId;
-}
-
-impl FloatWindow {
-    pub(super) fn new(workspace: WorkspaceId, dimension: Dimension) -> Self {
-        Self {
-            workspace,
-            dimension,
-        }
-    }
-
-    pub(crate) fn dimension(&self) -> Dimension {
-        self.dimension
     }
 }
 
@@ -504,18 +508,6 @@ pub(crate) enum Child {
     Container(ContainerId),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Focus {
-    Tiling(Child),
-    Float(FloatWindowId),
-}
-
-impl Focus {
-    pub(crate) fn window(id: WindowId) -> Self {
-        Focus::Tiling(Child::Window(id))
-    }
-}
-
 impl std::fmt::Display for Child {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -525,19 +517,8 @@ impl std::fmt::Display for Child {
     }
 }
 
-impl std::fmt::Display for Focus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Focus::Tiling(child) => write!(f, "{}", child),
-            Focus::Float(id) => write!(f, "{}", id),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct WindowId(usize);
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct FloatWindowId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ContainerId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -546,12 +527,6 @@ pub(crate) struct WorkspaceId(usize);
 impl std::fmt::Display for WindowId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "WindowId({})", self.0)
-    }
-}
-
-impl std::fmt::Display for FloatWindowId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "FloatWindowId({})", self.0)
     }
 }
 
@@ -568,15 +543,6 @@ impl std::fmt::Display for WorkspaceId {
 }
 
 impl NodeId for WindowId {
-    fn new(id: usize) -> Self {
-        Self(id)
-    }
-    fn get(self) -> usize {
-        self.0
-    }
-}
-
-impl NodeId for FloatWindowId {
     fn new(id: usize) -> Self {
         Self(id)
     }

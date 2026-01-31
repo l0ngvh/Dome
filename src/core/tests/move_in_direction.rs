@@ -1454,8 +1454,8 @@ fn move_in_direction_with_float_focused() {
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
       )
     )
 

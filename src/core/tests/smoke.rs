@@ -1,15 +1,15 @@
 use super::{setup_hub, setup_logger_with_level, snapshot_text, validate_hub};
 use crate::action::MonitorTarget;
-use crate::core::node::{Dimension, FloatWindowId, MonitorId, WindowId};
+use crate::core::node::{Dimension, MonitorId, WindowId};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use rayon::prelude::*;
 
 #[derive(Debug, Clone, Copy)]
 enum Op {
     InsertTiling,
-    DeleteWindow,
     InsertFloat,
-    DeleteFloat,
+    DeleteWindow,
     FocusLeft,
     FocusRight,
     FocusUp,
@@ -32,7 +32,6 @@ enum Op {
     FocusMonitor,
     MoveToMonitor,
     SetFocus,
-    SetFloatFocus,
     SetWindowConstraint,
     // Note: Exec is not included because it's a platform-specific action
     // that spawns external processes, not a core hub operation.
@@ -40,9 +39,8 @@ enum Op {
 
 const ALL_OPS: &[Op] = &[
     Op::InsertTiling,
-    Op::DeleteWindow,
     Op::InsertFloat,
-    Op::DeleteFloat,
+    Op::DeleteWindow,
     Op::FocusLeft,
     Op::FocusRight,
     Op::FocusUp,
@@ -65,14 +63,13 @@ const ALL_OPS: &[Op] = &[
     Op::FocusMonitor,
     Op::MoveToMonitor,
     Op::SetFocus,
-    Op::SetFloatFocus,
     Op::SetWindowConstraint,
 ];
 
-fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
+fn run_smoke_iteration(seed: u64, ops_per_run: usize) {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut hub = setup_hub();
     let mut windows: Vec<WindowId> = Vec::new();
-    let mut floats: Vec<FloatWindowId> = Vec::new();
     let mut monitors: Vec<MonitorId> = vec![hub.focused_monitor()];
     let mut history: Vec<String> = Vec::new();
 
@@ -86,15 +83,6 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                     windows.push(id);
                     format!("InsertTiling -> {id}")
                 }
-                Op::DeleteWindow => {
-                    if windows.is_empty() {
-                        continue;
-                    }
-                    let idx = rng.random_range(0..windows.len());
-                    let id = windows.remove(idx);
-                    hub.delete_window(id);
-                    format!("DeleteWindow({id})")
-                }
                 Op::InsertFloat => {
                     let dim = Dimension {
                         x: rng.random_range(0.0..100.0),
@@ -103,17 +91,17 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                         height: rng.random_range(5.0..15.0),
                     };
                     let id = hub.insert_float(dim);
-                    floats.push(id);
+                    windows.push(id);
                     format!("InsertFloat -> {id}")
                 }
-                Op::DeleteFloat => {
-                    if floats.is_empty() {
+                Op::DeleteWindow => {
+                    if windows.is_empty() {
                         continue;
                     }
-                    let idx = rng.random_range(0..floats.len());
-                    let id = floats.remove(idx);
-                    hub.delete_float(id);
-                    format!("DeleteFloat({id})")
+                    let idx = rng.random_range(0..windows.len());
+                    let id = windows.remove(idx);
+                    hub.delete_window(id);
+                    format!("DeleteWindow({id})")
                 }
                 Op::FocusLeft => {
                     hub.focus_left();
@@ -172,21 +160,8 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                     "FocusPrevTab".into()
                 }
                 Op::ToggleFloat => {
-                    if let Some((win_id, float_id)) = hub.toggle_float() {
-                        if windows.contains(&win_id) {
-                            // Tiling -> Float
-                            windows.retain(|&w| w != win_id);
-                            floats.push(float_id);
-                            format!("ToggleFloat({win_id} -> {float_id})")
-                        } else {
-                            // Float -> Tiling
-                            floats.retain(|&f| f != float_id);
-                            windows.push(win_id);
-                            format!("ToggleFloat({float_id} -> {win_id})")
-                        }
-                    } else {
-                        continue;
-                    }
+                    hub.toggle_float();
+                    "ToggleFloat".into()
                 }
                 Op::MoveToWorkspace => {
                     let ws = rng.random_range(0..5);
@@ -241,7 +216,7 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                         MonitorTarget::Right,
                     ];
                     let target = &targets[rng.random_range(0..targets.len())];
-                    hub.move_to_monitor(target);
+                    hub.move_focused_to_monitor(target);
                     format!("MoveToMonitor({target:?})")
                 }
                 Op::SetFocus => {
@@ -252,15 +227,6 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
                     let id = windows[idx];
                     hub.set_focus(id);
                     format!("SetFocus({id})")
-                }
-                Op::SetFloatFocus => {
-                    if floats.is_empty() {
-                        continue;
-                    }
-                    let idx = rng.random_range(0..floats.len());
-                    let id = floats[idx];
-                    hub.set_float_focus(id);
-                    format!("SetFloatFocus({id})")
                 }
                 Op::SetWindowConstraint => {
                     if windows.is_empty() {
@@ -291,12 +257,7 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
             validate_hub(&hub);
         }
 
-        // Exhaust all windows and floats to ensure none are in a dangling state
-        for id in floats.drain(..) {
-            history.push(format!("Cleanup: DeleteFloat({id})"));
-            hub.delete_float(id);
-            validate_hub(&hub);
-        }
+        // Exhaust all windows to ensure none are in a dangling state
         for id in windows.drain(..) {
             history.push(format!("Cleanup: DeleteWindow({id})"));
             hub.delete_window(id);
@@ -306,6 +267,7 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
 
     if let Err(e) = result {
         tracing::error!("=== SMOKE TEST FAILURE ===");
+        tracing::error!("Seed: {seed}");
         tracing::error!("Operations:");
         for (i, op) in history.iter().enumerate() {
             tracing::error!("  {i}: {op}");
@@ -317,18 +279,28 @@ fn run_smoke_iteration(rng: &mut ChaCha8Rng, ops_per_run: usize) {
 
 #[test]
 fn smoke_test() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     setup_logger_with_level("info");
 
     let seed = 42u64;
     let runs = 200;
     let ops_per_run = 10000;
+    let completed = AtomicUsize::new(0);
 
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
-
-    for run in 0..runs {
-        run_smoke_iteration(&mut rng, ops_per_run);
-        if run % 10 == 0 {
-            tracing::info!("Completed run {run}/{runs}");
+    (0..runs).into_par_iter().for_each(|run| {
+        run_smoke_iteration(seed.wrapping_add(run as u64), ops_per_run);
+        let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+        if done % 10 == 0 {
+            tracing::info!("Completed {done}/{runs}");
         }
-    }
+    });
+}
+
+#[test]
+#[ignore]
+fn reproduce_smoke_failure() {
+    setup_logger_with_level("info");
+    let seed = 0; // paste failing seed here
+    run_smoke_iteration(seed, 10000);
 }

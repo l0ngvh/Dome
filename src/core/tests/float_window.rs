@@ -13,8 +13,8 @@ fn insert_float_window() {
     });
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
       )
     )
 
@@ -58,9 +58,9 @@ fn float_window_with_tiling() {
     });
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=FloatWindowId(0), x=50.00, y=5.00, w=40.00, h=15.00)
+        Float(id=WindowId(1), x=50.00, y=5.00, w=40.00, h=15.00)
       )
     )
 
@@ -77,9 +77,9 @@ fn float_window_with_tiling() {
     |                                                 *                                      *                                                           |
     |                                                 *                                      *                                                           |
     |                                                 *                                      *                                                           |
-    |                                                 *                  F0                  *                                                           |
+    |                                                 *                  F1                  *                                                           |
     |                                                 *                                      *                                                           |
-    |                                                 *                       W0             *                                                           |
+    |                                                 *                                      *                                                           |
     |                                                 *                                      *                                                           |
     |                                                 *                                      *                                                           |
     |                                                 *                                      *                                                           |
@@ -98,7 +98,7 @@ fn float_window_with_tiling() {
 }
 
 #[test]
-fn delete_float_window() {
+fn delete_window_window() {
     let mut hub = setup();
     hub.insert_tiling();
     let f0 = hub.insert_float(Dimension {
@@ -107,7 +107,7 @@ fn delete_float_window() {
         width: 40.0,
         height: 15.0,
     });
-    hub.delete_float(f0);
+    hub.delete_window(f0);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
@@ -164,8 +164,8 @@ fn move_float_to_workspace() {
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=1, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), x=50.00, y=5.00, w=40.00, h=15.00)
+      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
+        Float(id=WindowId(1), x=50.00, y=5.00, w=40.00, h=15.00)
       )
     )
 
@@ -213,7 +213,7 @@ fn focus_falls_back_to_tiling_after_float_delete() {
         height: 15.0,
     });
     // Float is focused after insert
-    hub.delete_float(f0);
+    hub.delete_window(f0);
     // Focus should fall back to tiling window
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -272,7 +272,7 @@ fn focus_falls_back_to_container_focus_after_float_delete() {
         height: 15.0,
     });
 
-    hub.delete_float(f0);
+    hub.delete_window(f0);
 
     // Focus should fall back to W1 (container's focus), not W2 (last window)
     assert_snapshot!(snapshot(&hub), @r"
@@ -335,12 +335,12 @@ fn focus_falls_back_to_last_float() {
         height: 10.0,
     });
     // f1 is focused
-    hub.delete_float(f1);
+    hub.delete_window(f1);
     // Focus should fall back to f0
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=10.00)
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=10.00)
       )
     )
 
@@ -369,8 +369,8 @@ fn toggle_tiling_to_float() {
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Float(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -465,9 +465,9 @@ fn toggle_tiling_to_float_with_existing_tiling() {
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=FloatWindowId(0),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=FloatWindowId(0), x=37.50, y=0.00, w=75.00, h=30.00)
+        Float(id=WindowId(1), x=37.50, y=0.00, w=75.00, h=30.00)
       )
     )
 
@@ -486,7 +486,7 @@ fn toggle_tiling_to_float_with_existing_tiling() {
     |                                     *                                                                         *                                    |
     |                                     *                                                                         *                                    |
     |                                     *                                                                         *                                    |
-    |                                     *                                   F0                                    *                                    |
+    |                                     *                                   F1                                    *                                    |
     |                                     *                                                                         *                                    |
     |                                     *                                                                         *                                    |
     |                                     *                                                                         *                                    |
@@ -589,9 +589,9 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
-        Window(id=WindowId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(2),
+        Window(id=WindowId(2), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00)
+        Float(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00)
       )
     )
 
@@ -610,7 +610,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     *         |                            |                                                                                                             *
     *         |                            |                                                                                                             *
     *         |                            |                                                                                                             *
-    *         |             F0             |                                  W1                                                                         *
+    *         |             F1             |                                  W2                                                                         *
     *         |                            |                                                                                                             *
     *         |                            |                                                                                                             *
     *         |                            |                                                                                                             *
@@ -637,8 +637,8 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=1, focused=FloatWindowId(0),
-        Float(id=FloatWindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
+        Float(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00)
       )
     )
 
@@ -675,7 +675,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     ");
 
     // Now delete the float - this should not panic
-    hub.delete_float(f0);
+    hub.delete_window(f0);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -782,12 +782,12 @@ fn delete_unfocused_float_window() {
     });
     hub.insert_tiling();
 
-    hub.delete_float(f0);
+    hub.delete_window(f0);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+        Window(id=WindowId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -806,7 +806,7 @@ fn delete_unfocused_float_window() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
+    *                                                                         W1                                                                         *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
@@ -825,7 +825,7 @@ fn delete_unfocused_float_window() {
 }
 
 #[test]
-fn delete_float_keeps_current_workspace() {
+fn delete_window_keeps_current_workspace() {
     use crate::core::node::Dimension;
     let mut hub = setup();
 
@@ -836,7 +836,7 @@ fn delete_float_keeps_current_workspace() {
         width: 30.0,
         height: 20.0,
     });
-    hub.delete_float(f0);
+    hub.delete_window(f0);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -846,7 +846,7 @@ fn delete_float_keeps_current_workspace() {
 }
 
 #[test]
-fn delete_float_keeps_workspace_with_tiling() {
+fn delete_window_keeps_workspace_with_tiling() {
     use crate::core::node::Dimension;
     let mut hub = setup();
 
@@ -862,7 +862,7 @@ fn delete_float_keeps_workspace_with_tiling() {
     hub.focus_workspace("0");
 
     // Delete float - workspace 1 should remain because it has tiling
-    hub.delete_float(f0);
+    hub.delete_window(f0);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -875,7 +875,7 @@ fn delete_float_keeps_workspace_with_tiling() {
 }
 
 #[test]
-fn delete_float_keeps_workspace_with_other_floats() {
+fn delete_window_keeps_workspace_with_other_floats() {
     use crate::core::node::Dimension;
     let mut hub = setup();
 
@@ -896,20 +896,20 @@ fn delete_float_keeps_workspace_with_other_floats() {
     hub.focus_workspace("0");
 
     // Delete one float - workspace 1 should remain because it has another float
-    hub.delete_float(f0);
+    hub.delete_window(f0);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=FloatWindowId(1),
-        Float(id=FloatWindowId(1), x=50.00, y=5.00, w=30.00, h=20.00)
+      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
+        Float(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=20.00)
       )
     )
     ");
 }
 
 #[test]
-fn delete_float_removes_empty_non_current_workspace() {
+fn delete_window_removes_empty_non_current_workspace() {
     use crate::core::node::Dimension;
     let mut hub = setup();
 
@@ -924,11 +924,60 @@ fn delete_float_removes_empty_non_current_workspace() {
     hub.focus_workspace("0");
 
     // Delete float - workspace 1 should be removed (empty and not current)
-    hub.delete_float(f0);
+    hub.delete_window(f0);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
     )
+    ");
+}
+
+#[test]
+fn insert_float_window_offscreen_scrolls_into_view() {
+    let mut hub = setup();
+    hub.insert_float(Dimension {
+        x: 200.0,
+        y: 50.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Float(id=WindowId(0), x=120.00, y=10.00, w=30.00, h=20.00)
+      )
+    )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                            ******************************
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *             F0             *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            *                            *
+                                                                                                                            ******************************
     ");
 }

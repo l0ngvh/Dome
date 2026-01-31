@@ -115,3 +115,16 @@ fn focus_same_workspace() {
     ******************************************************************************************************************************************************
     ");
 }
+
+#[test]
+fn focus_workspace_prune_previous_workspace() {
+    let mut hub = setup();
+
+    hub.focus_workspace("2");
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(1), name=2)
+    )
+    ");
+}

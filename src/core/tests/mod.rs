@@ -21,7 +21,7 @@ mod toggle_spawn_mode;
 use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig};
-use crate::core::node::{Child, Dimension, Direction, FloatWindowId, Focus, Parent};
+use crate::core::node::{Child, Dimension, Direction, Parent, WindowId};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
@@ -40,25 +40,29 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         draw_windows(hub, &mut grid, root);
     }
 
-    // Draw float windows
+    let focused_is_float =
+        matches!(focused, Some(Child::Window(id)) if hub.get_window(id).is_float());
+
+    // Draw focus border for non-float windows before floats
+    if !focused_is_float {
+        if let Some(Child::Window(id)) = focused {
+            let dim = hub.get_window(id).dimension();
+            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
+        } else if let Some(Child::Container(id)) = focused {
+            let dim = hub.get_container(id).dimension();
+            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
+        }
+    }
+
+    // Draw float windows last so they appear on top
     for &float_id in workspace.float_windows() {
         draw_float(hub, &mut grid, float_id);
     }
 
-    match focused {
-        Some(Focus::Tiling(Child::Window(id))) => {
-            let dim = hub.get_window(id).dimension();
-            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
-        }
-        Some(Focus::Tiling(Child::Container(id))) => {
-            let dim = hub.get_container(id).dimension();
-            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
-        }
-        Some(Focus::Float(id)) => {
-            let dim = hub.get_float(id).dimension();
-            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
-        }
-        None => {}
+    // Draw focus border for float windows after floats
+    if focused_is_float && let Some(Child::Window(id)) = focused {
+        let dim = hub.get_window(id).dimension();
+        draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
     }
 
     s.push('\n');
@@ -119,9 +123,20 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     s
 }
 
-fn draw_float(hub: &Hub, grid: &mut [Vec<char>], float_id: FloatWindowId) {
-    let float = hub.get_float(float_id);
+fn draw_float(hub: &Hub, grid: &mut [Vec<char>], float_id: WindowId) {
+    let float = hub.get_window(float_id);
     let dim = float.dimension();
+    let grid_w = grid[0].len() as isize;
+    let grid_h = grid.len() as isize;
+    let x1 = dim.x.round() as isize;
+    let y1 = dim.y.round() as isize;
+    let x2 = (dim.x + dim.width).round() as isize - 1;
+    let y2 = (dim.y + dim.height).round() as isize - 1;
+    for row in (y1 + 1).max(0)..y2.min(grid_h) {
+        for col in (x1 + 1).max(0)..x2.min(grid_w) {
+            grid[row as usize][col as usize] = ' ';
+        }
+    }
     draw_rect(
         grid,
         dim.x,
@@ -356,9 +371,9 @@ fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
     }
 }
 
-fn fmt_float_str(hub: &Hub, s: &mut String, float_id: FloatWindowId, indent: usize) {
+fn fmt_float_str(hub: &Hub, s: &mut String, float_id: WindowId, indent: usize) {
     let prefix = "  ".repeat(indent);
-    let f = hub.get_float(float_id);
+    let f = hub.get_window(float_id);
     let dim = f.dimension();
     s.push_str(&format!(
         "{}Float(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
@@ -390,40 +405,70 @@ fn validate_hub(hub: &Hub) {
             "Workspace {workspace_id} has invalid monitor {}",
             workspace.monitor
         );
-        if let Some(Focus::Tiling(child)) = workspace.focused() {
-            validate_child_exists(hub, child);
-            if let Some(root) = workspace.root() {
-                match root {
-                    Child::Window(_) => {
-                        assert_eq!(
-                            child, root,
-                            "Workspace {workspace_id} focus ({child:?}) doesn't match root ({root:?})"
-                        );
-                    }
-                    Child::Container(cid) => {
-                        let root_focus = hub.get_container(cid).focused;
-                        assert!(
-                            child == root || child == root_focus,
-                            "Workspace {workspace_id} focus ({child:?}) doesn't match root ({root:?}) or root's focus ({root_focus:?})"
-                        );
+        match workspace.focused() {
+            Some(Child::Window(wid)) => {
+                let window = hub.get_window(wid);
+                if window.is_float() {
+                    assert!(
+                        workspace.float_windows().contains(&wid),
+                        "Workspace {workspace_id} focused on float {wid} but float not in workspace"
+                    );
+                } else if let Some(root) = workspace.root() {
+                    match root {
+                        Child::Window(_) => {
+                            assert_eq!(
+                                Child::Window(wid),
+                                root,
+                                "Workspace {workspace_id} focus ({wid:?}) doesn't match root ({root:?})"
+                            );
+                        }
+                        Child::Container(cid) => {
+                            let root_focus = hub.get_container(cid).focused;
+                            assert!(
+                                Child::Window(wid) == root || Child::Window(wid) == root_focus,
+                                "Workspace {workspace_id} focus ({wid:?}) doesn't match root ({root:?}) or root's focus ({root_focus:?})"
+                            );
+                        }
                     }
                 }
             }
-        }
-        if let Some(Focus::Float(fid)) = workspace.focused() {
-            hub.get_float(fid); // Validate float exists
-            assert!(
-                workspace.float_windows().contains(&fid),
-                "Workspace {workspace_id} focused on float {fid} but float not in workspace"
-            );
+            Some(Child::Container(cid)) => {
+                if let Some(root) = workspace.root() {
+                    match root {
+                        Child::Window(_) => {
+                            panic!(
+                                "Workspace {workspace_id} focus is container {cid:?} but root is window"
+                            );
+                        }
+                        Child::Container(root_cid) => {
+                            let root_focus = hub.get_container(root_cid).focused;
+                            assert!(
+                                Child::Container(cid) == root
+                                    || Child::Container(cid) == root_focus,
+                                "Workspace {workspace_id} focus ({cid:?}) doesn't match root ({root:?}) or root's focus ({root_focus:?})"
+                            );
+                        }
+                    }
+                }
+            }
+            None => {}
         }
 
         // Validate all floats in workspace
         for &fid in workspace.float_windows() {
-            let float = hub.get_float(fid);
+            let float = hub.get_window(fid);
             assert_eq!(
                 float.workspace, workspace_id,
                 "Float {fid} has wrong workspace"
+            );
+            assert_eq!(
+                float.parent,
+                Parent::Workspace(workspace_id),
+                "Float {fid} has wrong parent"
+            );
+            assert!(
+                float.is_float(),
+                "Window {fid} in float_windows but mode is not Float"
             );
         }
 
@@ -438,6 +483,7 @@ fn validate_hub(hub: &Hub) {
             match child {
                 Child::Window(wid) => {
                     let window = hub.get_window(wid);
+                    assert!(!window.is_float(), "Window {wid} in tree but mode is Float");
                     assert_eq!(
                         window.parent, expected_parent,
                         "Window {wid} has wrong parent"
@@ -511,6 +557,14 @@ fn validate_hub(hub: &Hub) {
                         container.children.len() >= 2,
                         "Container {cid} has less than 2 children"
                     );
+
+                    // Validate container.focused is not a float
+                    if let Child::Window(wid) = container.focused {
+                        assert!(
+                            !hub.get_window(wid).is_float(),
+                            "Container {cid} focused on float {wid}"
+                        );
+                    }
 
                     if container.is_tabbed() {
                         assert!(

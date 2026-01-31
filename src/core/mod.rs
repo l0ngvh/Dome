@@ -1,13 +1,15 @@
 mod allocator;
+mod float;
 mod hub;
 mod node;
+mod split;
 #[cfg(test)]
 mod tests;
+mod workspace;
 
 pub(crate) use hub::Hub;
 pub(crate) use node::{
-    Child, Container, ContainerId, Dimension, FloatWindowId, Focus, MonitorId, SpawnMode, Window,
-    WindowId,
+    Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, Window, WindowId,
 };
 
 const MAX_ITERATIONS: usize = 10000;

@@ -487,7 +487,6 @@ fn move_container_to_empty_workspace_resets_spawn_mode_based_on_screen_size() {
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(2),
         Container(id=ContainerId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -529,5 +528,79 @@ fn move_container_to_empty_workspace_resets_spawn_mode_based_on_screen_size() {
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
+
+#[test]
+fn move_to_workspace_insert_to_root_when_float_is_focused() {
+    let mut hub = setup_with_auto_tile();
+
+    let w0 = hub.insert_tiling();
+    hub.focus_workspace("1");
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+    hub.toggle_spawn_mode();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
+
+    hub.toggle_float();
+
+    hub.set_focus(w0);
+
+    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("1");
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(0),
+        Container(id=ContainerId(0), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(2), parent=ContainerId(1), x=50.00, y=0.00, w=50.00, h=10.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=10.00, w=50.00, h=10.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=50.00, y=20.00, w=50.00, h=10.00, direction=Horizontal,
+              Window(id=WindowId(4), parent=ContainerId(2), x=50.00, y=20.00, w=25.00, h=10.00)
+              Window(id=WindowId(5), parent=ContainerId(2), x=75.00, y=20.00, w=25.00, h=10.00)
+            )
+          )
+          Window(id=WindowId(0), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
+        )
+        Float(id=WindowId(6), x=62.50, y=10.00, w=25.00, h=10.00)
+      )
+    )
+
+    +------------------------------------------------++------------------------------------------------+**************************************************
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                       W2                       |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                ||                                                |*                                                *
+    |                                                |+------------------------------------------------+*                                                *
+    |                                                |+------------+----------------------+------------+*                                                *
+    |                                                ||            |                      |            |*                                                *
+    |                                                ||            |                      |            |*                                                *
+    |                                                ||            |                      |            |*                                                *
+    |                                                ||            |                      |            |*                                                *
+    |                       W1                       ||            |          F6          |            |*                       W0                       *
+    |                                                ||            |                      |            |*                                                *
+    |                                                ||            |                      |            |*                                                *
+    |                                                ||            |                      |            |*                                                *
+    |                                                |+------------+----------------------+------------+*                                                *
+    |                                                |+-----------------------++-----------------------+*                                                *
+    |                                                ||                       ||                       |*                                                *
+    |                                                ||                       ||                       |*                                                *
+    |                                                ||                       ||                       |*                                                *
+    |                                                ||                       ||                       |*                                                *
+    |                                                ||           W4          ||          W5           |*                                                *
+    |                                                ||                       ||                       |*                                                *
+    |                                                ||                       ||                       |*                                                *
+    |                                                ||                       ||                       |*                                                *
+    +------------------------------------------------++-----------------------++-----------------------+**************************************************
     ");
 }

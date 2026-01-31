@@ -13,7 +13,7 @@ use objc2_foundation::{
 };
 
 use crate::config::Color;
-use crate::core::{ContainerId, FloatWindowId, WindowId};
+use crate::core::{ContainerId, WindowId};
 
 fn clip_to_bounds(rect: NSRect, bounds: NSRect) -> Option<NSRect> {
     if rect.origin.x >= bounds.origin.x + bounds.size.width
@@ -109,7 +109,7 @@ pub(super) struct TilingBorder {
 }
 
 pub(super) struct FloatBorder {
-    pub(super) key: FloatWindowId,
+    pub(super) key: WindowId,
     pub(super) frame: NSRect,
     pub(super) bounds: NSRect,
     pub(super) colors: [Color; 4],
@@ -298,7 +298,7 @@ fn draw_label(text: &str, x: f32, y: f32, color: Color, bold: bool) {
 
 pub(super) struct OverlayManager {
     tiling: HashMap<WindowId, Retained<NSWindow>>,
-    float: HashMap<FloatWindowId, Retained<NSWindow>>,
+    float: HashMap<WindowId, Retained<NSWindow>>,
     container: HashMap<ContainerId, Retained<NSWindow>>,
     tab_bars: HashMap<ContainerId, Retained<NSWindow>>,
 }
