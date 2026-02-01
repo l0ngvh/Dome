@@ -144,7 +144,7 @@ fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
         return false;
     }
 
-    tracing::debug!(?keymap, %actions, "Keymap matched");
+    tracing::trace!(?keymap, %actions, "Keymap matched");
 
     if ctx.is_suspended.get() {
         tracing::info!("Received keymap action, resuming window management");
