@@ -780,14 +780,22 @@ fn position_tiling_windows(
 
 fn build_tab_bar(
     primary_full_height: f32,
-    bounds: NSRect,
+    monitor_dim: Dimension,
     id: ContainerId,
     container: &Container,
     registry: &Registry,
     config: &Config,
-) -> TabBarOverlay {
+) -> Option<TabBarOverlay> {
     let dim = container.dimension();
-    let height = config.tab_bar_height;
+    let tab_bar_dim = Dimension {
+        x: dim.x,
+        y: dim.y,
+        width: dim.width,
+        height: config.tab_bar_height,
+    };
+
+    let clipped = clip_to_bounds(tab_bar_dim, monitor_dim)?;
+
     let children = container.children();
     let active_tab = container.active_tab_index();
     let tab_width = if children.is_empty() {
@@ -813,22 +821,13 @@ fn build_tab_bar(
         })
         .collect();
 
-    TabBarOverlay {
+    Some(TabBarOverlay {
         key: id,
-        frame: to_ns_rect(
-            primary_full_height,
-            Dimension {
-                x: dim.x,
-                y: dim.y,
-                width: dim.width,
-                height,
-            },
-        ),
-        bounds,
+        frame: to_ns_rect(primary_full_height, clipped),
         tabs,
         background_color: config.tab_bar_background_color,
         active_background_color: config.active_tab_background_color,
-    }
+    })
 }
 
 // Quartz uses top-left origin, Cocoa uses bottom-left origin
@@ -842,6 +841,106 @@ fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
     )
 }
 
+/// Convert edge rect from Quartz coords to Cocoa coords, relative to the overlay window.
+/// Used for positioning border edges within their parent overlay NSWindow/NSView.
+fn to_edge_ns_rect(dim: Dimension, overlay_height: f32) -> NSRect {
+    NSRect::new(
+        NSPoint::new(dim.x as f64, (overlay_height - dim.y - dim.height) as f64),
+        NSSize::new(dim.width as f64, dim.height as f64),
+    )
+}
+
+/// Clip rect to bounds. Returns None if fully outside.
+fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimension> {
+    if rect.x >= bounds.x + bounds.width
+        || rect.y >= bounds.y + bounds.height
+        || rect.x + rect.width <= bounds.x
+        || rect.y + rect.height <= bounds.y
+    {
+        return None;
+    }
+    let x = rect.x.max(bounds.x);
+    let y = rect.y.max(bounds.y);
+    let right = (rect.x + rect.width).min(bounds.x + bounds.width);
+    let bottom = (rect.y + rect.height).min(bounds.y + bounds.height);
+    Some(Dimension {
+        x,
+        y,
+        width: right - x,
+        height: bottom - y,
+    })
+}
+
+/// Compute border edges for a window, clipped to monitor bounds.
+/// Returns (clipped_frame, edges) or None if fully outside bounds.
+/// All coordinates in Quartz (top-left origin).
+///
+/// # Arguments
+/// * `colors` - Edge colors in order: [top, right, bottom, left]
+///
+/// # Returns
+/// Edges in same order as colors: [top, right, bottom, left] (if visible after clipping)
+fn compute_border_edges(
+    frame: Dimension,
+    bounds: Dimension,
+    colors: [Color; 4],
+    b: f32,
+) -> Option<(Dimension, Vec<(Dimension, Color)>)> {
+    let clipped = clip_to_bounds(frame, bounds)?;
+
+    let offset_x = clipped.x - frame.x;
+    let offset_y = clipped.y - frame.y;
+    let clip_local = Dimension {
+        x: offset_x,
+        y: offset_y,
+        width: clipped.width,
+        height: clipped.height,
+    };
+
+    let w = frame.width;
+    let h = frame.height;
+    let mut edges = Vec::new();
+
+    // top (y = 0 in Quartz)
+    let top = Dimension { x: 0.0, y: 0.0, width: w, height: b };
+    if let Some(r) = clip_to_bounds(top, clip_local) {
+        edges.push((translate_dim(r, -offset_x, -offset_y), colors[0]));
+    }
+
+    // right (exclude corners)
+    let right = Dimension { x: w - b, y: b, width: b, height: h - 2.0 * b };
+    if let Some(r) = clip_to_bounds(right, clip_local) {
+        edges.push((translate_dim(r, -offset_x, -offset_y), colors[1]));
+    }
+
+    // bottom (y = h - b in Quartz)
+    let bottom = Dimension { x: 0.0, y: h - b, width: w, height: b };
+    if let Some(r) = clip_to_bounds(bottom, clip_local) {
+        edges.push((translate_dim(r, -offset_x, -offset_y), colors[2]));
+    }
+
+    // left (exclude corners)
+    let left = Dimension { x: 0.0, y: b, width: b, height: h - 2.0 * b };
+    if let Some(r) = clip_to_bounds(left, clip_local) {
+        edges.push((translate_dim(r, -offset_x, -offset_y), colors[3]));
+    }
+
+    if edges.is_empty() {
+        None
+    } else {
+        Some((clipped, edges))
+    }
+}
+
+fn translate_dim(dim: Dimension, dx: f32, dy: f32) -> Dimension {
+    Dimension {
+        x: dim.x + dx,
+        y: dim.y + dy,
+        width: dim.width,
+        height: dim.height,
+    }
+}
+
 fn build_overlays(
     hub: &Hub,
     registry: &Registry,
@@ -853,13 +952,11 @@ fn build_overlays(
     let mut float_borders = Vec::new();
     let mut container_borders = Vec::new();
     let mut tab_bars = Vec::new();
+    let b = config.border_size;
 
     for ws_id in hub.visible_workspaces() {
         let ws = hub.get_workspace(ws_id);
-        let bounds = to_ns_rect(
-            primary_full_height,
-            hub.get_monitor(ws.monitor()).dimension(),
-        );
+        let monitor_dim = hub.get_monitor(ws.monitor()).dimension();
         let focused = if ws_id == current_ws_id {
             ws.focused()
         } else {
@@ -877,26 +974,34 @@ fn build_overlays(
                         } else {
                             [config.border_color; 4]
                         };
-                        tiling_borders.push(TilingBorder {
-                            key: id,
-                            frame: to_ns_rect(primary_full_height, w.dimension()),
-                            bounds,
-                            colors,
-                        });
+                        if let Some((clipped, edges)) =
+                            compute_border_edges(w.dimension(), monitor_dim, colors, b)
+                        {
+                            tiling_borders.push(TilingBorder {
+                                key: id,
+                                frame: to_ns_rect(primary_full_height, clipped),
+                                edges: edges
+                                    .into_iter()
+                                    .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
+                                    .collect(),
+                            });
+                        }
                     }
                 }
                 Child::Container(id) => {
                     let container = hub.get_container(id);
                     if let Some(active) = container.active_tab() {
                         stack.push(active);
-                        tab_bars.push(build_tab_bar(
+                        if let Some(tab_bar) = build_tab_bar(
                             primary_full_height,
-                            bounds,
+                            monitor_dim,
                             id,
                             container,
                             registry,
                             config,
-                        ));
+                        ) {
+                            tab_bars.push(tab_bar);
+                        }
                     } else {
                         for &c in container.children() {
                             stack.push(c);
@@ -908,12 +1013,19 @@ fn build_overlays(
 
         if let Some(Child::Container(id)) = focused {
             let c = hub.get_container(id);
-            container_borders.push(ContainerBorder {
-                key: id,
-                frame: to_ns_rect(primary_full_height, c.dimension()),
-                bounds,
-                colors: spawn_colors(c.spawn_mode(), config),
-            });
+            let colors = spawn_colors(c.spawn_mode(), config);
+            if let Some((clipped, edges)) =
+                compute_border_edges(c.dimension(), monitor_dim, colors, b)
+            {
+                container_borders.push(ContainerBorder {
+                    key: id,
+                    frame: to_ns_rect(primary_full_height, clipped),
+                    edges: edges
+                        .into_iter()
+                        .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
+                        .collect(),
+                });
+            }
         }
 
         for &float_id in ws.float_windows() {
@@ -924,12 +1036,18 @@ fn build_overlays(
                 } else {
                     config.border_color
                 };
-                float_borders.push(FloatBorder {
-                    key: float_id,
-                    frame: to_ns_rect(primary_full_height, dim),
-                    bounds,
-                    colors: [color; 4],
-                });
+                if let Some((clipped, edges)) =
+                    compute_border_edges(dim, monitor_dim, [color; 4], b)
+                {
+                    float_borders.push(FloatBorder {
+                        key: float_id,
+                        frame: to_ns_rect(primary_full_height, clipped),
+                        edges: edges
+                            .into_iter()
+                            .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
+                            .collect(),
+                    });
+                }
             }
         }
     }
@@ -939,7 +1057,6 @@ fn build_overlays(
         float_borders,
         container_borders,
         tab_bars,
-        border_size: config.border_size,
     }
 }
 

@@ -256,7 +256,7 @@ impl Hub {
         self.focus_tab(false);
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     pub(crate) fn toggle_container_layout(&mut self) {
         let current_ws = self.current_workspace();
         let Some(focused) = self.workspaces.get(current_ws).focused else {

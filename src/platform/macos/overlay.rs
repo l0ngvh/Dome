@@ -15,24 +15,6 @@ use objc2_foundation::{
 use crate::config::Color;
 use crate::core::{ContainerId, WindowId};
 
-fn clip_to_bounds(rect: NSRect, bounds: NSRect) -> Option<NSRect> {
-    if rect.origin.x >= bounds.origin.x + bounds.size.width
-        || rect.origin.y >= bounds.origin.y + bounds.size.height
-        || rect.origin.x + rect.size.width <= bounds.origin.x
-        || rect.origin.y + rect.size.height <= bounds.origin.y
-    {
-        return None;
-    }
-    let x = rect.origin.x.max(bounds.origin.x);
-    let y = rect.origin.y.max(bounds.origin.y);
-    let right = (rect.origin.x + rect.size.width).min(bounds.origin.x + bounds.size.width);
-    let top = (rect.origin.y + rect.size.height).min(bounds.origin.y + bounds.size.height);
-    Some(NSRect::new(
-        NSPoint::new(x, y),
-        NSSize::new(right - x, top - y),
-    ))
-}
-
 fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> Retained<NSWindow> {
     let window = unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -54,72 +36,26 @@ fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> 
     window
 }
 
-fn compute_border_edges(
-    frame: NSRect,
-    bounds: NSRect,
-    colors: [Color; 4],
-    b: f64,
-) -> Vec<(NSRect, Color)> {
-    let w = frame.size.width;
-    let h = frame.size.height;
-
-    // Monitor bounds in local coordinates
-    let local_bounds = NSRect::new(
-        NSPoint::new(
-            bounds.origin.x - frame.origin.x,
-            bounds.origin.y - frame.origin.y,
-        ),
-        bounds.size,
-    );
-
-    let mut edges = Vec::new();
-
-    // top
-    let top = NSRect::new(NSPoint::new(0.0, h - b), NSSize::new(w, b));
-    if let Some(r) = clip_to_bounds(top, local_bounds) {
-        edges.push((r, colors[0]));
-    }
-
-    // bottom
-    let bottom = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, b));
-    if let Some(r) = clip_to_bounds(bottom, local_bounds) {
-        edges.push((r, colors[2]));
-    }
-
-    // right (exclude corners)
-    let right = NSRect::new(NSPoint::new(w - b, b), NSSize::new(b, h - 2.0 * b));
-    if let Some(r) = clip_to_bounds(right, local_bounds) {
-        edges.push((r, colors[1]));
-    }
-
-    // left (exclude corners)
-    let left = NSRect::new(NSPoint::new(0.0, b), NSSize::new(b, h - 2.0 * b));
-    if let Some(r) = clip_to_bounds(left, local_bounds) {
-        edges.push((r, colors[3]));
-    }
-
-    edges
-}
+// Border overlay structs use pre-clipped frames because macOS automatically relocates
+// windows that extend beyond monitor bounds. Without clipping, border overlays for
+// windows near screen edges would be pushed to different monitors.
 
 pub(super) struct TilingBorder {
     pub(super) key: WindowId,
     pub(super) frame: NSRect,
-    pub(super) bounds: NSRect,
-    pub(super) colors: [Color; 4],
+    pub(super) edges: Vec<(NSRect, Color)>,
 }
 
 pub(super) struct FloatBorder {
     pub(super) key: WindowId,
     pub(super) frame: NSRect,
-    pub(super) bounds: NSRect,
-    pub(super) colors: [Color; 4],
+    pub(super) edges: Vec<(NSRect, Color)>,
 }
 
 pub(super) struct ContainerBorder {
     pub(super) key: ContainerId,
     pub(super) frame: NSRect,
-    pub(super) bounds: NSRect,
-    pub(super) colors: [Color; 4],
+    pub(super) edges: Vec<(NSRect, Color)>,
 }
 
 pub(super) struct TabInfo {
@@ -132,7 +68,6 @@ pub(super) struct TabInfo {
 pub(super) struct TabBarOverlay {
     pub(super) key: ContainerId,
     pub(super) frame: NSRect,
-    pub(super) bounds: NSRect,
     pub(super) tabs: Vec<TabInfo>,
     pub(super) background_color: Color,
     pub(super) active_background_color: Color,
@@ -143,10 +78,8 @@ pub(super) struct Overlays {
     pub(super) float_borders: Vec<FloatBorder>,
     pub(super) container_borders: Vec<ContainerBorder>,
     pub(super) tab_bars: Vec<TabBarOverlay>,
-    pub(super) border_size: f32,
 }
 
-// BorderView
 struct BorderViewIvars {
     edges: RefCell<Vec<(NSRect, Color)>>,
 }
@@ -170,21 +103,20 @@ define_class!(
 );
 
 impl BorderView {
-    fn new(mtm: MainThreadMarker, frame: NSRect, edges: Vec<(NSRect, Color)>) -> Retained<Self> {
+    fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
         let ivars = BorderViewIvars {
-            edges: RefCell::new(edges),
+            edges: RefCell::new(Vec::new()),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 
-    fn set_data(&self, edges: Vec<(NSRect, Color)>) {
+    fn set_edges(&self, edges: Vec<(NSRect, Color)>) {
         *self.ivars().edges.borrow_mut() = edges;
         self.setNeedsDisplay(true);
     }
 }
 
-// TabBarView
 struct TabBarViewIvars {
     tabs: RefCell<Vec<TabInfo>>,
     background_color: Cell<Color>,
@@ -314,9 +246,6 @@ impl OverlayManager {
     }
 
     pub(super) fn process(&mut self, mtm: MainThreadMarker, overlays: Overlays) {
-        let b = overlays.border_size;
-
-        // Collect new keys
         let new_tiling: std::collections::HashSet<_> =
             overlays.tiling_borders.iter().map(|x| x.key).collect();
         let new_float: std::collections::HashSet<_> =
@@ -326,7 +255,6 @@ impl OverlayManager {
         let new_tab_bars: std::collections::HashSet<_> =
             overlays.tab_bars.iter().map(|x| x.key).collect();
 
-        // Remove stale
         self.tiling.retain(|k, w| {
             let keep = new_tiling.contains(k);
             if !keep {
@@ -356,88 +284,60 @@ impl OverlayManager {
             keep
         });
 
-        // Tiling borders
         for border in overlays.tiling_borders {
-            let edges = compute_border_edges(border.frame, border.bounds, border.colors, b as f64);
-            if edges.is_empty() {
-                if let Some(w) = self.tiling.remove(&border.key) {
-                    w.close();
-                }
-                continue;
-            }
             if let Some(window) = self.tiling.get(&border.key) {
                 window.setFrame_display(border.frame, true);
                 if let Some(view) = window.contentView() {
                     let v: &BorderView = unsafe { std::mem::transmute(&*view) };
-                    v.set_data(edges);
+                    v.set_edges(border.edges);
                 }
             } else {
                 let window = create_overlay_window(mtm, border.frame, NSNormalWindowLevel - 1);
-                let view = BorderView::new(mtm, border.frame, edges);
+                let view = BorderView::new(mtm, border.frame);
+                view.set_edges(border.edges);
                 window.setContentView(Some(&view));
                 window.orderFront(None);
                 self.tiling.insert(border.key, window);
             }
         }
 
-        // Float borders
         for border in overlays.float_borders {
-            let edges = compute_border_edges(border.frame, border.bounds, border.colors, b as f64);
-            if edges.is_empty() {
-                if let Some(w) = self.float.remove(&border.key) {
-                    w.close();
-                }
-                continue;
-            }
             if let Some(window) = self.float.get(&border.key) {
                 window.setFrame_display(border.frame, true);
                 if let Some(view) = window.contentView() {
                     let v: &BorderView = unsafe { std::mem::transmute(&*view) };
-                    v.set_data(edges);
+                    v.set_edges(border.edges);
                 }
             } else {
                 let window = create_overlay_window(mtm, border.frame, NSFloatingWindowLevel);
-                let view = BorderView::new(mtm, border.frame, edges);
+                let view = BorderView::new(mtm, border.frame);
+                view.set_edges(border.edges);
                 window.setContentView(Some(&view));
                 window.orderFront(None);
                 self.float.insert(border.key, window);
             }
         }
 
-        // Container borders
         for border in overlays.container_borders {
-            let edges = compute_border_edges(border.frame, border.bounds, border.colors, b as f64);
-            if edges.is_empty() {
-                if let Some(w) = self.container.remove(&border.key) {
-                    w.close();
-                }
-                continue;
-            }
             if let Some(window) = self.container.get(&border.key) {
                 window.setFrame_display(border.frame, true);
                 if let Some(view) = window.contentView() {
                     let v: &BorderView = unsafe { std::mem::transmute(&*view) };
-                    v.set_data(edges);
+                    v.set_edges(border.edges);
                 }
             } else {
                 let window = create_overlay_window(mtm, border.frame, NSNormalWindowLevel - 1);
-                let view = BorderView::new(mtm, border.frame, edges);
+                let view = BorderView::new(mtm, border.frame);
+                view.set_edges(border.edges);
                 window.setContentView(Some(&view));
                 window.orderFront(None);
                 self.container.insert(border.key, window);
             }
         }
 
-        // Tab bars
         for tab_bar in overlays.tab_bars {
-            let Some(frame) = clip_to_bounds(tab_bar.frame, tab_bar.bounds) else {
-                if let Some(w) = self.tab_bars.remove(&tab_bar.key) {
-                    w.close();
-                }
-                continue;
-            };
             if let Some(window) = self.tab_bars.get(&tab_bar.key) {
-                window.setFrame_display(frame, true);
+                window.setFrame_display(tab_bar.frame, true);
                 if let Some(view) = window.contentView() {
                     let v: &TabBarView = unsafe { std::mem::transmute(&*view) };
                     v.set_data(
@@ -447,10 +347,10 @@ impl OverlayManager {
                     );
                 }
             } else {
-                let window = create_overlay_window(mtm, frame, NSFloatingWindowLevel);
+                let window = create_overlay_window(mtm, tab_bar.frame, NSFloatingWindowLevel);
                 let view = TabBarView::new(
                     mtm,
-                    frame,
+                    tab_bar.frame,
                     tab_bar.tabs,
                     tab_bar.background_color,
                     tab_bar.active_background_color,
