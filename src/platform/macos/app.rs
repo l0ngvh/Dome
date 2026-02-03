@@ -235,8 +235,16 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
         match msg {
             HubMessage::Overlays(mut overlays) => {
                 let mirrors = std::mem::take(&mut overlays.mirrors);
-                delegate.ivars().overlay_manager.borrow_mut().process(mtm, overlays);
-                delegate.ivars().mirror_manager.borrow_mut().process_mirrors(mirrors);
+                delegate
+                    .ivars()
+                    .overlay_manager
+                    .borrow_mut()
+                    .process(mtm, overlays);
+                delegate
+                    .ivars()
+                    .mirror_manager
+                    .borrow_mut()
+                    .process_mirrors(mirrors);
             }
             HubMessage::RegisterObservers(apps) => {
                 for app in &apps {
@@ -244,7 +252,11 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 }
             }
             HubMessage::CaptureFrame { cg_id, surface } => {
-                delegate.ivars().mirror_manager.borrow_mut().apply_frame(cg_id, &surface);
+                delegate
+                    .ivars()
+                    .mirror_manager
+                    .borrow_mut()
+                    .apply_frame(cg_id, &surface);
             }
             HubMessage::CaptureFailed { cg_id } => {
                 delegate.ivars().mirror_manager.borrow().show_error(cg_id);
@@ -259,11 +271,12 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
 
 #[derive(Clone)]
 pub(super) struct ScreenInfo {
-    pub display_id: CGDirectDisplayID,
-    pub name: String,
-    pub dimension: Dimension,
-    pub full_height: f32,
-    pub is_primary: bool,
+    pub(super) display_id: CGDirectDisplayID,
+    pub(super) name: String,
+    pub(super) dimension: Dimension,
+    pub(super) full_height: f32,
+    pub(super) is_primary: bool,
+    pub(super) scale: f64,
 }
 
 fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
@@ -304,6 +317,7 @@ pub(super) fn get_all_screens(mtm: MainThreadMarker) -> Vec<ScreenInfo> {
                 },
                 full_height: bounds.size.height as f32,
                 is_primary: display_id == primary_id,
+                scale: screen.backingScaleFactor(),
             }
         })
         .collect()

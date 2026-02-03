@@ -204,21 +204,21 @@ impl MessageSender {
 type DisplayId = u32;
 
 struct MonitorRegistry {
-    map: HashMap<DisplayId, MonitorId>,
+    map: HashMap<DisplayId, (MonitorId, ScreenInfo)>,
     reverse: HashMap<MonitorId, DisplayId>,
     primary_display_id: DisplayId,
 }
 
 impl MonitorRegistry {
-    fn new(primary_display_id: DisplayId, primary_monitor_id: MonitorId) -> Self {
+    fn new(primary: &ScreenInfo, primary_monitor_id: MonitorId) -> Self {
         let mut map = HashMap::new();
         let mut reverse = HashMap::new();
-        map.insert(primary_display_id, primary_monitor_id);
-        reverse.insert(primary_monitor_id, primary_display_id);
+        map.insert(primary.display_id, (primary_monitor_id, primary.clone()));
+        reverse.insert(primary_monitor_id, primary.display_id);
         Self {
             map,
             reverse,
-            primary_display_id,
+            primary_display_id: primary.display_id,
         }
     }
 
@@ -227,16 +227,24 @@ impl MonitorRegistry {
     }
 
     fn get(&self, display_id: DisplayId) -> Option<MonitorId> {
-        self.map.get(&display_id).copied()
+        self.map.get(&display_id).map(|(id, _)| *id)
+    }
+
+    fn get_screen(&self, display_id: DisplayId) -> Option<&ScreenInfo> {
+        self.map.get(&display_id).map(|(_, info)| info)
+    }
+
+    fn get_screen_by_monitor(&self, monitor_id: MonitorId) -> Option<&ScreenInfo> {
+        self.reverse.get(&monitor_id).and_then(|d| self.get_screen(*d))
     }
 
     fn primary_monitor_id(&self) -> MonitorId {
         self.get(self.primary_display_id).unwrap()
     }
 
-    fn insert(&mut self, display_id: DisplayId, monitor_id: MonitorId) {
-        self.map.insert(display_id, monitor_id);
-        self.reverse.insert(monitor_id, display_id);
+    fn insert(&mut self, screen: &ScreenInfo, monitor_id: MonitorId) {
+        self.map.insert(screen.display_id, (monitor_id, screen.clone()));
+        self.reverse.insert(monitor_id, screen.display_id);
     }
 
     fn remove_by_id(&mut self, monitor_id: MonitorId) {
@@ -246,8 +254,9 @@ impl MonitorRegistry {
     }
 
     fn replace(&mut self, old_display_id: DisplayId, new_display_id: DisplayId) {
-        if let Some(monitor_id) = self.map.remove(&old_display_id) {
-            self.map.insert(new_display_id, monitor_id);
+        if let Some((monitor_id, mut info)) = self.map.remove(&old_display_id) {
+            info.display_id = new_display_id;
+            self.map.insert(new_display_id, (monitor_id, info));
             self.reverse.insert(monitor_id, new_display_id);
         }
     }
@@ -257,7 +266,7 @@ impl MonitorRegistry {
             .map
             .iter()
             .filter(|(key, _)| !current.contains(key))
-            .map(|(_, &id)| id)
+            .map(|(_, (id, _))| *id)
             .collect();
         for &id in &stale {
             self.remove_by_id(id);
@@ -296,7 +305,7 @@ impl Dome {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
-        let mut monitor_registry = MonitorRegistry::new(primary.display_id, primary_monitor_id);
+        let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         tracing::info!(
             name = %primary.name,
             display_id = primary.display_id,
@@ -307,7 +316,7 @@ impl Dome {
         for screen in &screens {
             if screen.display_id != primary.display_id {
                 let id = hub.add_monitor(screen.name.clone(), screen.dimension);
-                monitor_registry.insert(screen.display_id, id);
+                monitor_registry.insert(screen, id);
                 tracing::info!(
                     name = %screen.name,
                     display_id = screen.display_id,
@@ -836,12 +845,14 @@ impl Dome {
                     continue;
                 }
 
-                if let Some(clipped) = clip_to_bounds(dim, monitor_dim) {
+                let content_dim = apply_inset(dim, b);
+                if let Some(clipped) = clip_to_bounds(content_dim, monitor_dim) {
                     let frame = to_ns_rect(self.primary_full_height, clipped);
-                    let source_rect = compute_source_rect(dim, clipped);
+                    let source_rect = compute_source_rect(content_dim, clipped);
+                    let scale = self.monitor_registry.get_screen_by_monitor(ws.monitor()).unwrap().scale;
 
                     if let Some(capture) = self.registry.get_capture_mut(cg_id) {
-                        capture.start(cg_id, source_rect, frame.size.width as u32, frame.size.height as u32, self.sender.clone());
+                        capture.start(cg_id, source_rect, frame.size.width as u32, frame.size.height as u32, scale, self.sender.clone());
                     }
 
                     if let Some(window) = self.registry.get_mut(cg_id) {
@@ -852,6 +863,7 @@ impl Dome {
                         cg_id,
                         frame,
                         level: NSFloatingWindowLevel as isize + 1,
+                        scale,
                     });
                     curr_mirrors.insert(cg_id);
                 }
@@ -1219,7 +1231,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
     for screen in screens {
         if !registry.contains(screen.display_id) {
             let id = hub.add_monitor(screen.name.clone(), screen.dimension);
-            registry.insert(screen.display_id, id);
+            registry.insert(screen, id);
             tracing::info!(
                 name = %screen.name,
                 display_id = screen.display_id,

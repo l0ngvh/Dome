@@ -85,6 +85,7 @@ pub(super) struct MirrorUpdate {
     pub(super) cg_id: u32,
     pub(super) frame: NSRect,
     pub(super) level: isize,
+    pub(super) scale: f64,
 }
 
 struct BorderViewIvars {

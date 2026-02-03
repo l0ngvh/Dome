@@ -41,9 +41,20 @@ impl WindowCapture {
         source_rect: CGRect,
         width: u32,
         height: u32,
+        scale: f64,
         app_tx: MessageSender,
     ) {
-        self.update_config(source_rect, width, height);
+        let config = unsafe { SCStreamConfiguration::new() };
+        unsafe {
+            config.setWidth((width as f64 * scale) as usize);
+            config.setHeight((height as f64 * scale) as usize);
+            config.setSourceRect(source_rect);
+        }
+        let block = RcBlock::new(|_: *mut NSError| {});
+        unsafe {
+            self.stream
+                .updateConfiguration_completionHandler(&config, Some(&block))
+        };
         if !self.running {
             let block = RcBlock::new(move |error: *mut NSError| {
                 if !error.is_null() {
@@ -61,20 +72,6 @@ impl WindowCapture {
             unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&block)) };
             self.running = false;
         }
-    }
-
-    fn update_config(&self, source_rect: CGRect, width: u32, height: u32) {
-        let config = unsafe { SCStreamConfiguration::new() };
-        unsafe {
-            config.setWidth(width as usize);
-            config.setHeight(height as usize);
-            config.setSourceRect(source_rect);
-        }
-        let block = RcBlock::new(|_: *mut NSError| {});
-        unsafe {
-            self.stream
-                .updateConfiguration_completionHandler(&config, Some(&block))
-        };
     }
 }
 
@@ -259,6 +256,7 @@ impl MirrorWindow {
         cg_id: CGWindowID,
         frame: NSRect,
         level: isize,
+        scale: f64,
         hub_tx: Sender<HubEvent>,
     ) -> Self {
         let window = unsafe {
@@ -281,6 +279,7 @@ impl MirrorWindow {
 
         let view = MirrorView::new(mtm, frame, cg_id, hub_tx);
         let layer = CALayer::new();
+        layer.setContentsScale(scale);
         view.setLayer(Some(&layer));
         window.setContentView(Some(&view));
 
@@ -339,7 +338,7 @@ impl MirrorManager {
                 mirror.update(m.frame);
             } else {
                 let mirror =
-                    MirrorWindow::new(self.mtm, m.cg_id, m.frame, m.level, self.hub_tx.clone());
+                    MirrorWindow::new(self.mtm, m.cg_id, m.frame, m.level, m.scale, self.hub_tx.clone());
                 self.mirrors.insert(m.cg_id, mirror);
             }
         }
