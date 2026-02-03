@@ -78,6 +78,13 @@ pub(super) struct Overlays {
     pub(super) float_borders: Vec<FloatBorder>,
     pub(super) container_borders: Vec<ContainerBorder>,
     pub(super) tab_bars: Vec<TabBarOverlay>,
+    pub(super) mirrors: Vec<MirrorUpdate>,
+}
+
+pub(super) struct MirrorUpdate {
+    pub(super) cg_id: u32,
+    pub(super) frame: NSRect,
+    pub(super) level: isize,
 }
 
 struct BorderViewIvars {

@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender};
 
+use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use objc2::rc::Retained;
-use objc2_app_kit::NSRunningApplication;
-use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource};
+use objc2_app_kit::{NSFloatingWindowLevel, NSRunningApplication};
+use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
@@ -14,8 +16,9 @@ use crate::core::{
 };
 
 use super::app::{ScreenInfo, compute_global_bounds};
+use super::mirror::{WindowCapture, create_captures_async};
 use super::overlay::{
-    ContainerBorder, FloatBorder, Overlays, TabBarOverlay, TabInfo, TilingBorder,
+    ContainerBorder, FloatBorder, MirrorUpdate, Overlays, TabBarOverlay, TabInfo, TilingBorder,
 };
 use super::recovery;
 use super::window::{MacWindow, get_app_by_pid, get_ax_windows, list_cg_window_ids, running_apps};
@@ -54,18 +57,23 @@ pub(super) enum HubEvent {
     /// we receive plenty of focus events, so missing them isn't a concern.
     Sync,
     ScreensChanged(Vec<ScreenInfo>),
+    MirrorClicked(CGWindowID),
+    CaptureReady { cg_id: CGWindowID, capture: WindowCapture },
     Shutdown,
 }
 
 pub(super) enum HubMessage {
     Overlays(Overlays),
     RegisterObservers(Vec<Retained<NSRunningApplication>>),
+    CaptureFrame { cg_id: CGWindowID, surface: Retained<IOSurface> },
+    CaptureFailed { cg_id: CGWindowID },
     Shutdown,
 }
 
 struct WindowEntry {
     window: MacWindow,
     window_id: WindowId,
+    capture: Option<WindowCapture>,
 }
 
 struct Registry {
@@ -88,8 +96,11 @@ impl Registry {
         let pid = window.pid();
         self.id_to_cg.insert(window_id, cg_id);
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
-        self.windows
-            .insert(cg_id, WindowEntry { window, window_id });
+        self.windows.insert(cg_id, WindowEntry {
+            window,
+            window_id,
+            capture: None,
+        });
     }
 
     fn remove(&mut self, cg_id: CGWindowID) -> Option<(MacWindow, WindowId)> {
@@ -151,8 +162,27 @@ impl Registry {
             .and_then(|cg_id| self.windows.get(cg_id))
             .and_then(|e| e.window.title())
     }
+
+    fn set_capture(&mut self, cg_id: CGWindowID, capture: WindowCapture) {
+        if let Some(entry) = self.windows.get_mut(&cg_id) {
+            entry.capture = Some(capture);
+        }
+    }
+
+    fn get_capture(&self, cg_id: CGWindowID) -> Option<&WindowCapture> {
+        self.windows.get(&cg_id).and_then(|e| e.capture.as_ref())
+    }
+
+    fn get_capture_mut(&mut self, cg_id: CGWindowID) -> Option<&mut WindowCapture> {
+        self.windows.get_mut(&cg_id).and_then(|e| e.capture.as_mut())
+    }
+
+    fn cg_ids(&self) -> impl Iterator<Item = CGWindowID> + '_ {
+        self.windows.keys().copied()
+    }
 }
 
+#[derive(Clone)]
 pub(super) struct MessageSender {
     pub(super) tx: Sender<HubMessage>,
     pub(super) source: CFRetained<CFRunLoopSource>,
@@ -163,7 +193,7 @@ pub(super) struct MessageSender {
 unsafe impl Send for MessageSender {}
 
 impl MessageSender {
-    fn send(&self, msg: HubMessage) {
+    pub(super) fn send(&self, msg: HubMessage) {
         if self.tx.send(msg).is_ok() {
             self.source.signal();
             self.run_loop.wake_up();
@@ -250,6 +280,8 @@ pub(super) struct Dome {
     global_bounds: Dimension,
     observed_pids: HashSet<i32>,
     sender: MessageSender,
+    hub_tx: Sender<HubEvent>,
+    capture_queue: DispatchRetained<DispatchQueue>,
     running: bool,
 }
 
@@ -258,6 +290,7 @@ impl Dome {
         config: Config,
         screens: Vec<ScreenInfo>,
         global_bounds: Dimension,
+        hub_tx: Sender<HubEvent>,
         sender: MessageSender,
     ) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
@@ -294,6 +327,8 @@ impl Dome {
             global_bounds,
             observed_pids: HashSet::new(),
             sender,
+            hub_tx,
+            capture_queue: DispatchQueue::new("dome.capture", DispatchQueueAttr::SERIAL),
             running: true,
         }
     }
@@ -326,7 +361,7 @@ impl Dome {
             self.sender.send(HubMessage::RegisterObservers(new_apps));
         }
         self.process_frame(None, HashSet::new());
-        self.send_overlays();
+        self.send_overlays(&HashSet::new());
     }
 
     fn handle_event(&mut self, event: HubEvent) {
@@ -383,13 +418,24 @@ impl Dome {
                 tracing::info!(count = screens.len(), "Screens changed");
                 self.update_screens(screens);
             }
+            HubEvent::MirrorClicked(cg_id) => {
+                if let Some(window) = self.registry.get(cg_id) {
+                    window.focus().ok();
+                }
+                if let Some(window_id) = self.registry.get_window_id(cg_id) {
+                    self.hub.set_focus(window_id);
+                }
+            }
+            HubEvent::CaptureReady { cg_id, capture } => {
+                self.registry.set_capture(cg_id, capture);
+            }
         }
 
         if !self.running {
             return;
         }
-        self.process_frame(last_focus, previous_displayed);
-        self.send_overlays();
+        self.process_frame(last_focus, previous_displayed.clone());
+        self.send_overlays(&previous_displayed);
     }
 
     #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
@@ -445,6 +491,20 @@ impl Dome {
             if let Some(actions) = on_open_actions(window, &self.config.macos.on_open) {
                 self.execute_actions(&actions);
             }
+        }
+
+        // Create captures for windows without one
+        let need_capture: Vec<_> = self.registry.cg_ids_for_pid(pid)
+            .into_iter()
+            .filter(|id| self.registry.get_capture(*id).is_none())
+            .collect();
+        if !need_capture.is_empty() {
+            create_captures_async(
+                need_capture,
+                self.hub_tx.clone(),
+                self.sender.clone(),
+                self.capture_queue.clone(),
+            );
         }
     }
 
@@ -665,13 +725,157 @@ impl Dome {
         }
     }
 
-    fn send_overlays(&self) {
-        let overlays = build_overlays(
-            &self.hub,
-            &self.registry,
-            &self.config,
-            self.primary_full_height,
-        );
+    fn build_overlays(&mut self, previous_displayed: &HashSet<CGWindowID>) -> Overlays {
+        let current_ws_id = self.hub.current_workspace();
+        let mut tiling_borders = Vec::new();
+        let mut float_borders = Vec::new();
+        let mut container_borders = Vec::new();
+        let mut tab_bars = Vec::new();
+        let mut mirrors = Vec::new();
+        let mut curr_mirrors = HashSet::new();
+        let b = self.config.border_size;
+
+        for ws_id in self.hub.visible_workspaces() {
+            let ws = self.hub.get_workspace(ws_id);
+            let monitor_dim = self.hub.get_monitor(ws.monitor()).dimension();
+            let focused = if ws_id == current_ws_id {
+                ws.focused()
+            } else {
+                None
+            };
+
+            let mut stack: Vec<Child> = ws.root().into_iter().collect();
+            while let Some(child) = stack.pop() {
+                match child {
+                    Child::Window(id) => {
+                        if self.registry.get_cg_id(id).is_some() {
+                            let w = self.hub.get_window(id);
+                            let colors = if focused == Some(Child::Window(id)) {
+                                spawn_colors(w.spawn_mode(), &self.config)
+                            } else {
+                                [self.config.border_color; 4]
+                            };
+                            if let Some((clipped, edges)) =
+                                compute_border_edges(w.dimension(), monitor_dim, colors, b)
+                            {
+                                tiling_borders.push(TilingBorder {
+                                    key: id,
+                                    frame: to_ns_rect(self.primary_full_height, clipped),
+                                    edges: edges
+                                        .into_iter()
+                                        .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
+                                        .collect(),
+                                });
+                            }
+                        }
+                    }
+                    Child::Container(id) => {
+                        let container = self.hub.get_container(id);
+                        if let Some(active) = container.active_tab() {
+                            stack.push(active);
+                            if let Some(tab_bar) = build_tab_bar(
+                                self.primary_full_height,
+                                monitor_dim,
+                                id,
+                                container,
+                                &self.registry,
+                                &self.config,
+                            ) {
+                                tab_bars.push(tab_bar);
+                            }
+                        } else {
+                            for &c in container.children() {
+                                stack.push(c);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(Child::Container(id)) = focused {
+                let c = self.hub.get_container(id);
+                let colors = spawn_colors(c.spawn_mode(), &self.config);
+                if let Some((clipped, edges)) =
+                    compute_border_edges(c.dimension(), monitor_dim, colors, b)
+                {
+                    container_borders.push(ContainerBorder {
+                        key: id,
+                        frame: to_ns_rect(self.primary_full_height, clipped),
+                        edges: edges
+                            .into_iter()
+                            .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
+                            .collect(),
+                    });
+                }
+            }
+
+            for &float_id in ws.float_windows() {
+                let Some(cg_id) = self.registry.get_cg_id(float_id) else { continue };
+
+                let dim = self.hub.get_window(float_id).dimension();
+                let color = if focused == Some(Child::Window(float_id)) {
+                    self.config.focused_color
+                } else {
+                    self.config.border_color
+                };
+                if let Some((clipped, edges)) =
+                    compute_border_edges(dim, monitor_dim, [color; 4], b)
+                {
+                    float_borders.push(FloatBorder {
+                        key: float_id,
+                        frame: to_ns_rect(self.primary_full_height, clipped),
+                        edges: edges
+                            .into_iter()
+                            .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
+                            .collect(),
+                    });
+                }
+
+                // Mirror unfocused floats
+                if focused == Some(Child::Window(float_id)) {
+                    continue;
+                }
+
+                if let Some(clipped) = clip_to_bounds(dim, monitor_dim) {
+                    let frame = to_ns_rect(self.primary_full_height, clipped);
+                    let source_rect = compute_source_rect(dim, clipped);
+
+                    if let Some(capture) = self.registry.get_capture_mut(cg_id) {
+                        capture.start(cg_id, source_rect, frame.size.width as u32, frame.size.height as u32, self.sender.clone());
+                    }
+
+                    if let Some(window) = self.registry.get_mut(cg_id) {
+                        window.hide().ok();
+                    }
+
+                    mirrors.push(MirrorUpdate {
+                        cg_id,
+                        frame,
+                        level: NSFloatingWindowLevel as isize + 1,
+                    });
+                    curr_mirrors.insert(cg_id);
+                }
+            }
+        }
+
+        // Stop captures no longer mirrored
+        for cg_id in previous_displayed.difference(&curr_mirrors) {
+            if let Some(capture) = self.registry.get_capture_mut(*cg_id) {
+                capture.stop();
+            }
+        }
+
+        Overlays {
+            tiling_borders,
+            float_borders,
+            container_borders,
+            tab_bars,
+            mirrors,
+        }
+    }
+
+    fn send_overlays(&mut self, previous_mirrored: &HashSet<CGWindowID>) {
+        let overlays = self.build_overlays(previous_mirrored);
         self.sender.send(HubMessage::Overlays(overlays));
     }
 }
@@ -871,6 +1075,19 @@ fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimension> {
     })
 }
 
+fn compute_source_rect(original: Dimension, clipped: Dimension) -> CGRect {
+    CGRect {
+        origin: CGPoint {
+            x: (clipped.x - original.x) as f64,
+            y: (clipped.y - original.y) as f64,
+        },
+        size: CGSize {
+            width: clipped.width as f64,
+            height: clipped.height as f64,
+        },
+    }
+}
+
 /// Compute border edges for a window, clipped to monitor bounds.
 /// Returns (clipped_frame, edges) or None if fully outside bounds.
 /// All coordinates in Quartz (top-left origin).
@@ -938,125 +1155,6 @@ fn translate_dim(dim: Dimension, dx: f32, dy: f32) -> Dimension {
         y: dim.y + dy,
         width: dim.width,
         height: dim.height,
-    }
-}
-
-fn build_overlays(
-    hub: &Hub,
-    registry: &Registry,
-    config: &Config,
-    primary_full_height: f32,
-) -> Overlays {
-    let current_ws_id = hub.current_workspace();
-    let mut tiling_borders = Vec::new();
-    let mut float_borders = Vec::new();
-    let mut container_borders = Vec::new();
-    let mut tab_bars = Vec::new();
-    let b = config.border_size;
-
-    for ws_id in hub.visible_workspaces() {
-        let ws = hub.get_workspace(ws_id);
-        let monitor_dim = hub.get_monitor(ws.monitor()).dimension();
-        let focused = if ws_id == current_ws_id {
-            ws.focused()
-        } else {
-            None
-        };
-
-        let mut stack: Vec<Child> = ws.root().into_iter().collect();
-        while let Some(child) = stack.pop() {
-            match child {
-                Child::Window(id) => {
-                    if registry.get_cg_id(id).is_some() {
-                        let w = hub.get_window(id);
-                        let colors = if focused == Some(Child::Window(id)) {
-                            spawn_colors(w.spawn_mode(), config)
-                        } else {
-                            [config.border_color; 4]
-                        };
-                        if let Some((clipped, edges)) =
-                            compute_border_edges(w.dimension(), monitor_dim, colors, b)
-                        {
-                            tiling_borders.push(TilingBorder {
-                                key: id,
-                                frame: to_ns_rect(primary_full_height, clipped),
-                                edges: edges
-                                    .into_iter()
-                                    .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
-                                    .collect(),
-                            });
-                        }
-                    }
-                }
-                Child::Container(id) => {
-                    let container = hub.get_container(id);
-                    if let Some(active) = container.active_tab() {
-                        stack.push(active);
-                        if let Some(tab_bar) = build_tab_bar(
-                            primary_full_height,
-                            monitor_dim,
-                            id,
-                            container,
-                            registry,
-                            config,
-                        ) {
-                            tab_bars.push(tab_bar);
-                        }
-                    } else {
-                        for &c in container.children() {
-                            stack.push(c);
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(Child::Container(id)) = focused {
-            let c = hub.get_container(id);
-            let colors = spawn_colors(c.spawn_mode(), config);
-            if let Some((clipped, edges)) =
-                compute_border_edges(c.dimension(), monitor_dim, colors, b)
-            {
-                container_borders.push(ContainerBorder {
-                    key: id,
-                    frame: to_ns_rect(primary_full_height, clipped),
-                    edges: edges
-                        .into_iter()
-                        .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
-                        .collect(),
-                });
-            }
-        }
-
-        for &float_id in ws.float_windows() {
-            if registry.get_cg_id(float_id).is_some() {
-                let dim = hub.get_window(float_id).dimension();
-                let color = if focused == Some(Child::Window(float_id)) {
-                    config.focused_color
-                } else {
-                    config.border_color
-                };
-                if let Some((clipped, edges)) =
-                    compute_border_edges(dim, monitor_dim, [color; 4], b)
-                {
-                    float_borders.push(FloatBorder {
-                        key: float_id,
-                        frame: to_ns_rect(primary_full_height, clipped),
-                        edges: edges
-                            .into_iter()
-                            .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
-                            .collect(),
-                    });
-                }
-            }
-        }
-    }
-
-    Overlays {
-        tiling_borders,
-        float_borders,
-        container_borders,
-        tab_bars,
     }
 }
 

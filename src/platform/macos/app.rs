@@ -15,7 +15,10 @@ use objc2_core_foundation::{
     CFDictionary, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext, kCFBooleanTrue,
     kCFRunLoopDefaultMode,
 };
-use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
+use objc2_core_graphics::{
+    CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID, CGPreflightScreenCaptureAccess,
+    CGRequestScreenCaptureAccess,
+};
 use objc2_foundation::{NSNotification, NSNumber, NSObject, NSObjectProtocol, NSString};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -24,6 +27,7 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 use super::dome::{Dome, HubEvent, HubMessage, MessageSender};
 use super::keyboard::KeyboardListener;
 use super::listeners::EventListener;
+use super::mirror::MirrorManager;
 use super::overlay::OverlayManager;
 use super::recovery;
 use crate::config::{Config, start_config_watcher};
@@ -52,6 +56,15 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
                 .as_opaque(),
         ))
     });
+
+    if !CGPreflightScreenCaptureAccess() {
+        tracing::info!("Screen recording permission not granted, requesting...");
+        if !CGRequestScreenCaptureAccess() {
+            return Err(anyhow::anyhow!(
+                "Screen recording permission required. Please grant permission in System Settings > Privacy & Security > Screen Recording, then restart Dome."
+            ));
+        }
+    }
 
     let mtm = MainThreadMarker::new().unwrap();
     let app = NSApplication::sharedApplication(mtm);
@@ -97,6 +110,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
             tracing::error!("Failed to create keyboard listener: {e:#}");
         });
 
+    let hub_tx = event_tx.clone();
     let delegate = AppDelegate::new(mtm, event_tx, frame_rx, event_listener);
     let source = create_frame_source(&delegate);
 
@@ -111,7 +125,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     let hub_thread = thread::spawn(move || {
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Dome::new(hub_config, screens, global_bounds, sender).run(event_rx);
+            Dome::new(hub_config, screens, global_bounds, hub_tx, sender).run(event_rx);
         }))
         .is_err()
         {
@@ -162,6 +176,7 @@ pub(super) struct AppDelegateIvars {
     pub(super) hub_sender: Sender<HubEvent>,
     pub(super) frame_rx: Receiver<HubMessage>,
     pub(super) overlay_manager: RefCell<OverlayManager>,
+    pub(super) mirror_manager: RefCell<MirrorManager>,
     pub(super) event_listener: EventListener,
 }
 
@@ -194,9 +209,10 @@ impl AppDelegate {
         event_listener: EventListener,
     ) -> Retained<Self> {
         let ivars = AppDelegateIvars {
-            hub_sender,
+            hub_sender: hub_sender.clone(),
             frame_rx,
             overlay_manager: RefCell::new(OverlayManager::new()),
+            mirror_manager: RefCell::new(MirrorManager::new(mtm, hub_sender)),
             event_listener,
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
@@ -217,17 +233,21 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     let mtm = delegate.mtm();
     while let Ok(msg) = delegate.ivars().frame_rx.try_recv() {
         match msg {
-            HubMessage::Overlays(overlays) => {
-                delegate
-                    .ivars()
-                    .overlay_manager
-                    .borrow_mut()
-                    .process(mtm, overlays);
+            HubMessage::Overlays(mut overlays) => {
+                let mirrors = std::mem::take(&mut overlays.mirrors);
+                delegate.ivars().overlay_manager.borrow_mut().process(mtm, overlays);
+                delegate.ivars().mirror_manager.borrow_mut().process_mirrors(mirrors);
             }
             HubMessage::RegisterObservers(apps) => {
                 for app in &apps {
                     delegate.ivars().event_listener.register_app(app);
                 }
+            }
+            HubMessage::CaptureFrame { cg_id, surface } => {
+                delegate.ivars().mirror_manager.borrow_mut().apply_frame(cg_id, &surface);
+            }
+            HubMessage::CaptureFailed { cg_id } => {
+                delegate.ivars().mirror_manager.borrow().show_error(cg_id);
             }
             HubMessage::Shutdown => {
                 NSApplication::sharedApplication(mtm).terminate(None);

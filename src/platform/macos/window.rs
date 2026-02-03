@@ -574,14 +574,18 @@ pub(super) fn list_cg_window_ids() -> HashSet<CGWindowID> {
 }
 
 pub(super) fn running_apps() -> impl Iterator<Item = Retained<NSRunningApplication>> {
+    let own_pid = std::process::id() as i32;
     NSWorkspace::sharedWorkspace()
         .runningApplications()
         .into_iter()
         .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
-        .filter(|app| app.processIdentifier() != -1)
+        .filter(move |app| app.processIdentifier() != -1 && app.processIdentifier() != own_pid)
 }
 
 pub(super) fn get_app_by_pid(pid: i32) -> Option<Retained<NSRunningApplication>> {
+    if pid == std::process::id() as i32 {
+        return None;
+    }
     NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
 }
 
