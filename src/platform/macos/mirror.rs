@@ -12,7 +12,7 @@ use objc2_app_kit::{
     NSWindowStyleMask,
 };
 use objc2_core_foundation::{CFRetained, CGRect};
-use objc2_core_graphics::CGWindowID;
+use objc2_core_graphics::{CGWindowID, kCGColorSpaceSRGB};
 use objc2_core_media::CMSampleBuffer;
 use objc2_foundation::{NSError, NSObject, NSObjectProtocol, NSRect};
 use objc2_io_surface::IOSurface;
@@ -49,6 +49,8 @@ impl WindowCapture {
             config.setWidth((width as f64 * scale) as usize);
             config.setHeight((height as f64 * scale) as usize);
             config.setSourceRect(source_rect);
+            // calayer expects srgb
+            config.setColorSpaceName(kCGColorSpaceSRGB);
         }
         let block = RcBlock::new(|_: *mut NSError| {});
         unsafe {
