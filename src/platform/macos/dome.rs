@@ -58,15 +58,23 @@ pub(super) enum HubEvent {
     Sync,
     ScreensChanged(Vec<ScreenInfo>),
     MirrorClicked(CGWindowID),
-    CaptureReady { cg_id: CGWindowID, capture: WindowCapture },
+    CaptureReady {
+        cg_id: CGWindowID,
+        capture: WindowCapture,
+    },
     Shutdown,
 }
 
 pub(super) enum HubMessage {
     Overlays(Overlays),
     RegisterObservers(Vec<Retained<NSRunningApplication>>),
-    CaptureFrame { cg_id: CGWindowID, surface: Retained<IOSurface> },
-    CaptureFailed { cg_id: CGWindowID },
+    CaptureFrame {
+        cg_id: CGWindowID,
+        surface: Retained<IOSurface>,
+    },
+    CaptureFailed {
+        cg_id: CGWindowID,
+    },
     Shutdown,
 }
 
@@ -94,13 +102,19 @@ impl Registry {
     fn insert(&mut self, window: MacWindow, window_id: WindowId) {
         let cg_id = window.cg_id();
         let pid = window.pid();
+        if pid as u32 == std::process::id() {
+            return;
+        }
         self.id_to_cg.insert(window_id, cg_id);
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
-        self.windows.insert(cg_id, WindowEntry {
-            window,
-            window_id,
-            capture: None,
-        });
+        self.windows.insert(
+            cg_id,
+            WindowEntry {
+                window,
+                window_id,
+                capture: None,
+            },
+        );
     }
 
     fn remove(&mut self, cg_id: CGWindowID) -> Option<(MacWindow, WindowId)> {
@@ -174,7 +188,9 @@ impl Registry {
     }
 
     fn get_capture_mut(&mut self, cg_id: CGWindowID) -> Option<&mut WindowCapture> {
-        self.windows.get_mut(&cg_id).and_then(|e| e.capture.as_mut())
+        self.windows
+            .get_mut(&cg_id)
+            .and_then(|e| e.capture.as_mut())
     }
 
     fn cg_ids(&self) -> impl Iterator<Item = CGWindowID> + '_ {
@@ -235,7 +251,9 @@ impl MonitorRegistry {
     }
 
     fn get_screen_by_monitor(&self, monitor_id: MonitorId) -> Option<&ScreenInfo> {
-        self.reverse.get(&monitor_id).and_then(|d| self.get_screen(*d))
+        self.reverse
+            .get(&monitor_id)
+            .and_then(|d| self.get_screen(*d))
     }
 
     fn primary_monitor_id(&self) -> MonitorId {
@@ -243,7 +261,8 @@ impl MonitorRegistry {
     }
 
     fn insert(&mut self, screen: &ScreenInfo, monitor_id: MonitorId) {
-        self.map.insert(screen.display_id, (monitor_id, screen.clone()));
+        self.map
+            .insert(screen.display_id, (monitor_id, screen.clone()));
         self.reverse.insert(monitor_id, screen.display_id);
     }
 
@@ -503,7 +522,9 @@ impl Dome {
         }
 
         // Create captures for windows without one
-        let need_capture: Vec<_> = self.registry.cg_ids_for_pid(pid)
+        let need_capture: Vec<_> = self
+            .registry
+            .cg_ids_for_pid(pid)
             .into_iter()
             .filter(|id| self.registry.get_capture(*id).is_none())
             .collect();
@@ -819,7 +840,9 @@ impl Dome {
             }
 
             for &float_id in ws.float_windows() {
-                let Some(cg_id) = self.registry.get_cg_id(float_id) else { continue };
+                let Some(cg_id) = self.registry.get_cg_id(float_id) else {
+                    continue;
+                };
 
                 let dim = self.hub.get_window(float_id).dimension();
                 let color = if focused == Some(Child::Window(float_id)) {
@@ -849,10 +872,21 @@ impl Dome {
                 if let Some(clipped) = clip_to_bounds(content_dim, monitor_dim) {
                     let frame = to_ns_rect(self.primary_full_height, clipped);
                     let source_rect = compute_source_rect(content_dim, clipped);
-                    let scale = self.monitor_registry.get_screen_by_monitor(ws.monitor()).unwrap().scale;
+                    let scale = self
+                        .monitor_registry
+                        .get_screen_by_monitor(ws.monitor())
+                        .unwrap()
+                        .scale;
 
                     if let Some(capture) = self.registry.get_capture_mut(cg_id) {
-                        capture.start(cg_id, source_rect, frame.size.width as u32, frame.size.height as u32, scale, self.sender.clone());
+                        capture.start(
+                            cg_id,
+                            source_rect,
+                            frame.size.width as u32,
+                            frame.size.height as u32,
+                            scale,
+                            self.sender.clone(),
+                        );
                     }
 
                     if let Some(window) = self.registry.get_mut(cg_id) {
@@ -1131,25 +1165,45 @@ fn compute_border_edges(
     let mut edges = Vec::new();
 
     // top (y = 0 in Quartz)
-    let top = Dimension { x: 0.0, y: 0.0, width: w, height: b };
+    let top = Dimension {
+        x: 0.0,
+        y: 0.0,
+        width: w,
+        height: b,
+    };
     if let Some(r) = clip_to_bounds(top, clip_local) {
         edges.push((translate_dim(r, -offset_x, -offset_y), colors[0]));
     }
 
     // right (exclude corners)
-    let right = Dimension { x: w - b, y: b, width: b, height: h - 2.0 * b };
+    let right = Dimension {
+        x: w - b,
+        y: b,
+        width: b,
+        height: h - 2.0 * b,
+    };
     if let Some(r) = clip_to_bounds(right, clip_local) {
         edges.push((translate_dim(r, -offset_x, -offset_y), colors[1]));
     }
 
     // bottom (y = h - b in Quartz)
-    let bottom = Dimension { x: 0.0, y: h - b, width: w, height: b };
+    let bottom = Dimension {
+        x: 0.0,
+        y: h - b,
+        width: w,
+        height: b,
+    };
     if let Some(r) = clip_to_bounds(bottom, clip_local) {
         edges.push((translate_dim(r, -offset_x, -offset_y), colors[2]));
     }
 
     // left (exclude corners)
-    let left = Dimension { x: 0.0, y: b, width: b, height: h - 2.0 * b };
+    let left = Dimension {
+        x: 0.0,
+        y: b,
+        width: b,
+        height: h - 2.0 * b,
+    };
     if let Some(r) = clip_to_bounds(left, clip_local) {
         edges.push((translate_dim(r, -offset_x, -offset_y), colors[3]));
     }
