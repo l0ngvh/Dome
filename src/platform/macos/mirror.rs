@@ -51,6 +51,9 @@ impl WindowCapture {
             config.setSourceRect(source_rect);
             // calayer expects srgb
             config.setColorSpaceName(kCGColorSpaceSRGB);
+            config.setCapturesAudio(false);
+            config.setCaptureMicrophone(false);
+            config.setExcludesCurrentProcessAudio(false);
         }
         let block = RcBlock::new(|_: *mut NSError| {});
         unsafe {
@@ -339,8 +342,14 @@ impl MirrorManager {
             if let Some(mirror) = self.mirrors.get(&m.cg_id) {
                 mirror.update(m.frame);
             } else {
-                let mirror =
-                    MirrorWindow::new(self.mtm, m.cg_id, m.frame, m.level, m.scale, self.hub_tx.clone());
+                let mirror = MirrorWindow::new(
+                    self.mtm,
+                    m.cg_id,
+                    m.frame,
+                    m.level,
+                    m.scale,
+                    self.hub_tx.clone(),
+                );
                 self.mirrors.insert(m.cg_id, mirror);
             }
         }
