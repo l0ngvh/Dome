@@ -105,10 +105,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     let event_listener = EventListener::new(event_tx.clone(), is_suspended.clone());
 
-    let _keyboard_listener = KeyboardListener::new(keymaps, is_suspended, event_tx.clone())
-        .inspect_err(|e| {
-            tracing::error!("Failed to create keyboard listener: {e:#}");
-        });
+    let _keyboard_listener = KeyboardListener::new(keymaps, is_suspended, event_tx.clone())?;
 
     let hub_tx = event_tx.clone();
     let delegate = AppDelegate::new(mtm, event_tx, frame_rx, event_listener);
