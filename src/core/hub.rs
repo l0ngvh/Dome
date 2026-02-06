@@ -150,7 +150,6 @@ impl Hub {
             return;
         };
         self.move_child_to_workspace_with_id(focused, target_ws);
-        self.focused_monitor = target_id;
     }
 
     pub(crate) fn sync_config(&mut self, config: HubConfig) {

@@ -333,7 +333,7 @@ fn move_to_monitor_moves_focused_window() {
     hub.move_focused_to_monitor(&MonitorTarget::Right);
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
@@ -364,7 +364,7 @@ fn move_to_monitor_by_name() {
     hub.move_focused_to_monitor(&MonitorTarget::Name("external".to_string()));
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
       Workspace(id=WorkspaceId(1), name=external, focused=WindowId(0),
         Window(id=WindowId(0), parent=WorkspaceId(1), x=150.00, y=0.00, w=100.00, h=30.00)
@@ -399,7 +399,7 @@ fn move_float_to_monitor() {
     hub.move_focused_to_monitor(&MonitorTarget::Name("external".to_string()));
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
       Workspace(id=WorkspaceId(1), name=external, focused=WindowId(0),
         Float(id=WindowId(0), x=150.00, y=10.00, w=50.00, h=20.00)
@@ -495,6 +495,40 @@ fn move_to_monitor_noop_when_no_focused_window() {
     Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
       Workspace(id=WorkspaceId(1), name=right-monitor)
+    )
+    ");
+}
+
+#[test]
+fn move_to_monitor_does_not_change_focus() {
+    use crate::action::MonitorTarget;
+
+    let mut hub = setup();
+    hub.insert_tiling();
+    hub.insert_tiling();
+
+    hub.add_monitor(
+        "external".to_string(),
+        Dimension {
+            x: 150.0,
+            y: 0.0,
+            width: 100.0,
+            height: 30.0,
+        },
+    );
+
+    let original_monitor = hub.focused_monitor();
+    hub.move_focused_to_monitor(&MonitorTarget::Right);
+
+    assert_eq!(hub.focused_monitor(), original_monitor);
+    assert_snapshot!(snapshot_text(&hub), @r"
+    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+      )
+      Workspace(id=WorkspaceId(1), name=external, focused=WindowId(1),
+        Window(id=WindowId(1), parent=WorkspaceId(1), x=150.00, y=0.00, w=100.00, h=30.00)
+      )
     )
     ");
 }
