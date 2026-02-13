@@ -5,10 +5,10 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::core::Dimension;
 
-use super::window::MacWindow;
+use super::accessibility::AXWindow;
 
 struct WindowState {
-    window: MacWindow,
+    window: AXWindow,
     original_dim: Dimension,
 }
 
@@ -20,12 +20,14 @@ static RECOVERY_STATE: LazyLock<Mutex<HashMap<CGWindowID, WindowState>>> =
 // multiple monitors can make the exact placement of where we hide windows fuzzy
 // This has the side effect of moving all windows from different monitor on exit/crash, but that is
 // acceptable
-pub(super) fn track(cg_id: CGWindowID, window: MacWindow, screen: Dimension) {
-    let dimension = window.get_dimension();
-    let original_dim = default_position(screen, dimension.width, dimension.height);
+pub(super) fn track(window: AXWindow, screen: Dimension) {
+    let Ok((width, height)) = window.get_size() else {
+        return;
+    };
+    let original_dim = default_position(screen, width as f32, height as f32);
     if let Ok(mut state) = RECOVERY_STATE.lock() {
         state.insert(
-            cg_id,
+            window.cg_id(),
             WindowState {
                 window,
                 original_dim,
@@ -52,7 +54,13 @@ pub(super) fn untrack(cg_id: CGWindowID) {
 pub(super) fn restore_all() {
     if let Ok(mut state) = RECOVERY_STATE.lock() {
         for window_state in state.values_mut() {
-            let _ = window_state.window.set_dimension(window_state.original_dim);
+            let dim = window_state.original_dim;
+            let _ = window_state.window.set_frame(
+                dim.x as i32,
+                dim.y as i32,
+                dim.width as i32,
+                dim.height as i32,
+            );
         }
     }
 }

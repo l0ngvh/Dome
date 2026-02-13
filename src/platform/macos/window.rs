@@ -1,241 +1,167 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashSet;
-use std::ptr::NonNull;
 
 use objc2::rc::Retained;
 use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
-use objc2_application_services::{AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFArray, CFBoolean, CFDictionary, CFEqual, CFNumber, CFRetained, CFString, CFType, CGPoint,
-    CGSize, kCFBooleanFalse, kCFBooleanTrue,
+    CFArray, CFDictionary, CFNumber, CFString, CFType, CGPoint, CGRect, CGSize,
 };
-use objc2_core_graphics::{
-    CGSessionCopyCurrentDictionary, CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption,
-};
+use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
+use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-use super::objc2_wrapper::{
-    AXError, get_attribute, get_cg_window_id, is_attribute_settable,
-    kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute, kAXFullScreenAttribute,
-    kAXMainAttribute, kAXMinimizedAttribute, kAXParentAttribute, kAXPositionAttribute,
-    kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
-    kAXTitleAttribute, kAXWindowRole, kAXWindowsAttribute, kCGWindowNumber, set_attribute_value,
-};
-use crate::core::{Dimension, Window};
+use super::dome::{HubMessage, MessageSender, WindowCapture};
+use super::objc2_wrapper::kCGWindowNumber;
+use crate::config::{Color, Config};
+use crate::core::{Dimension, SpawnMode, Window, WindowId};
+use crate::platform::macos::accessibility::AXWindow;
 
-#[derive(Clone)]
 pub(super) struct MacWindow {
-    element: CFRetained<AXUIElement>,
-    app: CFRetained<AXUIElement>,
-    cg_id: CGWindowID,
-    pid: i32,
-    global_bounds: Dimension,
-    app_name: String,
-    bundle_id: Option<String>,
-    title: Option<String>,
-    /// Target position and retry count. Used to detect if window moved itself.
-    physical_placement: Option<(Dimension, u8)>,
-    is_hidden: bool,
-}
-
-// Safety: AXUIElement operations are IPC calls to the accessibility server,
-// safe to use from any thread for manipulating other applications' windows.
-unsafe impl Send for MacWindow {}
-
-impl std::fmt::Display for MacWindow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.app_name)?;
-        if let Some(bundle_id) = &self.bundle_id {
-            write!(f, " ({bundle_id})")?;
-        }
-        if let Some(title) = &self.title {
-            write!(f, " - {title}")?;
-        }
-        Ok(())
-    }
+    ax: AXWindow,
+    window_id: WindowId,
+    capture: Option<WindowCapture>,
+    primary_full_height: f32,
+    sender: MessageSender,
+    focused: bool,
+    global_bounds: RoundedDimension,
+    physical_placement: Option<(RoundedDimension, u8)>,
+    is_ax_hidden: bool,
 }
 
 impl MacWindow {
     pub(super) fn new(
-        element: CFRetained<AXUIElement>,
-        cg_id: CGWindowID,
+        ax: AXWindow,
+        window_id: WindowId,
+        hub_window: &Window,
+        primary_full_height: f32,
+        sender: MessageSender,
+        scale: f64,
         global_bounds: Dimension,
-        app: &NSRunningApplication,
     ) -> Self {
-        let pid = app.processIdentifier();
-        let ax_app = unsafe { AXUIElement::new_application(pid) };
-        let app_name = app
-            .localizedName()
-            .map(|n| n.to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-        let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
-        let title = get_attribute::<CFString>(&element, &kAXTitleAttribute())
-            .map(|t| t.to_string())
-            .ok();
-
+        let frame = to_ns_rect(primary_full_height, hub_window.dimension());
+        sender.send(HubMessage::WindowCreate {
+            cg_id: ax.cg_id(),
+            frame,
+            scale,
+        });
         Self {
-            element,
-            app: ax_app,
-            cg_id,
-            pid,
-            global_bounds,
-            app_name,
-            bundle_id,
-            title,
+            ax,
+            window_id,
+            capture: None,
+            primary_full_height,
+            sender,
+            focused: false,
+            global_bounds: round_dim(global_bounds),
             physical_placement: None,
-            is_hidden: false,
+            is_ax_hidden: false,
         }
-    }
-
-    pub(super) fn cg_id(&self) -> CGWindowID {
-        self.cg_id
     }
 
     pub(super) fn pid(&self) -> i32 {
-        self.pid
+        self.ax.pid()
     }
 
-    pub(super) fn app_name(&self) -> &str {
-        &self.app_name
+    pub(super) fn window_id(&self) -> WindowId {
+        self.window_id
     }
 
-    pub(super) fn bundle_id(&self) -> Option<&str> {
-        self.bundle_id.as_deref()
+    pub(super) fn set_capture(&mut self, capture: WindowCapture) {
+        self.capture = Some(capture);
     }
 
-    pub(super) fn title(&self) -> Option<&str> {
-        self.title.as_deref()
-    }
+    pub(super) fn show(
+        &mut self,
+        window: &Window,
+        monitor: Dimension,
+        scale: f64,
+        focused: bool,
+        config: &Config,
+    ) -> anyhow::Result<()> {
+        let content_dim = apply_inset(window.dimension(), config.border_size);
 
-    pub(super) fn update_title(&mut self) {
-        self.title = get_attribute::<CFString>(&self.element, &kAXTitleAttribute())
-            .map(|t| t.to_string())
-            .ok();
-    }
+        if window.is_float() && !focused {
+            if let Some(clipped) = clip_to_bounds(content_dim, monitor) {
+                let frame = to_ns_rect(self.primary_full_height, clipped);
+                let source_rect = compute_source_rect(content_dim, clipped);
 
-    pub(super) fn is_manageable(&self) -> bool {
-        let Some(title) = &self.title else {
-            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, "not manageable: window has no title");
-            return false;
+                if let Some(capture) = &mut self.capture {
+                    capture.start(
+                        self.ax.cg_id(),
+                        source_rect,
+                        frame.size.width as u32,
+                        frame.size.height as u32,
+                        scale,
+                        self.sender.clone(),
+                    );
+                }
+
+                if let Err(e) = self.hide_ax() {
+                    tracing::trace!("Failed to hide window for float capture: {e:#}");
+                }
+            } else {
+                self.hide()?;
+            }
+        } else {
+            self.try_placement(content_dim, monitor);
+        }
+
+        let colors = if window.is_float() && focused {
+            [config.focused_color; 4]
+        } else if focused {
+            spawn_colors(window.spawn_mode(), config)
+        } else {
+            [config.border_color; 4]
         };
-
-        let role = get_attribute::<CFString>(&self.element, &kAXRoleAttribute()).ok();
-        let is_window = role
-            .as_ref()
-            .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
-            .unwrap_or(false);
-        if !is_window {
-            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: role is not AXWindow");
-            return false;
+        if let Some((clipped, edges)) =
+            compute_border_edges(window.dimension(), monitor, colors, config.border_size)
+        {
+            self.sender.send(HubMessage::WindowShow {
+                cg_id: self.ax.cg_id(),
+                frame: to_ns_rect(self.primary_full_height, clipped),
+                is_float: window.is_float(),
+                is_focus: focused,
+                edges: edges
+                    .into_iter()
+                    .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
+                    .collect(),
+                scale,
+                border: config.border_size as f64,
+            });
         }
-
-        let subrole = get_attribute::<CFString>(&self.element, &kAXSubroleAttribute()).ok();
-        let is_standard = subrole
-            .as_ref()
-            .map(|sr| CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole())))
-            .unwrap_or(false);
-        if !is_standard {
-            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: subrole is not AXStandardWindow");
-            return false;
+        if focused
+            && !self.focused
+            && let Err(e) = self.ax.focus()
+        {
+            tracing::trace!("Failed to focus window: {e:#}");
         }
-
-        let is_root = match get_attribute::<AXUIElement>(&self.element, &kAXParentAttribute()) {
-            Err(_) => true,
-            Ok(parent) => CFEqual(Some(&*parent), Some(&*self.app)),
-        };
-        if !is_root {
-            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: window is not root");
-            return false;
-        }
-
-        if !is_attribute_settable(&self.element, &kAXPositionAttribute()) {
-            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: position is not settable");
-            return false;
-        }
-
-        if !is_attribute_settable(&self.element, &kAXSizeAttribute()) {
-            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: size is not settable");
-            return false;
-        }
-
-        if !is_attribute_settable(&self.element, &kAXMainAttribute()) {
-            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: main attribute is not settable");
-            return false;
-        }
-
-        let is_minimized = get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false);
-        if is_minimized {
-            tracing::trace!(app = %self.app_name, bundle_id = ?self.bundle_id, %title, "not manageable: window is minimized");
-            return false;
-        }
-
-        true
+        self.focused = focused;
+        Ok(())
     }
 
-    pub(super) fn should_tile(&self) -> bool {
-        let is_fullscreen = get_attribute::<CFBoolean>(&self.element, &kAXFullScreenAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false);
-        !is_fullscreen
+    pub(super) fn hide(&mut self) -> anyhow::Result<()> {
+        if let Some(capture) = &mut self.capture {
+            capture.stop();
+        }
+        self.sender.send(HubMessage::WindowHide {
+            cg_id: self.ax.cg_id(),
+        });
+        self.focused = false;
+        self.hide_ax()
     }
 
-    pub(super) fn get_dimension(&self) -> Dimension {
-        let (x, y) = get_attribute::<AXValue>(&self.element, &kAXPositionAttribute())
-            .map(|v| {
-                let mut pos = CGPoint::new(0.0, 0.0);
-                let ptr = NonNull::new(&mut pos as *mut _ as *mut _).unwrap();
-                unsafe { v.value(AXValueType::CGPoint, ptr) };
-                (pos.x as f32, pos.y as f32)
-            })
-            .unwrap_or((0.0, 0.0));
-        let (width, height) = self.get_size().unwrap_or((0.0, 0.0));
-        Dimension {
-            x,
-            y,
-            width,
-            height,
-        }
+    fn hidden_position(&self) -> (i32, i32) {
+        // MacOS doesn't allow completely set windows offscreen, so we need to leave at
+        // least one pixel left
+        // https://nikitabobko.github.io/AeroSpace/guide#emulation-of-virtual-workspaces
+        (
+            (self.global_bounds.x + self.global_bounds.width - 1),
+            (self.global_bounds.y + self.global_bounds.height - 1),
+        )
     }
 
-    /// As we're tracking windows with CGWindowID, we have to check whether a window is still valid
-    /// as macOS can reuse CGWindowID of deleted windows.
-    pub(super) fn is_valid(&self) -> bool {
-        if is_screen_locked() {
-            return true;
-        }
-        let is_deleted = matches!(
-            get_attribute::<CFString>(&self.element, &kAXRoleAttribute()),
-            Err(AXError::InvalidUIElement)
-        );
-        if is_deleted {
-            tracing::trace!(app = %self.app_name, title = ?self.title, "not valid: window is deleted");
-            return false;
-        }
-        let is_minimized = get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false);
-        if is_minimized {
-            tracing::trace!(app = %self.app_name, title = ?self.title, "not valid: window is minimized");
-            return false;
-        }
-        true
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub(super) fn set_dimension(&mut self, dim: Dimension) -> Result<()> {
-        // Round to avoid floating point comparison issues when checking if window settled at expected position
-        let dim = round_dim(dim);
-        self.is_hidden = false;
-        // Set position/size calls are expensive, and it can trigger a window moved/resize events
-        if self.approx_eq(dim) {
-            return Ok(());
-        }
-        self.with_animation_disabled(|| {
-            self.set_position(dim.x, dim.y)?;
-            self.set_size(dim.width, dim.height)
-        })
-        .with_context(|| format!("set_dimension for {} {:?}", self.app_name, self.title))
+    fn hide_ax(&mut self) -> Result<()> {
+        let (x, y) = self.hidden_position();
+        self.is_ax_hidden = true;
+        self.ax.hide_at(x, y)
     }
 
     /// Try to place this physical window on the logical placement. Mac has restrictions on how
@@ -243,12 +169,9 @@ impl MacWindow {
     /// taller than screen height, Mac will instead come up with an alternative placement. For our
     /// use case, the alternative placements are acceptable, albeit they will mess a little with
     /// our border rendering
-    #[tracing::instrument(skip(self))]
-    pub(super) fn try_placement(&mut self, window: &Window, border: f32, monitor: Dimension) {
-        let dim = apply_inset(window.dimension(), border);
-
-        if is_completely_offscreen(dim, monitor) {
-            if self.is_hidden {
+    fn try_placement(&mut self, placement: Dimension, monitor: Dimension) {
+        if is_completely_offscreen(placement, monitor) {
+            if self.is_ax_hidden {
                 return;
             }
             // TODO: if hide fail to move the window to offscreen position, this window is clearly
@@ -256,15 +179,17 @@ impl MacWindow {
             // Exception is full screen window, which, should be handled differently as a first
             // party citizen
             tracing::trace!(
-                "Window {self} is offscreen (dim={dim:?}, monitor={monitor:?}), hiding"
+                "Window {} is offscreen (dim={:?}, monitor={monitor:?}), hiding",
+                self.ax,
+                placement
             );
-            if let Err(e) = self.hide() {
+            if let Err(e) = self.hide_ax() {
                 tracing::trace!("Failed to hide window: {e:#}");
             }
             return;
         }
 
-        let mut target = dim;
+        let mut target = placement;
 
         // Mac prevents putting windows above menu bar
         if target.y < monitor.y {
@@ -285,26 +210,48 @@ impl MacWindow {
         }
 
         let rounded = round_dim(target);
-        if let Some((prev, count)) = &mut self.physical_placement {
-            if *prev == rounded && !self.is_hidden {
-                if *count >= 5 {
-                    tracing::trace!("Window {self} already at correct position");
-                    return;
-                }
-                *count += 1;
-            } else {
-                self.physical_placement = Some((rounded, 0));
+        let (ax, ay) = self.ax.get_position().unwrap_or((0, 0));
+        let (aw, ah) = self.ax.get_size().unwrap_or((0, 0));
+        let at_position =
+            ax == rounded.x && ay == rounded.y && aw == rounded.width && ah == rounded.height;
+        if at_position {
+            tracing::trace!(
+                "Window {} is already at the correct position {rounded:?}",
+                self.ax,
+            );
+            return;
+        }
+
+        if let Some((prev, count)) = &mut self.physical_placement
+            && *prev == rounded
+            && !self.is_ax_hidden
+        {
+            if *count >= 5 {
+                tracing::debug!(
+                    "Window {} can't be moved to the desired position {:?}",
+                    self.ax,
+                    self.physical_placement
+                );
+                return;
             }
+            *count += 1;
         } else {
             self.physical_placement = Some((rounded, 0));
         }
 
         tracing::trace!(
-            "Window {self} placing at {target:?} (was_hidden={})",
-            self.is_hidden
+            "Window {} placing at {target:?} (was_hidden={})",
+            self.ax,
+            self.is_ax_hidden
         );
-        if let Err(e) = self.set_dimension(rounded) {
-            tracing::trace!("Window {self} set_dimension failed: {e}");
+        self.is_ax_hidden = false;
+        if let Err(e) = self.ax.set_frame(
+            rounded.x as i32,
+            rounded.y as i32,
+            rounded.width as i32,
+            rounded.height as i32,
+        ) {
+            tracing::trace!("Window {} set_frame failed: {e}", self.ax);
         }
     }
 
@@ -312,171 +259,112 @@ impl MacWindow {
     /// If position doesn't align, attempts to move window back.
     /// Had to make sure to only call this function once this window has finished moving/resizing
     pub(super) fn check_placement(&mut self, window: &Window) -> Option<RawConstraint> {
-        if self.is_hidden {
+        if self.is_ax_hidden {
             // When spaces change or monitors are connected/disconnected, hidden windows
             // may be moved to visible state, so we need to re-hide them
-            let actual = self.get_dimension();
-            let hidden_x = self.global_bounds.x + self.global_bounds.width - 1.0;
-            let hidden_y = self.global_bounds.y + self.global_bounds.height - 1.0;
-            if !pixel_eq(actual.x, hidden_x) || !pixel_eq(actual.y, hidden_y) {
-                if let Err(e) = self.hide() {
-                    tracing::trace!("Window {self} hide failed: {e}");
-                }
+            let (x, y) = self.ax.get_position().unwrap_or((0, 0));
+            let (hidden_x, hidden_y) = self.hidden_position();
+            if (x != hidden_x || y != hidden_y)
+                && let Err(e) = self.hide_ax()
+            {
+                tracing::trace!("Window {} hide failed: {e}", self.ax);
             }
             return None;
         }
         let (expected, count) = self.physical_placement?;
-        let actual = self.get_dimension();
+        let (actual_x, actual_y) = self.ax.get_position().unwrap_or((0, 0));
+        let (actual_width, actual_height) = self.ax.get_size().unwrap_or((0, 0));
 
         tracing::trace!(
-            "Window {self} moved from {expected:?} to {actual:?}, with logical placement at {:?}",
+            "Window {} moved from {expected:?} to ({actual_x}, {actual_y}, {actual_width}, {actual_height}), with logical placement at {:?}",
+            self.ax,
             window.dimension()
         );
 
         // At least one edge must match on each axis - user resize moves both edges on one axis
-        let left = pixel_eq(actual.x, expected.x);
-        let right = pixel_eq(actual.x + actual.width, expected.x + expected.width);
-        let top = pixel_eq(actual.y, expected.y);
-        let bottom = pixel_eq(actual.y + actual.height, expected.y + expected.height);
+        let left = actual_x == expected.x;
+        let right = actual_x + actual_width == expected.x + expected.width;
+        let top = actual_y == expected.y;
+        let bottom = actual_y + actual_height == expected.y + expected.height;
         if !((left || right) && (top || bottom)) {
             if count < 5 {
                 self.physical_placement = Some((expected, count + 1));
-                if let Err(e) = self.set_dimension(expected) {
-                    tracing::trace!("Window {self} set_dimension failed: {e}");
+                if let Err(e) =
+                    self.ax
+                        .set_frame(expected.x, expected.y, expected.width, expected.height)
+                {
+                    tracing::trace!("Window {} set_frame failed: {e}", self.ax);
                 }
             }
             return None;
         }
 
-        compute_constraint(actual, expected, window)
+        let min_w = (actual_width > expected.width).then_some(actual_width as f32);
+        let min_h = (actual_height > expected.height).then_some(actual_height as f32);
+        let max_w = (actual_width < expected.width).then_some(actual_width as f32);
+        let max_h = (actual_height < expected.height).then_some(actual_height as f32);
+        if min_w.is_some() || min_h.is_some() || max_w.is_some() || max_h.is_some() {
+            Some((min_w, min_h, max_w, max_h))
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn update_title(&mut self) {
+        self.ax.update_title();
+    }
+
+    pub(super) fn is_valid(&self) -> bool {
+        self.ax.is_valid()
+    }
+
+    pub(super) fn title(&self) -> Option<&str> {
+        self.ax.title()
+    }
+
+    pub(super) fn app_name(&self) -> Option<&str> {
+        self.ax.app_name()
+    }
+
+    pub(super) fn bundle_id(&self) -> Option<&str> {
+        self.ax.bundle_id()
     }
 
     pub(super) fn focus(&self) -> Result<()> {
-        let is_frontmost = get_attribute::<CFBoolean>(&self.app, &kAXFrontmostAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false);
-        if !is_frontmost {
-            set_attribute_value(&self.app, &kAXFrontmostAttribute(), unsafe {
-                kCFBooleanTrue.unwrap()
-            })
-            .with_context(|| format!("focus for {} {:?}", self.app_name, self.title))?;
+        self.ax.focus()
+    }
+
+    pub(super) fn on_monitor_change(&mut self, global_bounds: Dimension, primary_full_height: f32) {
+        self.global_bounds = round_dim(global_bounds);
+        self.primary_full_height = primary_full_height;
+        if self.is_ax_hidden
+            && let Err(e) = self.hide_ax()
+        {
+            tracing::trace!("Failed to re-hide window: {e:#}");
         }
-        let is_main = get_attribute::<CFBoolean>(&self.element, &kAXMainAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false);
-        if !is_main {
-            set_attribute_value(&self.element, &kAXMainAttribute(), unsafe {
-                kCFBooleanTrue.unwrap()
-            })
-            .with_context(|| format!("focus for {} {:?}", self.app_name, self.title))?;
-        }
-        Ok(())
     }
+}
 
-    /// Hide the window by moving it offscreen
-    /// We don't minimize windows as there is no way to disable minimizing animation. When hiding
-    /// multiple windows, it gets triggered in a staggered manner, which is extremely slow, and
-    /// causes event tap to be timed out
-    pub(super) fn hide(&mut self) -> Result<()> {
-        tracing::trace!("Hiding window {self}");
-        self.is_hidden = true;
-        // MacOS doesn't allow completely set windows offscreen, so we need to leave at
-        // least one pixel left
-        // https://nikitabobko.github.io/AeroSpace/guide#emulation-of-virtual-workspaces
-        self.with_animation_disabled(|| {
-            self.set_position(
-                self.global_bounds.x + self.global_bounds.width - 1.0,
-                self.global_bounds.y + self.global_bounds.height - 1.0,
-            )
-        })
-        .with_context(|| format!("hide for {} {:?}", self.app_name, self.title))
+impl std::fmt::Display for MacWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.ax)
     }
+}
 
-    pub(super) fn set_global_bounds(&mut self, bounds: Dimension) {
-        self.global_bounds = bounds;
-    }
-
-    pub(super) fn get_size(&self) -> Result<(f32, f32)> {
-        let size = get_attribute::<AXValue>(&self.element, &kAXSizeAttribute())
-            .with_context(|| format!("get_size for {} {:?}", self.app_name, self.title))?;
-        let mut cg_size = CGSize::new(0.0, 0.0);
-        let ptr = NonNull::new((&mut cg_size as *mut CGSize).cast()).unwrap();
-        unsafe { size.value(AXValueType::CGSize, ptr) };
-        Ok((cg_size.width as f32, cg_size.height as f32))
-    }
-
-    /// Without this the windows move in a janky way
-    /// https://github.com/nikitabobko/AeroSpace/issues/51
-    fn with_animation_disabled<F>(&self, f: F) -> Result<()>
-    where
-        F: FnOnce() -> Result<()>,
-    {
-        let was_enabled =
-            get_attribute::<CFBoolean>(&self.app, &kAXEnhancedUserInterfaceAttribute()).ok();
-        let _ = set_attribute_value(&self.app, &kAXEnhancedUserInterfaceAttribute(), unsafe {
-            kCFBooleanFalse.unwrap()
+impl Drop for MacWindow {
+    fn drop(&mut self) {
+        self.sender.send(HubMessage::WindowDelete {
+            cg_id: self.ax.cg_id(),
         });
-        let result = f();
-        if was_enabled.is_some() {
-            let _ = set_attribute_value(&self.app, &kAXEnhancedUserInterfaceAttribute(), unsafe {
-                kCFBooleanTrue.unwrap()
-            });
-        }
-        result
-    }
-
-    fn set_position(&self, x: f32, y: f32) -> anyhow::Result<()> {
-        let pos_ptr: *mut CGPoint = &mut CGPoint::new(x as f64, y as f64);
-        let pos_ptr = NonNull::new(pos_ptr.cast()).unwrap();
-        let pos_ptr = unsafe { AXValue::new(AXValueType::CGPoint, pos_ptr) }.unwrap();
-        Ok(set_attribute_value(
-            &self.element,
-            &kAXPositionAttribute(),
-            &pos_ptr,
-        )?)
-    }
-
-    fn set_size(&self, width: f32, height: f32) -> anyhow::Result<()> {
-        let size_ptr: *mut CGSize = &mut CGSize::new(width as f64, height as f64);
-        let size = NonNull::new(size_ptr.cast()).unwrap();
-        let size = unsafe { AXValue::new(AXValueType::CGSize, size) }.unwrap();
-        Ok(set_attribute_value(
-            &self.element,
-            &kAXSizeAttribute(),
-            &size,
-        )?)
-    }
-
-    fn approx_eq(&self, other: Dimension) -> bool {
-        let s = self.get_dimension();
-        pixel_eq(s.x, other.x)
-            && pixel_eq(s.y, other.y)
-            && pixel_eq(s.width, other.width)
-            && pixel_eq(s.height, other.height)
     }
 }
 
-// For comparing actual window position/size from macOS vs what we requested.
-const PIXEL_EPSILON: f32 = 1.0;
-
-fn pixel_eq(a: f32, b: f32) -> bool {
-    (a - b).abs() <= PIXEL_EPSILON
-}
-
-fn exceeds_by_pixel(actual: f32, expected: f32) -> bool {
-    actual > expected + PIXEL_EPSILON
-}
-
-fn falls_short_by_pixel(actual: f32, expected: f32) -> bool {
-    actual < expected - PIXEL_EPSILON
-}
-
-fn round_dim(dim: Dimension) -> Dimension {
-    Dimension {
-        x: dim.x.round(),
-        y: dim.y.round(),
-        width: dim.width.round(),
-        height: dim.height.round(),
+fn round_dim(dim: Dimension) -> RoundedDimension {
+    RoundedDimension {
+        x: dim.x.round() as i32,
+        y: dim.y.round() as i32,
+        width: dim.width.round() as i32,
+        height: dim.height.round() as i32,
     }
 }
 
@@ -498,55 +386,6 @@ fn is_completely_offscreen(dim: Dimension, screen: Dimension) -> bool {
 
 /// Constraint on raw window size (min_w, min_h, max_w, max_h).
 pub(super) type RawConstraint = (Option<f32>, Option<f32>, Option<f32>, Option<f32>);
-
-fn compute_constraint(
-    actual: Dimension,
-    expected: Dimension,
-    existing: &Window,
-) -> Option<RawConstraint> {
-    let (cur_min_w, cur_min_h) = existing.min_size();
-    let (cur_max_w, cur_max_h) = existing.max_size();
-    let min_w = exceeds_by_pixel(actual.width, expected.width)
-        .then_some(actual.width)
-        .filter(|&w| !pixel_eq(w, cur_min_w));
-    let min_h = exceeds_by_pixel(actual.height, expected.height)
-        .then_some(actual.height)
-        .filter(|&h| !pixel_eq(h, cur_min_h));
-    let max_w = falls_short_by_pixel(actual.width, expected.width)
-        .then_some(actual.width)
-        .filter(|&w| !pixel_eq(w, cur_max_w));
-    let max_h = falls_short_by_pixel(actual.height, expected.height)
-        .then_some(actual.height)
-        .filter(|&h| !pixel_eq(h, cur_max_h));
-    if min_w.is_some() || min_h.is_some() || max_w.is_some() || max_h.is_some() {
-        Some((min_w, min_h, max_w, max_h))
-    } else {
-        None
-    }
-}
-
-fn is_screen_locked() -> bool {
-    let Some(dict) = CGSessionCopyCurrentDictionary() else {
-        return false;
-    };
-    let dict: &CFDictionary<CFString, CFType> = unsafe { dict.cast_unchecked() };
-
-    // CGSSessionScreenIsLocked is present when screen is locked
-    let locked_key = CFString::from_static_str("CGSSessionScreenIsLocked");
-    if dict.contains_key(&locked_key) {
-        return true;
-    }
-
-    // kCGSSessionOnConsoleKey is false when screen is off/sleeping
-    let on_console_key = CFString::from_static_str("kCGSSessionOnConsoleKey");
-    if let Some(value) = dict.get(&on_console_key)
-        && let Some(b) = value.downcast_ref::<CFBoolean>()
-    {
-        return !b.as_bool();
-    }
-
-    false
-}
 
 pub(super) fn list_cg_window_ids() -> HashSet<CGWindowID> {
     let Some(window_list) = CGWindowListCopyWindowInfo(CGWindowListOption::OptionAll, 0) else {
@@ -589,16 +428,155 @@ pub(super) fn get_app_by_pid(pid: i32) -> Option<Retained<NSRunningApplication>>
     NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
 }
 
-pub(super) fn get_ax_windows(pid: i32) -> Vec<(CGWindowID, CFRetained<AXUIElement>)> {
-    let ax_app = unsafe { AXUIElement::new_application(pid) };
-    let Ok(windows) = get_attribute::<CFArray<AXUIElement>>(&ax_app, &kAXWindowsAttribute()) else {
-        return Vec::new();
+// Quartz uses top-left origin, Cocoa uses bottom-left origin
+fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
+    NSRect::new(
+        NSPoint::new(
+            dim.x as f64,
+            (primary_full_height - dim.y - dim.height) as f64,
+        ),
+        NSSize::new(dim.width as f64, dim.height as f64),
+    )
+}
+
+/// Convert edge rect from Quartz coords to Cocoa coords, relative to the overlay window.
+fn to_edge_ns_rect(dim: Dimension, overlay_height: f32) -> NSRect {
+    NSRect::new(
+        NSPoint::new(dim.x as f64, (overlay_height - dim.y - dim.height) as f64),
+        NSSize::new(dim.width as f64, dim.height as f64),
+    )
+}
+
+/// Clip rect to bounds. Returns None if fully outside.
+fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimension> {
+    if rect.x >= bounds.x + bounds.width
+        || rect.y >= bounds.y + bounds.height
+        || rect.x + rect.width <= bounds.x
+        || rect.y + rect.height <= bounds.y
+    {
+        return None;
+    }
+    let x = rect.x.max(bounds.x);
+    let y = rect.y.max(bounds.y);
+    let right = (rect.x + rect.width).min(bounds.x + bounds.width);
+    let bottom = (rect.y + rect.height).min(bounds.y + bounds.height);
+    Some(Dimension {
+        x,
+        y,
+        width: right - x,
+        height: bottom - y,
+    })
+}
+
+fn compute_source_rect(original: Dimension, clipped: Dimension) -> CGRect {
+    CGRect {
+        origin: CGPoint {
+            x: (clipped.x - original.x) as f64,
+            y: (clipped.y - original.y) as f64,
+        },
+        size: CGSize {
+            width: clipped.width as f64,
+            height: clipped.height as f64,
+        },
+    }
+}
+
+fn compute_border_edges(
+    frame: Dimension,
+    bounds: Dimension,
+    colors: [Color; 4],
+    b: f32,
+) -> Option<(Dimension, Vec<(Dimension, Color)>)> {
+    let clipped = clip_to_bounds(frame, bounds)?;
+
+    let offset_x = clipped.x - frame.x;
+    let offset_y = clipped.y - frame.y;
+    let clip_local = Dimension {
+        x: offset_x,
+        y: offset_y,
+        width: clipped.width,
+        height: clipped.height,
     };
-    windows
-        .iter()
-        .filter_map(|w| {
-            let cg_id = get_cg_window_id(&w)?;
-            Some((cg_id, w.clone()))
-        })
-        .collect()
+
+    let w = frame.width;
+    let h = frame.height;
+    let mut edges = Vec::new();
+
+    // top
+    let top = Dimension {
+        x: 0.0,
+        y: 0.0,
+        width: w,
+        height: b,
+    };
+    if let Some(r) = clip_to_bounds(top, clip_local) {
+        edges.push((translate_dim(r, -offset_x, -offset_y), colors[0]));
+    }
+
+    // right
+    let right = Dimension {
+        x: w - b,
+        y: b,
+        width: b,
+        height: h - 2.0 * b,
+    };
+    if let Some(r) = clip_to_bounds(right, clip_local) {
+        edges.push((translate_dim(r, -offset_x, -offset_y), colors[1]));
+    }
+
+    // bottom
+    let bottom = Dimension {
+        x: 0.0,
+        y: h - b,
+        width: w,
+        height: b,
+    };
+    if let Some(r) = clip_to_bounds(bottom, clip_local) {
+        edges.push((translate_dim(r, -offset_x, -offset_y), colors[2]));
+    }
+
+    // left
+    let left = Dimension {
+        x: 0.0,
+        y: b,
+        width: b,
+        height: h - 2.0 * b,
+    };
+    if let Some(r) = clip_to_bounds(left, clip_local) {
+        edges.push((translate_dim(r, -offset_x, -offset_y), colors[3]));
+    }
+
+    if edges.is_empty() {
+        None
+    } else {
+        Some((clipped, edges))
+    }
+}
+
+fn translate_dim(dim: Dimension, dx: f32, dy: f32) -> Dimension {
+    Dimension {
+        x: dim.x + dx,
+        y: dim.y + dy,
+        width: dim.width,
+        height: dim.height,
+    }
+}
+
+fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
+    let f = config.focused_color;
+    let s = config.spawn_indicator_color;
+    [
+        if spawn.is_tab() { s } else { f },
+        if spawn.is_horizontal() { s } else { f },
+        if spawn.is_vertical() { s } else { f },
+        f,
+    ]
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+struct RoundedDimension {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
 }

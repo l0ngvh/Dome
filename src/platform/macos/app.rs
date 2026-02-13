@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -8,7 +9,9 @@ use std::thread;
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSScreen,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
+    NSColor, NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder, NSScreen, NSView,
+    NSWindow, NSWindowCollectionBehavior, NSWindowOrderingMode, NSWindowStyleMask,
 };
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
@@ -17,9 +20,13 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{
     CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID, CGPreflightScreenCaptureAccess,
-    CGRequestScreenCaptureAccess,
+    CGRequestScreenCaptureAccess, CGWindowID,
 };
-use objc2_foundation::{NSNotification, NSNumber, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{
+    NSNotification, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+};
+use objc2_io_surface::IOSurface;
+use objc2_quartz_core::CALayer;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
@@ -27,12 +34,12 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 use super::dome::{Dome, HubEvent, HubMessage, MessageSender};
 use super::keyboard::KeyboardListener;
 use super::listeners::EventListener;
-use super::mirror::MirrorManager;
 use super::overlay::OverlayManager;
 use super::recovery;
-use crate::config::{Config, start_config_watcher};
+use crate::config::{Color, Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
+use crate::platform::macos::overlay::draw_rect;
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -169,19 +176,19 @@ fn init_tracing(config: &Config) {
         .init();
 }
 
-pub(super) struct AppDelegateIvars {
-    pub(super) hub_sender: Sender<HubEvent>,
-    pub(super) frame_rx: Receiver<HubMessage>,
-    pub(super) overlay_manager: RefCell<OverlayManager>,
-    pub(super) mirror_manager: RefCell<MirrorManager>,
-    pub(super) event_listener: EventListener,
+struct AppDelegateIvars {
+    hub_sender: Sender<HubEvent>,
+    frame_rx: Receiver<HubMessage>,
+    overlay_manager: RefCell<OverlayManager>,
+    overlay_windows: RefCell<HashMap<CGWindowID, OverlayWindow>>,
+    event_listener: EventListener,
 }
 
 define_class!(
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[ivars = AppDelegateIvars]
-    pub(super) struct AppDelegate;
+    struct AppDelegate;
 
     unsafe impl NSObjectProtocol for AppDelegate {}
 
@@ -209,7 +216,7 @@ impl AppDelegate {
             hub_sender: hub_sender.clone(),
             frame_rx,
             overlay_manager: RefCell::new(OverlayManager::new()),
-            mirror_manager: RefCell::new(MirrorManager::new(mtm, hub_sender)),
+            overlay_windows: RefCell::new(HashMap::new()),
             event_listener,
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
@@ -230,18 +237,12 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     let mtm = delegate.mtm();
     while let Ok(msg) = delegate.ivars().frame_rx.try_recv() {
         match msg {
-            HubMessage::Overlays(mut overlays) => {
-                let mirrors = std::mem::take(&mut overlays.mirrors);
+            HubMessage::Overlays(overlays) => {
                 delegate
                     .ivars()
                     .overlay_manager
                     .borrow_mut()
                     .process(mtm, overlays);
-                delegate
-                    .ivars()
-                    .mirror_manager
-                    .borrow_mut()
-                    .process_mirrors(mirrors);
             }
             HubMessage::RegisterObservers(apps) => {
                 for app in &apps {
@@ -249,14 +250,60 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 }
             }
             HubMessage::CaptureFrame { cg_id, surface } => {
-                delegate
-                    .ivars()
-                    .mirror_manager
-                    .borrow_mut()
-                    .apply_frame(cg_id, &surface);
+                if let Some(overlay) = delegate.ivars().overlay_windows.borrow().get(&cg_id) {
+                    overlay.apply_frame(&surface);
+                }
             }
             HubMessage::CaptureFailed { cg_id } => {
-                delegate.ivars().mirror_manager.borrow().show_error(cg_id);
+                // TODO: proper error handling
+                tracing::debug!("Failed to screen capture for {cg_id}");
+            }
+            HubMessage::WindowCreate {
+                cg_id,
+                frame,
+                scale,
+            } => {
+                let overlay = OverlayWindow::new(
+                    mtm,
+                    frame,
+                    cg_id,
+                    scale,
+                    delegate.ivars().hub_sender.clone(),
+                );
+                delegate
+                    .ivars()
+                    .overlay_windows
+                    .borrow_mut()
+                    .insert(cg_id, overlay);
+            }
+            HubMessage::WindowShow {
+                cg_id,
+                frame,
+                is_float,
+                is_focus,
+                edges,
+                scale,
+                border,
+            } => {
+                let ui_window = UIWindow {
+                    frame,
+                    is_float,
+                    is_focus,
+                    edges,
+                    scale,
+                    border,
+                };
+                if let Some(overlay) = delegate.ivars().overlay_windows.borrow().get(&cg_id) {
+                    overlay.render(ui_window);
+                }
+            }
+            HubMessage::WindowHide { cg_id } => {
+                if let Some(overlay) = delegate.ivars().overlay_windows.borrow().get(&cg_id) {
+                    overlay.hide();
+                }
+            }
+            HubMessage::WindowDelete { cg_id } => {
+                delegate.ivars().overlay_windows.borrow_mut().remove(&cg_id);
             }
             HubMessage::Shutdown => {
                 NSApplication::sharedApplication(mtm).terminate(None);
@@ -274,6 +321,16 @@ pub(super) struct ScreenInfo {
     pub(super) full_height: f32,
     pub(super) is_primary: bool,
     pub(super) scale: f64,
+}
+
+impl std::fmt::Display for ScreenInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} (id={}, dim={:?}, scale={})",
+            self.name, self.display_id, self.dimension, self.scale
+        )
+    }
 }
 
 fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
@@ -342,5 +399,221 @@ pub(super) fn compute_global_bounds(screens: &[ScreenInfo]) -> Dimension {
         y: min_y,
         width: max_x - min_x,
         height: max_y - min_y,
+    }
+}
+
+struct OverlayWindow {
+    window: Retained<NSWindow>,
+    border_view: Retained<BorderView>,
+    mirror_view: Retained<MirrorView>,
+}
+
+impl OverlayWindow {
+    fn new(
+        mtm: MainThreadMarker,
+        frame: NSRect,
+        source_cg_id: CGWindowID,
+        scale: f64,
+        hub_sender: Sender<HubEvent>,
+    ) -> Self {
+        let window = unsafe {
+            NSWindow::initWithContentRect_styleMask_backing_defer(
+                NSWindow::alloc(mtm),
+                frame,
+                NSWindowStyleMask::Borderless,
+                NSBackingStoreType::Buffered,
+                false,
+            )
+        };
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+        window.setOpaque(false);
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::Auxiliary
+                | NSWindowCollectionBehavior::Default
+                | NSWindowCollectionBehavior::Transient
+                | NSWindowCollectionBehavior::FullScreenNone
+                | NSWindowCollectionBehavior::FullScreenDisallowsTiling
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        unsafe { window.setReleasedWhenClosed(false) };
+        let content_view = window.contentView().unwrap();
+
+        let border_view = BorderView::new(mtm, frame);
+        content_view.addSubview(&border_view);
+        let mirror_view = MirrorView::new(mtm, frame, source_cg_id, scale, hub_sender);
+        content_view.addSubview_positioned_relativeTo(
+            &mirror_view,
+            NSWindowOrderingMode::Above,
+            Some(&border_view),
+        );
+        Self {
+            window,
+            border_view,
+            mirror_view,
+        }
+    }
+
+    fn render(&self, content_window: UIWindow) {
+        let frame = content_window.frame();
+        self.window.setFrame_display(frame, true);
+        let bounds = NSRect::new(NSPoint::new(0.0, 0.0), frame.size);
+        self.border_view.setFrame(bounds);
+        self.border_view.set_edges(content_window.edges());
+        let b = content_window.border;
+        let inner = NSRect::new(
+            NSPoint::new(b, b),
+            NSSize::new(frame.size.width - 2.0 * b, frame.size.height - 2.0 * b),
+        );
+        self.mirror_view.setFrame(inner);
+        self.mirror_view.set_scale(content_window.scale());
+        let level = if content_window.is_float() {
+            NSFloatingWindowLevel
+        } else {
+            NSNormalWindowLevel - 1
+        };
+        self.window.setLevel(level);
+        if !content_window.is_focus() && content_window.is_float() {
+            self.mirror_view.setHidden(false);
+            self.window.setIgnoresMouseEvents(false);
+        } else {
+            self.mirror_view.setHidden(true);
+            self.window.setIgnoresMouseEvents(true);
+        }
+        self.window.setIsVisible(true);
+    }
+
+    fn hide(&self) {
+        self.window.setIsVisible(false);
+    }
+
+    fn apply_frame(&self, surface: &IOSurface) {
+        self.mirror_view.apply_frame(surface);
+    }
+}
+
+impl Drop for OverlayWindow {
+    fn drop(&mut self) {
+        self.window.close();
+    }
+}
+
+struct UIWindow {
+    frame: NSRect,
+    is_float: bool,
+    is_focus: bool,
+    edges: Vec<(NSRect, Color)>,
+    scale: f64,
+    border: f64,
+}
+
+impl UIWindow {
+    fn frame(&self) -> NSRect {
+        self.frame
+    }
+    fn is_float(&self) -> bool {
+        self.is_float
+    }
+    fn is_focus(&self) -> bool {
+        self.is_focus
+    }
+    fn edges(&self) -> Vec<(NSRect, Color)> {
+        self.edges.clone()
+    }
+    fn scale(&self) -> f64 {
+        self.scale
+    }
+}
+
+struct BorderViewIvars {
+    edges: RefCell<Vec<(NSRect, Color)>>,
+}
+
+define_class!(
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = BorderViewIvars]
+    struct BorderView;
+
+    unsafe impl NSObjectProtocol for BorderView {}
+
+    impl BorderView {
+        #[unsafe(method(drawRect:))]
+        fn draw_rect(&self, _dirty_rect: NSRect) {
+            for (rect, color) in self.ivars().edges.borrow().iter() {
+                draw_rect(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height, *color);
+            }
+        }
+    }
+);
+
+impl BorderView {
+    fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
+        let ivars = BorderViewIvars {
+            edges: RefCell::new(Vec::new()),
+        };
+        let this = Self::alloc(mtm).set_ivars(ivars);
+        unsafe { msg_send![super(this), initWithFrame: frame] }
+    }
+
+    fn set_edges(&self, edges: Vec<(NSRect, Color)>) {
+        *self.ivars().edges.borrow_mut() = edges;
+        self.setNeedsDisplay(true);
+    }
+}
+
+struct MirrorViewIvars {
+    cg_id: CGWindowID,
+    layer: Retained<CALayer>,
+    hub_tx: Sender<HubEvent>,
+}
+
+define_class!(
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = MirrorViewIvars]
+    struct MirrorView;
+
+    unsafe impl NSObjectProtocol for MirrorView {}
+
+    impl MirrorView {
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, _event: &NSEvent) {
+            self.ivars().hub_tx.send(HubEvent::MirrorClicked(self.ivars().cg_id)).ok();
+        }
+
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+            true
+        }
+    }
+);
+
+impl MirrorView {
+    fn new(
+        mtm: MainThreadMarker,
+        frame: NSRect,
+        cg_id: CGWindowID,
+        scale: f64,
+        hub_tx: Sender<HubEvent>,
+    ) -> Retained<Self> {
+        let layer = CALayer::new();
+        layer.setContentsScale(scale);
+        let this = Self::alloc(mtm).set_ivars(MirrorViewIvars {
+            cg_id,
+            hub_tx,
+            layer: layer.clone(),
+        });
+        let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        view.setLayer(Some(&layer));
+        view.setWantsLayer(true);
+        view
+    }
+
+    fn apply_frame(&self, surface: &IOSurface) {
+        unsafe { self.ivars().layer.setContents(Some(surface)) };
+    }
+
+    fn set_scale(&self, scale: f64) {
+        self.ivars().layer.setContentsScale(scale);
     }
 }

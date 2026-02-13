@@ -1,27 +1,34 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender};
 
-use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
-use objc2::rc::Retained;
-use objc2_app_kit::{NSFloatingWindowLevel, NSRunningApplication};
-use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource, CGPoint, CGRect, CGSize};
-use objc2_core_graphics::CGWindowID;
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use block2::RcBlock;
+use dispatch2::{DispatchQueue, DispatchRetained};
+use objc2::runtime::ProtocolObject;
+use objc2::{AnyThread, DefinedClass, define_class, msg_send, rc::Retained};
+use objc2_app_kit::NSRunningApplication;
+use objc2_application_services::AXUIElement;
+use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource, CGRect};
+use objc2_core_graphics::{CGWindowID, kCGColorSpaceSRGB};
+use objc2_core_media::CMSampleBuffer;
+use objc2_foundation::{NSError, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
+use objc2_screen_capture_kit::{
+    SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
+    SCStreamOutputType,
+};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
     Child, Container, ContainerId, Dimension, Hub, MonitorId, SpawnMode, Window, WindowId,
+    WorkspaceId,
 };
+use crate::platform::macos::accessibility::{AXWindow, get_ax_windows};
 
 use super::app::{ScreenInfo, compute_global_bounds};
-use super::mirror::{WindowCapture, create_captures_async};
-use super::overlay::{
-    ContainerBorder, FloatBorder, MirrorUpdate, Overlays, TabBarOverlay, TabInfo, TilingBorder,
-};
+use super::overlay::{ContainerBorder, Overlays, TabBarOverlay, TabInfo};
 use super::recovery;
-use super::window::{MacWindow, get_app_by_pid, get_ax_windows, list_cg_window_ids, running_apps};
+use super::window::{MacWindow, get_app_by_pid, list_cg_window_ids, running_apps};
 
 #[expect(
     clippy::large_enum_variant,
@@ -75,33 +82,53 @@ pub(super) enum HubMessage {
     CaptureFailed {
         cg_id: CGWindowID,
     },
+    WindowShow {
+        cg_id: CGWindowID,
+        frame: NSRect,
+        is_float: bool,
+        is_focus: bool,
+        edges: Vec<(NSRect, Color)>,
+        scale: f64,
+        border: f64,
+    },
+    WindowHide {
+        cg_id: CGWindowID,
+    },
+    WindowCreate {
+        cg_id: CGWindowID,
+        frame: NSRect,
+        scale: f64,
+    },
+    WindowDelete {
+        cg_id: CGWindowID,
+    },
     Shutdown,
 }
 
-struct WindowEntry {
-    window: MacWindow,
-    window_id: WindowId,
-    capture: Option<WindowCapture>,
-}
-
 struct Registry {
-    windows: HashMap<CGWindowID, WindowEntry>,
+    windows: HashMap<CGWindowID, MacWindow>,
     id_to_cg: HashMap<WindowId, CGWindowID>,
     pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
+    primary_full_height: f32,
+    global_bounds: Dimension,
+    sender: MessageSender,
 }
 
 impl Registry {
-    fn new() -> Self {
+    fn new(primary_full_height: f32, global_bounds: Dimension, sender: MessageSender) -> Self {
         Self {
             windows: HashMap::new(),
             id_to_cg: HashMap::new(),
             pid_to_cg: HashMap::new(),
+            primary_full_height,
+            global_bounds,
+            sender,
         }
     }
 
-    fn insert(&mut self, window: MacWindow, window_id: WindowId) {
-        let cg_id = window.cg_id();
-        let pid = window.pid();
+    fn insert(&mut self, ax: AXWindow, window_id: WindowId, hub_window: &Window, scale: f64) {
+        let cg_id = ax.cg_id();
+        let pid = ax.pid();
         if pid as u32 == std::process::id() {
             return;
         }
@@ -109,29 +136,30 @@ impl Registry {
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
         self.windows.insert(
             cg_id,
-            WindowEntry {
-                window,
+            MacWindow::new(
+                ax,
                 window_id,
-                capture: None,
-            },
+                hub_window,
+                self.primary_full_height,
+                self.sender.clone(),
+                scale,
+                self.global_bounds,
+            ),
         );
     }
 
-    fn remove(&mut self, cg_id: CGWindowID) -> Option<(MacWindow, WindowId)> {
-        let entry = self.windows.remove(&cg_id)?;
-        self.id_to_cg.remove(&entry.window_id);
-        if let Some(ids) = self.pid_to_cg.get_mut(&entry.window.pid()) {
+    fn remove(&mut self, cg_id: CGWindowID) -> Option<WindowId> {
+        let window = self.windows.remove(&cg_id)?;
+        self.id_to_cg.remove(&window.window_id());
+        if let Some(ids) = self.pid_to_cg.get_mut(&window.pid()) {
             ids.retain(|&id| id != cg_id);
         }
-        Some((entry.window, entry.window_id))
-    }
-
-    fn get(&self, cg_id: CGWindowID) -> Option<&MacWindow> {
-        self.windows.get(&cg_id).map(|e| &e.window)
+        tracing::info!(%window, window_id = %window.window_id(), "Window removed");
+        Some(window.window_id())
     }
 
     fn get_mut(&mut self, cg_id: CGWindowID) -> Option<&mut MacWindow> {
-        self.windows.get_mut(&cg_id).map(|e| &mut e.window)
+        self.windows.get_mut(&cg_id)
     }
 
     fn get_cg_id(&self, window_id: WindowId) -> Option<CGWindowID> {
@@ -139,7 +167,21 @@ impl Registry {
     }
 
     fn get_window_id(&self, cg_id: CGWindowID) -> Option<WindowId> {
-        self.windows.get(&cg_id).map(|e| e.window_id)
+        self.windows.get(&cg_id).map(|e| e.window_id())
+    }
+
+    fn get_by_window_id(&self, window_id: WindowId) -> Option<&MacWindow> {
+        self.id_to_cg
+            .get(&window_id)
+            .copied()
+            .and_then(|cg_id| self.windows.get(&cg_id))
+    }
+
+    fn get_mut_by_window_id(&mut self, window_id: WindowId) -> Option<&mut MacWindow> {
+        self.id_to_cg
+            .get(&window_id)
+            .copied()
+            .and_then(|cg_id| self.windows.get_mut(&cg_id))
     }
 
     fn contains(&self, cg_id: CGWindowID) -> bool {
@@ -150,51 +192,40 @@ impl Registry {
         self.pid_to_cg.get(&pid).cloned().unwrap_or_default()
     }
 
-    fn remove_by_pid(&mut self, pid: i32) -> Vec<(CGWindowID, MacWindow, WindowId)> {
+    fn remove_by_pid(&mut self, pid: i32) -> Vec<(CGWindowID, WindowId)> {
         let Some(cg_ids) = self.pid_to_cg.remove(&pid) else {
             return Vec::new();
         };
         let mut removed = Vec::new();
         for cg_id in cg_ids {
-            if let Some(entry) = self.windows.remove(&cg_id) {
-                self.id_to_cg.remove(&entry.window_id);
-                removed.push((cg_id, entry.window, entry.window_id));
+            if let Some(window) = self.windows.remove(&cg_id) {
+                self.id_to_cg.remove(&window.window_id());
+                tracing::info!(%window, window_id = %window.window_id(), "Window removed");
+                removed.push((cg_id, window.window_id()));
             }
         }
         removed
     }
 
     fn is_valid(&self, cg_id: CGWindowID) -> bool {
-        self.windows
-            .get(&cg_id)
-            .is_some_and(|e| e.window.is_valid())
+        self.windows.get(&cg_id).is_some_and(|w| w.is_valid())
     }
 
     fn get_title(&self, window_id: WindowId) -> Option<&str> {
         self.id_to_cg
             .get(&window_id)
             .and_then(|cg_id| self.windows.get(cg_id))
-            .and_then(|e| e.window.title())
+            .and_then(|w| w.title())
     }
 
     fn set_capture(&mut self, cg_id: CGWindowID, capture: WindowCapture) {
-        if let Some(entry) = self.windows.get_mut(&cg_id) {
-            entry.capture = Some(capture);
+        if let Some(window) = self.windows.get_mut(&cg_id) {
+            window.set_capture(capture);
         }
     }
 
-    fn get_capture(&self, cg_id: CGWindowID) -> Option<&WindowCapture> {
-        self.windows.get(&cg_id).and_then(|e| e.capture.as_ref())
-    }
-
-    fn get_capture_mut(&mut self, cg_id: CGWindowID) -> Option<&mut WindowCapture> {
-        self.windows
-            .get_mut(&cg_id)
-            .and_then(|e| e.capture.as_mut())
-    }
-
-    fn cg_ids(&self) -> impl Iterator<Item = CGWindowID> + '_ {
-        self.windows.keys().copied()
+    fn get(&self, cg_id: CGWindowID) -> Option<&MacWindow> {
+        self.windows.get(&cg_id)
     }
 }
 
@@ -219,8 +250,14 @@ impl MessageSender {
 
 type DisplayId = u32;
 
+struct MonitorEntry {
+    id: MonitorId,
+    screen: ScreenInfo,
+    displayed_windows: HashSet<CGWindowID>,
+}
+
 struct MonitorRegistry {
-    map: HashMap<DisplayId, (MonitorId, ScreenInfo)>,
+    map: HashMap<DisplayId, MonitorEntry>,
     reverse: HashMap<MonitorId, DisplayId>,
     primary_display_id: DisplayId,
 }
@@ -229,7 +266,14 @@ impl MonitorRegistry {
     fn new(primary: &ScreenInfo, primary_monitor_id: MonitorId) -> Self {
         let mut map = HashMap::new();
         let mut reverse = HashMap::new();
-        map.insert(primary.display_id, (primary_monitor_id, primary.clone()));
+        map.insert(
+            primary.display_id,
+            MonitorEntry {
+                id: primary_monitor_id,
+                screen: primary.clone(),
+                displayed_windows: HashSet::new(),
+            },
+        );
         reverse.insert(primary_monitor_id, primary.display_id);
         Self {
             map,
@@ -243,11 +287,11 @@ impl MonitorRegistry {
     }
 
     fn get(&self, display_id: DisplayId) -> Option<MonitorId> {
-        self.map.get(&display_id).map(|(id, _)| *id)
+        self.map.get(&display_id).map(|e| e.id)
     }
 
     fn get_screen(&self, display_id: DisplayId) -> Option<&ScreenInfo> {
-        self.map.get(&display_id).map(|(_, info)| info)
+        self.map.get(&display_id).map(|e| &e.screen)
     }
 
     fn get_screen_by_monitor(&self, monitor_id: MonitorId) -> Option<&ScreenInfo> {
@@ -256,13 +300,25 @@ impl MonitorRegistry {
             .and_then(|d| self.get_screen(*d))
     }
 
+    fn get_entry_mut(&mut self, monitor_id: MonitorId) -> Option<&mut MonitorEntry> {
+        self.reverse
+            .get(&monitor_id)
+            .and_then(|d| self.map.get_mut(d))
+    }
+
     fn primary_monitor_id(&self) -> MonitorId {
         self.get(self.primary_display_id).unwrap()
     }
 
     fn insert(&mut self, screen: &ScreenInfo, monitor_id: MonitorId) {
-        self.map
-            .insert(screen.display_id, (monitor_id, screen.clone()));
+        self.map.insert(
+            screen.display_id,
+            MonitorEntry {
+                id: monitor_id,
+                screen: screen.clone(),
+                displayed_windows: HashSet::new(),
+            },
+        );
         self.reverse.insert(monitor_id, screen.display_id);
     }
 
@@ -273,10 +329,9 @@ impl MonitorRegistry {
     }
 
     fn replace(&mut self, old_display_id: DisplayId, new_display_id: DisplayId) {
-        if let Some((monitor_id, mut info)) = self.map.remove(&old_display_id) {
-            info.display_id = new_display_id;
-            self.map.insert(new_display_id, (monitor_id, info));
-            self.reverse.insert(monitor_id, new_display_id);
+        if let Some(mut entry) = self.map.remove(&old_display_id) {
+            entry.screen.display_id = new_display_id;
+            self.map.insert(new_display_id, entry);
         }
     }
 
@@ -285,7 +340,7 @@ impl MonitorRegistry {
             .map
             .iter()
             .filter(|(key, _)| !current.contains(key))
-            .map(|(_, (id, _))| *id)
+            .map(|(_, e)| e.id)
             .collect();
         for &id in &stale {
             self.remove_by_id(id);
@@ -325,29 +380,19 @@ impl Dome {
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
-        tracing::info!(
-            name = %primary.name,
-            display_id = primary.display_id,
-            dimension = ?primary.dimension,
-            "Primary monitor"
-        );
+        tracing::info!(%primary, "Primary monitor");
 
         for screen in &screens {
             if screen.display_id != primary.display_id {
                 let id = hub.add_monitor(screen.name.clone(), screen.dimension);
                 monitor_registry.insert(screen, id);
-                tracing::info!(
-                    name = %screen.name,
-                    display_id = screen.display_id,
-                    dimension = ?screen.dimension,
-                    "Monitor"
-                );
+                tracing::info!(%screen, "Monitor");
             }
         }
 
         Self {
             hub,
-            registry: Registry::new(),
+            registry: Registry::new(primary.full_height, global_bounds, sender.clone()),
             monitor_registry,
             config,
             primary_screen: primary.dimension,
@@ -356,7 +401,7 @@ impl Dome {
             observed_pids: HashSet::new(),
             sender,
             hub_tx,
-            capture_queue: DispatchQueue::new("dome.capture", DispatchQueueAttr::SERIAL),
+            capture_queue: DispatchQueue::main().into(),
             running: true,
         }
     }
@@ -388,17 +433,12 @@ impl Dome {
         if !new_apps.is_empty() {
             self.sender.send(HubMessage::RegisterObservers(new_apps));
         }
-        self.process_frame(None, HashSet::new());
-        self.send_overlays(&HashSet::new());
+        let overlays = self.process_frame();
+
+        self.sender.send(HubMessage::Overlays(overlays));
     }
 
     fn handle_event(&mut self, event: HubEvent) {
-        let last_focus = self
-            .hub
-            .get_workspace(self.hub.current_workspace())
-            .focused();
-        let previous_displayed = get_displayed_cg_ids(&self.hub, &self.registry);
-
         match event {
             HubEvent::Shutdown => {
                 tracing::info!("Shutdown requested");
@@ -462,8 +502,9 @@ impl Dome {
         if !self.running {
             return;
         }
-        self.process_frame(last_focus, previous_displayed.clone());
-        self.send_overlays(&previous_displayed);
+        let overlays = self.process_frame();
+
+        self.sender.send(HubMessage::Overlays(overlays));
     }
 
     #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
@@ -487,50 +528,63 @@ impl Dome {
         }
 
         // Add new windows
-        for (cg_id, ax_element) in get_ax_windows(pid) {
+        let mut new_cg_ids = Vec::new();
+        for ax in get_ax_windows(app) {
             if !self.running {
                 return;
             }
-            if self.registry.contains(cg_id) {
+            if self.registry.contains(ax.cg_id()) {
                 continue;
             }
 
-            let window = MacWindow::new(ax_element, cg_id, self.global_bounds, app);
-            if !window.is_manageable() {
+            if !ax.is_manageable() {
                 continue;
             }
-            if should_ignore(&window, &self.config.macos.ignore) {
+            if should_ignore(&ax, &self.config.macos.ignore) {
                 continue;
             }
 
-            let dimension = window.get_dimension();
-            let window_id = if window.should_tile() {
+            let Ok((x, y)) = ax.get_position() else {
+                continue;
+            };
+            let Ok((width, height)) = ax.get_size() else {
+                continue;
+            };
+            let window_id = if ax.should_tile() {
                 self.hub.insert_tiling()
             } else {
-                self.hub.insert_float(dimension)
+                self.hub.insert_float(Dimension {
+                    x: x as f32,
+                    y: y as f32,
+                    width: width as f32,
+                    height: height as f32,
+                })
             };
 
-            recovery::track(cg_id, window.clone(), self.primary_screen);
-            self.registry.insert(window, window_id);
+            recovery::track(ax.clone(), self.primary_screen);
+            let hub_window = self.hub.get_window(window_id);
+            let ws = self.hub.get_workspace(hub_window.workspace());
+            let scale = self
+                .monitor_registry
+                .get_screen_by_monitor(ws.monitor())
+                .unwrap()
+                .scale;
+            let cg_id = ax.cg_id();
+            self.registry.insert(ax, window_id, hub_window, scale);
 
-            let window = self.registry.get(cg_id).unwrap();
+            let window = self.registry.get_by_window_id(window_id).unwrap();
             tracing::info!(%window, %window_id, "Window inserted");
 
             if let Some(actions) = on_open_actions(window, &self.config.macos.on_open) {
                 self.execute_actions(&actions);
             }
+
+            new_cg_ids.push(cg_id);
         }
 
-        // Create captures for windows without one
-        let need_capture: Vec<_> = self
-            .registry
-            .cg_ids_for_pid(pid)
-            .into_iter()
-            .filter(|id| self.registry.get_capture(*id).is_none())
-            .collect();
-        if !need_capture.is_empty() {
+        if !new_cg_ids.is_empty() {
             create_captures_async(
-                need_capture,
+                new_cg_ids,
                 self.hub_tx.clone(),
                 self.sender.clone(),
                 self.capture_queue.clone(),
@@ -552,16 +606,14 @@ impl Dome {
     }
 
     fn remove_app_windows(&mut self, pid: i32) {
-        for (cg_id, window, window_id) in self.registry.remove_by_pid(pid) {
-            tracing::info!(%window, %window_id, "Window removed");
+        for (cg_id, window_id) in self.registry.remove_by_pid(pid) {
             recovery::untrack(cg_id);
             self.hub.delete_window(window_id);
         }
     }
 
     fn remove_window(&mut self, cg_id: CGWindowID) {
-        if let Some((window, window_id)) = self.registry.remove(cg_id) {
-            tracing::info!(%window, %window_id, "Window removed");
+        if let Some(window_id) = self.registry.remove(cg_id) {
             recovery::untrack(cg_id);
             self.hub.delete_window(window_id);
         }
@@ -646,9 +698,11 @@ impl Dome {
             self.primary_full_height = primary.full_height;
         }
         self.global_bounds = compute_global_bounds(&screens);
+        self.registry.global_bounds = self.global_bounds;
+        self.registry.primary_full_height = self.primary_full_height;
 
-        for entry in self.registry.windows.values_mut() {
-            entry.window.set_global_bounds(self.global_bounds);
+        for window in self.registry.windows.values_mut() {
+            window.on_monitor_change(self.global_bounds, self.primary_full_height);
         }
 
         reconcile_monitors(&mut self.hub, &mut self.monitor_registry, &screens);
@@ -701,103 +755,59 @@ impl Dome {
     }
 
     #[tracing::instrument(skip_all)]
-    fn process_frame(
-        &mut self,
-        last_focus: Option<Child>,
-        previous_displayed: HashSet<CGWindowID>,
-    ) {
-        let border = self.config.border_size;
-        let current_displayed = get_displayed_cg_ids(&self.hub, &self.registry);
-
-        // Hide windows no longer displayed
-        for cg_id in previous_displayed.difference(&current_displayed) {
-            if let Some(window) = self.registry.get_mut(*cg_id)
-                && let Err(e) = window.hide()
-            {
-                tracing::trace!("Failed to hide window: {e:#}");
-            }
-        }
-
-        // Position tiling windows
-        let windows = collect_tiling_windows(&self.hub, &self.registry);
-        position_tiling_windows(windows, &mut self.registry, border);
-
-        // Position float windows
-        for ws_id in self.hub.visible_workspaces() {
-            let ws = self.hub.get_workspace(ws_id);
-            for &float_id in ws.float_windows() {
-                if let Some(cg_id) = self.registry.get_cg_id(float_id)
-                    && let Some(window) = self.registry.get_mut(cg_id)
-                {
-                    let dim = apply_inset(self.hub.get_window(float_id).dimension(), border);
-                    if let Err(e) = window.set_dimension(dim) {
-                        tracing::trace!("Failed to set float dimension: {e:#}");
-                    }
-                }
-            }
-        }
-
-        // Focus window if changed
-        let ws = self.hub.get_workspace(self.hub.current_workspace());
-        let focused = ws.focused();
-        if focused != last_focus {
-            let focus_cg_id = match focused {
-                Some(Child::Window(id)) => self.registry.get_cg_id(id),
-                Some(Child::Container(_)) => None,
-                None => None,
-            };
-            if let Some(cg_id) = focus_cg_id
-                && let Some(window) = self.registry.get(cg_id)
-                && let Err(e) = window.focus()
-            {
-                tracing::trace!("Failed to focus window: {e:#}");
-            }
-        }
-    }
-
-    fn build_overlays(&mut self, previous_displayed: &HashSet<CGWindowID>) -> Overlays {
+    fn process_frame(&mut self) -> Overlays {
         let current_ws_id = self.hub.current_workspace();
-        let mut tiling_borders = Vec::new();
-        let mut float_borders = Vec::new();
+        let b = self.config.border_size;
         let mut container_borders = Vec::new();
         let mut tab_bars = Vec::new();
-        let mut mirrors = Vec::new();
-        let mut curr_mirrors = HashSet::new();
-        let b = self.config.border_size;
+
+        // Hide windows no longer displayed and update displayed state per monitor
+        for ws_id in self.hub.visible_workspaces() {
+            let ws = self.hub.get_workspace(ws_id);
+            let monitor_id = ws.monitor();
+            let current_windows = get_displayed_for_workspace(&self.hub, ws_id, &self.registry);
+
+            let entry = self.monitor_registry.get_entry_mut(monitor_id).unwrap();
+            for cg_id in entry.displayed_windows.difference(&current_windows) {
+                if let Some(window_entry) = self.registry.get_mut(*cg_id)
+                    && let Err(e) = window_entry.hide()
+                {
+                    tracing::trace!("Failed to hide window: {e:#}");
+                }
+            }
+            entry.displayed_windows = current_windows;
+        }
 
         for ws_id in self.hub.visible_workspaces() {
             let ws = self.hub.get_workspace(ws_id);
-            let monitor_dim = self.hub.get_monitor(ws.monitor()).dimension();
+            let monitor_id = ws.monitor();
+            let monitor_dim = self.hub.get_monitor(monitor_id).dimension();
+            let mut stack: Vec<Child> = ws.root().into_iter().collect();
+            let scale = self
+                .monitor_registry
+                .get_screen_by_monitor(monitor_id)
+                .unwrap()
+                .scale;
             let focused = if ws_id == current_ws_id {
                 ws.focused()
             } else {
                 None
             };
 
-            let mut stack: Vec<Child> = ws.root().into_iter().collect();
             while let Some(child) = stack.pop() {
                 match child {
                     Child::Window(id) => {
-                        if self.registry.get_cg_id(id).is_some() {
-                            let w = self.hub.get_window(id);
-                            let colors = if focused == Some(Child::Window(id)) {
-                                spawn_colors(w.spawn_mode(), &self.config)
-                            } else {
-                                [self.config.border_color; 4]
-                            };
-                            if let Some((clipped, edges)) =
-                                compute_border_edges(w.dimension(), monitor_dim, colors, b)
-                            {
-                                tiling_borders.push(TilingBorder {
-                                    key: id,
-                                    frame: to_ns_rect(self.primary_full_height, clipped),
-                                    edges: edges
-                                        .into_iter()
-                                        .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
-                                        .collect(),
-                                });
-                            }
-                        }
+                        let focused = focused == Some(Child::Window(id));
+                        let window = self.registry.get_mut_by_window_id(id).unwrap();
+                        if let Err(e) = window.show(
+                            self.hub.get_window(id),
+                            monitor_dim,
+                            scale,
+                            focused,
+                            &self.config,
+                        ) {
+                            tracing::trace!("Failed to set position for window: {e:#}");
+                        };
                     }
                     Child::Container(id) => {
                         let container = self.hub.get_container(id);
@@ -840,89 +850,24 @@ impl Dome {
             }
 
             for &float_id in ws.float_windows() {
-                let Some(cg_id) = self.registry.get_cg_id(float_id) else {
-                    continue;
-                };
-
-                let dim = self.hub.get_window(float_id).dimension();
-                let color = if focused == Some(Child::Window(float_id)) {
-                    self.config.focused_color
-                } else {
-                    self.config.border_color
-                };
-                if let Some((clipped, edges)) =
-                    compute_border_edges(dim, monitor_dim, [color; 4], b)
-                {
-                    float_borders.push(FloatBorder {
-                        key: float_id,
-                        frame: to_ns_rect(self.primary_full_height, clipped),
-                        edges: edges
-                            .into_iter()
-                            .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
-                            .collect(),
-                    });
+                let float_focused = focused == Some(Child::Window(float_id));
+                let window = self.registry.get_mut_by_window_id(float_id).unwrap();
+                if let Err(e) = window.show(
+                    self.hub.get_window(float_id),
+                    monitor_dim,
+                    scale,
+                    float_focused,
+                    &self.config,
+                ) {
+                    tracing::trace!("Failed to set float dimension: {e:#}");
                 }
-
-                // Mirror unfocused floats
-                if focused == Some(Child::Window(float_id)) {
-                    continue;
-                }
-
-                let content_dim = apply_inset(dim, b);
-                if let Some(clipped) = clip_to_bounds(content_dim, monitor_dim) {
-                    let frame = to_ns_rect(self.primary_full_height, clipped);
-                    let source_rect = compute_source_rect(content_dim, clipped);
-                    let scale = self
-                        .monitor_registry
-                        .get_screen_by_monitor(ws.monitor())
-                        .unwrap()
-                        .scale;
-
-                    if let Some(capture) = self.registry.get_capture_mut(cg_id) {
-                        capture.start(
-                            cg_id,
-                            source_rect,
-                            frame.size.width as u32,
-                            frame.size.height as u32,
-                            scale,
-                            self.sender.clone(),
-                        );
-                    }
-
-                    if let Some(window) = self.registry.get_mut(cg_id) {
-                        window.hide().ok();
-                    }
-
-                    mirrors.push(MirrorUpdate {
-                        cg_id,
-                        frame,
-                        level: NSFloatingWindowLevel as isize + 1,
-                        scale,
-                    });
-                    curr_mirrors.insert(cg_id);
-                }
-            }
-        }
-
-        // Stop captures no longer mirrored
-        for cg_id in previous_displayed.difference(&curr_mirrors) {
-            if let Some(capture) = self.registry.get_capture_mut(*cg_id) {
-                capture.stop();
             }
         }
 
         Overlays {
-            tiling_borders,
-            float_borders,
             container_borders,
             tab_bars,
-            mirrors,
         }
-    }
-
-    fn send_overlays(&mut self, previous_mirrored: &HashSet<CGWindowID>) {
-        let overlays = self.build_overlays(previous_mirrored);
-        self.sender.send(HubMessage::Overlays(overlays));
     }
 }
 
@@ -935,97 +880,47 @@ impl Drop for Dome {
 
 fn get_focused_window_cg_id(pid: i32) -> Option<CGWindowID> {
     use super::objc2_wrapper::{get_attribute, get_cg_window_id, kAXFocusedWindowAttribute};
-    let ax_app = unsafe { objc2_application_services::AXUIElement::new_application(pid) };
-    let focused = get_attribute::<objc2_application_services::AXUIElement>(
-        &ax_app,
-        &kAXFocusedWindowAttribute(),
-    )
-    .ok()?;
+    let ax_app = unsafe { AXUIElement::new_application(pid) };
+    let focused = get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute()).ok()?;
     get_cg_window_id(&focused)
 }
 
-fn get_displayed_cg_ids(hub: &Hub, registry: &Registry) -> HashSet<CGWindowID> {
-    let mut cg_ids = HashSet::new();
-
-    for ws_id in hub.visible_workspaces() {
-        let ws = hub.get_workspace(ws_id);
-        let mut stack: Vec<Child> = ws.root().into_iter().collect();
-        while let Some(child) = stack.pop() {
-            match child {
-                Child::Window(id) => {
-                    if let Some(cg_id) = registry.get_cg_id(id) {
-                        cg_ids.insert(cg_id);
-                    }
-                }
-                Child::Container(id) => {
-                    let container = hub.get_container(id);
-                    if let Some(active) = container.active_tab() {
-                        stack.push(active);
-                    } else {
-                        for &c in container.children() {
-                            stack.push(c);
-                        }
-                    }
-                }
-            }
-        }
-
-        for &float_id in ws.float_windows() {
-            if let Some(cg_id) = registry.get_cg_id(float_id) {
-                cg_ids.insert(cg_id);
-            }
-        }
-    }
-
-    cg_ids
-}
-
-/// Position tiling windows, returns discovered size constraints and clipped window ids
-fn collect_tiling_windows(
+fn get_displayed_for_workspace(
     hub: &Hub,
+    ws_id: WorkspaceId,
     registry: &Registry,
-) -> Vec<(CGWindowID, WindowId, Window, Dimension)> {
-    let mut result = Vec::new();
+) -> HashSet<CGWindowID> {
+    let mut windows = HashSet::new();
+    let ws = hub.get_workspace(ws_id);
 
-    for ws_id in hub.visible_workspaces() {
-        let ws = hub.get_workspace(ws_id);
-        let monitor_dim = hub.get_monitor(ws.monitor()).dimension();
-        let mut stack: Vec<Child> = ws.root().into_iter().collect();
-
-        while let Some(child) = stack.pop() {
-            match child {
-                Child::Window(id) => {
-                    if let Some(cg_id) = registry.get_cg_id(id) {
-                        result.push((cg_id, id, hub.get_window(id).clone(), monitor_dim));
-                    }
+    let mut stack: Vec<Child> = ws.root().into_iter().collect();
+    while let Some(child) = stack.pop() {
+        match child {
+            Child::Window(id) => {
+                if let Some(cg_id) = registry.get_cg_id(id) {
+                    windows.insert(cg_id);
                 }
-                Child::Container(id) => {
-                    let container = hub.get_container(id);
-                    if let Some(active) = container.active_tab() {
-                        stack.push(active);
-                    } else {
-                        for &c in container.children() {
-                            stack.push(c);
-                        }
+            }
+            Child::Container(id) => {
+                let container = hub.get_container(id);
+                if let Some(active) = container.active_tab() {
+                    stack.push(active);
+                } else {
+                    for &c in container.children() {
+                        stack.push(c);
                     }
                 }
             }
         }
     }
-    result
-}
 
-fn position_tiling_windows(
-    windows: Vec<(CGWindowID, WindowId, Window, Dimension)>,
-    registry: &mut Registry,
-    border: f32,
-) {
-    for (cg_id, _id, core_window, monitor_dim) in windows {
-        let Some(mac_window) = registry.get_mut(cg_id) else {
-            continue;
-        };
-        mac_window.try_placement(&core_window, border, monitor_dim);
+    for &float_id in ws.float_windows() {
+        if let Some(cg_id) = registry.get_cg_id(float_id) {
+            windows.insert(cg_id);
+        }
     }
+
+    windows
 }
 
 fn build_tab_bar(
@@ -1119,19 +1014,6 @@ fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimension> {
         width: right - x,
         height: bottom - y,
     })
-}
-
-fn compute_source_rect(original: Dimension, clipped: Dimension) -> CGRect {
-    CGRect {
-        origin: CGPoint {
-            x: (clipped.x - original.x) as f64,
-            y: (clipped.y - original.y) as f64,
-        },
-        size: CGSize {
-            width: clipped.width as f64,
-            height: clipped.height as f64,
-        },
-    }
 }
 
 /// Compute border edges for a window, clipped to monitor bounds.
@@ -1236,15 +1118,6 @@ fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
     ]
 }
 
-fn apply_inset(dim: Dimension, border: f32) -> Dimension {
-    Dimension {
-        x: dim.x + border,
-        y: dim.y + border,
-        width: (dim.width - 2.0 * border).max(0.0),
-        height: (dim.height - 2.0 * border).max(0.0),
-    }
-}
-
 fn on_open_actions(window: &MacWindow, rules: &[MacosOnOpenRule]) -> Option<Actions> {
     let rule = rules.iter().find(|r| {
         r.window
@@ -1254,12 +1127,16 @@ fn on_open_actions(window: &MacWindow, rules: &[MacosOnOpenRule]) -> Option<Acti
     Some(rule.run.clone())
 }
 
-fn should_ignore(window: &MacWindow, rules: &[MacosWindow]) -> bool {
+fn should_ignore(ax_window: &AXWindow, rules: &[MacosWindow]) -> bool {
     let matched = rules
         .iter()
-        .find(|r| r.matches(window.app_name(), window.bundle_id(), window.title()));
+        .find(|r| r.matches(ax_window.title(), ax_window.bundle_id(), ax_window.title()));
     if let Some(rule) = matched {
-        tracing::debug!(%window, ?rule, "Window ignored by rule");
+        tracing::debug!(
+            %ax_window,
+            ?rule,
+            "Window ignored by rule"
+        );
         return true;
     }
     false
@@ -1286,12 +1163,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
         if !registry.contains(screen.display_id) {
             let id = hub.add_monitor(screen.name.clone(), screen.dimension);
             registry.insert(screen, id);
-            tracing::info!(
-                name = %screen.name,
-                display_id = screen.display_id,
-                dimension = ?screen.dimension,
-                "Monitor added"
-            );
+            tracing::info!(%screen, "Monitor added");
         }
     }
 
@@ -1301,10 +1173,10 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
         tracing::info!(%monitor_id, fallback = %registry.primary_monitor_id(), "Monitor removed");
     }
 
-    // Update dimensions
+    // Update screen info (dimension, scale, etc.)
     for screen in screens {
-        if let Some(monitor_id) = registry.get(screen.display_id) {
-            let old_dim = hub.get_monitor(monitor_id).dimension();
+        if let Some(entry) = registry.map.get_mut(&screen.display_id) {
+            let old_dim = hub.get_monitor(entry.id).dimension();
             if old_dim != screen.dimension {
                 tracing::info!(
                     name = %screen.name,
@@ -1313,7 +1185,192 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
                     "Monitor dimension changed"
                 );
             }
-            hub.update_monitor_dimension(monitor_id, screen.dimension);
+            hub.update_monitor_dimension(entry.id, screen.dimension);
+            entry.screen = screen.clone();
         }
+    }
+}
+
+pub(super) struct WindowCapture {
+    stream: Retained<SCStream>,
+    handler: Retained<StreamOutputHandler>,
+    running: bool,
+}
+
+// Safety: SCStream and StreamOutputHandler are thread-safe for the operations we perform
+unsafe impl Send for WindowCapture {}
+
+impl WindowCapture {
+    pub(super) fn start(
+        &mut self,
+        cg_id: CGWindowID,
+        source_rect: CGRect,
+        width: u32,
+        height: u32,
+        scale: f64,
+        app_tx: MessageSender,
+    ) {
+        let config = unsafe { SCStreamConfiguration::new() };
+        unsafe {
+            config.setWidth((width as f64 * scale) as usize);
+            config.setHeight((height as f64 * scale) as usize);
+            config.setSourceRect(source_rect);
+            // calayer expects srgb
+            config.setColorSpaceName(kCGColorSpaceSRGB);
+            config.setCapturesAudio(false);
+            config.setCaptureMicrophone(false);
+            config.setExcludesCurrentProcessAudio(false);
+        }
+        let block = RcBlock::new(|_: *mut NSError| {});
+        unsafe {
+            self.stream
+                .updateConfiguration_completionHandler(&config, Some(&block))
+        };
+        if !self.running {
+            let block = RcBlock::new(move |error: *mut NSError| {
+                if !error.is_null() {
+                    app_tx.send(HubMessage::CaptureFailed { cg_id });
+                }
+            });
+            unsafe { self.stream.startCaptureWithCompletionHandler(Some(&block)) };
+            self.running = true;
+        }
+    }
+
+    pub(super) fn stop(&mut self) {
+        if self.running {
+            let block = RcBlock::new(|_: *mut NSError| {});
+            unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&block)) };
+            self.running = false;
+        }
+    }
+}
+
+impl Drop for WindowCapture {
+    fn drop(&mut self) {
+        self.stop();
+        unsafe {
+            self.stream
+                .removeStreamOutput_type_error(
+                    ProtocolObject::from_ref(&*self.handler),
+                    SCStreamOutputType::Screen,
+                )
+                .ok();
+        }
+    }
+}
+
+fn create_captures_async(
+    cg_ids: Vec<CGWindowID>,
+    hub_tx: Sender<HubEvent>,
+    app_tx: MessageSender,
+    queue: DispatchRetained<DispatchQueue>,
+) {
+    let block = RcBlock::new(
+        move |content: *mut SCShareableContent, error: *mut NSError| {
+            if !error.is_null() || content.is_null() {
+                tracing::error!("Failed to get shareable content");
+                return;
+            }
+            let content = unsafe { Retained::retain(content).unwrap() };
+            let sc_windows = unsafe { content.windows() };
+
+            for cg_id in &cg_ids {
+                let cg_id = *cg_id;
+                let Some(sc_window) = sc_windows.iter().find(|w| unsafe { w.windowID() } == cg_id)
+                else {
+                    continue;
+                };
+
+                let filter = unsafe {
+                    SCContentFilter::initWithDesktopIndependentWindow(
+                        <SCContentFilter as AnyThread>::alloc(),
+                        &sc_window,
+                    )
+                };
+
+                let config = unsafe { SCStreamConfiguration::new() };
+                unsafe { config.setQueueDepth(3) };
+
+                let handler = StreamOutputHandler::new(cg_id, app_tx.clone());
+
+                let stream = unsafe {
+                    SCStream::initWithFilter_configuration_delegate(
+                        <SCStream as AnyThread>::alloc(),
+                        &filter,
+                        &config,
+                        None,
+                    )
+                };
+
+                if unsafe {
+                    stream.addStreamOutput_type_sampleHandlerQueue_error(
+                        ProtocolObject::from_ref(&*handler),
+                        SCStreamOutputType::Screen,
+                        Some(&queue),
+                    )
+                }
+                .is_err()
+                {
+                    continue;
+                }
+
+                let capture = WindowCapture {
+                    stream,
+                    handler,
+                    running: false,
+                };
+                hub_tx.send(HubEvent::CaptureReady { cg_id, capture }).ok();
+            }
+        },
+    );
+    unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&block) };
+}
+
+struct StreamOutputHandlerIvars {
+    cg_id: CGWindowID,
+    app_tx: MessageSender,
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[ivars = StreamOutputHandlerIvars]
+    struct StreamOutputHandler;
+
+    unsafe impl NSObjectProtocol for StreamOutputHandler {}
+
+    unsafe impl SCStreamOutput for StreamOutputHandler {
+        #[unsafe(method(stream:didOutputSampleBuffer:ofType:))]
+        fn did_output_sample_buffer(
+            &self,
+            _stream: &SCStream,
+            buffer: &CMSampleBuffer,
+            output_type: SCStreamOutputType,
+        ) {
+            if output_type == SCStreamOutputType::Screen
+                && let Some(surface) = extract_io_surface(buffer)
+            {
+                self.ivars().app_tx.send(HubMessage::CaptureFrame {
+                    cg_id: self.ivars().cg_id,
+                    surface,
+                });
+            }
+        }
+    }
+);
+
+impl StreamOutputHandler {
+    fn new(cg_id: CGWindowID, app_tx: MessageSender) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { cg_id, app_tx });
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+fn extract_io_surface(buffer: &CMSampleBuffer) -> Option<Retained<IOSurface>> {
+    unsafe {
+        let image_buffer = buffer.image_buffer()?;
+        let surface = objc2_core_video::CVPixelBufferGetIOSurface(Some(&image_buffer))?;
+        let ptr = CFRetained::into_raw(surface).as_ptr() as *mut IOSurface;
+        Some(Retained::from_raw(ptr).unwrap())
     }
 }

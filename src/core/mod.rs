@@ -9,7 +9,7 @@ mod workspace;
 
 pub(crate) use hub::Hub;
 pub(crate) use node::{
-    Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, Window, WindowId,
+    Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, Window, WindowId, WorkspaceId,
 };
 
 const MAX_ITERATIONS: usize = 10000;
