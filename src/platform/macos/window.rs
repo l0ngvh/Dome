@@ -1,22 +1,11 @@
-use std::collections::HashSet;
-
 use anyhow::Result;
-use objc2::rc::Retained;
-use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
-use objc2_core_foundation::{
-    CFArray, CFDictionary, CFNumber, CFString, CFType, CGPoint, CGRect, CGSize,
-};
-use objc2_core_graphics::{
-    CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption,
-};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-use super::app::ScreenInfo;
 use super::dome::{HubMessage, MessageSender};
 use super::mirror::WindowCapture;
-use super::objc2_wrapper::kCGWindowNumber;
-use crate::config::{Color, Config};
-use crate::core::{Dimension, SpawnMode, Window, WindowId};
+use super::monitor::{MonitorInfo, primary_full_height_from};
+use super::rendering::{clip_to_bounds, compute_window_border, to_ns_rect};
+use crate::config::Config;
+use crate::core::{Dimension, Window, WindowId};
 use crate::platform::macos::accessibility::AXWindow;
 
 pub(super) struct MacWindow {
@@ -27,7 +16,7 @@ pub(super) struct MacWindow {
     focused: bool,
     physical_placement: Option<(RoundedDimension, u8)>,
     is_ax_hidden: bool,
-    monitors: Vec<ScreenInfo>,
+    monitors: Vec<MonitorInfo>,
 }
 
 impl MacWindow {
@@ -36,7 +25,7 @@ impl MacWindow {
         window_id: WindowId,
         hub_window: &Window,
         sender: MessageSender,
-        monitors: Vec<ScreenInfo>,
+        monitors: Vec<MonitorInfo>,
     ) -> Self {
         let primary_full_height = primary_full_height_from(&monitors);
         let frame = to_ns_rect(primary_full_height, hub_window.dimension());
@@ -77,52 +66,33 @@ impl MacWindow {
     ) -> anyhow::Result<()> {
         let content_dim = apply_inset(window.dimension(), config.border_size);
         let scale = self.hidden_monitor().scale;
+        let primary_full_height = self.primary_full_height();
 
         if window.is_float() && !focused {
-            if let Some(clipped) = clip_to_bounds(content_dim, monitor) {
-                let frame = to_ns_rect(self.primary_full_height(), clipped);
-                let source_rect = compute_source_rect(content_dim, clipped);
-
-                if let Some(capture) = &mut self.capture {
-                    capture.start(
-                        self.ax.cg_id(),
-                        source_rect,
-                        frame.size.width as u32,
-                        frame.size.height as u32,
-                        scale,
-                        self.sender.clone(),
-                    );
-                }
-
-                if let Err(e) = self.hide_ax() {
-                    tracing::trace!("Failed to hide window for float capture: {e:#}");
-                }
-            } else {
-                self.hide()?;
+            if let Some(capture) = &mut self.capture {
+                capture.start(
+                    self.ax.cg_id(),
+                    content_dim,
+                    monitor,
+                    scale,
+                    primary_full_height,
+                    self.sender.clone(),
+                );
             }
+            self.hide_ax()?;
         } else {
             self.try_placement(content_dim, monitor);
         }
 
-        let colors = if window.is_float() && focused {
-            [config.focused_color; 4]
-        } else if focused {
-            spawn_colors(window.spawn_mode(), config)
-        } else {
-            [config.border_color; 4]
-        };
-        if let Some((clipped, edges)) =
-            compute_border_edges(window.dimension(), monitor, colors, config.border_size)
+        if let Some(border) =
+            compute_window_border(window, monitor, focused, config, primary_full_height)
         {
             self.sender.send(HubMessage::WindowShow {
                 cg_id: self.ax.cg_id(),
-                frame: to_ns_rect(self.primary_full_height(), clipped),
+                frame: border.frame,
                 is_float: window.is_float(),
                 is_focus: focused,
-                edges: edges
-                    .into_iter()
-                    .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
-                    .collect(),
+                edges: border.edges,
                 scale,
                 border: config.border_size as f64,
             });
@@ -156,7 +126,7 @@ impl MacWindow {
     /// We pick the monitor whose bottom-right corner is furthest from origin,
     /// ensuring hidden windows are placed at a valid screen position that is
     /// not visible on any other screen.
-    fn hidden_monitor(&self) -> &ScreenInfo {
+    fn hidden_monitor(&self) -> &MonitorInfo {
         self.monitors
             .iter()
             .max_by_key(|m| {
@@ -186,7 +156,7 @@ impl MacWindow {
     /// use case, the alternative placements are acceptable, albeit they will mess a little with
     /// our border rendering
     fn try_placement(&mut self, placement: Dimension, monitor: Dimension) {
-        if is_completely_offscreen(placement, monitor) {
+        let Some(target) = clip_to_bounds(placement, monitor) else {
             if self.is_ax_hidden {
                 return;
             }
@@ -203,27 +173,7 @@ impl MacWindow {
                 tracing::trace!("Failed to hide window: {e:#}");
             }
             return;
-        }
-
-        let mut target = placement;
-
-        // Mac prevents putting windows above menu bar
-        if target.y < monitor.y {
-            target.height -= monitor.y - target.y;
-            target.y = monitor.y;
-        }
-        // Clip to fit within monitor bounds, as Mac sometimes snaps windows to fit within screen,
-        // which might be confused with user setting size manually
-        if target.y + target.height > monitor.y + monitor.height {
-            target.height = monitor.y + monitor.height - target.y;
-        }
-        if target.x < monitor.x {
-            target.width -= monitor.x - target.x;
-            target.x = monitor.x;
-        }
-        if target.x + target.width > monitor.x + monitor.width {
-            target.width = monitor.x + monitor.width - target.x;
-        }
+        };
 
         let rounded = round_dim(target);
         let (ax, ay) = self.ax.get_position().unwrap_or((0, 0));
@@ -350,7 +300,7 @@ impl MacWindow {
         self.ax.focus()
     }
 
-    pub(super) fn on_monitor_change(&mut self, monitors: Vec<ScreenInfo>) {
+    pub(super) fn on_monitor_change(&mut self, monitors: Vec<MonitorInfo>) {
         self.monitors = monitors;
         if self.is_ax_hidden
             && let Err(e) = self.hide_ax()
@@ -383,205 +333,8 @@ fn apply_inset(dim: Dimension, border: f32) -> Dimension {
     }
 }
 
-fn is_completely_offscreen(dim: Dimension, screen: Dimension) -> bool {
-    dim.x + dim.width <= screen.x
-        || dim.x >= screen.x + screen.width
-        || dim.y + dim.height <= screen.y
-        || dim.y >= screen.y + screen.height
-}
-
 /// Constraint on raw window size (min_w, min_h, max_w, max_h).
 pub(super) type RawConstraint = (Option<f32>, Option<f32>, Option<f32>, Option<f32>);
-
-pub(super) fn list_cg_window_ids() -> HashSet<CGWindowID> {
-    let Some(window_list) = CGWindowListCopyWindowInfo(CGWindowListOption::OptionAll, 0) else {
-        tracing::warn!("CGWindowListCopyWindowInfo returned None");
-        return HashSet::new();
-    };
-    let window_list: &CFArray<CFDictionary<CFString, CFType>> =
-        unsafe { window_list.cast_unchecked() };
-
-    let mut ids = HashSet::new();
-    let key = kCGWindowNumber();
-    for dict in window_list {
-        // window id is a required attribute
-        // https://developer.apple.com/documentation/coregraphics/kcgwindownumber?language=objc
-        let id = dict
-            .get(&key)
-            .unwrap()
-            .downcast::<CFNumber>()
-            .unwrap()
-            .as_i64()
-            .unwrap();
-        ids.insert(id as CGWindowID);
-    }
-    ids
-}
-
-pub(super) fn running_apps() -> impl Iterator<Item = Retained<NSRunningApplication>> {
-    let own_pid = std::process::id() as i32;
-    NSWorkspace::sharedWorkspace()
-        .runningApplications()
-        .into_iter()
-        .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
-        .filter(move |app| app.processIdentifier() != -1 && app.processIdentifier() != own_pid)
-}
-
-pub(super) fn get_app_by_pid(pid: i32) -> Option<Retained<NSRunningApplication>> {
-    if pid == std::process::id() as i32 {
-        return None;
-    }
-    NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
-}
-
-// Quartz uses top-left origin, Cocoa uses bottom-left origin
-fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
-    NSRect::new(
-        NSPoint::new(
-            dim.x as f64,
-            (primary_full_height - dim.y - dim.height) as f64,
-        ),
-        NSSize::new(dim.width as f64, dim.height as f64),
-    )
-}
-
-/// Convert edge rect from Quartz coords to Cocoa coords, relative to the overlay window.
-fn to_edge_ns_rect(dim: Dimension, overlay_height: f32) -> NSRect {
-    NSRect::new(
-        NSPoint::new(dim.x as f64, (overlay_height - dim.y - dim.height) as f64),
-        NSSize::new(dim.width as f64, dim.height as f64),
-    )
-}
-
-/// Clip rect to bounds. Returns None if fully outside.
-fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimension> {
-    if rect.x >= bounds.x + bounds.width
-        || rect.y >= bounds.y + bounds.height
-        || rect.x + rect.width <= bounds.x
-        || rect.y + rect.height <= bounds.y
-    {
-        return None;
-    }
-    let x = rect.x.max(bounds.x);
-    let y = rect.y.max(bounds.y);
-    let right = (rect.x + rect.width).min(bounds.x + bounds.width);
-    let bottom = (rect.y + rect.height).min(bounds.y + bounds.height);
-    Some(Dimension {
-        x,
-        y,
-        width: right - x,
-        height: bottom - y,
-    })
-}
-
-fn compute_source_rect(original: Dimension, clipped: Dimension) -> CGRect {
-    CGRect {
-        origin: CGPoint {
-            x: (clipped.x - original.x) as f64,
-            y: (clipped.y - original.y) as f64,
-        },
-        size: CGSize {
-            width: clipped.width as f64,
-            height: clipped.height as f64,
-        },
-    }
-}
-
-fn compute_border_edges(
-    frame: Dimension,
-    bounds: Dimension,
-    colors: [Color; 4],
-    b: f32,
-) -> Option<(Dimension, Vec<(Dimension, Color)>)> {
-    let clipped = clip_to_bounds(frame, bounds)?;
-
-    let offset_x = clipped.x - frame.x;
-    let offset_y = clipped.y - frame.y;
-    let clip_local = Dimension {
-        x: offset_x,
-        y: offset_y,
-        width: clipped.width,
-        height: clipped.height,
-    };
-
-    let w = frame.width;
-    let h = frame.height;
-    let mut edges = Vec::new();
-
-    // top
-    let top = Dimension {
-        x: 0.0,
-        y: 0.0,
-        width: w,
-        height: b,
-    };
-    if let Some(r) = clip_to_bounds(top, clip_local) {
-        edges.push((translate_dim(r, -offset_x, -offset_y), colors[0]));
-    }
-
-    // right
-    let right = Dimension {
-        x: w - b,
-        y: b,
-        width: b,
-        height: h - 2.0 * b,
-    };
-    if let Some(r) = clip_to_bounds(right, clip_local) {
-        edges.push((translate_dim(r, -offset_x, -offset_y), colors[1]));
-    }
-
-    // bottom
-    let bottom = Dimension {
-        x: 0.0,
-        y: h - b,
-        width: w,
-        height: b,
-    };
-    if let Some(r) = clip_to_bounds(bottom, clip_local) {
-        edges.push((translate_dim(r, -offset_x, -offset_y), colors[2]));
-    }
-
-    // left
-    let left = Dimension {
-        x: 0.0,
-        y: b,
-        width: b,
-        height: h - 2.0 * b,
-    };
-    if let Some(r) = clip_to_bounds(left, clip_local) {
-        edges.push((translate_dim(r, -offset_x, -offset_y), colors[3]));
-    }
-
-    if edges.is_empty() {
-        None
-    } else {
-        Some((clipped, edges))
-    }
-}
-
-fn translate_dim(dim: Dimension, dx: f32, dy: f32) -> Dimension {
-    Dimension {
-        x: dim.x + dx,
-        y: dim.y + dy,
-        width: dim.width,
-        height: dim.height,
-    }
-}
-
-fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
-    let f = config.focused_color;
-    let s = config.spawn_indicator_color;
-    [
-        if spawn.is_tab() { s } else { f },
-        if spawn.is_horizontal() { s } else { f },
-        if spawn.is_vertical() { s } else { f },
-        f,
-    ]
-}
-
-fn primary_full_height_from(monitors: &[ScreenInfo]) -> f32 {
-    monitors.iter().find(|s| s.is_primary).unwrap().full_height
-}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 struct RoundedDimension {

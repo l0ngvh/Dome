@@ -4,9 +4,11 @@ mod dome;
 mod keyboard;
 mod listeners;
 mod mirror;
+mod monitor;
 mod objc2_wrapper;
 mod overlay;
 mod recovery;
+mod rendering;
 mod throttle;
 mod window;
 

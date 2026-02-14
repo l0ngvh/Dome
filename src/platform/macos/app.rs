@@ -10,8 +10,8 @@ use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSColor, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder, NSScreen, NSView,
-    NSWindow, NSWindowCollectionBehavior, NSWindowOrderingMode, NSWindowStyleMask,
+    NSColor, NSFloatingWindowLevel, NSNormalWindowLevel, NSWindow,
+    NSWindowCollectionBehavior, NSWindowOrderingMode, NSWindowStyleMask,
 };
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
@@ -19,11 +19,10 @@ use objc2_core_foundation::{
     kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::{
-    CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID, CGPreflightScreenCaptureAccess,
-    CGRequestScreenCaptureAccess, CGWindowID,
+    CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess, CGWindowID,
 };
 use objc2_foundation::{
-    NSNotification, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+    NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
 };
 use objc2_io_surface::IOSurface;
 use tracing_error::ErrorLayer;
@@ -34,12 +33,11 @@ use super::dome::{Dome, HubEvent, HubMessage, MessageSender};
 use super::keyboard::KeyboardListener;
 use super::listeners::EventListener;
 use super::mirror::MirrorView;
-use super::overlay::OverlayManager;
+use super::monitor::get_all_screens;
+use super::overlay::{BorderView, OverlayManager};
 use super::recovery;
 use crate::config::{Color, Config, start_config_watcher};
-use crate::core::Dimension;
 use crate::ipc;
-use crate::platform::macos::overlay::draw_rect;
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -303,70 +301,6 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct ScreenInfo {
-    pub(super) display_id: CGDirectDisplayID,
-    pub(super) name: String,
-    pub(super) dimension: Dimension,
-    pub(super) full_height: f32,
-    pub(super) is_primary: bool,
-    pub(super) scale: f64,
-}
-
-impl std::fmt::Display for ScreenInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} (id={}, dim={:?}, scale={})",
-            self.name, self.display_id, self.dimension, self.scale
-        )
-    }
-}
-
-fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
-    let desc = screen.deviceDescription();
-    let key = NSString::from_str("NSScreenNumber");
-    desc.objectForKey(&key)
-        .and_then(|obj| {
-            let num: Option<&NSNumber> = obj.downcast_ref();
-            num.map(|n| n.unsignedIntValue())
-        })
-        .unwrap_or(0)
-}
-
-pub(super) fn get_all_screens(mtm: MainThreadMarker) -> Vec<ScreenInfo> {
-    let primary_id = CGMainDisplayID();
-
-    NSScreen::screens(mtm)
-        .iter()
-        .map(|screen| {
-            let display_id = get_display_id(&screen);
-            let name = screen.localizedName().to_string();
-            let bounds = CGDisplayBounds(display_id);
-            let frame = screen.frame();
-            let visible = screen.visibleFrame();
-
-            let top_inset =
-                (frame.origin.y + frame.size.height) - (visible.origin.y + visible.size.height);
-            let bottom_inset = visible.origin.y - frame.origin.y;
-
-            ScreenInfo {
-                display_id,
-                name,
-                dimension: Dimension {
-                    x: bounds.origin.x as f32,
-                    y: (bounds.origin.y + top_inset) as f32,
-                    width: bounds.size.width as f32,
-                    height: (bounds.size.height - top_inset - bottom_inset) as f32,
-                },
-                full_height: bounds.size.height as f32,
-                is_primary: display_id == primary_id,
-                scale: screen.backingScaleFactor(),
-            }
-        })
-        .collect()
-}
-
 struct OverlayWindow {
     window: Retained<NSWindow>,
     border_view: Retained<BorderView>,
@@ -485,42 +419,5 @@ impl UIWindow {
     }
     fn scale(&self) -> f64 {
         self.scale
-    }
-}
-
-struct BorderViewIvars {
-    edges: RefCell<Vec<(NSRect, Color)>>,
-}
-
-define_class!(
-    #[unsafe(super(NSView, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[ivars = BorderViewIvars]
-    struct BorderView;
-
-    unsafe impl NSObjectProtocol for BorderView {}
-
-    impl BorderView {
-        #[unsafe(method(drawRect:))]
-        fn draw_rect(&self, _dirty_rect: NSRect) {
-            for (rect, color) in self.ivars().edges.borrow().iter() {
-                draw_rect(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height, *color);
-            }
-        }
-    }
-);
-
-impl BorderView {
-    fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
-        let ivars = BorderViewIvars {
-            edges: RefCell::new(Vec::new()),
-        };
-        let this = Self::alloc(mtm).set_ivars(ivars);
-        unsafe { msg_send![super(this), initWithFrame: frame] }
-    }
-
-    fn set_edges(&self, edges: Vec<(NSRect, Color)>) {
-        *self.ivars().edges.borrow_mut() = edges;
-        self.setNeedsDisplay(true);
     }
 }

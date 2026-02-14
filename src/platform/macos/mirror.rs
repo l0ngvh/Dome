@@ -6,7 +6,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{NSEvent, NSResponder, NSView};
-use objc2_core_foundation::{CFRetained, CGRect};
+use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGWindowID, kCGColorSpaceSRGB};
 use objc2_core_media::CMSampleBuffer;
 use objc2_foundation::{NSError, NSObject, NSObjectProtocol, NSRect};
@@ -18,6 +18,8 @@ use objc2_screen_capture_kit::{
 };
 
 use super::dome::{HubEvent, HubMessage, MessageSender};
+use super::rendering::{clip_to_bounds, to_ns_rect};
+use crate::core::Dimension;
 
 pub(super) struct MirrorViewIvars {
     cg_id: CGWindowID,
@@ -84,19 +86,27 @@ pub(super) struct WindowCapture {
 unsafe impl Send for WindowCapture {}
 
 impl WindowCapture {
+    /// `scale` is passed separately because the original window may be hidden on a different monitor.
     pub(super) fn start(
         &mut self,
         cg_id: CGWindowID,
-        source_rect: CGRect,
-        width: u32,
-        height: u32,
+        content_dim: Dimension,
+        monitor: Dimension,
         scale: f64,
+        primary_full_height: f32,
         app_tx: MessageSender,
     ) {
+        let Some(clipped) = clip_to_bounds(content_dim, monitor) else {
+            self.stop();
+            return;
+        };
+        let frame = to_ns_rect(primary_full_height, clipped);
+        let source_rect = compute_source_rect(content_dim, clipped);
+
         let config = unsafe { SCStreamConfiguration::new() };
         unsafe {
-            config.setWidth((width as f64 * scale) as usize);
-            config.setHeight((height as f64 * scale) as usize);
+            config.setWidth((frame.size.width * scale) as usize);
+            config.setHeight((frame.size.height * scale) as usize);
             config.setSourceRect(source_rect);
             // calayer expects srgb
             config.setColorSpaceName(kCGColorSpaceSRGB);
@@ -126,6 +136,19 @@ impl WindowCapture {
             unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&block)) };
             self.running = false;
         }
+    }
+}
+
+fn compute_source_rect(original: Dimension, clipped: Dimension) -> CGRect {
+    CGRect {
+        origin: CGPoint {
+            x: (clipped.x - original.x) as f64,
+            y: (clipped.y - original.y) as f64,
+        },
+        size: CGSize {
+            width: clipped.width as f64,
+            height: clipped.height as f64,
+        },
     }
 }
 

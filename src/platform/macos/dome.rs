@@ -3,26 +3,27 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::rc::Retained;
-use objc2_app_kit::NSRunningApplication;
+use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
 use objc2_application_services::AXUIElement;
-use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource};
-use objc2_core_graphics::CGWindowID;
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_core_foundation::{
+    CFArray, CFDictionary, CFNumber, CFRetained, CFRunLoop, CFRunLoopSource, CFString, CFType,
+};
+use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
+use objc2_foundation::NSRect;
 use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
-use crate::core::{
-    Child, Container, ContainerId, Dimension, Hub, MonitorId, SpawnMode, Window, WindowId,
-    WorkspaceId,
-};
+use crate::core::{Child, Container, Dimension, Hub, MonitorId, Window, WindowId, WorkspaceId};
 use crate::platform::macos::accessibility::{AXWindow, get_ax_windows};
 
-use super::app::ScreenInfo;
 use super::mirror::{WindowCapture, create_captures_async};
-use super::overlay::{ContainerBorder, Overlays, TabBarOverlay, TabInfo};
+use super::monitor::MonitorInfo;
+use super::objc2_wrapper::kCGWindowNumber;
+use super::overlay::Overlays;
 use super::recovery;
-use super::window::{MacWindow, get_app_by_pid, list_cg_window_ids, running_apps};
+use super::rendering::{ContainerBorder, build_tab_bar, compute_container_border};
+use super::window::MacWindow;
 
 #[expect(
     clippy::large_enum_variant,
@@ -57,7 +58,7 @@ pub(super) enum HubEvent {
     /// syncs window state, not focus, as focus changes should come from user interactions. Beside
     /// we receive plenty of focus events, so missing them isn't a concern.
     Sync,
-    ScreensChanged(Vec<ScreenInfo>),
+    ScreensChanged(Vec<MonitorInfo>),
     MirrorClicked(CGWindowID),
     CaptureReady {
         cg_id: CGWindowID,
@@ -102,12 +103,12 @@ struct Registry {
     windows: HashMap<CGWindowID, MacWindow>,
     id_to_cg: HashMap<WindowId, CGWindowID>,
     pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
-    monitors: Vec<ScreenInfo>,
+    monitors: Vec<MonitorInfo>,
     sender: MessageSender,
 }
 
 impl Registry {
-    fn new(monitors: Vec<ScreenInfo>, sender: MessageSender) -> Self {
+    fn new(monitors: Vec<MonitorInfo>, sender: MessageSender) -> Self {
         Self {
             windows: HashMap::new(),
             id_to_cg: HashMap::new(),
@@ -241,7 +242,7 @@ type DisplayId = u32;
 
 struct MonitorEntry {
     id: MonitorId,
-    screen: ScreenInfo,
+    screen: MonitorInfo,
     displayed_windows: HashSet<CGWindowID>,
 }
 
@@ -252,7 +253,7 @@ struct MonitorRegistry {
 }
 
 impl MonitorRegistry {
-    fn new(primary: &ScreenInfo, primary_monitor_id: MonitorId) -> Self {
+    fn new(primary: &MonitorInfo, primary_monitor_id: MonitorId) -> Self {
         let mut map = HashMap::new();
         let mut reverse = HashMap::new();
         map.insert(
@@ -289,7 +290,7 @@ impl MonitorRegistry {
         self.get(self.primary_display_id).unwrap()
     }
 
-    fn insert(&mut self, screen: &ScreenInfo, monitor_id: MonitorId) {
+    fn insert(&mut self, screen: &MonitorInfo, monitor_id: MonitorId) {
         self.map.insert(
             screen.display_id,
             MonitorEntry {
@@ -327,7 +328,7 @@ impl MonitorRegistry {
         stale
     }
 
-    fn all_screens(&self) -> Vec<ScreenInfo> {
+    fn all_screens(&self) -> Vec<MonitorInfo> {
         self.map.values().map(|e| e.screen.clone()).collect()
     }
 }
@@ -352,7 +353,7 @@ pub(super) struct Dome {
 impl Dome {
     pub(super) fn new(
         config: Config,
-        screens: Vec<ScreenInfo>,
+        screens: Vec<MonitorInfo>,
         hub_tx: Sender<HubEvent>,
         sender: MessageSender,
     ) -> Self {
@@ -660,7 +661,7 @@ impl Dome {
         }
     }
 
-    fn update_screens(&mut self, screens: Vec<ScreenInfo>) {
+    fn update_screens(&mut self, screens: Vec<MonitorInfo>) {
         if screens.is_empty() {
             tracing::warn!("Empty screen list, skipping reconciliation");
             return;
@@ -728,7 +729,6 @@ impl Dome {
     #[tracing::instrument(skip_all)]
     fn process_frame(&mut self) -> Overlays {
         let current_ws_id = self.hub.current_workspace();
-        let b = self.config.border_size;
         let mut container_borders = Vec::new();
         let mut tab_bars = Vec::new();
 
@@ -775,13 +775,15 @@ impl Dome {
                         let container = self.hub.get_container(id);
                         if let Some(active) = container.active_tab() {
                             stack.push(active);
+                            let titles = self.collect_tab_titles(container);
                             if let Some(tab_bar) = build_tab_bar(
-                                self.primary_full_height,
+                                container.dimension(),
                                 monitor_dim,
                                 id,
-                                container,
-                                &self.registry,
+                                &titles,
+                                container.active_tab_index(),
                                 &self.config,
+                                self.primary_full_height,
                             ) {
                                 tab_bars.push(tab_bar);
                             }
@@ -796,17 +798,16 @@ impl Dome {
 
             if let Some(Child::Container(id)) = focused {
                 let c = self.hub.get_container(id);
-                let colors = spawn_colors(c.spawn_mode(), &self.config);
-                if let Some((clipped, edges)) =
-                    compute_border_edges(c.dimension(), monitor_dim, colors, b)
-                {
+                if let Some(border) = compute_container_border(
+                    c,
+                    monitor_dim,
+                    &self.config,
+                    self.primary_full_height,
+                ) {
                     container_borders.push(ContainerBorder {
                         key: id,
-                        frame: to_ns_rect(self.primary_full_height, clipped),
-                        edges: edges
-                            .into_iter()
-                            .map(|(r, c)| (to_edge_ns_rect(r, clipped.height), c))
-                            .collect(),
+                        frame: border.frame,
+                        edges: border.edges,
                     });
                 }
             }
@@ -829,6 +830,21 @@ impl Dome {
             container_borders,
             tab_bars,
         }
+    }
+
+    fn collect_tab_titles(&self, container: &Container) -> Vec<String> {
+        container
+            .children()
+            .iter()
+            .map(|c| match c {
+                Child::Window(wid) => self
+                    .registry
+                    .get_title(*wid)
+                    .unwrap_or("Unknown")
+                    .to_owned(),
+                Child::Container(_) => "Container".to_owned(),
+            })
+            .collect()
     }
 }
 
@@ -884,201 +900,6 @@ fn get_displayed_for_workspace(
     windows
 }
 
-fn build_tab_bar(
-    primary_full_height: f32,
-    monitor_dim: Dimension,
-    id: ContainerId,
-    container: &Container,
-    registry: &Registry,
-    config: &Config,
-) -> Option<TabBarOverlay> {
-    let dim = container.dimension();
-    let tab_bar_dim = Dimension {
-        x: dim.x,
-        y: dim.y,
-        width: dim.width,
-        height: config.tab_bar_height,
-    };
-
-    let clipped = clip_to_bounds(tab_bar_dim, monitor_dim)?;
-
-    let children = container.children();
-    let active_tab = container.active_tab_index();
-    let tab_width = if children.is_empty() {
-        0.0
-    } else {
-        dim.width / children.len() as f32
-    };
-
-    let tabs = children
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            let title = match c {
-                Child::Window(wid) => registry.get_title(*wid).unwrap_or("Unknown").to_owned(),
-                Child::Container(_) => "Container".to_owned(),
-            };
-            TabInfo {
-                title,
-                x: i as f32 * tab_width,
-                width: tab_width,
-                is_active: i == active_tab,
-            }
-        })
-        .collect();
-
-    Some(TabBarOverlay {
-        key: id,
-        frame: to_ns_rect(primary_full_height, clipped),
-        tabs,
-        background_color: config.tab_bar_background_color,
-        active_background_color: config.active_tab_background_color,
-    })
-}
-
-// Quartz uses top-left origin, Cocoa uses bottom-left origin
-fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
-    NSRect::new(
-        NSPoint::new(
-            dim.x as f64,
-            (primary_full_height - dim.y - dim.height) as f64,
-        ),
-        NSSize::new(dim.width as f64, dim.height as f64),
-    )
-}
-
-/// Convert edge rect from Quartz coords to Cocoa coords, relative to the overlay window.
-/// Used for positioning border edges within their parent overlay NSWindow/NSView.
-fn to_edge_ns_rect(dim: Dimension, overlay_height: f32) -> NSRect {
-    NSRect::new(
-        NSPoint::new(dim.x as f64, (overlay_height - dim.y - dim.height) as f64),
-        NSSize::new(dim.width as f64, dim.height as f64),
-    )
-}
-
-/// Clip rect to bounds. Returns None if fully outside.
-fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimension> {
-    if rect.x >= bounds.x + bounds.width
-        || rect.y >= bounds.y + bounds.height
-        || rect.x + rect.width <= bounds.x
-        || rect.y + rect.height <= bounds.y
-    {
-        return None;
-    }
-    let x = rect.x.max(bounds.x);
-    let y = rect.y.max(bounds.y);
-    let right = (rect.x + rect.width).min(bounds.x + bounds.width);
-    let bottom = (rect.y + rect.height).min(bounds.y + bounds.height);
-    Some(Dimension {
-        x,
-        y,
-        width: right - x,
-        height: bottom - y,
-    })
-}
-
-/// Compute border edges for a window, clipped to monitor bounds.
-/// Returns (clipped_frame, edges) or None if fully outside bounds.
-/// All coordinates in Quartz (top-left origin).
-///
-/// # Arguments
-/// * `colors` - Edge colors in order: [top, right, bottom, left]
-///
-/// # Returns
-/// Edges in same order as colors: [top, right, bottom, left] (if visible after clipping)
-fn compute_border_edges(
-    frame: Dimension,
-    bounds: Dimension,
-    colors: [Color; 4],
-    b: f32,
-) -> Option<(Dimension, Vec<(Dimension, Color)>)> {
-    let clipped = clip_to_bounds(frame, bounds)?;
-
-    let offset_x = clipped.x - frame.x;
-    let offset_y = clipped.y - frame.y;
-    let clip_local = Dimension {
-        x: offset_x,
-        y: offset_y,
-        width: clipped.width,
-        height: clipped.height,
-    };
-
-    let w = frame.width;
-    let h = frame.height;
-    let mut edges = Vec::new();
-
-    // top (y = 0 in Quartz)
-    let top = Dimension {
-        x: 0.0,
-        y: 0.0,
-        width: w,
-        height: b,
-    };
-    if let Some(r) = clip_to_bounds(top, clip_local) {
-        edges.push((translate_dim(r, -offset_x, -offset_y), colors[0]));
-    }
-
-    // right (exclude corners)
-    let right = Dimension {
-        x: w - b,
-        y: b,
-        width: b,
-        height: h - 2.0 * b,
-    };
-    if let Some(r) = clip_to_bounds(right, clip_local) {
-        edges.push((translate_dim(r, -offset_x, -offset_y), colors[1]));
-    }
-
-    // bottom (y = h - b in Quartz)
-    let bottom = Dimension {
-        x: 0.0,
-        y: h - b,
-        width: w,
-        height: b,
-    };
-    if let Some(r) = clip_to_bounds(bottom, clip_local) {
-        edges.push((translate_dim(r, -offset_x, -offset_y), colors[2]));
-    }
-
-    // left (exclude corners)
-    let left = Dimension {
-        x: 0.0,
-        y: b,
-        width: b,
-        height: h - 2.0 * b,
-    };
-    if let Some(r) = clip_to_bounds(left, clip_local) {
-        edges.push((translate_dim(r, -offset_x, -offset_y), colors[3]));
-    }
-
-    if edges.is_empty() {
-        None
-    } else {
-        Some((clipped, edges))
-    }
-}
-
-fn translate_dim(dim: Dimension, dx: f32, dy: f32) -> Dimension {
-    Dimension {
-        x: dim.x + dx,
-        y: dim.y + dy,
-        width: dim.width,
-        height: dim.height,
-    }
-}
-
-fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
-    let f = config.focused_color;
-    let s = config.spawn_indicator_color;
-    // [top, right, bottom, left] to match BorderView draw order
-    [
-        if spawn.is_tab() { s } else { f },
-        if spawn.is_horizontal() { s } else { f },
-        if spawn.is_vertical() { s } else { f },
-        f,
-    ]
-}
-
 fn on_open_actions(window: &MacWindow, rules: &[MacosOnOpenRule]) -> Option<Actions> {
     let rule = rules.iter().find(|r| {
         r.window
@@ -1103,7 +924,7 @@ fn should_ignore(ax_window: &AXWindow, rules: &[MacosWindow]) -> bool {
     false
 }
 
-fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[ScreenInfo]) {
+fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[MonitorInfo]) {
     let current_keys: HashSet<_> = screens.iter().map(|s| s.display_id).collect();
 
     // Special handling for when the primary monitor got replaced, i.e. due to mirroring to prevent
@@ -1150,4 +971,45 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
             entry.screen = screen.clone();
         }
     }
+}
+
+fn list_cg_window_ids() -> HashSet<CGWindowID> {
+    let Some(window_list) = CGWindowListCopyWindowInfo(CGWindowListOption::OptionAll, 0) else {
+        tracing::warn!("CGWindowListCopyWindowInfo returned None");
+        return HashSet::new();
+    };
+    let window_list: &CFArray<CFDictionary<CFString, CFType>> =
+        unsafe { window_list.cast_unchecked() };
+
+    let mut ids = HashSet::new();
+    let key = kCGWindowNumber();
+    for dict in window_list {
+        // window id is a required attribute
+        // https://developer.apple.com/documentation/coregraphics/kcgwindownumber?language=objc
+        let id = dict
+            .get(&key)
+            .unwrap()
+            .downcast::<CFNumber>()
+            .unwrap()
+            .as_i64()
+            .unwrap();
+        ids.insert(id as CGWindowID);
+    }
+    ids
+}
+
+fn running_apps() -> impl Iterator<Item = Retained<NSRunningApplication>> {
+    let own_pid = std::process::id() as i32;
+    NSWorkspace::sharedWorkspace()
+        .runningApplications()
+        .into_iter()
+        .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
+        .filter(move |app| app.processIdentifier() != -1 && app.processIdentifier() != own_pid)
+}
+
+fn get_app_by_pid(pid: i32) -> Option<Retained<NSRunningApplication>> {
+    if pid == std::process::id() as i32 {
+        return None;
+    }
+    NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
 }

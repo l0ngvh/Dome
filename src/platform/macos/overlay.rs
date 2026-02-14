@@ -15,6 +15,8 @@ use objc2_foundation::{
 use crate::config::Color;
 use crate::core::ContainerId;
 
+use super::rendering::{ContainerBorder, TabBarOverlay, TabInfo};
+
 fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> Retained<NSWindow> {
     let window = unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -36,37 +38,12 @@ fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> 
     window
 }
 
-// Border overlay structs use pre-clipped frames because macOS automatically relocates
-// windows that extend beyond monitor bounds. Without clipping, border overlays for
-// windows near screen edges would be pushed to different monitors.
-
-pub(super) struct ContainerBorder {
-    pub(super) key: ContainerId,
-    pub(super) frame: NSRect,
-    pub(super) edges: Vec<(NSRect, Color)>,
-}
-
-pub(super) struct TabInfo {
-    pub(super) title: String,
-    pub(super) x: f32,
-    pub(super) width: f32,
-    pub(super) is_active: bool,
-}
-
-pub(super) struct TabBarOverlay {
-    pub(super) key: ContainerId,
-    pub(super) frame: NSRect,
-    pub(super) tabs: Vec<TabInfo>,
-    pub(super) background_color: Color,
-    pub(super) active_background_color: Color,
-}
-
 pub(super) struct Overlays {
     pub(super) container_borders: Vec<ContainerBorder>,
     pub(super) tab_bars: Vec<TabBarOverlay>,
 }
 
-struct BorderViewIvars {
+pub(super) struct BorderViewIvars {
     edges: RefCell<Vec<(NSRect, Color)>>,
 }
 
@@ -74,7 +51,7 @@ define_class!(
     #[unsafe(super(NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[ivars = BorderViewIvars]
-    struct BorderView;
+    pub(super) struct BorderView;
 
     unsafe impl NSObjectProtocol for BorderView {}
 
@@ -89,7 +66,7 @@ define_class!(
 );
 
 impl BorderView {
-    fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
+    pub(super) fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
         let ivars = BorderViewIvars {
             edges: RefCell::new(Vec::new()),
         };
@@ -97,7 +74,7 @@ impl BorderView {
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 
-    fn set_edges(&self, edges: Vec<(NSRect, Color)>) {
+    pub(super) fn set_edges(&self, edges: Vec<(NSRect, Color)>) {
         *self.ivars().edges.borrow_mut() = edges;
         self.setNeedsDisplay(true);
     }
