@@ -10,7 +10,7 @@ use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSColor, NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder, NSScreen, NSView,
+    NSColor, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder, NSScreen, NSView,
     NSWindow, NSWindowCollectionBehavior, NSWindowOrderingMode, NSWindowStyleMask,
 };
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
@@ -26,7 +26,6 @@ use objc2_foundation::{
     NSNotification, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
 };
 use objc2_io_surface::IOSurface;
-use objc2_quartz_core::CALayer;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
@@ -34,6 +33,7 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 use super::dome::{Dome, HubEvent, HubMessage, MessageSender};
 use super::keyboard::KeyboardListener;
 use super::listeners::EventListener;
+use super::mirror::MirrorView;
 use super::overlay::OverlayManager;
 use super::recovery;
 use crate::config::{Color, Config, start_config_watcher};
@@ -522,60 +522,5 @@ impl BorderView {
     fn set_edges(&self, edges: Vec<(NSRect, Color)>) {
         *self.ivars().edges.borrow_mut() = edges;
         self.setNeedsDisplay(true);
-    }
-}
-
-struct MirrorViewIvars {
-    cg_id: CGWindowID,
-    layer: Retained<CALayer>,
-    hub_tx: Sender<HubEvent>,
-}
-
-define_class!(
-    #[unsafe(super(NSView, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[ivars = MirrorViewIvars]
-    struct MirrorView;
-
-    unsafe impl NSObjectProtocol for MirrorView {}
-
-    impl MirrorView {
-        #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, _event: &NSEvent) {
-            self.ivars().hub_tx.send(HubEvent::MirrorClicked(self.ivars().cg_id)).ok();
-        }
-
-        #[unsafe(method(acceptsFirstMouse:))]
-        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
-            true
-        }
-    }
-);
-
-impl MirrorView {
-    fn new(
-        mtm: MainThreadMarker,
-        frame: NSRect,
-        cg_id: CGWindowID,
-        hub_tx: Sender<HubEvent>,
-    ) -> Retained<Self> {
-        let layer = CALayer::new();
-        let this = Self::alloc(mtm).set_ivars(MirrorViewIvars {
-            cg_id,
-            hub_tx,
-            layer: layer.clone(),
-        });
-        let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
-        view.setLayer(Some(&layer));
-        view.setWantsLayer(true);
-        view
-    }
-
-    fn apply_frame(&self, surface: &IOSurface) {
-        unsafe { self.ivars().layer.setContents(Some(surface)) };
-    }
-
-    fn set_scale(&self, scale: f64) {
-        self.ivars().layer.setContentsScale(scale);
     }
 }

@@ -17,14 +17,12 @@ use crate::core::{
     WorkspaceId,
 };
 use crate::platform::macos::accessibility::{AXWindow, get_ax_windows};
-use crate::platform::macos::window::WindowCapture;
 
 use super::app::ScreenInfo;
+use super::mirror::{WindowCapture, create_captures_async};
 use super::overlay::{ContainerBorder, Overlays, TabBarOverlay, TabInfo};
 use super::recovery;
-use super::window::{
-    MacWindow, create_captures_async, get_app_by_pid, list_cg_window_ids, running_apps,
-};
+use super::window::{MacWindow, get_app_by_pid, list_cg_window_ids, running_apps};
 
 #[expect(
     clippy::large_enum_variant,
