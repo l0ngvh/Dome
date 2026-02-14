@@ -1,21 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender};
 
-use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
-use objc2::runtime::ProtocolObject;
-use objc2::{AnyThread, DefinedClass, define_class, msg_send, rc::Retained};
+use objc2::rc::Retained;
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::AXUIElement;
-use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource, CGRect};
-use objc2_core_graphics::{CGWindowID, kCGColorSpaceSRGB};
-use objc2_core_media::CMSampleBuffer;
-use objc2_foundation::{NSError, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
+use objc2_core_foundation::{CFRetained, CFRunLoop, CFRunLoopSource};
+use objc2_core_graphics::CGWindowID;
+use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
-use objc2_screen_capture_kit::{
-    SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
-    SCStreamOutputType,
-};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
@@ -24,11 +17,14 @@ use crate::core::{
     WorkspaceId,
 };
 use crate::platform::macos::accessibility::{AXWindow, get_ax_windows};
+use crate::platform::macos::window::WindowCapture;
 
-use super::app::{ScreenInfo, compute_global_bounds};
+use super::app::ScreenInfo;
 use super::overlay::{ContainerBorder, Overlays, TabBarOverlay, TabInfo};
 use super::recovery;
-use super::window::{MacWindow, get_app_by_pid, list_cg_window_ids, running_apps};
+use super::window::{
+    MacWindow, create_captures_async, get_app_by_pid, list_cg_window_ids, running_apps,
+};
 
 #[expect(
     clippy::large_enum_variant,
@@ -97,7 +93,6 @@ pub(super) enum HubMessage {
     WindowCreate {
         cg_id: CGWindowID,
         frame: NSRect,
-        scale: f64,
     },
     WindowDelete {
         cg_id: CGWindowID,
@@ -109,24 +104,22 @@ struct Registry {
     windows: HashMap<CGWindowID, MacWindow>,
     id_to_cg: HashMap<WindowId, CGWindowID>,
     pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
-    primary_full_height: f32,
-    global_bounds: Dimension,
+    monitors: Vec<ScreenInfo>,
     sender: MessageSender,
 }
 
 impl Registry {
-    fn new(primary_full_height: f32, global_bounds: Dimension, sender: MessageSender) -> Self {
+    fn new(monitors: Vec<ScreenInfo>, sender: MessageSender) -> Self {
         Self {
             windows: HashMap::new(),
             id_to_cg: HashMap::new(),
             pid_to_cg: HashMap::new(),
-            primary_full_height,
-            global_bounds,
+            monitors,
             sender,
         }
     }
 
-    fn insert(&mut self, ax: AXWindow, window_id: WindowId, hub_window: &Window, scale: f64) {
+    fn insert(&mut self, ax: AXWindow, window_id: WindowId, hub_window: &Window) {
         let cg_id = ax.cg_id();
         let pid = ax.pid();
         if pid as u32 == std::process::id() {
@@ -140,10 +133,8 @@ impl Registry {
                 ax,
                 window_id,
                 hub_window,
-                self.primary_full_height,
                 self.sender.clone(),
-                scale,
-                self.global_bounds,
+                self.monitors.clone(),
             ),
         );
     }
@@ -290,16 +281,6 @@ impl MonitorRegistry {
         self.map.get(&display_id).map(|e| e.id)
     }
 
-    fn get_screen(&self, display_id: DisplayId) -> Option<&ScreenInfo> {
-        self.map.get(&display_id).map(|e| &e.screen)
-    }
-
-    fn get_screen_by_monitor(&self, monitor_id: MonitorId) -> Option<&ScreenInfo> {
-        self.reverse
-            .get(&monitor_id)
-            .and_then(|d| self.get_screen(*d))
-    }
-
     fn get_entry_mut(&mut self, monitor_id: MonitorId) -> Option<&mut MonitorEntry> {
         self.reverse
             .get(&monitor_id)
@@ -347,6 +328,10 @@ impl MonitorRegistry {
         }
         stale
     }
+
+    fn all_screens(&self) -> Vec<ScreenInfo> {
+        self.map.values().map(|e| e.screen.clone()).collect()
+    }
 }
 
 pub(super) struct Dome {
@@ -359,8 +344,6 @@ pub(super) struct Dome {
     /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
-    /// Bounding box of all monitors, used for hiding windows offscreen.
-    global_bounds: Dimension,
     observed_pids: HashSet<i32>,
     sender: MessageSender,
     hub_tx: Sender<HubEvent>,
@@ -372,7 +355,6 @@ impl Dome {
     pub(super) fn new(
         config: Config,
         screens: Vec<ScreenInfo>,
-        global_bounds: Dimension,
         hub_tx: Sender<HubEvent>,
         sender: MessageSender,
     ) -> Self {
@@ -392,12 +374,11 @@ impl Dome {
 
         Self {
             hub,
-            registry: Registry::new(primary.full_height, global_bounds, sender.clone()),
+            registry: Registry::new(monitor_registry.all_screens(), sender.clone()),
             monitor_registry,
             config,
             primary_screen: primary.dimension,
             primary_full_height: primary.full_height,
-            global_bounds,
             observed_pids: HashSet::new(),
             sender,
             hub_tx,
@@ -563,14 +544,8 @@ impl Dome {
 
             recovery::track(ax.clone(), self.primary_screen);
             let hub_window = self.hub.get_window(window_id);
-            let ws = self.hub.get_workspace(hub_window.workspace());
-            let scale = self
-                .monitor_registry
-                .get_screen_by_monitor(ws.monitor())
-                .unwrap()
-                .scale;
             let cg_id = ax.cg_id();
-            self.registry.insert(ax, window_id, hub_window, scale);
+            self.registry.insert(ax, window_id, hub_window);
 
             let window = self.registry.get_by_window_id(window_id).unwrap();
             tracing::info!(%window, %window_id, "Window inserted");
@@ -697,12 +672,10 @@ impl Dome {
             self.primary_screen = primary.dimension;
             self.primary_full_height = primary.full_height;
         }
-        self.global_bounds = compute_global_bounds(&screens);
-        self.registry.global_bounds = self.global_bounds;
-        self.registry.primary_full_height = self.primary_full_height;
+        self.registry.monitors = screens.clone();
 
         for window in self.registry.windows.values_mut() {
-            window.on_monitor_change(self.global_bounds, self.primary_full_height);
+            window.on_monitor_change(screens.clone());
         }
 
         reconcile_monitors(&mut self.hub, &mut self.monitor_registry, &screens);
@@ -783,11 +756,6 @@ impl Dome {
             let monitor_id = ws.monitor();
             let monitor_dim = self.hub.get_monitor(monitor_id).dimension();
             let mut stack: Vec<Child> = ws.root().into_iter().collect();
-            let scale = self
-                .monitor_registry
-                .get_screen_by_monitor(monitor_id)
-                .unwrap()
-                .scale;
             let focused = if ws_id == current_ws_id {
                 ws.focused()
             } else {
@@ -799,13 +767,9 @@ impl Dome {
                     Child::Window(id) => {
                         let focused = focused == Some(Child::Window(id));
                         let window = self.registry.get_mut_by_window_id(id).unwrap();
-                        if let Err(e) = window.show(
-                            self.hub.get_window(id),
-                            monitor_dim,
-                            scale,
-                            focused,
-                            &self.config,
-                        ) {
+                        if let Err(e) =
+                            window.show(self.hub.get_window(id), monitor_dim, focused, &self.config)
+                        {
                             tracing::trace!("Failed to set position for window: {e:#}");
                         };
                     }
@@ -855,7 +819,6 @@ impl Dome {
                 if let Err(e) = window.show(
                     self.hub.get_window(float_id),
                     monitor_dim,
-                    scale,
                     float_focused,
                     &self.config,
                 ) {
@@ -1188,189 +1151,5 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
             hub.update_monitor_dimension(entry.id, screen.dimension);
             entry.screen = screen.clone();
         }
-    }
-}
-
-pub(super) struct WindowCapture {
-    stream: Retained<SCStream>,
-    handler: Retained<StreamOutputHandler>,
-    running: bool,
-}
-
-// Safety: SCStream and StreamOutputHandler are thread-safe for the operations we perform
-unsafe impl Send for WindowCapture {}
-
-impl WindowCapture {
-    pub(super) fn start(
-        &mut self,
-        cg_id: CGWindowID,
-        source_rect: CGRect,
-        width: u32,
-        height: u32,
-        scale: f64,
-        app_tx: MessageSender,
-    ) {
-        let config = unsafe { SCStreamConfiguration::new() };
-        unsafe {
-            config.setWidth((width as f64 * scale) as usize);
-            config.setHeight((height as f64 * scale) as usize);
-            config.setSourceRect(source_rect);
-            // calayer expects srgb
-            config.setColorSpaceName(kCGColorSpaceSRGB);
-            config.setCapturesAudio(false);
-            config.setCaptureMicrophone(false);
-            config.setExcludesCurrentProcessAudio(false);
-        }
-        let block = RcBlock::new(|_: *mut NSError| {});
-        unsafe {
-            self.stream
-                .updateConfiguration_completionHandler(&config, Some(&block))
-        };
-        if !self.running {
-            let block = RcBlock::new(move |error: *mut NSError| {
-                if !error.is_null() {
-                    app_tx.send(HubMessage::CaptureFailed { cg_id });
-                }
-            });
-            unsafe { self.stream.startCaptureWithCompletionHandler(Some(&block)) };
-            self.running = true;
-        }
-    }
-
-    pub(super) fn stop(&mut self) {
-        if self.running {
-            let block = RcBlock::new(|_: *mut NSError| {});
-            unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&block)) };
-            self.running = false;
-        }
-    }
-}
-
-impl Drop for WindowCapture {
-    fn drop(&mut self) {
-        self.stop();
-        unsafe {
-            self.stream
-                .removeStreamOutput_type_error(
-                    ProtocolObject::from_ref(&*self.handler),
-                    SCStreamOutputType::Screen,
-                )
-                .ok();
-        }
-    }
-}
-
-fn create_captures_async(
-    cg_ids: Vec<CGWindowID>,
-    hub_tx: Sender<HubEvent>,
-    app_tx: MessageSender,
-    queue: DispatchRetained<DispatchQueue>,
-) {
-    let block = RcBlock::new(
-        move |content: *mut SCShareableContent, error: *mut NSError| {
-            if !error.is_null() || content.is_null() {
-                tracing::error!("Failed to get shareable content");
-                return;
-            }
-            let content = unsafe { Retained::retain(content).unwrap() };
-            let sc_windows = unsafe { content.windows() };
-
-            for cg_id in &cg_ids {
-                let cg_id = *cg_id;
-                let Some(sc_window) = sc_windows.iter().find(|w| unsafe { w.windowID() } == cg_id)
-                else {
-                    continue;
-                };
-
-                let filter = unsafe {
-                    SCContentFilter::initWithDesktopIndependentWindow(
-                        <SCContentFilter as AnyThread>::alloc(),
-                        &sc_window,
-                    )
-                };
-
-                let config = unsafe { SCStreamConfiguration::new() };
-                unsafe { config.setQueueDepth(3) };
-
-                let handler = StreamOutputHandler::new(cg_id, app_tx.clone());
-
-                let stream = unsafe {
-                    SCStream::initWithFilter_configuration_delegate(
-                        <SCStream as AnyThread>::alloc(),
-                        &filter,
-                        &config,
-                        None,
-                    )
-                };
-
-                if unsafe {
-                    stream.addStreamOutput_type_sampleHandlerQueue_error(
-                        ProtocolObject::from_ref(&*handler),
-                        SCStreamOutputType::Screen,
-                        Some(&queue),
-                    )
-                }
-                .is_err()
-                {
-                    continue;
-                }
-
-                let capture = WindowCapture {
-                    stream,
-                    handler,
-                    running: false,
-                };
-                hub_tx.send(HubEvent::CaptureReady { cg_id, capture }).ok();
-            }
-        },
-    );
-    unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&block) };
-}
-
-struct StreamOutputHandlerIvars {
-    cg_id: CGWindowID,
-    app_tx: MessageSender,
-}
-
-define_class!(
-    #[unsafe(super(NSObject))]
-    #[ivars = StreamOutputHandlerIvars]
-    struct StreamOutputHandler;
-
-    unsafe impl NSObjectProtocol for StreamOutputHandler {}
-
-    unsafe impl SCStreamOutput for StreamOutputHandler {
-        #[unsafe(method(stream:didOutputSampleBuffer:ofType:))]
-        fn did_output_sample_buffer(
-            &self,
-            _stream: &SCStream,
-            buffer: &CMSampleBuffer,
-            output_type: SCStreamOutputType,
-        ) {
-            if output_type == SCStreamOutputType::Screen
-                && let Some(surface) = extract_io_surface(buffer)
-            {
-                self.ivars().app_tx.send(HubMessage::CaptureFrame {
-                    cg_id: self.ivars().cg_id,
-                    surface,
-                });
-            }
-        }
-    }
-);
-
-impl StreamOutputHandler {
-    fn new(cg_id: CGWindowID, app_tx: MessageSender) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { cg_id, app_tx });
-        unsafe { msg_send![super(this), init] }
-    }
-}
-
-fn extract_io_surface(buffer: &CMSampleBuffer) -> Option<Retained<IOSurface>> {
-    unsafe {
-        let image_buffer = buffer.image_buffer()?;
-        let surface = objc2_core_video::CVPixelBufferGetIOSurface(Some(&image_buffer))?;
-        let ptr = CFRetained::into_raw(surface).as_ptr() as *mut IOSurface;
-        Some(Retained::from_raw(ptr).unwrap())
     }
 }

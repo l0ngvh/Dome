@@ -106,7 +106,6 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     if screens.is_empty() {
         return Err(anyhow::anyhow!("No monitors detected"));
     }
-    let global_bounds = compute_global_bounds(&screens);
 
     let is_suspended = Rc::new(Cell::new(false));
 
@@ -129,7 +128,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     let hub_thread = thread::spawn(move || {
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Dome::new(hub_config, screens, global_bounds, hub_tx, sender).run(event_rx);
+            Dome::new(hub_config, screens, hub_tx, sender).run(event_rx);
         }))
         .is_err()
         {
@@ -258,18 +257,9 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 // TODO: proper error handling
                 tracing::debug!("Failed to screen capture for {cg_id}");
             }
-            HubMessage::WindowCreate {
-                cg_id,
-                frame,
-                scale,
-            } => {
-                let overlay = OverlayWindow::new(
-                    mtm,
-                    frame,
-                    cg_id,
-                    scale,
-                    delegate.ivars().hub_sender.clone(),
-                );
+            HubMessage::WindowCreate { cg_id, frame } => {
+                let overlay =
+                    OverlayWindow::new(mtm, frame, cg_id, delegate.ivars().hub_sender.clone());
                 delegate
                     .ivars()
                     .overlay_windows
@@ -377,31 +367,6 @@ pub(super) fn get_all_screens(mtm: MainThreadMarker) -> Vec<ScreenInfo> {
         .collect()
 }
 
-pub(super) fn compute_global_bounds(screens: &[ScreenInfo]) -> Dimension {
-    let min_x = screens
-        .iter()
-        .map(|s| s.dimension.x)
-        .fold(f32::MAX, f32::min);
-    let min_y = screens
-        .iter()
-        .map(|s| s.dimension.y)
-        .fold(f32::MAX, f32::min);
-    let max_x = screens
-        .iter()
-        .map(|s| s.dimension.x + s.dimension.width)
-        .fold(f32::MIN, f32::max);
-    let max_y = screens
-        .iter()
-        .map(|s| s.dimension.y + s.dimension.height)
-        .fold(f32::MIN, f32::max);
-    Dimension {
-        x: min_x,
-        y: min_y,
-        width: max_x - min_x,
-        height: max_y - min_y,
-    }
-}
-
 struct OverlayWindow {
     window: Retained<NSWindow>,
     border_view: Retained<BorderView>,
@@ -413,7 +378,6 @@ impl OverlayWindow {
         mtm: MainThreadMarker,
         frame: NSRect,
         source_cg_id: CGWindowID,
-        scale: f64,
         hub_sender: Sender<HubEvent>,
     ) -> Self {
         let window = unsafe {
@@ -440,7 +404,7 @@ impl OverlayWindow {
 
         let border_view = BorderView::new(mtm, frame);
         content_view.addSubview(&border_view);
-        let mirror_view = MirrorView::new(mtm, frame, source_cg_id, scale, hub_sender);
+        let mirror_view = MirrorView::new(mtm, frame, source_cg_id, hub_sender);
         content_view.addSubview_positioned_relativeTo(
             &mirror_view,
             NSWindowOrderingMode::Above,
@@ -593,11 +557,9 @@ impl MirrorView {
         mtm: MainThreadMarker,
         frame: NSRect,
         cg_id: CGWindowID,
-        scale: f64,
         hub_tx: Sender<HubEvent>,
     ) -> Retained<Self> {
         let layer = CALayer::new();
-        layer.setContentsScale(scale);
         let this = Self::alloc(mtm).set_ivars(MirrorViewIvars {
             cg_id,
             hub_tx,

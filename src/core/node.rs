@@ -484,10 +484,6 @@ impl Window {
         self.mode == DisplayMode::Float
     }
 
-    pub(crate) fn workspace(&self) -> WorkspaceId {
-        self.workspace
-    }
-
     // Reset spawn mode
     pub(super) fn set_spawn_mode(&mut self, spawn_mode: SpawnMode) {
         self.spawn_mode = SpawnMode::clean(spawn_mode)
