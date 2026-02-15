@@ -34,7 +34,7 @@ unsafe impl Send for AXWindow {}
 
 impl std::fmt::Display for AXWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.app_name_())?;
+        write!(f, "[{}:{}] {}", self.pid, self.cg_id, self.app_name_())?;
         if let Some(bundle_id) = &self.bundle_id {
             write!(f, " ({bundle_id})")?;
         }
@@ -172,7 +172,6 @@ impl AXWindow {
     /// multiple windows, it gets triggered in a staggered manner, which is extremely slow, and
     /// causes event tap to be timed out
     pub(super) fn hide_at(&self, x: i32, y: i32) -> Result<()> {
-        tracing::trace!("Hiding window {self}");
         self.with_animation_disabled(|| self.set_position(x, y))
             .with_context(|| format!("hide for {self}"))
     }

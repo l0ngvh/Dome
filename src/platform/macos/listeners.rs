@@ -429,7 +429,6 @@ unsafe extern "C-unwind" fn observer_callback(
 
     let notification = unsafe { notification.as_ref() };
     let element = unsafe { CFRetained::retain(element) };
-    tracing::trace!("Received event: {}", (*notification));
 
     if CFEqual(Some(notification), Some(&*kAXWindowCreatedNotification()))
         || CFEqual(
@@ -473,7 +472,6 @@ unsafe extern "C-unwind" fn observer_callback(
         || CFEqual(Some(notification), Some(&*kAXResizedNotification()))
     {
         if let Ok(pid) = get_pid(&element) {
-            tracing::trace!(%pid, %notification, "Window moved or resized");
             ctx.resize_debounce.submit(pid);
         }
         return;
@@ -483,5 +481,8 @@ unsafe extern "C-unwind" fn observer_callback(
         && let Some(cg_id) = get_cg_window_id(&element)
     {
         ctx.title_throttle.submit(cg_id);
+        return;
     }
+
+    tracing::trace!(%notification, "unexpected AX event");
 }

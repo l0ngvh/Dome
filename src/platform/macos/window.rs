@@ -181,10 +181,6 @@ impl MacWindow {
         let at_position =
             ax == rounded.x && ay == rounded.y && aw == rounded.width && ah == rounded.height;
         if at_position {
-            tracing::trace!(
-                "Window {} is already at the correct position {rounded:?}",
-                self.ax,
-            );
             return;
         }
 

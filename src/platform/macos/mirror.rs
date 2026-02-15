@@ -103,10 +103,13 @@ impl WindowCapture {
         let frame = to_ns_rect(primary_full_height, clipped);
         let source_rect = compute_source_rect(content_dim, clipped);
 
+        let width = (frame.size.width * scale) as usize;
+        let height = (frame.size.height * scale) as usize;
+
         let config = unsafe { SCStreamConfiguration::new() };
         unsafe {
-            config.setWidth((frame.size.width * scale) as usize);
-            config.setHeight((frame.size.height * scale) as usize);
+            config.setWidth(width);
+            config.setHeight(height);
             config.setSourceRect(source_rect);
             // calayer expects srgb
             config.setColorSpaceName(kCGColorSpaceSRGB);
@@ -114,7 +117,22 @@ impl WindowCapture {
             config.setCaptureMicrophone(false);
             config.setExcludesCurrentProcessAudio(false);
         }
-        let block = RcBlock::new(|_: *mut NSError| {});
+        let block = RcBlock::new(move |error: *mut NSError| {
+            if !error.is_null() {
+                let error = unsafe { &*error };
+                tracing::warn!(
+                    cg_id,
+                    width,
+                    height,
+                    source_x = source_rect.origin.x,
+                    source_y = source_rect.origin.y,
+                    source_w = source_rect.size.width,
+                    source_h = source_rect.size.height,
+                    %error,
+                    "capture config update failed"
+                );
+            }
+        });
         unsafe {
             self.stream
                 .updateConfiguration_completionHandler(&config, Some(&block))
@@ -122,6 +140,18 @@ impl WindowCapture {
         if !self.running {
             let block = RcBlock::new(move |error: *mut NSError| {
                 if !error.is_null() {
+                    let error = unsafe { &*error };
+                    tracing::warn!(
+                        cg_id,
+                        width,
+                        height,
+                        source_x = source_rect.origin.x,
+                        source_y = source_rect.origin.y,
+                        source_w = source_rect.size.width,
+                        source_h = source_rect.size.height,
+                        %error,
+                        "capture start failed"
+                    );
                     app_tx.send(HubMessage::CaptureFailed { cg_id });
                 }
             });
