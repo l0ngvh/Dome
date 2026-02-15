@@ -68,6 +68,22 @@ impl MacWindow {
         let scale = self.hidden_monitor().scale;
         let primary_full_height = self.primary_full_height();
 
+        if let Some(border) =
+            compute_window_border(window, monitor, focused, config, primary_full_height)
+        {
+            self.sender.send(HubMessage::WindowShow {
+                cg_id: self.ax.cg_id(),
+                frame: border.frame,
+                is_float: window.is_float(),
+                is_focus: focused,
+                edges: border.edges,
+                scale,
+                border: config.border_size as f64,
+            });
+        } else {
+            return self.hide();
+        }
+
         if window.is_float() && !focused {
             if let Some(capture) = &mut self.capture {
                 capture.start(
@@ -82,21 +98,11 @@ impl MacWindow {
             self.hide_ax()?;
         } else {
             self.try_placement(content_dim, monitor);
+            if let Some(capture) = &mut self.capture {
+                capture.stop();
+            }
         }
 
-        if let Some(border) =
-            compute_window_border(window, monitor, focused, config, primary_full_height)
-        {
-            self.sender.send(HubMessage::WindowShow {
-                cg_id: self.ax.cg_id(),
-                frame: border.frame,
-                is_float: window.is_float(),
-                is_focus: focused,
-                edges: border.edges,
-                scale,
-                border: config.border_size as f64,
-            });
-        }
         if focused
             && !self.focused
             && let Err(e) = self.ax.focus()
@@ -169,6 +175,7 @@ impl MacWindow {
                 self.ax,
                 placement
             );
+            // only hide the physical window, the border can be partially visible
             if let Err(e) = self.hide_ax() {
                 tracing::trace!("Failed to hide window: {e:#}");
             }
@@ -188,24 +195,25 @@ impl MacWindow {
             && *prev == rounded
             && !self.is_ax_hidden
         {
-            if *count >= 5 {
+            if *count < 5 {
+                *count += 1;
+            } else if *count == 5 {
+                *count += 1;
                 tracing::debug!(
                     "Window {} can't be moved to the desired position {:?}",
                     self.ax,
                     self.physical_placement
                 );
+            } else {
                 return;
             }
-            *count += 1;
         } else {
             self.physical_placement = Some((rounded, 0));
+            tracing::trace!(
+                "Placing window {self} at {rounded:?}, with its logical placement at {placement:?}"
+            );
         }
 
-        tracing::trace!(
-            "Window {} placing at {target:?} (was_hidden={})",
-            self.ax,
-            self.is_ax_hidden
-        );
         self.is_ax_hidden = false;
         if let Err(e) = self.ax.set_frame(
             rounded.x as i32,
