@@ -14,11 +14,11 @@ use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
-use crate::core::{Child, Container, Dimension, Hub, MonitorId, Window, WindowId, WorkspaceId};
+use crate::core::{Child, Container, Dimension, Hub, Window, WindowId, WorkspaceId};
 use crate::platform::macos::accessibility::{AXWindow, get_ax_windows};
 
 use super::mirror::{WindowCapture, create_captures_async};
-use super::monitor::MonitorInfo;
+use super::monitor::{MonitorInfo, MonitorRegistry};
 use super::objc2_wrapper::kCGWindowNumber;
 use super::overlay::Overlays;
 use super::recovery;
@@ -235,101 +235,6 @@ impl MessageSender {
             self.source.signal();
             self.run_loop.wake_up();
         }
-    }
-}
-
-type DisplayId = u32;
-
-struct MonitorEntry {
-    id: MonitorId,
-    screen: MonitorInfo,
-    displayed_windows: HashSet<CGWindowID>,
-}
-
-struct MonitorRegistry {
-    map: HashMap<DisplayId, MonitorEntry>,
-    reverse: HashMap<MonitorId, DisplayId>,
-    primary_display_id: DisplayId,
-}
-
-impl MonitorRegistry {
-    fn new(primary: &MonitorInfo, primary_monitor_id: MonitorId) -> Self {
-        let mut map = HashMap::new();
-        let mut reverse = HashMap::new();
-        map.insert(
-            primary.display_id,
-            MonitorEntry {
-                id: primary_monitor_id,
-                screen: primary.clone(),
-                displayed_windows: HashSet::new(),
-            },
-        );
-        reverse.insert(primary_monitor_id, primary.display_id);
-        Self {
-            map,
-            reverse,
-            primary_display_id: primary.display_id,
-        }
-    }
-
-    fn contains(&self, display_id: DisplayId) -> bool {
-        self.map.contains_key(&display_id)
-    }
-
-    fn get(&self, display_id: DisplayId) -> Option<MonitorId> {
-        self.map.get(&display_id).map(|e| e.id)
-    }
-
-    fn get_entry_mut(&mut self, monitor_id: MonitorId) -> Option<&mut MonitorEntry> {
-        self.reverse
-            .get(&monitor_id)
-            .and_then(|d| self.map.get_mut(d))
-    }
-
-    fn primary_monitor_id(&self) -> MonitorId {
-        self.get(self.primary_display_id).unwrap()
-    }
-
-    fn insert(&mut self, screen: &MonitorInfo, monitor_id: MonitorId) {
-        self.map.insert(
-            screen.display_id,
-            MonitorEntry {
-                id: monitor_id,
-                screen: screen.clone(),
-                displayed_windows: HashSet::new(),
-            },
-        );
-        self.reverse.insert(monitor_id, screen.display_id);
-    }
-
-    fn remove_by_id(&mut self, monitor_id: MonitorId) {
-        if let Some(display_id) = self.reverse.remove(&monitor_id) {
-            self.map.remove(&display_id);
-        }
-    }
-
-    fn replace(&mut self, old_display_id: DisplayId, new_display_id: DisplayId) {
-        if let Some(mut entry) = self.map.remove(&old_display_id) {
-            entry.screen.display_id = new_display_id;
-            self.map.insert(new_display_id, entry);
-        }
-    }
-
-    fn remove_stale(&mut self, current: &HashSet<DisplayId>) -> Vec<MonitorId> {
-        let stale: Vec<_> = self
-            .map
-            .iter()
-            .filter(|(key, _)| !current.contains(key))
-            .map(|(_, e)| e.id)
-            .collect();
-        for &id in &stale {
-            self.remove_by_id(id);
-        }
-        stale
-    }
-
-    fn all_screens(&self) -> Vec<MonitorInfo> {
-        self.map.values().map(|e| e.screen.clone()).collect()
     }
 }
 
@@ -798,12 +703,9 @@ impl Dome {
 
             if let Some(Child::Container(id)) = focused {
                 let c = self.hub.get_container(id);
-                if let Some(border) = compute_container_border(
-                    c,
-                    monitor_dim,
-                    &self.config,
-                    self.primary_full_height,
-                ) {
+                if let Some(border) =
+                    compute_container_border(c, monitor_dim, &self.config, self.primary_full_height)
+                {
                     container_borders.push(ContainerBorder {
                         key: id,
                         frame: border.frame,
@@ -931,12 +833,10 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
     // disruption due to removal and addition of workspaces.
     if let Some(new_primary) = screens.iter().find(|s| s.is_primary) {
         if !registry.contains(new_primary.display_id) {
-            let old_display_id = registry.primary_display_id;
-            registry.replace(old_display_id, new_primary.display_id);
-            registry.primary_display_id = new_primary.display_id;
+            registry.replace_primary(new_primary);
             hub.update_monitor_dimension(registry.primary_monitor_id(), new_primary.dimension);
         } else {
-            registry.primary_display_id = new_primary.display_id;
+            registry.set_primary_display_id(new_primary.display_id);
         }
     }
 
@@ -957,8 +857,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
 
     // Update screen info (dimension, scale, etc.)
     for screen in screens {
-        if let Some(entry) = registry.map.get_mut(&screen.display_id) {
-            let old_dim = hub.get_monitor(entry.id).dimension();
+        if let Some((monitor_id, old_dim)) = registry.update_screen(screen) {
             if old_dim != screen.dimension {
                 tracing::info!(
                     name = %screen.name,
@@ -967,8 +866,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
                     "Monitor dimension changed"
                 );
             }
-            hub.update_monitor_dimension(entry.id, screen.dimension);
-            entry.screen = screen.clone();
+            hub.update_monitor_dimension(monitor_id, screen.dimension);
         }
     }
 }

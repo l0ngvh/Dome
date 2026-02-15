@@ -1,9 +1,11 @@
+use std::collections::{HashMap, HashSet};
+
 use objc2::MainThreadMarker;
 use objc2_app_kit::NSScreen;
-use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
+use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID, CGWindowID};
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::core::Dimension;
+use crate::core::{Dimension, MonitorId};
 
 #[derive(Clone)]
 pub(super) struct MonitorInfo {
@@ -22,6 +24,118 @@ impl std::fmt::Display for MonitorInfo {
             "{} (id={}, dim={:?}, scale={})",
             self.name, self.display_id, self.dimension, self.scale
         )
+    }
+}
+
+type DisplayId = u32;
+
+pub(super) struct MonitorEntry {
+    pub(super) id: MonitorId,
+    pub(super) screen: MonitorInfo,
+    pub(super) displayed_windows: HashSet<CGWindowID>,
+}
+
+pub(super) struct MonitorRegistry {
+    map: HashMap<DisplayId, MonitorEntry>,
+    reverse: HashMap<MonitorId, DisplayId>,
+    primary_display_id: DisplayId,
+}
+
+impl MonitorRegistry {
+    pub(super) fn new(primary: &MonitorInfo, primary_monitor_id: MonitorId) -> Self {
+        let mut map = HashMap::new();
+        let mut reverse = HashMap::new();
+        map.insert(
+            primary.display_id,
+            MonitorEntry {
+                id: primary_monitor_id,
+                screen: primary.clone(),
+                displayed_windows: HashSet::new(),
+            },
+        );
+        reverse.insert(primary_monitor_id, primary.display_id);
+        Self {
+            map,
+            reverse,
+            primary_display_id: primary.display_id,
+        }
+    }
+
+    pub(super) fn contains(&self, display_id: DisplayId) -> bool {
+        self.map.contains_key(&display_id)
+    }
+
+    pub(super) fn get(&self, display_id: DisplayId) -> Option<MonitorId> {
+        self.map.get(&display_id).map(|e| e.id)
+    }
+
+    pub(super) fn get_entry_mut(&mut self, monitor_id: MonitorId) -> Option<&mut MonitorEntry> {
+        self.reverse
+            .get(&monitor_id)
+            .and_then(|d| self.map.get_mut(d))
+    }
+
+    pub(super) fn primary_monitor_id(&self) -> MonitorId {
+        self.get(self.primary_display_id).unwrap()
+    }
+
+    pub(super) fn set_primary_display_id(&mut self, display_id: DisplayId) {
+        self.primary_display_id = display_id;
+    }
+
+    pub(super) fn replace_primary(&mut self, new_screen: &MonitorInfo) {
+        debug_assert!(!self.map.contains_key(&new_screen.display_id));
+        if let Some(mut entry) = self.map.remove(&self.primary_display_id) {
+            let old = self.primary_display_id;
+            let monitor_id = entry.id;
+            entry.screen = new_screen.clone();
+            self.map.insert(new_screen.display_id, entry);
+            self.reverse.insert(monitor_id, new_screen.display_id);
+            self.primary_display_id = new_screen.display_id;
+            tracing::info!(old, new = new_screen.display_id, "Primary monitor replaced");
+        }
+    }
+
+    pub(super) fn insert(&mut self, screen: &MonitorInfo, monitor_id: MonitorId) {
+        self.map.insert(
+            screen.display_id,
+            MonitorEntry {
+                id: monitor_id,
+                screen: screen.clone(),
+                displayed_windows: HashSet::new(),
+            },
+        );
+        self.reverse.insert(monitor_id, screen.display_id);
+    }
+
+    fn remove_by_id(&mut self, monitor_id: MonitorId) {
+        if let Some(display_id) = self.reverse.remove(&monitor_id) {
+            self.map.remove(&display_id);
+        }
+    }
+
+    pub(super) fn remove_stale(&mut self, current: &HashSet<DisplayId>) -> Vec<MonitorId> {
+        let stale: Vec<_> = self
+            .map
+            .iter()
+            .filter(|(key, _)| !current.contains(key))
+            .map(|(_, e)| e.id)
+            .collect();
+        for &id in &stale {
+            self.remove_by_id(id);
+        }
+        stale
+    }
+
+    pub(super) fn all_screens(&self) -> Vec<MonitorInfo> {
+        self.map.values().map(|e| e.screen.clone()).collect()
+    }
+
+    pub(super) fn update_screen(&mut self, screen: &MonitorInfo) -> Option<(MonitorId, Dimension)> {
+        let entry = self.map.get_mut(&screen.display_id)?;
+        let old_dim = entry.screen.dimension;
+        entry.screen = screen.clone();
+        Some((entry.id, old_dim))
     }
 }
 
