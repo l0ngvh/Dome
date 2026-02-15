@@ -6,7 +6,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsOnOpenRule, WindowsWindow};
-use crate::core::{Child, ContainerId, Dimension, Hub, MonitorId, SpawnMode, WindowId};
+use crate::core::{Child, ContainerId, Dimension, Hub, MonitorId, SpawnMode, WindowId, WorkspaceId};
 
 use super::recovery;
 use super::window::{Taskbar, WindowHandle, enum_windows, get_size_constraints};
@@ -160,8 +160,13 @@ impl Registry {
     }
 }
 
+struct MonitorEntry {
+    id: MonitorId,
+    displayed_windows: HashSet<WindowKey>,
+}
+
 struct MonitorRegistry {
-    map: HashMap<isize, MonitorId>,
+    map: HashMap<isize, MonitorEntry>,
     reverse: HashMap<MonitorId, isize>,
     primary_handle: isize,
 }
@@ -170,7 +175,13 @@ impl MonitorRegistry {
     fn new(primary_handle: isize, primary_monitor_id: MonitorId) -> Self {
         let mut map = HashMap::new();
         let mut reverse = HashMap::new();
-        map.insert(primary_handle, primary_monitor_id);
+        map.insert(
+            primary_handle,
+            MonitorEntry {
+                id: primary_monitor_id,
+                displayed_windows: HashSet::new(),
+            },
+        );
         reverse.insert(primary_monitor_id, primary_handle);
         Self {
             map,
@@ -180,7 +191,13 @@ impl MonitorRegistry {
     }
 
     fn insert(&mut self, handle: isize, monitor_id: MonitorId) {
-        self.map.insert(handle, monitor_id);
+        self.map.insert(
+            handle,
+            MonitorEntry {
+                id: monitor_id,
+                displayed_windows: HashSet::new(),
+            },
+        );
         self.reverse.insert(monitor_id, handle);
     }
 
@@ -188,6 +205,12 @@ impl MonitorRegistry {
         if let Some(handle) = self.reverse.remove(&monitor_id) {
             self.map.remove(&handle);
         }
+    }
+
+    fn get_entry_mut(&mut self, monitor_id: MonitorId) -> Option<&mut MonitorEntry> {
+        self.reverse
+            .get(&monitor_id)
+            .and_then(|h| self.map.get_mut(h))
     }
 }
 
@@ -259,13 +282,9 @@ impl Dome {
     pub(super) fn run(mut self, rx: Receiver<HubEvent>) {
         while self.running {
             if let Ok(event) = rx.recv() {
-                let previous_displayed: HashSet<_> = get_displayed_windows(&self.hub, &self.registry)
-                    .into_iter()
-                    .map(|(handle, _)| WindowKey::from(&handle))
-                    .collect();
                 let last_focus = self.hub.get_workspace(self.hub.current_workspace()).focused();
                 let (creates, deletes) = self.handle_event(event);
-                self.process_frame(creates, deletes, previous_displayed, last_focus);
+                self.process_frame(creates, deletes, last_focus);
             }
         }
     }
@@ -435,7 +454,6 @@ impl Dome {
         &mut self,
         creates: Vec<OverlayCreate>,
         deletes: Vec<WindowId>,
-        previous_displayed: HashSet<WindowKey>,
         last_focus: Option<Child>,
     ) {
         let border = self.config.border_size;
@@ -453,6 +471,23 @@ impl Dome {
             containers: Vec::new(),
             tab_bars: Vec::new(),
         };
+
+        // Hide windows no longer displayed per monitor
+        for ws_id in self.hub.visible_workspaces() {
+            let monitor_id = self.hub.get_workspace(ws_id).monitor();
+            let current_windows =
+                get_displayed_for_workspace(&self.hub, ws_id, &self.registry);
+
+            if let Some(entry) = self.monitor_registry.get_entry_mut(monitor_id) {
+                for key in entry.displayed_windows.difference(&current_windows) {
+                    if let Some(handle) = self.registry.get_handle_by_key(*key) {
+                        handle.hide();
+                        self.taskbar.delete_tab(handle.hwnd()).ok();
+                    }
+                }
+                entry.displayed_windows = current_windows;
+            }
+        }
 
         // Tiling windows
         for (handle, dim) in get_tiling_windows(&self.hub, &self.registry) {
@@ -496,19 +531,6 @@ impl Dome {
                     edges: border_edges(dim, border, colors),
                     is_float: true,
                 });
-            }
-        }
-
-        // Hide managed windows no longer displayed (workspace switch)
-        let current: HashSet<_> = frame.windows.iter()
-            .filter_map(|w| self.registry.get_handle(w.window_id).map(|h| WindowKey::from(&h)))
-            .collect();
-        for key in &previous_displayed {
-            if !current.contains(key)
-                && let Some(handle) = self.registry.get_handle_by_key(*key)
-            {
-                handle.hide();
-                self.taskbar.delete_tab(handle.hwnd()).ok();
             }
         }
 
@@ -636,9 +658,41 @@ fn get_float_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimen
     windows
 }
 
-fn get_displayed_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimension)> {
-    let mut windows = get_tiling_windows(hub, registry);
-    windows.extend(get_float_windows(hub, registry));
+fn get_displayed_for_workspace(
+    hub: &Hub,
+    ws_id: WorkspaceId,
+    registry: &Registry,
+) -> HashSet<WindowKey> {
+    let mut windows = HashSet::new();
+    let ws = hub.get_workspace(ws_id);
+
+    let mut stack: Vec<Child> = ws.root().into_iter().collect();
+    while let Some(child) = stack.pop() {
+        match child {
+            Child::Window(id) => {
+                if let Some(handle) = registry.get_handle(id) {
+                    windows.insert(WindowKey::from(&handle));
+                }
+            }
+            Child::Container(id) => {
+                let container = hub.get_container(id);
+                if let Some(active) = container.active_tab() {
+                    stack.push(active);
+                } else {
+                    for &c in container.children() {
+                        stack.push(c);
+                    }
+                }
+            }
+        }
+    }
+
+    for &float_id in ws.float_windows() {
+        if let Some(handle) = registry.get_handle(float_id) {
+            windows.insert(WindowKey::from(&handle));
+        }
+    }
+
     windows
 }
 
@@ -812,10 +866,10 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Ve
         .map
         .iter()
         .filter(|(key, _)| !current_keys.contains(key))
-        .map(|(_, &id)| id)
+        .map(|(_, entry)| entry.id)
         .collect();
 
-    let fallback_id = registry.map.get(&registry.primary_handle).copied();
+    let fallback_id = registry.map.get(&registry.primary_handle).map(|e| e.id);
     for monitor_id in to_remove {
         if let Some(fallback) = fallback_id
             && fallback != monitor_id
@@ -828,7 +882,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Ve
 
     // Update dimensions for existing monitors
     for screen in &screens {
-        if let Some(&monitor_id) = registry.map.get(&screen.handle) {
+        if let Some(monitor_id) = registry.map.get(&screen.handle).map(|e| e.id) {
             let old_dim = hub.get_monitor(monitor_id).dimension();
             if old_dim != screen.dimension {
                 tracing::info!(
