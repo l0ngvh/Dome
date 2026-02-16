@@ -244,20 +244,24 @@ impl MacWindow {
         let (expected, count) = self.physical_placement?;
         let (actual_x, actual_y) = self.ax.get_position().unwrap_or((0, 0));
         let (actual_width, actual_height) = self.ax.get_size().unwrap_or((0, 0));
-
-        tracing::trace!(
-            "Window {} moved from {expected:?} to ({actual_x}, {actual_y}, {actual_width}, {actual_height}), with logical placement at {:?}",
-            self.ax,
-            window.dimension()
-        );
+        let logical = window.dimension();
 
         // At least one edge must match on each axis - user resize moves both edges on one axis
         let left = actual_x == expected.x;
         let right = actual_x + actual_width == expected.x + expected.width;
         let top = actual_y == expected.y;
         let bottom = actual_y + actual_height == expected.y + expected.height;
+
         if !((left || right) && (top || bottom)) {
             if count < 5 {
+                tracing::trace!(
+                    window = %self.ax,
+                    ?expected,
+                    actual = ?(actual_x, actual_y, actual_width, actual_height),
+                    ?logical,
+                    attempt = count + 1,
+                    "window drifted, correcting"
+                );
                 self.physical_placement = Some((expected, count + 1));
                 if let Err(e) =
                     self.ax
@@ -274,6 +278,14 @@ impl MacWindow {
         let max_w = (actual_width < expected.width).then_some(actual_width as f32);
         let max_h = (actual_height < expected.height).then_some(actual_height as f32);
         if min_w.is_some() || min_h.is_some() || max_w.is_some() || max_h.is_some() {
+            tracing::trace!(
+                window = %self.ax,
+                ?expected,
+                actual = ?(actual_x, actual_y, actual_width, actual_height),
+                ?logical,
+                ?min_w, ?min_h, ?max_w, ?max_h,
+                "window constrained"
+            );
             Some((min_w, min_h, max_w, max_h))
         } else {
             None

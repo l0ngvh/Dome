@@ -305,7 +305,6 @@ unsafe extern "C-unwind" fn sync_timer_callback(_timer: *mut CFRunLoopTimer, inf
     if ctx.is_suspended.get() {
         return;
     }
-    tracing::trace!("Periodic sync every {}s", SYNC_INTERVAL.as_secs());
     send_hub_event(&ctx.hub_sender, HubEvent::Sync);
 }
 
