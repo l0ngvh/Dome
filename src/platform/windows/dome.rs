@@ -68,7 +68,6 @@ pub(super) struct OverlayFrame {
     pub(super) focused: Option<WindowId>,
     pub(super) windows: Vec<WindowOverlay>,
     pub(super) containers: Vec<ContainerOverlay>,
-    pub(super) tab_bars: Vec<TabBarOverlay>,
 }
 
 pub(super) struct OverlayCreate {
@@ -88,11 +87,12 @@ pub(super) struct ContainerOverlay {
     pub(super) container_id: ContainerId,
     pub(super) frame: Dimension,
     pub(super) edges: Vec<(Dimension, Color)>,
+    pub(super) tab_bar: Option<TabBarInfo>,
 }
 
-pub(super) struct TabBarOverlay {
-    pub(super) frame: Dimension,
+pub(super) struct TabBarInfo {
     pub(super) tabs: Vec<TabInfo>,
+    pub(super) height: f32,
     pub(super) background_color: Color,
     pub(super) active_background_color: Color,
     pub(super) border_color: Color,
@@ -469,7 +469,6 @@ impl Dome {
             },
             windows: Vec::new(),
             containers: Vec::new(),
-            tab_bars: Vec::new(),
         };
 
         // Hide windows no longer displayed per monitor
@@ -544,20 +543,27 @@ impl Dome {
 
         // Container borders and tab bars
         for (container_id, dim, is_tabbed) in get_containers(&self.hub) {
+            let is_focused = focused == Some(Child::Container(container_id));
             if is_tabbed {
-                frame.tab_bars.push(build_tab_bar(
-                    &self.hub,
-                    &self.registry,
+                let edges = if is_focused {
+                    let colors = spawn_colors(self.hub.get_container(container_id).spawn_mode(), &self.config);
+                    border_edges(dim, border, colors)
+                } else {
+                    vec![]
+                };
+                frame.containers.push(ContainerOverlay {
                     container_id,
-                    &self.config,
-                    focused == Some(Child::Container(container_id)),
-                ));
-            } else if focused == Some(Child::Container(container_id)) {
+                    frame: dim,
+                    edges,
+                    tab_bar: Some(build_tab_info(&self.hub, &self.registry, container_id, &self.config, is_focused)),
+                });
+            } else if is_focused {
                 let colors = spawn_colors(self.hub.get_container(container_id).spawn_mode(), &self.config);
                 frame.containers.push(ContainerOverlay {
                     container_id,
                     frame: dim,
                     edges: border_edges(dim, border, colors),
+                    tab_bar: None,
                 });
             }
         }
@@ -721,22 +727,15 @@ fn get_containers(hub: &Hub) -> Vec<(ContainerId, Dimension, bool)> {
     containers
 }
 
-fn build_tab_bar(
+fn build_tab_info(
     hub: &Hub,
     registry: &Registry,
     container_id: ContainerId,
     config: &Config,
     is_focused: bool,
-) -> TabBarOverlay {
+) -> TabBarInfo {
     let container = hub.get_container(container_id);
     let dim = container.dimension();
-    let height = config.tab_bar_height;
-    let tab_color = if is_focused {
-        config.focused_color
-    } else {
-        config.border_color
-    };
-
     let children = container.children();
     let tab_width = if children.is_empty() {
         dim.width
@@ -765,17 +764,12 @@ fn build_tab_bar(
         })
         .collect();
 
-    TabBarOverlay {
-        frame: Dimension {
-            x: dim.x,
-            y: dim.y,
-            width: dim.width,
-            height,
-        },
+    TabBarInfo {
         tabs,
+        height: config.tab_bar_height,
         background_color: config.tab_bar_background_color,
         active_background_color: config.active_tab_background_color,
-        border_color: tab_color,
+        border_color: if is_focused { config.focused_color } else { config.border_color },
         border: config.border_size,
     }
 }

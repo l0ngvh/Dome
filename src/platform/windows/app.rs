@@ -33,7 +33,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
-use super::dome::{AppHandle, HubEvent, OverlayFrame, TabBarOverlay, WM_APP_OVERLAY};
+use super::dome::{AppHandle, HubEvent, OverlayFrame, TabBarInfo, WM_APP_OVERLAY};
 use super::get_all_screens;
 use crate::config::Color;
 use crate::core::{ContainerId, Dimension, WindowId};
@@ -48,16 +48,16 @@ struct OverlayWindow {
     height: u32,
     is_float: bool,
     is_visible: bool,
+    text_format: Option<IDWriteTextFormat>,
+    text_format_bold: Option<IDWriteTextFormat>,
 }
 
 pub(super) struct App {
     hwnd: HWND,
-    dc_target: ID2D1DCRenderTarget,
-    mem_dc: HDC,
-    bitmap: HGDIOBJ,
+    d2d_factory: ID2D1Factory,
     text_format: IDWriteTextFormat,
     text_format_bold: IDWriteTextFormat,
-    screen: Dimension,
+    dwrite_factory: IDWriteFactory,
     hub_sender: Sender<HubEvent>,
     window_overlays: HashMap<WindowId, OverlayWindow>,
     container_overlays: HashMap<ContainerId, OverlayWindow>,
@@ -65,7 +65,6 @@ pub(super) struct App {
 
 impl App {
     pub(super) fn new(
-        screen: Dimension,
         hub_sender: Sender<HubEvent>,
     ) -> windows::core::Result<Box<Self>> {
         let class_name = windows::core::w!("DomeApp");
@@ -80,27 +79,19 @@ impl App {
         };
         unsafe { RegisterClassW(&wc) };
 
-        // WS_EX_LAYERED + WS_EX_TRANSPARENT: enables click-through to other processes
-        // WS_EX_TOOLWINDOW: hides from taskbar and alt-tab
         let hwnd = unsafe {
             CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
+                WS_EX_TOOLWINDOW,
                 class_name,
                 windows::core::w!(""),
                 WS_POPUP,
-                screen.x as i32,
-                screen.y as i32,
-                screen.width as i32,
-                screen.height as i32,
+                0, 0, 1, 1,
                 None,
                 None,
                 Some(hinstance.into()),
                 None,
             )?
         };
-
-        let (dc_target, mem_dc, bitmap) =
-            create_render_resources(screen.width as u32, screen.height as u32)?;
 
         let dwrite_factory: IDWriteFactory =
             unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)? };
@@ -127,14 +118,15 @@ impl App {
             )?
         };
 
+        let d2d_factory: ID2D1Factory =
+            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
+
         let app = Box::new(Self {
             hwnd,
-            dc_target,
-            mem_dc,
-            bitmap,
+            d2d_factory,
             text_format,
             text_format_bold,
-            screen,
+            dwrite_factory,
             hub_sender,
             window_overlays: HashMap::new(),
             container_overlays: HashMap::new(),
@@ -158,7 +150,7 @@ impl App {
     fn handle_overlay_frame(&mut self, frame: OverlayFrame) {
         // Create new window overlays
         for create in frame.creates {
-            if let Ok(overlay) = OverlayWindow::new(create.hwnd, create.is_float) {
+            if let Ok(overlay) = OverlayWindow::new(&self.d2d_factory, create.hwnd, create.is_float) {
                 self.window_overlays.insert(create.window_id, overlay);
             }
         }
@@ -169,7 +161,6 @@ impl App {
         }
 
         let mut seen_windows: HashSet<WindowId> = HashSet::new();
-        let mut seen_containers: HashSet<ContainerId> = HashSet::new();
 
         // Update window overlays
         for window in &frame.windows {
@@ -196,31 +187,37 @@ impl App {
                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
                     }
                 }
-                overlay.update(&window.frame, &window.edges);
+                overlay.update(&self.d2d_factory, &window.frame, &window.edges);
                 overlay.show();
             }
         }
 
         // Update container overlays
-        for container in &frame.containers {
-            seen_containers.insert(container.container_id);
+        let frame_container_ids: HashSet<_> = frame.containers.iter()
+            .map(|c| c.container_id)
+            .collect();
+        self.container_overlays.retain(|id, _| frame_container_ids.contains(id));
 
+        for container in &frame.containers {
             let overlay = self.container_overlays
                 .entry(container.container_id)
-                .or_insert_with(|| OverlayWindow::new_container().unwrap());
+                .or_insert_with(|| OverlayWindow::new_container(
+                    &self.d2d_factory,
+                    self.text_format.clone(),
+                    self.text_format_bold.clone(),
+                ).unwrap());
 
-            overlay.update(&container.frame, &container.edges);
+            overlay.update_container(&self.d2d_factory, &self.dwrite_factory, &container.frame, &container.edges, container.tab_bar.as_ref());
             overlay.show();
-        }
-
-        // Hide unseen overlays (workspace switch)
-        for (id, overlay) in &mut self.window_overlays {
-            if !seen_windows.contains(id) {
-                overlay.hide();
+            unsafe {
+                SetWindowPos(overlay.hwnd, Some(HWND_TOP), 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
             }
         }
-        for (id, overlay) in &mut self.container_overlays {
-            if !seen_containers.contains(id) {
+
+        // Hide unseen window overlays (workspace switch)
+        for (id, overlay) in &mut self.window_overlays {
+            if !seen_windows.contains(id) {
                 overlay.hide();
             }
         }
@@ -244,207 +241,14 @@ impl App {
                 }
             }
         }
-
-        // Render tab bars on main window
-        if let Err(e) = self.render_tab_bars(&frame.tab_bars) {
-            tracing::warn!("render_tab_bars failed: {e}");
-        }
-    }
-
-    fn render_tab_bars(&mut self, tab_bars: &[TabBarOverlay]) -> anyhow::Result<()> {
-        let width = self.screen.width as i32;
-        let height = self.screen.height as i32;
-
-        unsafe {
-            let rect = RECT {
-                left: 0,
-                top: 0,
-                right: width,
-                bottom: height,
-            };
-            self.dc_target.BindDC(self.mem_dc, &rect)?;
-
-            self.dc_target.BeginDraw();
-            self.dc_target.Clear(Some(&D2D1_COLOR_F {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 0.0,
-            }));
-
-            for tab_bar in tab_bars {
-                let frame = &tab_bar.frame;
-
-                // Background
-                let bg_brush = self.dc_target.CreateSolidColorBrush(
-                    &color_to_d2d(&tab_bar.background_color),
-                    None,
-                )?;
-                self.dc_target.FillRectangle(
-                    &D2D_RECT_F {
-                        left: frame.x,
-                        top: frame.y,
-                        right: frame.x + frame.width,
-                        bottom: frame.y + frame.height,
-                    },
-                    &bg_brush,
-                );
-
-                // Border
-                let border_brush = self.dc_target.CreateSolidColorBrush(
-                    &color_to_d2d(&tab_bar.border_color),
-                    None,
-                )?;
-                let b = tab_bar.border;
-                // Top
-                self.dc_target.FillRectangle(
-                    &D2D_RECT_F { left: frame.x, top: frame.y, right: frame.x + frame.width, bottom: frame.y + b },
-                    &border_brush,
-                );
-                // Bottom
-                self.dc_target.FillRectangle(
-                    &D2D_RECT_F { left: frame.x, top: frame.y + frame.height - b, right: frame.x + frame.width, bottom: frame.y + frame.height },
-                    &border_brush,
-                );
-                // Left
-                self.dc_target.FillRectangle(
-                    &D2D_RECT_F { left: frame.x, top: frame.y + b, right: frame.x + b, bottom: frame.y + frame.height - b },
-                    &border_brush,
-                );
-                // Right
-                self.dc_target.FillRectangle(
-                    &D2D_RECT_F { left: frame.x + frame.width - b, top: frame.y + b, right: frame.x + frame.width, bottom: frame.y + frame.height - b },
-                    &border_brush,
-                );
-
-                // Active tab background
-                let active_brush = self.dc_target.CreateSolidColorBrush(
-                    &color_to_d2d(&tab_bar.active_background_color),
-                    None,
-                )?;
-
-                // Tab separators and active background
-                for (i, tab) in tab_bar.tabs.iter().enumerate() {
-                    if tab.is_active {
-                        self.dc_target.FillRectangle(
-                            &D2D_RECT_F {
-                                left: tab.x,
-                                top: frame.y,
-                                right: tab.x + tab.width,
-                                bottom: frame.y + frame.height,
-                            },
-                            &active_brush,
-                        );
-                    }
-                    // Separator (except first)
-                    if i > 0 {
-                        self.dc_target.FillRectangle(
-                            &D2D_RECT_F {
-                                left: tab.x - b / 2.0,
-                                top: frame.y,
-                                right: tab.x + b / 2.0,
-                                bottom: frame.y + frame.height,
-                            },
-                            &border_brush,
-                        );
-                    }
-                }
-
-                // Tab labels
-                let text_brush = self.dc_target.CreateSolidColorBrush(
-                    &D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
-                    None,
-                )?;
-                for tab in &tab_bar.tabs {
-                    let text = if tab.is_active {
-                        format!("[{}]", tab.title)
-                    } else {
-                        tab.title.clone()
-                    };
-                    let text_utf16: Vec<u16> = text.encode_utf16().collect();
-                    let format = if tab.is_active {
-                        &self.text_format_bold
-                    } else {
-                        &self.text_format
-                    };
-                    let x = tab.x + tab.width / 2.0 - text.len() as f32 * 3.5;
-                    self.dc_target.DrawText(
-                        &text_utf16,
-                        format,
-                        &D2D_RECT_F {
-                            left: x,
-                            top: frame.y + frame.height / 2.0 - 6.0,
-                            right: x + 1000.0,
-                            bottom: frame.y + frame.height,
-                        },
-                        &text_brush,
-                        D2D1_DRAW_TEXT_OPTIONS_NONE,
-                        Default::default(),
-                    );
-                }
-            }
-
-            self.dc_target.EndDraw(None, None)?;
-
-            // Update layered window
-            let size = SIZE { cx: width, cy: height };
-            let src_point = POINT { x: 0, y: 0 };
-            let dst_point = POINT {
-                x: self.screen.x as i32,
-                y: self.screen.y as i32,
-            };
-            let blend = BLENDFUNCTION {
-                BlendOp: AC_SRC_OVER as u8,
-                BlendFlags: 0,
-                SourceConstantAlpha: 255,
-                AlphaFormat: AC_SRC_ALPHA as u8,
-            };
-
-            UpdateLayeredWindow(
-                self.hwnd,
-                None,
-                Some(&dst_point),
-                Some(&size),
-                Some(self.mem_dc),
-                Some(&src_point),
-                COLORREF(0),
-                Some(&blend),
-                ULW_ALPHA,
-            )?;
-        }
-
-        if !tab_bars.is_empty() {
-            unsafe {
-                let _ = ShowWindow(self.hwnd, SW_SHOWNA);
-                SetWindowPos(self.hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0,
-                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE).ok();
-            }
-        } else {
-            unsafe { let _ = ShowWindow(self.hwnd, SW_HIDE); }
-        }
-
-        Ok(())
     }
 }
-
-impl Drop for App {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = DeleteDC(self.mem_dc);
-            let _ = DeleteObject(self.bitmap);
-            let _ = DestroyWindow(self.hwnd);
-        }
-    }
-}
-
 fn create_render_resources(
+    d2d_factory: &ID2D1Factory,
     width: u32,
     height: u32,
 ) -> windows::core::Result<(ID2D1DCRenderTarget, HDC, HGDIOBJ)> {
     unsafe {
-        // Create D2D factory and DC render target
-        let d2d_factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-
         let render_props = D2D1_RENDER_TARGET_PROPERTIES {
             r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
             pixelFormat: D2D1_PIXEL_FORMAT {
@@ -493,7 +297,7 @@ fn color_to_d2d(color: &Color) -> D2D1_COLOR_F {
 }
 
 impl OverlayWindow {
-    fn new(managed_hwnd: HWND, is_float: bool) -> windows::core::Result<Self> {
+    fn new(d2d_factory: &ID2D1Factory, managed_hwnd: HWND, is_float: bool) -> windows::core::Result<Self> {
         let hwnd = unsafe {
             CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -521,7 +325,7 @@ impl OverlayWindow {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
         }
 
-        let (dc_target, mem_dc, bitmap) = create_render_resources(1, 1)?;
+        let (dc_target, mem_dc, bitmap) = create_render_resources(d2d_factory, 1, 1)?;
 
         Ok(Self {
             hwnd,
@@ -533,10 +337,16 @@ impl OverlayWindow {
             height: 1,
             is_float,
             is_visible: false,
+            text_format: None,
+            text_format_bold: None,
         })
     }
 
-    fn new_container() -> windows::core::Result<Self> {
+    fn new_container(
+        d2d_factory: &ID2D1Factory,
+        text_format: IDWriteTextFormat,
+        text_format_bold: IDWriteTextFormat,
+    ) -> windows::core::Result<Self> {
         let hwnd = unsafe {
             CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -551,7 +361,7 @@ impl OverlayWindow {
             )?
         };
 
-        let (dc_target, mem_dc, bitmap) = create_render_resources(1, 1)?;
+        let (dc_target, mem_dc, bitmap) = create_render_resources(d2d_factory, 1, 1)?;
 
         Ok(Self {
             hwnd,
@@ -563,25 +373,27 @@ impl OverlayWindow {
             height: 1,
             is_float: false,
             is_visible: false,
+            text_format: Some(text_format),
+            text_format_bold: Some(text_format_bold),
         })
     }
 
-    fn update(&mut self, frame: &Dimension, edges: &[(Dimension, Color)]) {
+    fn update(&mut self, d2d_factory: &ID2D1Factory, frame: &Dimension, edges: &[(Dimension, Color)]) {
         let w = frame.width.max(1.0) as u32;
         let h = frame.height.max(1.0) as u32;
 
-        if self.width != w || self.height != h {
+        if (self.width != w || self.height != h)
+            && let Ok((dc_target, mem_dc, bitmap)) = create_render_resources(d2d_factory, w, h)
+        {
             unsafe {
-                DeleteDC(self.mem_dc);
-                DeleteObject(self.bitmap);
+                let _ = DeleteDC(self.mem_dc);
+                let _ = DeleteObject(self.bitmap);
             }
-            if let Ok((dc_target, mem_dc, bitmap)) = create_render_resources(w, h) {
-                self.dc_target = dc_target;
-                self.mem_dc = mem_dc;
-                self.bitmap = bitmap;
-                self.width = w;
-                self.height = h;
-            }
+            self.dc_target = dc_target;
+            self.mem_dc = mem_dc;
+            self.bitmap = bitmap;
+            self.width = w;
+            self.height = h;
         }
 
         self.render_edges(edges, frame);
@@ -636,6 +448,185 @@ impl OverlayWindow {
         }
     }
 
+    fn update_container(
+        &mut self,
+        d2d_factory: &ID2D1Factory,
+        dwrite_factory: &IDWriteFactory,
+        frame: &Dimension,
+        edges: &[(Dimension, Color)],
+        tab_bar: Option<&TabBarInfo>,
+    ) {
+        let w = frame.width.max(1.0) as u32;
+        let h = frame.height.max(1.0) as u32;
+
+        if (self.width != w || self.height != h)
+            && let Ok((dc_target, mem_dc, bitmap)) = create_render_resources(d2d_factory, w, h)
+        {
+            unsafe {
+                let _ = DeleteDC(self.mem_dc);
+                let _ = DeleteObject(self.bitmap);
+            }
+            self.dc_target = dc_target;
+            self.mem_dc = mem_dc;
+            self.bitmap = bitmap;
+            self.width = w;
+            self.height = h;
+        }
+
+        unsafe {
+            let rect = RECT {
+                left: 0,
+                top: 0,
+                right: self.width as i32,
+                bottom: self.height as i32,
+            };
+            if self.dc_target.BindDC(self.mem_dc, &rect).is_err() {
+                return;
+            }
+            self.dc_target.BeginDraw();
+            self.dc_target.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+
+            // Render border edges
+            for (edge, color) in edges {
+                if let Ok(brush) = self.dc_target.CreateSolidColorBrush(&color_to_d2d(color), None) {
+                    self.dc_target.FillRectangle(
+                        &D2D_RECT_F {
+                            left: edge.x - frame.x,
+                            top: edge.y - frame.y,
+                            right: edge.x - frame.x + edge.width,
+                            bottom: edge.y - frame.y + edge.height,
+                        },
+                        &brush,
+                    );
+                }
+            }
+
+            // Render tab bar
+            if let Some(tb) = tab_bar {
+                // Background
+                if let Ok(bg_brush) = self.dc_target.CreateSolidColorBrush(&color_to_d2d(&tb.background_color), None) {
+                    self.dc_target.FillRectangle(
+                        &D2D_RECT_F { left: 0.0, top: 0.0, right: frame.width, bottom: tb.height },
+                        &bg_brush,
+                    );
+                }
+
+                // Border
+                if let Ok(border_brush) = self.dc_target.CreateSolidColorBrush(&color_to_d2d(&tb.border_color), None) {
+                    let b = tb.border;
+                    self.dc_target.FillRectangle(
+                        &D2D_RECT_F { left: 0.0, top: 0.0, right: frame.width, bottom: b },
+                        &border_brush,
+                    );
+                    self.dc_target.FillRectangle(
+                        &D2D_RECT_F { left: 0.0, top: tb.height - b, right: frame.width, bottom: tb.height },
+                        &border_brush,
+                    );
+                    self.dc_target.FillRectangle(
+                        &D2D_RECT_F { left: 0.0, top: b, right: b, bottom: tb.height - b },
+                        &border_brush,
+                    );
+                    self.dc_target.FillRectangle(
+                        &D2D_RECT_F { left: frame.width - b, top: b, right: frame.width, bottom: tb.height - b },
+                        &border_brush,
+                    );
+
+                    for (i, tab) in tb.tabs.iter().enumerate() {
+                        if i > 0 {
+                            self.dc_target.FillRectangle(
+                                &D2D_RECT_F {
+                                    left: tab.x - frame.x - b / 2.0,
+                                    top: 0.0,
+                                    right: tab.x - frame.x + b / 2.0,
+                                    bottom: tb.height,
+                                },
+                                &border_brush,
+                            );
+                        }
+                    }
+                }
+
+                // Active tab background
+                if let Ok(active_brush) = self.dc_target.CreateSolidColorBrush(&color_to_d2d(&tb.active_background_color), None) {
+                    for tab in &tb.tabs {
+                        if tab.is_active {
+                            self.dc_target.FillRectangle(
+                                &D2D_RECT_F {
+                                    left: tab.x - frame.x,
+                                    top: 0.0,
+                                    right: tab.x - frame.x + tab.width,
+                                    bottom: tb.height,
+                                },
+                                &active_brush,
+                            );
+                        }
+                    }
+                }
+
+                // Tab labels
+                if let Ok(text_brush) = self.dc_target.CreateSolidColorBrush(
+                    &D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+                    None,
+                ) {
+                    for tab in &tb.tabs {
+                        let format = if tab.is_active {
+                            self.text_format_bold.as_ref()
+                        } else {
+                            self.text_format.as_ref()
+                        };
+                        if let Some(fmt) = format {
+                            let text: Vec<u16> = tab.title.encode_utf16().collect();
+                            let tab_left = tab.x - frame.x;
+                            let tab_center = tab_left + tab.width / 2.0;
+
+                            // Measure text width
+                            let text_width = dwrite_factory
+                                .CreateTextLayout(&text, fmt, tab.width, tb.height)
+                                .ok()
+                                .and_then(|layout| {
+                                    let mut metrics = Default::default();
+                                    layout.GetMetrics(&mut metrics).ok()?;
+                                    Some(metrics.width)
+                                })
+                                .unwrap_or(0.0);
+
+                            self.dc_target.DrawText(
+                                &text,
+                                fmt,
+                                &D2D_RECT_F {
+                                    left: tab_center - text_width / 2.0,
+                                    top: tb.height / 2.0 - 6.0,
+                                    right: tab_left + tab.width,
+                                    bottom: tb.height,
+                                },
+                                &text_brush,
+                                D2D1_DRAW_TEXT_OPTIONS_NONE,
+                                Default::default(),
+                            );
+                        }
+                    }
+                }
+            }
+
+            self.dc_target.EndDraw(None, None).ok();
+
+            let size = SIZE { cx: self.width as i32, cy: self.height as i32 };
+            let src_point = POINT { x: 0, y: 0 };
+            let blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER as u8,
+                BlendFlags: 0,
+                SourceConstantAlpha: 255,
+                AlphaFormat: AC_SRC_ALPHA as u8,
+            };
+            UpdateLayeredWindow(self.hwnd, None, None, Some(&size), Some(self.mem_dc),
+                Some(&src_point), COLORREF(0), Some(&blend), ULW_ALPHA).ok();
+
+            SetWindowPos(self.hwnd, None,
+                frame.x as i32, frame.y as i32, w as i32, h as i32,
+                SWP_NOZORDER | SWP_NOACTIVATE).ok();
+        }
+    }
+
     fn show(&mut self) {
         if !self.is_visible {
             unsafe { let _ = ShowWindow(self.hwnd, SW_SHOWNA); }
@@ -654,8 +645,8 @@ impl OverlayWindow {
 impl Drop for OverlayWindow {
     fn drop(&mut self) {
         unsafe {
-            DeleteDC(self.mem_dc);
-            DeleteObject(self.bitmap);
+            let _ = DeleteDC(self.mem_dc);
+            let _ = DeleteObject(self.bitmap);
             DestroyWindow(self.hwnd).ok();
         }
     }
