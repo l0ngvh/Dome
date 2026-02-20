@@ -228,9 +228,9 @@ fn set_min_size_exceeds_screen_size() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=-50.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=-50.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=100.00, h=30.00)
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=100.00, y=0.00, w=100.00, h=30.00)
         )
       )
     )
@@ -250,7 +250,7 @@ fn set_min_size_exceeds_screen_size() {
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
-    0                                                |*                                                W1                                                *
+                            W0                       |*                                                W1                                                *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
@@ -284,13 +284,13 @@ fn set_min_size_exceeds_container_size() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=-50.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=-50.00, y=0.00, w=0.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=-50.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=-50.00, y=0.00, w=200.00, h=15.00)
-            Container(id=ContainerId(2), parent=ContainerId(1), x=-50.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
-              Window(id=WindowId(2), parent=ContainerId(2), x=-50.00, y=15.00, w=100.00, h=15.00)
-              Window(id=WindowId(3), parent=ContainerId(2), x=50.00, y=15.00, w=100.00, h=15.00)
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=0.00, h=30.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=0.00, w=200.00, h=15.00)
+            Container(id=ContainerId(2), parent=ContainerId(1), x=0.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
+              Window(id=WindowId(2), parent=ContainerId(2), x=0.00, y=15.00, w=100.00, h=15.00)
+              Window(id=WindowId(3), parent=ContainerId(2), x=100.00, y=15.00, w=100.00, h=15.00)
             )
           )
         )
@@ -305,7 +305,7 @@ fn set_min_size_exceeds_container_size() {
                                                                                                                                                          |
                                                                                                                                                          |
                                                                                                                                                          |
-                                                     W1                                                                                                  |
+                                                                              W1                                                                         |
                                                                                                                                                          |
                                                                                                                                                          |
                                                                                                                                                          |
@@ -320,7 +320,7 @@ fn set_min_size_exceeds_container_size() {
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
-    2                                                |*                                                W3                                                *
+                            W2                       |*                                                W3                                                *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
@@ -369,7 +369,7 @@ fn set_min_size_exceeds_container_size_focus_first() {
     *                                                *|                                                                                                   
     *                                                *|                                                                                                   
     *                                                *|                                                                                                   
-    *                                                *|                                                                                                  W
+    *                                                *|                                                W1                                                 
     *                                                *|                                                                                                   
     *                                                *|                                                                                                   
     *                                                *|                                                                                                   
@@ -409,9 +409,9 @@ fn set_min_size_global_exceeds_screen_size() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=-50.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=-50.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=100.00, h=30.00)
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=100.00, y=0.00, w=100.00, h=30.00)
         )
       )
     )
@@ -431,7 +431,7 @@ fn set_min_size_global_exceeds_screen_size() {
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
-    0                                                |*                                                W1                                                *
+                            W0                       |*                                                W1                                                *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
@@ -462,19 +462,19 @@ fn set_min_size_exceeds_screen_height() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=-10.00, w=150.00, h=40.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=-10.00, w=150.00, h=20.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=10.00, w=150.00, h=20.00)
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=40.00, direction=Vertical,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=20.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=20.00, w=150.00, h=20.00)
         )
       )
     )
 
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
     |                                                                         W0                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
@@ -548,7 +548,7 @@ fn set_min_size_exceeds_screen_height_scroll_to_focus() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
-    |                                                                                                                                                    |
+    |                                                                         W1                                                                         |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
@@ -651,7 +651,7 @@ fn scroll_into_view_with_focused_container() {
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
-    *                                                                                                  ||                                                W
+    *                                                                                                  ||                       W1                        
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
@@ -661,7 +661,7 @@ fn scroll_into_view_with_focused_container() {
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
-    *                                                W0                                                ||                                                W
+    *                                                W0                                                ||                       W2                        
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
@@ -671,7 +671,7 @@ fn scroll_into_view_with_focused_container() {
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
-    *                                                                                                  ||                                                W
+    *                                                                                                  ||                       W3                        
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
     *                                                                                                  ||                                                 
@@ -697,12 +697,12 @@ fn delete_window_with_min_size_shrinks_parent_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=-150.00, y=0.00, w=300.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=-150.00, y=0.00, w=300.00, h=15.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=-150.00, y=15.00, w=300.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(1), parent=ContainerId(1), x=-150.00, y=15.00, w=100.00, h=15.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=-50.00, y=15.00, w=100.00, h=15.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=15.00, w=100.00, h=15.00)
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=300.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=300.00, h=15.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=15.00, w=300.00, h=15.00, direction=Horizontal,
+            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=15.00, w=100.00, h=15.00)
+            Window(id=WindowId(2), parent=ContainerId(1), x=100.00, y=15.00, w=100.00, h=15.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=200.00, y=15.00, w=100.00, h=15.00)
           )
         )
       )
@@ -716,7 +716,7 @@ fn delete_window_with_min_size_shrinks_parent_container() {
                                                                                                                                                          |
                                                                                                                                                          |
                                                                                                                                                          |
-    0                                                                                                                                                    |
+                                                                              W0                                                                         |
                                                                                                                                                          |
                                                                                                                                                          |
                                                                                                                                                          |
@@ -731,7 +731,7 @@ fn delete_window_with_min_size_shrinks_parent_container() {
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
-    2                                                |*                                                W3                                                *
+                            W2                       |*                                                W3                                                *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
@@ -746,11 +746,11 @@ fn delete_window_with_min_size_shrinks_parent_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=-50.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=-50.00, y=0.00, w=200.00, h=15.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=-50.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(2), parent=ContainerId(1), x=-50.00, y=15.00, w=100.00, h=15.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=50.00, y=15.00, w=100.00, h=15.00)
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=200.00, h=15.00)
+          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
+            Window(id=WindowId(2), parent=ContainerId(1), x=0.00, y=15.00, w=100.00, h=15.00)
+            Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=15.00, w=100.00, h=15.00)
           )
         )
       )
@@ -764,7 +764,7 @@ fn delete_window_with_min_size_shrinks_parent_container() {
                                                                                                                                                          |
                                                                                                                                                          |
                                                                                                                                                          |
-                                                     W0                                                                                                  |
+                                                                              W0                                                                         |
                                                                                                                                                          |
                                                                                                                                                          |
                                                                                                                                                          |
@@ -779,7 +779,7 @@ fn delete_window_with_min_size_shrinks_parent_container() {
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
-    2                                                |*                                                W3                                                *
+                            W2                       |*                                                W3                                                *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
                                                      |*                                                                                                  *
@@ -901,23 +901,23 @@ fn scroll_window_into_view_in_vertical_child_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=-30.00, w=150.00, h=60.00, direction=Horizontal,
-          Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=-30.00, w=100.00, h=60.00, direction=Vertical,
-            Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=-30.00, w=100.00, h=20.00)
-            Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=-10.00, w=100.00, h=20.00)
-            Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=10.00, w=100.00, h=20.00)
+        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=60.00, direction=Horizontal,
+          Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=0.00, w=100.00, h=60.00, direction=Vertical,
+            Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=20.00)
+            Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=20.00, w=100.00, h=20.00)
+            Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=40.00, w=100.00, h=20.00)
           )
-          Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=-30.00, w=50.00, h=60.00)
+          Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=0.00, w=50.00, h=60.00)
         )
       )
     )
 
-    |                                                W1                                                ||                       W3                       |
     |                                                                                                  ||                                                |
     |                                                                                                  ||                                                |
     |                                                                                                  ||                                                |
     |                                                                                                  ||                                                |
     |                                                                                                  ||                                                |
+    |                                                W1                                                ||                                                |
     |                                                                                                  ||                                                |
     |                                                                                                  ||                                                |
     |                                                                                                  ||                                                |
@@ -927,7 +927,7 @@ fn scroll_window_into_view_in_vertical_child_container() {
     *                                                                                                  *|                                                |
     *                                                                                                  *|                                                |
     *                                                                                                  *|                                                |
-    *                                                                                                  *|                                                |
+    *                                                                                                  *|                       W3                       |
     *                                                                                                  *|                                                |
     *                                                                                                  *|                                                |
     *                                                                                                  *|                                                |
@@ -950,32 +950,32 @@ fn scroll_window_into_view_in_vertical_child_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=-10.00, w=150.00, h=40.00, direction=Horizontal,
-          Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=-10.00, w=100.00, h=40.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=-10.00, w=100.00, h=20.00)
-            Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=10.00, w=100.00, h=20.00)
+        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=40.00, direction=Horizontal,
+          Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=0.00, w=100.00, h=40.00, direction=Vertical,
+            Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=20.00)
+            Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=20.00, w=100.00, h=20.00)
           )
-          Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=-10.00, w=50.00, h=40.00)
+          Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=0.00, w=50.00, h=40.00)
         )
       )
     )
 
+    |                                                                                                  ||                                                |
+    |                                                                                                  ||                                                |
+    |                                                                                                  ||                                                |
+    |                                                                                                  ||                                                |
+    |                                                                                                  ||                                                |
     |                                                W1                                                ||                                                |
     |                                                                                                  ||                                                |
     |                                                                                                  ||                                                |
     |                                                                                                  ||                                                |
-    |                                                                                                  ||                                                |
-    |                                                                                                  ||                                                |
-    |                                                                                                  ||                                                |
-    |                                                                                                  ||                                                |
-    |                                                                                                  ||                                                |
     +--------------------------------------------------------------------------------------------------+|                                                |
-    ****************************************************************************************************|                       W3                       |
+    ****************************************************************************************************|                                                |
     *                                                                                                  *|                                                |
     *                                                                                                  *|                                                |
     *                                                                                                  *|                                                |
     *                                                                                                  *|                                                |
-    *                                                                                                  *|                                                |
+    *                                                                                                  *|                       W3                       |
     *                                                                                                  *|                                                |
     *                                                                                                  *|                                                |
     *                                                                                                  *|                                                |

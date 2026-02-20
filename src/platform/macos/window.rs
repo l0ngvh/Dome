@@ -5,6 +5,7 @@ use super::mirror::WindowCapture;
 use super::monitor::{MonitorInfo, primary_full_height_from};
 use super::rendering::{clip_to_bounds, compute_window_border, to_ns_rect};
 use crate::config::Config;
+use crate::core::WindowPlacement;
 use crate::core::{Dimension, Window, WindowId};
 use crate::platform::macos::accessibility::AXWindow;
 
@@ -59,23 +60,31 @@ impl MacWindow {
 
     pub(super) fn show(
         &mut self,
-        window: &Window,
-        monitor: Dimension,
-        focused: bool,
+        wp: &WindowPlacement,
         config: &Config,
     ) -> anyhow::Result<()> {
-        let content_dim = apply_inset(window.dimension(), config.border_size);
+        // content_dim from the full unclipped frame, NOT visible_frame.
+        // apply_inset insets all 4 sides. When we later clip against visible_frame:
+        // - Non-clipped edges: content stays inset by border_size (border exists)
+        // - Clipped edges: clip overrides the inset (no gap, border is gone on that side)
+        let content_dim = apply_inset(wp.frame, config.border_size);
         let scale = self.hidden_monitor().scale;
         let primary_full_height = self.primary_full_height();
 
-        if let Some(border) =
-            compute_window_border(window, monitor, focused, config, primary_full_height)
-        {
+        if let Some(border) = compute_window_border(
+            wp.frame,
+            wp.visible_frame,
+            wp.spawn_mode,
+            wp.is_float,
+            wp.is_focused,
+            config,
+            primary_full_height,
+        ) {
             self.sender.send(HubMessage::WindowShow {
                 cg_id: self.ax.cg_id(),
                 frame: border.frame,
-                is_float: window.is_float(),
-                is_focus: focused,
+                is_float: wp.is_float,
+                is_focus: wp.is_focused,
                 edges: border.edges,
                 scale,
                 border: config.border_size as f64,
@@ -84,12 +93,12 @@ impl MacWindow {
             return self.hide();
         }
 
-        if window.is_float() && !focused {
+        if wp.is_float && !wp.is_focused {
             if let Some(capture) = &mut self.capture {
                 capture.start(
                     self.ax.cg_id(),
                     content_dim,
-                    monitor,
+                    wp.visible_frame,
                     scale,
                     primary_full_height,
                     self.sender.clone(),
@@ -97,19 +106,21 @@ impl MacWindow {
             }
             self.hide_ax()?;
         } else {
-            self.try_placement(content_dim, monitor);
+            // try_placement clips to visible_frame bounds — macOS doesn't reliably allow
+            // placing windows partially off-screen (especially above menu bar)
+            self.try_placement(content_dim, wp.visible_frame);
             if let Some(capture) = &mut self.capture {
                 capture.stop();
             }
         }
 
-        if focused
+        if wp.is_focused
             && !self.focused
             && let Err(e) = self.ax.focus()
         {
             tracing::trace!("Failed to focus window: {e:#}");
         }
-        self.focused = focused;
+        self.focused = wp.is_focused;
         Ok(())
     }
 
@@ -161,8 +172,8 @@ impl MacWindow {
     /// taller than screen height, Mac will instead come up with an alternative placement. For our
     /// use case, the alternative placements are acceptable, albeit they will mess a little with
     /// our border rendering
-    fn try_placement(&mut self, placement: Dimension, monitor: Dimension) {
-        let Some(target) = clip_to_bounds(placement, monitor) else {
+    fn try_placement(&mut self, placement: Dimension, bounds: Dimension) {
+        let Some(target) = clip_to_bounds(placement, bounds) else {
             if self.is_ax_hidden {
                 return;
             }
@@ -171,7 +182,7 @@ impl MacWindow {
             // Exception is full screen window, which, should be handled differently as a first
             // party citizen
             tracing::trace!(
-                "Window {} is offscreen (dim={:?}, monitor={monitor:?}), hiding",
+                "Window {} is offscreen (dim={:?}, bounds={bounds:?}), hiding",
                 self.ax,
                 placement
             );

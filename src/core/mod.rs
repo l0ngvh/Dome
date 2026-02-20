@@ -7,7 +7,7 @@ mod split;
 mod tests;
 mod workspace;
 
-pub(crate) use hub::Hub;
+pub(crate) use hub::{ContainerPlacement, Hub, MonitorPlacements, WindowPlacement};
 pub(crate) use node::{
     Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, Window, WindowId, WorkspaceId,
 };

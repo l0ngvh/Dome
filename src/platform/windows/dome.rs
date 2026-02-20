@@ -6,7 +6,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsOnOpenRule, WindowsWindow};
-use crate::core::{Child, ContainerId, Dimension, Hub, MonitorId, SpawnMode, WindowId, WorkspaceId};
+use crate::core::{Child, ContainerId, Dimension, Hub, MonitorId, SpawnMode, WindowId};
 
 use super::recovery;
 use super::window::{Taskbar, WindowHandle, enum_windows, get_size_constraints};
@@ -284,7 +284,7 @@ impl Dome {
             if let Ok(event) = rx.recv() {
                 let last_focus = self.hub.get_workspace(self.hub.current_workspace()).focused();
                 let (creates, deletes) = self.handle_event(event);
-                self.process_frame(creates, deletes, last_focus);
+                self.apply_layout(creates, deletes, last_focus);
             }
         }
     }
@@ -450,15 +450,14 @@ impl Dome {
         }
     }
 
-    fn process_frame(
+    fn apply_layout(
         &mut self,
         creates: Vec<OverlayCreate>,
         deletes: Vec<WindowId>,
         last_focus: Option<Child>,
     ) {
         let border = self.config.border_size;
-        let ws = self.hub.get_workspace(self.hub.current_workspace());
-        let focused = ws.focused();
+        let focused = self.hub.get_workspace(self.hub.current_workspace()).focused();
 
         let mut frame = OverlayFrame {
             creates,
@@ -471,13 +470,13 @@ impl Dome {
             containers: Vec::new(),
         };
 
-        // Hide windows no longer displayed per monitor
-        for ws_id in self.hub.visible_workspaces() {
-            let monitor_id = self.hub.get_workspace(ws_id).monitor();
-            let current_windows =
-                get_displayed_for_workspace(&self.hub, ws_id, &self.registry);
-
-            if let Some(entry) = self.monitor_registry.get_entry_mut(monitor_id) {
+        for mp in self.hub.get_visible_placements() {
+            if let Some(entry) = self.monitor_registry.get_entry_mut(mp.monitor_id) {
+                let current_windows: HashSet<_> = mp
+                    .windows
+                    .iter()
+                    .filter_map(|p| self.registry.get_handle(p.id).map(|h| WindowKey::from(&h)))
+                    .collect();
                 for key in entry.displayed_windows.difference(&current_windows) {
                     if let Some(handle) = self.registry.get_handle_by_key(*key) {
                         handle.hide();
@@ -486,50 +485,64 @@ impl Dome {
                 }
                 entry.displayed_windows = current_windows;
             }
-        }
 
-        // Tiling windows
-        for (handle, dim) in get_tiling_windows(&self.hub, &self.registry) {
-            let content_dim = apply_inset(dim, border);
-            self.check_and_set_constraints(&handle, &content_dim);
-            handle.set_position(&content_dim);
-            self.taskbar.add_tab(handle.hwnd()).ok();
+            for wp in &mp.windows {
+                if let Some(handle) = self.registry.get_handle(wp.id) {
+                    let content_dim = apply_inset(wp.frame, border);
+                    self.check_and_set_constraints(&handle, &content_dim);
+                    handle.set_position(&apply_inset(wp.visible_frame, border));
+                    if wp.is_float {
+                        handle.set_topmost();
+                    }
+                    self.taskbar.add_tab(handle.hwnd()).ok();
 
-            if let Some(id) = self.registry.get_id(&handle) {
-                let colors = if focused == Some(Child::Window(id)) {
-                    spawn_colors(self.hub.get_window(id).spawn_mode(), &self.config)
-                } else {
-                    [self.config.border_color; 4]
-                };
-                frame.windows.push(WindowOverlay {
-                    window_id: id,
-                    frame: dim,
-                    edges: border_edges(dim, border, colors),
-                    is_float: false,
-                });
+                    let colors = if wp.is_focused {
+                        if wp.is_float {
+                            [self.config.focused_color; 4]
+                        } else {
+                            spawn_colors(wp.spawn_mode, &self.config)
+                        }
+                    } else {
+                        [self.config.border_color; 4]
+                    };
+                    frame.windows.push(WindowOverlay {
+                        window_id: wp.id,
+                        frame: wp.visible_frame,
+                        edges: border_edges(wp.visible_frame, border, colors),
+                        is_float: wp.is_float,
+                    });
+                }
             }
-        }
 
-        // Float windows
-        for (handle, dim) in get_float_windows(&self.hub, &self.registry) {
-            let content_dim = apply_inset(dim, border);
-            self.check_and_set_constraints(&handle, &content_dim);
-            handle.set_position(&content_dim);
-            handle.set_topmost();
-            self.taskbar.add_tab(handle.hwnd()).ok();
-
-            if let Some(id) = self.registry.get_id(&handle) {
-                let colors = if focused == Some(Child::Window(id)) {
-                    [self.config.focused_color; 4]
+            for cp in &mp.containers {
+                let tab_bar = if cp.is_tabbed {
+                    Some(build_tab_info(
+                        &self.hub,
+                        &self.registry,
+                        cp.id,
+                        cp.visible_frame,
+                        &self.config,
+                        cp.is_focused,
+                    ))
                 } else {
-                    [self.config.border_color; 4]
+                    None
                 };
-                frame.windows.push(WindowOverlay {
-                    window_id: id,
-                    frame: dim,
-                    edges: border_edges(dim, border, colors),
-                    is_float: true,
-                });
+
+                let edges = if cp.is_focused {
+                    let colors = spawn_colors(cp.spawn_mode, &self.config);
+                    border_edges(cp.visible_frame, border, colors)
+                } else {
+                    vec![]
+                };
+
+                if cp.is_tabbed || cp.is_focused {
+                    frame.containers.push(ContainerOverlay {
+                        container_id: cp.id,
+                        frame: cp.visible_frame,
+                        edges,
+                        tab_bar,
+                    });
+                }
             }
         }
 
@@ -539,33 +552,6 @@ impl Dome {
             && let Some(handle) = self.registry.get_handle(id)
         {
             handle.focus();
-        }
-
-        // Container borders and tab bars
-        for (container_id, dim, is_tabbed) in get_containers(&self.hub) {
-            let is_focused = focused == Some(Child::Container(container_id));
-            if is_tabbed {
-                let edges = if is_focused {
-                    let colors = spawn_colors(self.hub.get_container(container_id).spawn_mode(), &self.config);
-                    border_edges(dim, border, colors)
-                } else {
-                    vec![]
-                };
-                frame.containers.push(ContainerOverlay {
-                    container_id,
-                    frame: dim,
-                    edges,
-                    tab_bar: Some(build_tab_info(&self.hub, &self.registry, container_id, &self.config, is_focused)),
-                });
-            } else if is_focused {
-                let colors = spawn_colors(self.hub.get_container(container_id).spawn_mode(), &self.config);
-                frame.containers.push(ContainerOverlay {
-                    container_id,
-                    frame: dim,
-                    edges: border_edges(dim, border, colors),
-                    tab_bar: None,
-                });
-            }
         }
 
         if let Some(app_hwnd) = self.app_hwnd {
@@ -621,126 +607,20 @@ fn send_overlay_frame(frame: OverlayFrame, app_hwnd: AppHandle) {
     unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_OVERLAY, WPARAM(ptr), LPARAM(0)).ok() };
 }
 
-fn get_tiling_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimension)> {
-    let mut windows = Vec::new();
-
-    for ws_id in hub.visible_workspaces() {
-        let ws = hub.get_workspace(ws_id);
-        let mut stack: Vec<Child> = ws.root().into_iter().collect();
-        while let Some(child) = stack.pop() {
-            match child {
-                Child::Window(id) => {
-                    if let Some(handle) = registry.get_handle(id) {
-                        windows.push((handle, hub.get_window(id).dimension()));
-                    }
-                }
-                Child::Container(id) => {
-                    let container = hub.get_container(id);
-                    if let Some(active) = container.active_tab() {
-                        stack.push(active);
-                    } else {
-                        for &c in container.children() {
-                            stack.push(c);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    windows
-}
-
-fn get_float_windows(hub: &Hub, registry: &Registry) -> Vec<(WindowHandle, Dimension)> {
-    let mut windows = Vec::new();
-    for ws_id in hub.visible_workspaces() {
-        let ws = hub.get_workspace(ws_id);
-        for &id in ws.float_windows() {
-            if let Some(handle) = registry.get_handle(id) {
-                windows.push((handle, hub.get_window(id).dimension()));
-            }
-        }
-    }
-    windows
-}
-
-fn get_displayed_for_workspace(
-    hub: &Hub,
-    ws_id: WorkspaceId,
-    registry: &Registry,
-) -> HashSet<WindowKey> {
-    let mut windows = HashSet::new();
-    let ws = hub.get_workspace(ws_id);
-
-    let mut stack: Vec<Child> = ws.root().into_iter().collect();
-    while let Some(child) = stack.pop() {
-        match child {
-            Child::Window(id) => {
-                if let Some(handle) = registry.get_handle(id) {
-                    windows.insert(WindowKey::from(&handle));
-                }
-            }
-            Child::Container(id) => {
-                let container = hub.get_container(id);
-                if let Some(active) = container.active_tab() {
-                    stack.push(active);
-                } else {
-                    for &c in container.children() {
-                        stack.push(c);
-                    }
-                }
-            }
-        }
-    }
-
-    for &float_id in ws.float_windows() {
-        if let Some(handle) = registry.get_handle(float_id) {
-            windows.insert(WindowKey::from(&handle));
-        }
-    }
-
-    windows
-}
-
-fn get_containers(hub: &Hub) -> Vec<(ContainerId, Dimension, bool)> {
-    let mut containers = Vec::new();
-    for ws_id in hub.visible_workspaces() {
-        let ws = hub.get_workspace(ws_id);
-        let mut stack: Vec<Child> = ws.root().into_iter().collect();
-        while let Some(child) = stack.pop() {
-            if let Child::Container(id) = child {
-                let container = hub.get_container(id);
-                let is_tabbed = container.active_tab().is_some();
-                containers.push((id, container.dimension(), is_tabbed));
-                if is_tabbed {
-                    if let Some(active) = container.active_tab() {
-                        stack.push(active);
-                    }
-                } else {
-                    for &c in container.children() {
-                        stack.push(c);
-                    }
-                }
-            }
-        }
-    }
-    containers
-}
-
 fn build_tab_info(
     hub: &Hub,
     registry: &Registry,
     container_id: ContainerId,
+    visible_frame: Dimension,
     config: &Config,
     is_focused: bool,
 ) -> TabBarInfo {
     let container = hub.get_container(container_id);
-    let dim = container.dimension();
     let children = container.children();
     let tab_width = if children.is_empty() {
-        dim.width
+        visible_frame.width
     } else {
-        dim.width / children.len() as f32
+        visible_frame.width / children.len() as f32
     };
     let active_tab = container.active_tab_index();
 
@@ -757,7 +637,7 @@ fn build_tab_info(
             };
             TabInfo {
                 title,
-                x: dim.x + i as f32 * tab_width,
+                x: visible_frame.x + i as f32 * tab_width,
                 width: tab_width,
                 is_active: i == active_tab,
             }

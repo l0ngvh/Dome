@@ -17,6 +17,9 @@ mod sync_config;
 mod tabbed;
 mod toggle_direction;
 mod toggle_spawn_mode;
+mod visible_placements;
+
+use std::collections::HashSet;
 
 use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
@@ -31,38 +34,92 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     validate_hub(hub);
     let mut s = snapshot_text(hub);
 
-    // ASCII visualization
+    // ASCII visualization uses screen coords from get_visible_placements
     let mut grid = vec![vec![' '; ASCII_WIDTH]; ASCII_HEIGHT];
-    let workspace = hub.get_workspace(hub.current_workspace());
-    let focused = workspace.focused();
+    let all = hub.get_visible_placements();
+    let mp = &all[0];
 
-    if let Some(root) = workspace.root() {
-        draw_windows(hub, &mut grid, root);
-    }
-
-    let focused_is_float =
-        matches!(focused, Some(Child::Window(id)) if hub.get_window(id).is_float());
-
-    // Draw focus border for non-float windows before floats
-    if !focused_is_float {
-        if let Some(Child::Window(id)) = focused {
-            let dim = hub.get_window(id).dimension();
-            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
-        } else if let Some(Child::Container(id)) = focused {
-            let dim = hub.get_container(id).dimension();
-            draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
+    // Draw tiling windows
+    for wp in &mp.windows {
+        if !wp.is_float {
+            let d = wp.visible_frame;
+            let clip = clip_edges(wp.frame, wp.visible_frame);
+            draw_rect(
+                &mut grid,
+                d.x,
+                d.y,
+                d.width,
+                d.height,
+                &format!("W{}", wp.id.get()),
+                clip,
+            );
         }
     }
 
-    // Draw float windows last so they appear on top
-    for &float_id in workspace.float_windows() {
-        draw_float(hub, &mut grid, float_id);
+    // Draw tab bars
+    for cp in &mp.containers {
+        if cp.is_tabbed {
+            let container = hub.get_container(cp.id);
+            let labels: Vec<String> = container
+                .children()
+                .iter()
+                .map(|child| match child {
+                    Child::Window(wid) => format!("W{}", wid.get()),
+                    Child::Container(cid) => format!("C{}", cid.get()),
+                })
+                .collect();
+            let d = cp.visible_frame;
+            draw_tab_bar(&mut grid, d.x, d.y, d.width, &labels, cp.active_tab_index);
+        }
     }
 
-    // Draw focus border for float windows after floats
-    if focused_is_float && let Some(Child::Window(id)) = focused {
-        let dim = hub.get_window(id).dimension();
-        draw_focused_border(&mut grid, dim.x, dim.y, dim.width, dim.height);
+    // Draw focus border for non-float focused
+    let focused_float = mp.windows.iter().find(|p| p.is_focused && p.is_float);
+    if focused_float.is_none() {
+        if let Some(wp) = mp.windows.iter().find(|p| p.is_focused) {
+            let d = wp.visible_frame;
+            let clip = clip_edges(wp.frame, wp.visible_frame);
+            draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
+        } else if let Some(cp) = mp.containers.iter().find(|p| p.is_focused) {
+            let d = cp.visible_frame;
+            let clip = clip_edges(cp.frame, cp.visible_frame);
+            draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
+        }
+    }
+
+    // Draw float windows on top
+    for wp in &mp.windows {
+        if wp.is_float {
+            let d = wp.visible_frame;
+            let clip = clip_edges(wp.frame, wp.visible_frame);
+            let grid_w = grid[0].len() as isize;
+            let grid_h = grid.len() as isize;
+            let x1 = d.x.round() as isize;
+            let y1 = d.y.round() as isize;
+            let x2 = (d.x + d.width).round() as isize - 1;
+            let y2 = (d.y + d.height).round() as isize - 1;
+            for row in (y1 + 1).max(0)..y2.min(grid_h) {
+                for col in (x1 + 1).max(0)..x2.min(grid_w) {
+                    grid[row as usize][col as usize] = ' ';
+                }
+            }
+            draw_rect(
+                &mut grid,
+                d.x,
+                d.y,
+                d.width,
+                d.height,
+                &format!("F{}", wp.id.get()),
+                clip,
+            );
+        }
+    }
+
+    // Draw focus border for float focused (on top of everything)
+    if let Some(wp) = focused_float {
+        let d = wp.visible_frame;
+        let clip = clip_edges(wp.frame, wp.visible_frame);
+        draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
     }
 
     s.push('\n');
@@ -121,76 +178,6 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     }
     s.push_str(")\n");
     s
-}
-
-fn draw_float(hub: &Hub, grid: &mut [Vec<char>], float_id: WindowId) {
-    let float = hub.get_window(float_id);
-    let dim = float.dimension();
-    let grid_w = grid[0].len() as isize;
-    let grid_h = grid.len() as isize;
-    let x1 = dim.x.round() as isize;
-    let y1 = dim.y.round() as isize;
-    let x2 = (dim.x + dim.width).round() as isize - 1;
-    let y2 = (dim.y + dim.height).round() as isize - 1;
-    for row in (y1 + 1).max(0)..y2.min(grid_h) {
-        for col in (x1 + 1).max(0)..x2.min(grid_w) {
-            grid[row as usize][col as usize] = ' ';
-        }
-    }
-    draw_rect(
-        grid,
-        dim.x,
-        dim.y,
-        dim.width,
-        dim.height,
-        &format!("F{}", float_id.get()),
-    );
-}
-
-fn draw_windows(hub: &Hub, grid: &mut [Vec<char>], child: Child) {
-    match child {
-        Child::Window(id) => {
-            let dim = hub.get_window(id).dimension();
-            draw_rect(
-                grid,
-                dim.x,
-                dim.y,
-                dim.width,
-                dim.height,
-                &format!("W{}", id.get()),
-            );
-        }
-        Child::Container(id) => {
-            let c = hub.get_container(id);
-            if c.is_tabbed() {
-                let dim = c.dimension();
-                let tab_labels: Vec<String> = c
-                    .children()
-                    .iter()
-                    .map(|child| match child {
-                        Child::Window(wid) => format!("W{}", wid.get()),
-                        Child::Container(cid) => format!("C{}", cid.get()),
-                    })
-                    .collect();
-                draw_tab_bar(
-                    grid,
-                    dim.x,
-                    dim.y,
-                    dim.width,
-                    &tab_labels,
-                    c.active_tab_index(),
-                );
-
-                if let Some(&active) = c.children().get(c.active_tab_index()) {
-                    draw_windows(hub, grid, active);
-                }
-            } else {
-                for &child in c.children() {
-                    draw_windows(hub, grid, child);
-                }
-            }
-        }
-    }
 }
 
 fn draw_tab_bar(
@@ -256,41 +243,63 @@ fn draw_tab_bar(
     }
 }
 
-fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str) {
+fn clip_edges(frame: Dimension, visible: Dimension) -> [bool; 4] {
+    [
+        visible.x > frame.x + 0.5,
+        (visible.x + visible.width) < (frame.x + frame.width) - 0.5,
+        visible.y > frame.y + 0.5,
+        (visible.y + visible.height) < (frame.y + frame.height) - 0.5,
+    ]
+}
+
+fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str, clip: [bool; 4]) {
     let grid_w = grid[0].len() as isize;
     let grid_h = grid.len() as isize;
+    let [clip_l, clip_r, clip_t, clip_b] = clip;
 
     let x1 = x.round() as isize;
     let y1 = y.round() as isize;
     let x2 = (x + w).round() as isize - 1;
     let y2 = (y + h).round() as isize - 1;
 
-    for col in x1.max(0)..=x2.min(grid_w - 1) {
-        if y1 >= 0 && y1 < grid_h {
-            grid[y1 as usize][col as usize] = '-';
-        }
-        if y2 >= 0 && y2 < grid_h {
-            grid[y2 as usize][col as usize] = '-';
-        }
-    }
-    for row in y1.max(0)..=y2.min(grid_h - 1) {
-        if x1 >= 0 && x1 < grid_w {
-            grid[row as usize][x1 as usize] = '|';
-        }
-        if x2 >= 0 && x2 < grid_w {
-            grid[row as usize][x2 as usize] = '|';
+    if !clip_t {
+        for col in x1.max(0)..=x2.min(grid_w - 1) {
+            if y1 >= 0 && y1 < grid_h {
+                grid[y1 as usize][col as usize] = '-';
+            }
         }
     }
-    if x1 >= 0 && x1 < grid_w && y1 >= 0 && y1 < grid_h {
+    if !clip_b {
+        for col in x1.max(0)..=x2.min(grid_w - 1) {
+            if y2 >= 0 && y2 < grid_h {
+                grid[y2 as usize][col as usize] = '-';
+            }
+        }
+    }
+    if !clip_l {
+        for row in y1.max(0)..=y2.min(grid_h - 1) {
+            if x1 >= 0 && x1 < grid_w {
+                grid[row as usize][x1 as usize] = '|';
+            }
+        }
+    }
+    if !clip_r {
+        for row in y1.max(0)..=y2.min(grid_h - 1) {
+            if x2 >= 0 && x2 < grid_w {
+                grid[row as usize][x2 as usize] = '|';
+            }
+        }
+    }
+    if !clip_l && !clip_t && x1 >= 0 && x1 < grid_w && y1 >= 0 && y1 < grid_h {
         grid[y1 as usize][x1 as usize] = '+';
     }
-    if x2 >= 0 && x2 < grid_w && y1 >= 0 && y1 < grid_h {
+    if !clip_r && !clip_t && x2 >= 0 && x2 < grid_w && y1 >= 0 && y1 < grid_h {
         grid[y1 as usize][x2 as usize] = '+';
     }
-    if x1 >= 0 && x1 < grid_w && y2 >= 0 && y2 < grid_h {
+    if !clip_l && !clip_b && x1 >= 0 && x1 < grid_w && y2 >= 0 && y2 < grid_h {
         grid[y2 as usize][x1 as usize] = '+';
     }
-    if x2 >= 0 && x2 < grid_w && y2 >= 0 && y2 < grid_h {
+    if !clip_r && !clip_b && x2 >= 0 && x2 < grid_w && y2 >= 0 && y2 < grid_h {
         grid[y2 as usize][x2 as usize] = '+';
     }
 
@@ -307,29 +316,42 @@ fn draw_rect(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, label: &str
     }
 }
 
-fn draw_focused_border(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32) {
+fn draw_focused_border(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, clip: [bool; 4]) {
     let grid_w = grid[0].len() as isize;
     let grid_h = grid.len() as isize;
+    let [clip_l, clip_r, clip_t, clip_b] = clip;
 
     let x1 = x.round() as isize;
     let y1 = y.round() as isize;
     let x2 = (x + w).round() as isize - 1;
     let y2 = (y + h).round() as isize - 1;
 
-    for col in x1.max(0)..=x2.min(grid_w - 1) {
-        if y1 >= 0 && y1 < grid_h {
-            grid[y1 as usize][col as usize] = '*';
-        }
-        if y2 >= 0 && y2 < grid_h {
-            grid[y2 as usize][col as usize] = '*';
+    if !clip_t {
+        for col in x1.max(0)..=x2.min(grid_w - 1) {
+            if y1 >= 0 && y1 < grid_h {
+                grid[y1 as usize][col as usize] = '*';
+            }
         }
     }
-    for row in y1.max(0)..=y2.min(grid_h - 1) {
-        if x1 >= 0 && x1 < grid_w {
-            grid[row as usize][x1 as usize] = '*';
+    if !clip_b {
+        for col in x1.max(0)..=x2.min(grid_w - 1) {
+            if y2 >= 0 && y2 < grid_h {
+                grid[y2 as usize][col as usize] = '*';
+            }
         }
-        if x2 >= 0 && x2 < grid_w {
-            grid[row as usize][x2 as usize] = '*';
+    }
+    if !clip_l {
+        for row in y1.max(0)..=y2.min(grid_h - 1) {
+            if x1 >= 0 && x1 < grid_w {
+                grid[row as usize][x1 as usize] = '*';
+            }
+        }
+    }
+    if !clip_r {
+        for row in y1.max(0)..=y2.min(grid_h - 1) {
+            if x2 >= 0 && x2 < grid_w {
+                grid[row as usize][x2 as usize] = '*';
+            }
         }
     }
 }
@@ -746,6 +768,53 @@ fn validate_hub(hub: &Hub) {
                     }
                 }
             }
+        }
+    }
+
+    // Validate visible placements
+    fn clip(dim: Dimension, bounds: Dimension) -> Option<Dimension> {
+        let x1 = dim.x.max(bounds.x);
+        let y1 = dim.y.max(bounds.y);
+        let x2 = (dim.x + dim.width).min(bounds.x + bounds.width);
+        let y2 = (dim.y + dim.height).min(bounds.y + bounds.height);
+        if x1 >= x2 || y1 >= y2 {
+            return None;
+        }
+        Some(Dimension {
+            x: x1,
+            y: y1,
+            width: x2 - x1,
+            height: y2 - y1,
+        })
+    }
+
+    let all_placements = hub.get_visible_placements();
+    let mut seen_window_ids = HashSet::new();
+
+    for mp in &all_placements {
+        let screen = hub.get_monitor(mp.monitor_id).dimension();
+
+        for wp in &mp.windows {
+            assert!(
+                seen_window_ids.insert(wp.id),
+                "Duplicate window {} in visible placements",
+                wp.id
+            );
+            assert_eq!(
+                clip(wp.frame, screen),
+                Some(wp.visible_frame),
+                "Window {} visible_frame doesn't match clip(frame, screen)",
+                wp.id
+            );
+        }
+
+        for cp in &mp.containers {
+            assert_eq!(
+                clip(cp.frame, screen),
+                Some(cp.visible_frame),
+                "Container {} visible_frame doesn't match clip(frame, screen)",
+                cp.id
+            );
         }
     }
 }

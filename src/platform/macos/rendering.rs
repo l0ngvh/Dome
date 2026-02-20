@@ -1,7 +1,7 @@
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use crate::config::{Color, Config};
-use crate::core::{Container, ContainerId, Dimension, SpawnMode, Window};
+use crate::core::{ContainerId, Dimension, SpawnMode};
 
 /// Computed border data ready for sending to the app thread.
 pub(super) struct BorderEdges {
@@ -33,32 +33,35 @@ pub(super) struct TabBarOverlay {
 /// Compute border edges for a window, clipped to monitor bounds.
 /// Returns frame and edges in Cocoa coordinates (bottom-left origin), ready for rendering.
 pub(super) fn compute_window_border(
-    window: &Window,
-    bounds: Dimension,
+    frame: Dimension,
+    visible_frame: Dimension,
+    spawn_mode: SpawnMode,
+    is_float: bool,
     focused: bool,
     config: &Config,
     primary_full_height: f32,
 ) -> Option<BorderEdges> {
     let colors = if !focused {
         [config.border_color; 4]
-    } else if window.is_float() {
+    } else if is_float {
         [config.focused_color; 4]
     } else {
-        spawn_colors(window.spawn_mode(), config)
+        spawn_colors(spawn_mode, config)
     };
-    compute_border_edges(window.dimension(), bounds, colors, config.border_size, primary_full_height)
+    compute_border_edges(frame, visible_frame, colors, config.border_size, primary_full_height)
 }
 
 /// Compute border edges for a container, clipped to monitor bounds.
 /// Returns frame and edges in Cocoa coordinates (bottom-left origin), ready for rendering.
 pub(super) fn compute_container_border(
-    container: &Container,
-    bounds: Dimension,
+    frame: Dimension,
+    visible_frame: Dimension,
+    spawn_mode: SpawnMode,
     config: &Config,
     primary_full_height: f32,
 ) -> Option<BorderEdges> {
-    let colors = spawn_colors(container.spawn_mode(), config);
-    compute_border_edges(container.dimension(), bounds, colors, config.border_size, primary_full_height)
+    let colors = spawn_colors(spawn_mode, config);
+    compute_border_edges(frame, visible_frame, colors, config.border_size, primary_full_height)
 }
 
 /// colors: [top, right, bottom, left]
@@ -180,8 +183,7 @@ fn dim_to_ns_rect(dim: Dimension) -> NSRect {
 }
 
 pub(super) fn build_tab_bar(
-    container_dim: Dimension,
-    bounds: Dimension,
+    visible_frame: Dimension,
     id: ContainerId,
     titles: &[String],
     active_tab: usize,
@@ -189,21 +191,21 @@ pub(super) fn build_tab_bar(
     primary_full_height: f32,
 ) -> Option<TabBarOverlay> {
     let tab_bar_dim = Dimension {
-        x: container_dim.x,
-        y: container_dim.y,
-        width: container_dim.width,
+        x: visible_frame.x,
+        y: visible_frame.y,
+        width: visible_frame.width,
         height: config.tab_bar_height,
     };
 
-    // Convert to Cocoa coords upfront
+    // Convert to Cocoa coords
     let tab_bar = to_cocoa(tab_bar_dim, primary_full_height);
-    let bounds = to_cocoa(bounds, primary_full_height);
+    let bounds = to_cocoa(visible_frame, primary_full_height);
     let clipped = clip_to_bounds(tab_bar, bounds)?;
 
     let tab_width = if titles.is_empty() {
         0.0
     } else {
-        container_dim.width / titles.len() as f32
+        visible_frame.width / titles.len() as f32
     };
 
     let tabs = titles

@@ -4,8 +4,33 @@ use crate::config::SizeConstraint;
 use super::allocator::{Allocator, NodeId};
 use super::node::{
     Child, Container, ContainerId, Dimension, Direction, DisplayMode, Monitor, MonitorId, Parent,
-    Window, WindowId, Workspace, WorkspaceId,
+    SpawnMode, Window, WindowId, Workspace, WorkspaceId,
 };
+
+pub(crate) struct WindowPlacement {
+    pub(crate) id: WindowId,
+    pub(crate) frame: Dimension,
+    pub(crate) visible_frame: Dimension,
+    pub(crate) is_float: bool,
+    pub(crate) is_focused: bool,
+    pub(crate) spawn_mode: SpawnMode,
+}
+
+pub(crate) struct ContainerPlacement {
+    pub(crate) id: ContainerId,
+    pub(crate) frame: Dimension,
+    pub(crate) visible_frame: Dimension,
+    pub(crate) is_focused: bool,
+    pub(crate) spawn_mode: SpawnMode,
+    pub(crate) is_tabbed: bool,
+    pub(crate) active_tab_index: usize,
+}
+
+pub(crate) struct MonitorPlacements {
+    pub(crate) monitor_id: MonitorId,
+    pub(crate) windows: Vec<WindowPlacement>,
+    pub(crate) containers: Vec<ContainerPlacement>,
+}
 
 #[derive(Debug)]
 pub(crate) struct Hub {
@@ -174,6 +199,89 @@ impl Hub {
 
     pub(crate) fn get_window(&self, id: WindowId) -> &Window {
         self.windows.get(id)
+    }
+
+    pub(crate) fn get_visible_placements(&self) -> Vec<MonitorPlacements> {
+        let current_ws = self.current_workspace();
+
+        self.visible_workspaces()
+            .into_iter()
+            .map(|ws_id| {
+                let ws = self.workspaces.get(ws_id);
+                let screen = self.monitors.get(ws.monitor).dimension;
+                let (offset_x, offset_y) = ws.viewport_offset;
+                let focused = if ws_id == current_ws { ws.focused } else { None };
+
+                let mut windows = Vec::new();
+                let mut containers = Vec::new();
+
+                let mut stack: Vec<Child> = ws.root.into_iter().collect();
+                for _ in super::bounded_loop() {
+                    let Some(child) = stack.pop() else { break };
+                    match child {
+                        Child::Window(id) => {
+                            let window = self.windows.get(id);
+                            let frame = translate(window.dimension, offset_x, offset_y, screen);
+                            if let Some(visible_frame) = clip(frame, screen) {
+                                windows.push(WindowPlacement {
+                                    id,
+                                    frame,
+                                    visible_frame,
+                                    is_float: false,
+                                    is_focused: focused == Some(Child::Window(id)),
+                                    spawn_mode: window.spawn_mode(),
+                                });
+                            }
+                        }
+                        Child::Container(id) => {
+                            let container = self.containers.get(id);
+                            let frame =
+                                translate(container.dimension, offset_x, offset_y, screen);
+                            let Some(visible_frame) = clip(frame, screen) else {
+                                continue;
+                            };
+                            containers.push(ContainerPlacement {
+                                id,
+                                frame,
+                                visible_frame,
+                                is_focused: focused == Some(Child::Container(id)),
+                                spawn_mode: container.spawn_mode(),
+                                is_tabbed: container.is_tabbed(),
+                                active_tab_index: container.active_tab_index(),
+                            });
+                            if let Some(active) = container.active_tab() {
+                                stack.push(active);
+                            } else {
+                                for &c in container.children() {
+                                    stack.push(c);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for &id in &ws.float_windows {
+                    let window = self.windows.get(id);
+                    let frame = translate(window.dimension, offset_x, offset_y, screen);
+                    if let Some(visible_frame) = clip(frame, screen) {
+                        windows.push(WindowPlacement {
+                            id,
+                            frame,
+                            visible_frame,
+                            is_float: true,
+                            is_focused: focused == Some(Child::Window(id)),
+                            spawn_mode: window.spawn_mode(),
+                        });
+                    }
+                }
+
+                MonitorPlacements {
+                    monitor_id: ws.monitor,
+                    windows,
+                    containers,
+                }
+            })
+            .collect()
     }
 
     /// Insert a new window as tiling to the current workspace.
@@ -498,4 +606,24 @@ impl From<crate::config::Config> for HubConfig {
             max_height: config.max_height,
         }
     }
+}
+
+fn translate(dim: Dimension, offset_x: f32, offset_y: f32, screen: Dimension) -> Dimension {
+    Dimension {
+        x: dim.x - offset_x + screen.x,
+        y: dim.y - offset_y + screen.y,
+        width: dim.width,
+        height: dim.height,
+    }
+}
+
+fn clip(dim: Dimension, bounds: Dimension) -> Option<Dimension> {
+    let x1 = dim.x.max(bounds.x);
+    let y1 = dim.y.max(bounds.y);
+    let x2 = (dim.x + dim.width).min(bounds.x + bounds.width);
+    let y2 = (dim.y + dim.height).min(bounds.y + bounds.height);
+    if x1 >= x2 || y1 >= y2 {
+        return None;
+    }
+    Some(Dimension { x: x1, y: y1, width: x2 - x1, height: y2 - y1 })
 }

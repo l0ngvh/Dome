@@ -14,7 +14,7 @@ use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
-use crate::core::{Child, Container, Dimension, Hub, Window, WindowId, WorkspaceId};
+use crate::core::{Child, Container, Dimension, Hub, Window, WindowId};
 use crate::platform::macos::accessibility::{AXWindow, get_ax_windows};
 
 use super::mirror::{WindowCapture, create_captures_async};
@@ -318,7 +318,13 @@ impl Dome {
         if !new_apps.is_empty() {
             self.sender.send(HubMessage::RegisterObservers(new_apps));
         }
-        let overlays = self.process_frame();
+        // Hide all windows before first frame — windows discovered during initial sync
+        // may end up offscreen due to viewport scrolling. apply_layout will show the
+        // visible ones.
+        for window in self.registry.windows.values_mut() {
+            window.hide().ok();
+        }
+        let overlays = self.apply_layout();
 
         self.sender.send(HubMessage::Overlays(overlays));
     }
@@ -387,7 +393,7 @@ impl Dome {
         if !self.running {
             return;
         }
-        let overlays = self.process_frame();
+        let overlays = self.apply_layout();
 
         self.sender.send(HubMessage::Overlays(overlays));
     }
@@ -632,18 +638,19 @@ impl Dome {
     }
 
     #[tracing::instrument(skip_all)]
-    fn process_frame(&mut self) -> Overlays {
-        let current_ws_id = self.hub.current_workspace();
+    fn apply_layout(&mut self) -> Overlays {
         let mut container_borders = Vec::new();
         let mut tab_bars = Vec::new();
 
-        // Hide windows no longer displayed and update displayed state per monitor
-        for ws_id in self.hub.visible_workspaces() {
-            let ws = self.hub.get_workspace(ws_id);
-            let monitor_id = ws.monitor();
-            let current_windows = get_displayed_for_workspace(&self.hub, ws_id, &self.registry);
+        for mp in self.hub.get_visible_placements() {
+            let entry = self.monitor_registry.get_entry_mut(mp.monitor_id).unwrap();
 
-            let entry = self.monitor_registry.get_entry_mut(monitor_id).unwrap();
+            // Hide windows no longer displayed on this monitor
+            let current_windows: HashSet<_> = mp
+                .windows
+                .iter()
+                .filter_map(|p| self.registry.get_cg_id(p.id))
+                .collect();
             for cg_id in entry.displayed_windows.difference(&current_windows) {
                 if let Some(window_entry) = self.registry.get_mut(*cg_id)
                     && let Err(e) = window_entry.hide()
@@ -652,78 +659,44 @@ impl Dome {
                 }
             }
             entry.displayed_windows = current_windows;
-        }
 
-        for ws_id in self.hub.visible_workspaces() {
-            let ws = self.hub.get_workspace(ws_id);
-            let monitor_id = ws.monitor();
-            let monitor_dim = self.hub.get_monitor(monitor_id).dimension();
-            let mut stack: Vec<Child> = ws.root().into_iter().collect();
-            let focused = if ws_id == current_ws_id {
-                ws.focused()
-            } else {
-                None
-            };
-
-            while let Some(child) = stack.pop() {
-                match child {
-                    Child::Window(id) => {
-                        let focused = focused == Some(Child::Window(id));
-                        let window = self.registry.get_mut_by_window_id(id).unwrap();
-                        if let Err(e) =
-                            window.show(self.hub.get_window(id), monitor_dim, focused, &self.config)
-                        {
-                            tracing::trace!("Failed to set position for window: {e:#}");
-                        };
-                    }
-                    Child::Container(id) => {
-                        let container = self.hub.get_container(id);
-                        if let Some(active) = container.active_tab() {
-                            stack.push(active);
-                            let titles = self.collect_tab_titles(container);
-                            if let Some(tab_bar) = build_tab_bar(
-                                container.dimension(),
-                                monitor_dim,
-                                id,
-                                &titles,
-                                container.active_tab_index(),
-                                &self.config,
-                                self.primary_full_height,
-                            ) {
-                                tab_bars.push(tab_bar);
-                            }
-                        } else {
-                            for &c in container.children() {
-                                stack.push(c);
-                            }
-                        }
-                    }
+            for wp in &mp.windows {
+                let window = self.registry.get_mut_by_window_id(wp.id).unwrap();
+                if let Err(e) = window.show(wp, &self.config) {
+                    tracing::trace!("Failed to set position for window: {e:#}");
                 }
             }
 
-            if let Some(Child::Container(id)) = focused {
-                let c = self.hub.get_container(id);
-                if let Some(border) =
-                    compute_container_border(c, monitor_dim, &self.config, self.primary_full_height)
-                {
-                    container_borders.push(ContainerBorder {
-                        key: id,
-                        frame: border.frame,
-                        edges: border.edges,
-                    });
+            for cp in &mp.containers {
+                if cp.is_tabbed {
+                    let container = self.hub.get_container(cp.id);
+                    let titles = self.collect_tab_titles(container);
+                    if let Some(tab_bar) = build_tab_bar(
+                        cp.visible_frame,
+                        cp.id,
+                        &titles,
+                        cp.active_tab_index,
+                        &self.config,
+                        self.primary_full_height,
+                    ) {
+                        tab_bars.push(tab_bar);
+                    }
                 }
-            }
 
-            for &float_id in ws.float_windows() {
-                let float_focused = focused == Some(Child::Window(float_id));
-                let window = self.registry.get_mut_by_window_id(float_id).unwrap();
-                if let Err(e) = window.show(
-                    self.hub.get_window(float_id),
-                    monitor_dim,
-                    float_focused,
-                    &self.config,
-                ) {
-                    tracing::trace!("Failed to set float dimension: {e:#}");
+                if cp.is_focused {
+                    if let Some(border) = compute_container_border(
+                        cp.frame,
+                        cp.visible_frame,
+                        cp.spawn_mode,
+                        &self.config,
+                        self.primary_full_height,
+                    ) {
+                        container_borders.push(ContainerBorder {
+                            key: cp.id,
+                            frame: border.frame,
+                            edges: border.edges,
+                        });
+                    }
                 }
             }
         }
@@ -762,44 +735,6 @@ fn get_focused_window_cg_id(pid: i32) -> Option<CGWindowID> {
     let ax_app = unsafe { AXUIElement::new_application(pid) };
     let focused = get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute()).ok()?;
     get_cg_window_id(&focused)
-}
-
-fn get_displayed_for_workspace(
-    hub: &Hub,
-    ws_id: WorkspaceId,
-    registry: &Registry,
-) -> HashSet<CGWindowID> {
-    let mut windows = HashSet::new();
-    let ws = hub.get_workspace(ws_id);
-
-    let mut stack: Vec<Child> = ws.root().into_iter().collect();
-    while let Some(child) = stack.pop() {
-        match child {
-            Child::Window(id) => {
-                if let Some(cg_id) = registry.get_cg_id(id) {
-                    windows.insert(cg_id);
-                }
-            }
-            Child::Container(id) => {
-                let container = hub.get_container(id);
-                if let Some(active) = container.active_tab() {
-                    stack.push(active);
-                } else {
-                    for &c in container.children() {
-                        stack.push(c);
-                    }
-                }
-            }
-        }
-    }
-
-    for &float_id in ws.float_windows() {
-        if let Some(cg_id) = registry.get_cg_id(float_id) {
-            windows.insert(cg_id);
-        }
-    }
-
-    windows
 }
 
 fn on_open_actions(window: &MacWindow, rules: &[MacosOnOpenRule]) -> Option<Actions> {

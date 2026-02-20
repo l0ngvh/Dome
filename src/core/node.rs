@@ -43,6 +43,7 @@ pub(crate) struct Workspace {
     pub(super) focused: Option<Child>,
     /// All floats in this workspace. Source of truth for rendering.
     pub(super) float_windows: Vec<WindowId>,
+    pub(super) viewport_offset: (f32, f32),
 }
 
 impl Node for Workspace {
@@ -57,6 +58,7 @@ impl Workspace {
             name,
             monitor,
             float_windows: Vec::new(),
+            viewport_offset: (0.0, 0.0),
         }
     }
 

@@ -177,77 +177,65 @@ impl Hub {
     }
 
     fn scroll_into_view(&mut self, workspace_id: WorkspaceId) {
-        let ws = self.workspaces.get(workspace_id);
-        let screen = self.monitors.get(ws.monitor).dimension;
+        self.clamp_viewport_offset(workspace_id);
 
-        let focused_dim = match ws.focused {
+        let (monitor_id, current_offset, focused) = {
+            let ws = self.workspaces.get(workspace_id);
+            (ws.monitor, ws.viewport_offset, ws.focused)
+        };
+        let screen = self.monitors.get(monitor_id).dimension;
+        let (mut offset_x, mut offset_y) = current_offset;
+
+        let focused_dim = match focused {
             Some(Child::Window(id)) => self.windows.get(id).dimension,
             Some(Child::Container(id)) => self.containers.get(id).dimension,
             None => return,
         };
 
-        let mut offset_x = 0.0;
-        let mut offset_y = 0.0;
-
-        if focused_dim.x + focused_dim.width > screen.x + screen.width {
-            offset_x = (screen.x + screen.width) - (focused_dim.x + focused_dim.width);
+        if focused_dim.x - offset_x + focused_dim.width > screen.width {
+            offset_x = focused_dim.x + focused_dim.width - screen.width;
         }
-        if focused_dim.x + offset_x < screen.x {
-            offset_x = screen.x - focused_dim.x;
+        if focused_dim.x - offset_x < 0.0 {
+            offset_x = focused_dim.x;
         }
 
-        if focused_dim.y + focused_dim.height > screen.y + screen.height {
-            offset_y = (screen.y + screen.height) - (focused_dim.y + focused_dim.height);
+        if focused_dim.y - offset_y + focused_dim.height > screen.height {
+            offset_y = focused_dim.y + focused_dim.height - screen.height;
         }
-        if focused_dim.y + offset_y < screen.y {
-            offset_y = screen.y - focused_dim.y;
-        }
-
-        if offset_x == 0.0 && offset_y == 0.0 {
-            return;
+        if focused_dim.y - offset_y < 0.0 {
+            offset_y = focused_dim.y;
         }
 
-        tracing::debug!(offset_x, offset_y, "Scrolling workspace into view");
-        self.apply_scroll_offset(workspace_id, offset_x, offset_y);
+        self.workspaces.get_mut(workspace_id).viewport_offset = (offset_x, offset_y);
     }
 
-    fn apply_scroll_offset(&mut self, workspace_id: WorkspaceId, offset_x: f32, offset_y: f32) {
+    fn clamp_viewport_offset(&mut self, workspace_id: WorkspaceId) {
         let ws = self.workspaces.get(workspace_id);
+        let screen = self.monitors.get(ws.monitor).dimension;
+        let (mut offset_x, mut offset_y) = ws.viewport_offset;
 
-        for &float_id in &ws.float_windows.clone() {
-            let w = self.windows.get_mut(float_id);
-            w.dimension.x += offset_x;
-            w.dimension.y += offset_y;
-        }
-
-        let Some(root) = ws.root else { return };
-
-        let mut stack = vec![root];
-        for _ in super::bounded_loop() {
-            let Some(child) = stack.pop() else { break };
-            match child {
-                Child::Window(id) => {
-                    let w = self.windows.get_mut(id);
-                    w.dimension.x += offset_x;
-                    w.dimension.y += offset_y;
-                }
-                Child::Container(id) => {
-                    let c = self.containers.get_mut(id);
-                    c.dimension.x += offset_x;
-                    c.dimension.y += offset_y;
-                    stack.extend(c.children.iter().copied());
-                }
+        let root_dim = match ws.root {
+            Some(Child::Window(id)) => self.windows.get(id).dimension,
+            Some(Child::Container(id)) => self.containers.get(id).dimension,
+            None => {
+                self.workspaces.get_mut(workspace_id).viewport_offset = (0.0, 0.0);
+                return;
             }
-        }
+        };
+
+        offset_x = offset_x.clamp(0.0, (root_dim.width - screen.width).max(0.0));
+        offset_y = offset_y.clamp(0.0, (root_dim.height - screen.height).max(0.0));
+        self.workspaces.get_mut(workspace_id).viewport_offset = (offset_x, offset_y);
     }
 
     // Windows can extend beyond screen visible area
     fn set_root_dimension(&mut self, root: Child, screen: Dimension) {
         let (min_w, min_h) = self.get_effective_min_size(root);
         let base_dim = Dimension {
+            x: 0.0,
+            y: 0.0,
             width: screen.width.max(min_w),
             height: screen.height.max(min_h),
-            ..screen
         };
 
         // Apply max_size centering for single window at root

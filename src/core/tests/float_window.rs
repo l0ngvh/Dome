@@ -945,7 +945,7 @@ fn insert_float_window_offscreen_scrolls_into_view() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Float(id=WindowId(0), x=120.00, y=10.00, w=30.00, h=20.00)
+        Float(id=WindowId(0), x=200.00, y=50.00, w=30.00, h=20.00)
       )
     )
 

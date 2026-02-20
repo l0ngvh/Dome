@@ -28,9 +28,40 @@ fn add_monitor_creates_workspace_on_new_monitor() {
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=monitor-1, focused=WindowId(1),
-        Window(id=WindowId(1), parent=WorkspaceId(1), x=150.00, y=0.00, w=100.00, h=30.00)
+        Window(id=WindowId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=100.00, h=30.00)
       )
     )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                         W0                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 }
 
@@ -338,7 +369,7 @@ fn move_to_monitor_moves_focused_window() {
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=right-monitor, focused=WindowId(1),
-        Window(id=WindowId(1), parent=WorkspaceId(1), x=150.00, y=0.00, w=100.00, h=30.00)
+        Window(id=WindowId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=100.00, h=30.00)
       )
     )
     ");
@@ -367,7 +398,7 @@ fn move_to_monitor_by_name() {
     Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
       Workspace(id=WorkspaceId(1), name=external, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(1), x=150.00, y=0.00, w=100.00, h=30.00)
+        Window(id=WindowId(0), parent=WorkspaceId(1), x=0.00, y=0.00, w=100.00, h=30.00)
       )
     )
     ");
@@ -402,7 +433,7 @@ fn move_float_to_monitor() {
     Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
       Workspace(id=WorkspaceId(1), name=external, focused=WindowId(0),
-        Float(id=WindowId(0), x=150.00, y=10.00, w=50.00, h=20.00)
+        Float(id=WindowId(0), x=10.00, y=10.00, w=50.00, h=20.00)
       )
     )
     ");
@@ -527,7 +558,7 @@ fn move_to_monitor_does_not_change_focus() {
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=external, focused=WindowId(1),
-        Window(id=WindowId(1), parent=WorkspaceId(1), x=150.00, y=0.00, w=100.00, h=30.00)
+        Window(id=WindowId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=100.00, h=30.00)
       )
     )
     ");
