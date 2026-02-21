@@ -40,6 +40,7 @@ pub(super) enum HubEvent {
     WindowDestroyed(WindowHandle),
     WindowFocused(WindowHandle),
     WindowTitleChanged(WindowHandle),
+    #[expect(dead_code, reason = "TODO: update float window position in hub")]
     WindowMovedOrResized(WindowHandle),
     ScreensChanged(Vec<ScreenInfo>),
     Action(Actions),

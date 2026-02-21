@@ -683,20 +683,20 @@ impl Dome {
                     }
                 }
 
-                if cp.is_focused {
-                    if let Some(border) = compute_container_border(
+                if cp.is_focused
+                    && let Some(border) = compute_container_border(
                         cp.frame,
                         cp.visible_frame,
                         cp.spawn_mode,
                         &self.config,
                         self.primary_full_height,
-                    ) {
-                        container_borders.push(ContainerBorder {
-                            key: cp.id,
-                            frame: border.frame,
-                            edges: border.edges,
-                        });
-                    }
+                    )
+                {
+                    container_borders.push(ContainerBorder {
+                        key: cp.id,
+                        frame: border.frame,
+                        edges: border.edges,
+                    });
                 }
             }
         }

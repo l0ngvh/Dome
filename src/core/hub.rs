@@ -18,11 +18,13 @@ pub(crate) struct WindowPlacement {
 
 pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
+    #[cfg_attr(all(target_os = "windows", not(test)), expect(dead_code, reason = "used on macOS"))]
     pub(crate) frame: Dimension,
     pub(crate) visible_frame: Dimension,
     pub(crate) is_focused: bool,
     pub(crate) spawn_mode: SpawnMode,
     pub(crate) is_tabbed: bool,
+    #[cfg_attr(all(target_os = "windows", not(test)), expect(dead_code, reason = "used on macOS"))]
     pub(crate) active_tab_index: usize,
 }
 
@@ -95,6 +97,7 @@ impl Hub {
             .collect()
     }
 
+    #[cfg_attr(all(target_os = "macos", not(test)), expect(dead_code, reason = "used on Windows"))]
     pub(crate) fn get_monitor(&self, id: MonitorId) -> &Monitor {
         self.monitors.get(id)
     }
@@ -189,6 +192,7 @@ impl Hub {
         self.workspaces.all_active()
     }
 
+    #[cfg_attr(all(target_os = "macos", not(test)), expect(dead_code, reason = "used on Windows"))]
     pub(crate) fn get_workspace(&self, id: WorkspaceId) -> &Workspace {
         self.workspaces.get(id)
     }

@@ -26,6 +26,7 @@ pub(crate) struct Monitor {
 }
 
 impl Monitor {
+    #[cfg_attr(all(target_os = "macos", not(test)), expect(dead_code, reason = "used on Windows"))]
     pub(crate) fn dimension(&self) -> Dimension {
         self.dimension
     }
@@ -62,20 +63,19 @@ impl Workspace {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn root(&self) -> Option<Child> {
         self.root
     }
 
+    #[cfg_attr(all(target_os = "macos", not(test)), expect(dead_code, reason = "used on Windows"))]
     pub(crate) fn focused(&self) -> Option<Child> {
         self.focused
     }
 
+    #[cfg(test)]
     pub(crate) fn float_windows(&self) -> &[WindowId] {
         &self.float_windows
-    }
-
-    pub(crate) fn monitor(&self) -> MonitorId {
-        self.monitor
     }
 }
 
@@ -198,6 +198,7 @@ impl Container {
         &self.children
     }
 
+    #[cfg(test)]
     pub(crate) fn dimension(&self) -> Dimension {
         self.dimension
     }
@@ -466,6 +467,7 @@ impl Window {
         }
     }
 
+    #[cfg_attr(all(target_os = "windows", not(test)), expect(dead_code, reason = "used on macOS"))]
     pub(crate) fn dimension(&self) -> Dimension {
         self.dimension
     }

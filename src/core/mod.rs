@@ -7,10 +7,12 @@ mod split;
 mod tests;
 mod workspace;
 
-pub(crate) use hub::{ContainerPlacement, Hub, MonitorPlacements, WindowPlacement};
-pub(crate) use node::{
-    Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, Window, WindowId, WorkspaceId,
-};
+pub(crate) use hub::Hub;
+#[cfg(target_os = "macos")]
+pub(crate) use hub::WindowPlacement;
+pub(crate) use node::{Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, WindowId};
+#[cfg(target_os = "macos")]
+pub(crate) use node::Window;
 
 const MAX_ITERATIONS: usize = 10000;
 

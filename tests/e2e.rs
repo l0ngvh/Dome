@@ -15,7 +15,7 @@ fn spawn_server(config_path: &str) -> Child {
 }
 
 fn wait_for_server(timeout: Duration) -> bool {
-    let client = DomeClient::default();
+    let client = DomeClient;
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
         if client.ping() {

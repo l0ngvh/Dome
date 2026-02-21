@@ -291,7 +291,7 @@ fn smoke_test() {
     (0..runs).into_par_iter().for_each(|run| {
         run_smoke_iteration(seed.wrapping_add(run as u64), ops_per_run);
         let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-        if done % 10 == 0 {
+        if done.is_multiple_of(10) {
             tracing::info!("Completed {done}/{runs}");
         }
     });
