@@ -491,7 +491,8 @@ impl Dome {
                 if let Some(handle) = self.registry.get_handle(wp.id) {
                     let content_dim = apply_inset(wp.frame, border);
                     self.check_and_set_constraints(&handle, &content_dim);
-                    handle.set_position(&apply_inset(wp.visible_frame, border));
+                    // TODO: use visible_frame with SetWindowRgn to clip at monitor edges
+                    handle.set_position(&content_dim);
                     if wp.is_float {
                         handle.set_topmost();
                     }
