@@ -1,11 +1,13 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Console::{
     CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler,
 };
-use windows::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos};
+use windows::Win32::UI::WindowsAndMessaging::{
+    IsZoomed, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOZORDER, SW_MAXIMIZE, SW_RESTORE,
+};
 use windows::core::BOOL;
 
 use crate::core::Dimension;
@@ -16,9 +18,13 @@ use super::window::WindowHandle;
 const DEFAULT_WIDTH: f32 = 800.0;
 const DEFAULT_HEIGHT: f32 = 600.0;
 
-thread_local! {
-    static RECOVERY_STATE: RefCell<HashMap<isize, Dimension>> = RefCell::new(HashMap::new());
+struct WindowState {
+    dimension: Dimension,
+    is_maximized: bool,
 }
+
+static RECOVERY_STATE: LazyLock<Mutex<HashMap<isize, WindowState>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub(super) fn track(handle: &WindowHandle) {
     let dim = handle.dimension();
@@ -42,22 +48,35 @@ pub(super) fn track(handle: &WindowHandle) {
     } else {
         dim
     };
-    RECOVERY_STATE.with(|state| {
-        state.borrow_mut().insert(hwnd.0 as isize, original_dim);
-    });
+    let is_maximized = unsafe { IsZoomed(hwnd) }.as_bool();
+
+    if let Ok(mut state) = RECOVERY_STATE.lock() {
+        state.insert(
+            hwnd.0 as isize,
+            WindowState {
+                dimension: original_dim,
+                is_maximized,
+            },
+        );
+    }
 }
 
 pub(super) fn untrack(handle: &WindowHandle) {
-    RECOVERY_STATE.with(|state| {
-        state.borrow_mut().remove(&(handle.hwnd().0 as isize));
-    });
+    if let Ok(mut state) = RECOVERY_STATE.lock() {
+        state.remove(&(handle.hwnd().0 as isize));
+    }
 }
 
 pub(super) fn restore_all() {
-    RECOVERY_STATE.with(|state| {
-        for (&hwnd_val, dim) in state.borrow().iter() {
+    if let Ok(state) = RECOVERY_STATE.lock() {
+        for (&hwnd_val, window_state) in state.iter() {
             let hwnd = HWND(hwnd_val as *mut _);
+            let dim = window_state.dimension;
             unsafe {
+                // Restore the window before setting its position if it was maximized
+                if window_state.is_maximized {
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                }
                 let _ = SetWindowPos(
                     hwnd,
                     None,
@@ -67,9 +86,13 @@ pub(super) fn restore_all() {
                     dim.height as i32,
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
+                // Maximize the window again if it was originally maximized
+                if window_state.is_maximized {
+                    let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+                }
             }
         }
-    });
+    }
 }
 
 pub(super) fn install_handlers() {
@@ -84,3 +107,4 @@ unsafe extern "system" fn console_handler(ctrl_type: u32) -> BOOL {
     }
     BOOL(0)
 }
+
