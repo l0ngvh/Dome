@@ -351,7 +351,7 @@ impl Dome {
             if let Some(entry) = self.monitor_registry.get_entry_mut(mp.monitor_id) {
                 let (wins, conts) = entry.apply_placements(
                     &mp.layout,
-                    &self.registry,
+                    &mut self.registry,
                     &mut self.taskbar,
                     &mut self.hub,
                     &self.config,
@@ -383,13 +383,13 @@ impl Dome {
         let was_fs = self.registry.get_handle(window_id).is_some_and(|h| h.fullscreen());
         match (was_fs, is_fs) {
             (false, true) => {
-                if let Some(h) = self.registry.get_mut_handle(handle) {
+                if let Some(h) = self.registry.get_handle_mut(window_id) {
                     h.sync_fullscreen(true);
                 }
                 self.hub.set_fullscreen(window_id);
             }
             (true, false) => {
-                if let Some(h) = self.registry.get_mut_handle(handle) {
+                if let Some(h) = self.registry.get_handle_mut(window_id) {
                     h.sync_fullscreen(false);
                 }
                 self.hub.unset_fullscreen(window_id);

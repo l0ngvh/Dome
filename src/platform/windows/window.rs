@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::core::DisplayMode;
 use crate::core::Dimension;
 use crate::core::WindowId;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
@@ -31,7 +32,7 @@ pub(super) struct WindowHandle {
     hwnd: HWND,
     title: Option<String>,
     process: String,
-    fullscreen: bool,
+    mode: DisplayMode,
 }
 
 unsafe impl Send for WindowHandle {}
@@ -42,7 +43,7 @@ impl WindowHandle {
             hwnd,
             title: get_window_title(hwnd),
             process: get_process_name(hwnd).unwrap_or_default(),
-            fullscreen: false,
+            mode: DisplayMode::Tiling,
         }
     }
 
@@ -140,21 +141,21 @@ impl WindowHandle {
     }
 
     pub(super) fn set_fullscreen(&mut self, dim: &Dimension) {
-        self.fullscreen = true;
+        self.mode = DisplayMode::Fullscreen;
         self.set_position(dim);
     }
 
     pub(super) fn sync_fullscreen(&mut self, fs: bool) {
-        self.fullscreen = fs;
+        self.mode = if fs { DisplayMode::Fullscreen } else { DisplayMode::Tiling };
     }
 
     pub(super) fn show(&mut self, dim: &Dimension, border: f32, is_float: bool) {
-        self.fullscreen = false;
         let content = apply_inset(*dim, border);
         self.set_position(&content);
-        if is_float {
+        if is_float && self.mode != DisplayMode::Float {
             self.set_topmost();
         }
+        self.mode = if is_float { DisplayMode::Float } else { DisplayMode::Tiling };
     }
 
     /// Returns (min_width, min_height, max_width, max_height) constraints
@@ -189,7 +190,7 @@ impl WindowHandle {
     }
 
     pub(super) fn fullscreen(&self) -> bool {
-        self.fullscreen
+        self.mode == DisplayMode::Fullscreen
     }
 
     fn set_position(&self, dim: &Dimension) {
@@ -212,7 +213,7 @@ impl WindowHandle {
     }
 
     pub(super) fn hide(&self) {
-        if self.fullscreen {
+        if self.mode == DisplayMode::Fullscreen {
             let _was_visible = unsafe { ShowWindow(self.hwnd, SW_MINIMIZE) };
             return;
         }
@@ -466,15 +467,12 @@ impl Registry {
         self.windows.get(&WindowKey::from(handle)).copied()
     }
 
-    pub(super) fn get_handle(&self, id: WindowId) -> Option<WindowHandle> {
-        self.reverse.get(&id).cloned()
+    pub(super) fn get_handle(&self, id: WindowId) -> Option<&WindowHandle> {
+        self.reverse.get(&id)
     }
 
-    pub(super) fn get_mut_handle(&mut self, handle: &WindowHandle) -> Option<&mut WindowHandle> {
-        let key = WindowKey::from(handle);
-        self.windows
-            .get(&key)
-            .and_then(|&id| self.reverse.get_mut(&id))
+    pub(super) fn get_handle_mut(&mut self, id: WindowId) -> Option<&mut WindowHandle> {
+        self.reverse.get_mut(&id)
     }
 
     pub(super) fn get_handle_by_key(&self, key: WindowKey) -> Option<WindowHandle> {

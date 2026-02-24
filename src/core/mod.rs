@@ -10,7 +10,7 @@ mod workspace;
 
 pub(crate) use hub::Hub;
 pub(crate) use hub::{ContainerPlacement, MonitorLayout, MonitorPlacements, WindowPlacement};
-pub(crate) use node::{Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, WindowId};
+pub(crate) use node::{Child, Container, ContainerId, Dimension, DisplayMode, MonitorId, SpawnMode, WindowId};
 #[cfg(target_os = "macos")]
 pub(crate) use node::Window;
 

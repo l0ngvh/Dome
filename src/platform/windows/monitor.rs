@@ -22,7 +22,7 @@ impl MonitorEntry {
     pub(super) fn apply_placements(
         &mut self,
         layout: &MonitorLayout,
-        registry: &Registry,
+        registry: &mut Registry,
         taskbar: &mut Taskbar,
         hub: &mut Hub,
         config: &Config,
@@ -41,12 +41,12 @@ impl MonitorEntry {
     fn apply_fullscreen(
         &mut self,
         window_id: WindowId,
-        registry: &Registry,
+        registry: &mut Registry,
         taskbar: &mut Taskbar,
     ) {
         let current_windows: HashSet<_> = registry
             .get_handle(window_id)
-            .map(|h| WindowKey::from(&h))
+            .map(|h| WindowKey::from(h))
             .into_iter()
             .collect();
         for key in self.displayed_windows.difference(&current_windows) {
@@ -57,7 +57,7 @@ impl MonitorEntry {
         }
         self.displayed_windows = current_windows;
 
-        if let Some(mut handle) = registry.get_handle(window_id) {
+        if let Some(handle) = registry.get_handle_mut(window_id) {
             handle.set_fullscreen(&self.dimension);
             taskbar.add_tab(handle.hwnd()).ok();
         }
@@ -67,7 +67,7 @@ impl MonitorEntry {
         &mut self,
         windows: &[WindowPlacement],
         containers: &[ContainerPlacement],
-        registry: &Registry,
+        registry: &mut Registry,
         taskbar: &mut Taskbar,
         hub: &mut Hub,
         config: &Config,
@@ -75,7 +75,7 @@ impl MonitorEntry {
         let border = config.border_size;
         let current_windows: HashSet<_> = windows
             .iter()
-            .filter_map(|p| registry.get_handle(p.id).map(|h| WindowKey::from(&h)))
+            .filter_map(|p| registry.get_handle(p.id).map(|h| WindowKey::from(h)))
             .collect();
         for key in self.displayed_windows.difference(&current_windows) {
             if let Some(handle) = registry.get_handle_by_key(*key) {
@@ -87,31 +87,29 @@ impl MonitorEntry {
 
         let mut window_overlays = Vec::new();
         for wp in windows {
-            if let Some(mut handle) = registry.get_handle(wp.id) {
-                if let Some([min_w, min_h, max_w, max_h]) = handle.get_constraints(&wp.frame, border)
-                    && let Some(id) = registry.get_id(&handle)
-                {
-                    hub.set_window_constraint(id, min_w, min_h, max_w, max_h);
+            if let Some(handle) = registry.get_handle_mut(wp.id) {
+                if let Some([min_w, min_h, max_w, max_h]) = handle.get_constraints(&wp.frame, border) {
+                    hub.set_window_constraint(wp.id, min_w, min_h, max_w, max_h);
                 }
                 handle.show(&wp.frame, border, wp.is_float);
                 taskbar.add_tab(handle.hwnd()).ok();
-
-                let colors = if wp.is_focused {
-                    if wp.is_float {
-                        [config.focused_color; 4]
-                    } else {
-                        spawn_colors(wp.spawn_mode, config)
-                    }
-                } else {
-                    [config.border_color; 4]
-                };
-                window_overlays.push(WindowOverlay {
-                    window_id: wp.id,
-                    frame: wp.visible_frame,
-                    edges: border_edges(wp.visible_frame, border, colors),
-                    is_float: wp.is_float,
-                });
             }
+
+            let colors = if wp.is_focused {
+                if wp.is_float {
+                    [config.focused_color; 4]
+                } else {
+                    spawn_colors(wp.spawn_mode, config)
+                }
+            } else {
+                [config.border_color; 4]
+            };
+            window_overlays.push(WindowOverlay {
+                window_id: wp.id,
+                frame: wp.visible_frame,
+                edges: border_edges(wp.visible_frame, border, colors),
+                is_float: wp.is_float,
+            });
         }
 
         let mut container_overlays = Vec::new();
