@@ -139,9 +139,13 @@ impl Registry {
 
     fn remove(&mut self, cg_id: CGWindowID) -> Option<WindowId> {
         let window = self.windows.remove(&cg_id)?;
+        let pid = window.pid();
         self.id_to_cg.remove(&window.window_id());
-        if let Some(ids) = self.pid_to_cg.get_mut(&window.pid()) {
+        if let Some(ids) = self.pid_to_cg.get_mut(&pid) {
             ids.retain(|&id| id != cg_id);
+            if ids.is_empty() {
+                self.pid_to_cg.remove(&pid);
+            }
         }
         tracing::info!(%window, window_id = %window.window_id(), "Window removed");
         Some(window.window_id())

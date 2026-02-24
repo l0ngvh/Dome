@@ -10,6 +10,8 @@ use objc2_core_foundation::{
     kCFRunLoopDefaultMode,
 };
 
+/// The callback must not re-enter `submit` (e.g. by pumping the run loop),
+/// as that would create aliasing `&mut` references through the raw self-pointer.
 pub(super) struct Throttle<T: 'static> {
     interval: Duration,
     last_sent: Option<Instant>,
@@ -113,9 +115,13 @@ unsafe extern "C-unwind" fn throttle_timer_callback<T: 'static>(
     throttle.on_timer();
 }
 
+type TimerContext<T> = *mut (*mut Debounce<T>, T);
+
+/// The callback must not re-enter `submit` (e.g. by pumping the run loop),
+/// as that would create aliasing `&mut` references through the raw self-pointer.
 pub(super) struct Debounce<T: 'static + Eq + Hash + Copy> {
     interval: Duration,
-    pending: HashMap<T, CFRetained<CFRunLoopTimer>>,
+    pending: HashMap<T, (CFRetained<CFRunLoopTimer>, TimerContext<T>)>,
     run_loop: CFRetained<CFRunLoop>,
     callback: Box<dyn Fn(T)>,
     _bound_to_thread: PhantomData<*const ()>,
@@ -134,8 +140,9 @@ impl<T: 'static + Eq + Hash + Copy> Debounce<T> {
 
     pub(super) fn submit(self: &mut Pin<Box<Self>>, value: T) {
         let this = unsafe { self.as_mut().get_unchecked_mut() };
-        if let Some(timer) = this.pending.remove(&value) {
+        if let Some((timer, ctx_ptr)) = this.pending.remove(&value) {
             CFRunLoopTimer::invalidate(&timer);
+            unsafe { drop(Box::from_raw(ctx_ptr)) };
         }
         let ptr = Box::into_raw(Box::new((this as *mut Self, value)));
         let mut context = CFRunLoopTimerContext {
@@ -160,7 +167,7 @@ impl<T: 'static + Eq + Hash + Copy> Debounce<T> {
 
         this.run_loop
             .add_timer(Some(&timer), unsafe { kCFRunLoopDefaultMode });
-        this.pending.insert(value, timer);
+        this.pending.insert(value, (timer, ptr));
     }
 
     fn on_timer(&mut self, value: T) {
@@ -171,8 +178,9 @@ impl<T: 'static + Eq + Hash + Copy> Debounce<T> {
 
 impl<T: Eq + Hash + Copy> Drop for Debounce<T> {
     fn drop(&mut self) {
-        for timer in self.pending.values() {
+        for (timer, ctx_ptr) in self.pending.values() {
             CFRunLoopTimer::invalidate(timer);
+            unsafe { drop(Box::from_raw(*ctx_ptr)) };
         }
     }
 }

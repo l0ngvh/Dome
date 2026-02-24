@@ -115,6 +115,13 @@ impl Drop for EventListener {
             CFRunLoopTimer::invalidate(timer);
         }
 
+        if let Some(run_loop) = CFRunLoop::current() {
+            for observer in self.ctx.observers.borrow().values() {
+                let source = unsafe { observer.run_loop_source() };
+                run_loop.remove_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
+            }
+        }
+
         let notification_center = NSWorkspace::sharedWorkspace().notificationCenter();
         for observer in &self.workspace_observers {
             unsafe { notification_center.removeObserver(ProtocolObject::as_ref(observer)) };
@@ -329,7 +336,12 @@ fn handle_app_terminated(ctx: &ListenerCtx, notification: &NSNotification) {
     };
     let pid = app.processIdentifier();
     tracing::debug!(%pid, "App terminated");
-    ctx.observers.borrow_mut().remove(&pid);
+    if let Some(observer) = ctx.observers.borrow_mut().remove(&pid) {
+        let source = unsafe { observer.run_loop_source() };
+        if let Some(run_loop) = CFRunLoop::current() {
+            run_loop.remove_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
+        }
+    }
     send_hub_event(&ctx.hub_sender, HubEvent::AppTerminated { pid });
 }
 
