@@ -22,3 +22,49 @@ args = ["llvm-cov", "test", "--lib", "--branch", "--html", "--open", "--ignore-f
 [tasks.e2e]
 command = "cargo"
 args = ["test", "--test", "e2e", "--", "--test-threads=1", "${@}"]
+
+# === Leak Detection ===
+
+[tasks.leak-check]
+description = "Run leak check"
+run_task = [
+    { name = "leak-check-macos", condition = { platforms = ["mac"] } },
+]
+
+
+
+[tasks.leak-check-macos]
+private = true
+script_runner = "@shell"
+script = '''
+cargo build
+MallocStackLogging=1 ./target/debug/dome &
+PID=$!
+sleep 3
+echo "Dome running (PID: $PID)"
+echo ""
+echo "=== Initial heap snapshot ==="
+heap $PID --showSizes > /tmp/heap1.txt
+head -50 /tmp/heap1.txt
+echo ""
+echo "Use the app, then press Enter to take second snapshot..."
+read
+echo "=== Second heap snapshot ==="
+heap $PID --showSizes > /tmp/heap2.txt
+head -50 /tmp/heap2.txt
+echo ""
+echo "=== Stack traces (top allocators) ==="
+malloc_history $PID -callTree -invert -collapseRecursion > /tmp/malloc_history.txt
+head -100 /tmp/malloc_history.txt
+echo ""
+echo "Files saved:"
+echo "  /tmp/heap1.txt, /tmp/heap2.txt - heap snapshots"
+echo "  /tmp/malloc_history.txt - full stack traces"
+echo ""
+echo "For specific type: malloc_history $PID NSRunningApplication"
+./target/debug/dome exit 2>/dev/null || kill $PID 2>/dev/null || true
+'''
+
+
+
+
