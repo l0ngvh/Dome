@@ -6,6 +6,7 @@ mod float_window;
 mod focus_direction;
 mod focus_parent;
 mod focus_workspace;
+mod fullscreen;
 mod insert_window;
 mod monitor;
 mod move_in_direction;
@@ -23,7 +24,7 @@ use std::collections::HashSet;
 
 use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
-use crate::core::hub::{Hub, HubConfig};
+use crate::core::hub::{Hub, HubConfig, MonitorLayout};
 use crate::core::node::{
     Child, Container, ContainerId, Dimension, Direction, Parent, WindowId, Workspace, WorkspaceId,
 };
@@ -41,8 +42,35 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     let all = hub.get_visible_placements();
     let mp = &all[0];
 
+    let (windows, containers) = match &mp.layout {
+        MonitorLayout::Normal { windows, containers } => {
+            (windows.as_slice(), containers.as_slice())
+        }
+        MonitorLayout::Fullscreen(id) => {
+            let screen = hub.get_monitor(mp.monitor_id).dimension();
+            draw_rect(
+                &mut grid,
+                screen.x,
+                screen.y,
+                screen.width,
+                screen.height,
+                &format!("W{}", id.get()),
+                [false; 4],
+            );
+            s.push('\n');
+            s.push_str(
+                &grid
+                    .iter()
+                    .map(|row| row.iter().collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+            return s;
+        }
+    };
+
     // Draw tiling windows
-    for wp in &mp.windows {
+    for wp in windows {
         if !wp.is_float {
             let d = wp.visible_frame;
             let clip = clip_edges(wp.frame, wp.visible_frame);
@@ -59,7 +87,7 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     }
 
     // Draw tab bars
-    for cp in &mp.containers {
+    for cp in containers {
         if cp.is_tabbed {
             let container = hub.get_container(cp.id);
             let labels: Vec<String> = container
@@ -76,13 +104,13 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     }
 
     // Draw focus border for non-float focused
-    let focused_float = mp.windows.iter().find(|p| p.is_focused && p.is_float);
+    let focused_float = windows.iter().find(|p| p.is_focused && p.is_float);
     if focused_float.is_none() {
-        if let Some(wp) = mp.windows.iter().find(|p| p.is_focused) {
+        if let Some(wp) = windows.iter().find(|p| p.is_focused) {
             let d = wp.visible_frame;
             let clip = clip_edges(wp.frame, wp.visible_frame);
             draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
-        } else if let Some(cp) = mp.containers.iter().find(|p| p.is_focused) {
+        } else if let Some(cp) = containers.iter().find(|p| p.is_focused) {
             let d = cp.visible_frame;
             let clip = clip_edges(cp.frame, cp.visible_frame);
             draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
@@ -90,7 +118,7 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     }
 
     // Draw float windows on top
-    for wp in &mp.windows {
+    for wp in windows {
         if wp.is_float {
             let d = wp.visible_frame;
             let clip = clip_edges(wp.frame, wp.visible_frame);
@@ -158,7 +186,7 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
         } else {
             String::new()
         };
-        let has_content = workspace.root().is_some() || !workspace.float_windows().is_empty();
+        let has_content = workspace.root().is_some() || !workspace.float_windows().is_empty() || !workspace.fullscreen_windows().is_empty();
         if !has_content {
             s.push_str(&format!(
                 "  Workspace(id={}, name={}{})\n",
@@ -174,6 +202,9 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
             }
             for &float_id in workspace.float_windows() {
                 fmt_float_str(hub, &mut s, float_id, 2);
+            }
+            for &fs_id in workspace.fullscreen_windows() {
+                fmt_fullscreen_str(hub, &mut s, fs_id, 2);
             }
             s.push_str("  )\n");
         }
@@ -405,6 +436,16 @@ fn fmt_float_str(hub: &Hub, s: &mut String, float_id: WindowId, indent: usize) {
     ));
 }
 
+fn fmt_fullscreen_str(hub: &Hub, s: &mut String, fs_id: WindowId, indent: usize) {
+    let prefix = "  ".repeat(indent);
+    let w = hub.get_window(fs_id);
+    let dim = w.dimension();
+    s.push_str(&format!(
+        "{}Fullscreen(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
+        prefix, fs_id, dim.x, dim.y, dim.width, dim.height
+    ));
+}
+
 fn validate_hub(hub: &Hub) {
     validate_monitors(hub);
     let monitor_ids: Vec<_> = hub.all_monitors().iter().map(|(id, _)| *id).collect();
@@ -417,6 +458,7 @@ fn validate_hub(hub: &Hub) {
         );
         validate_workspace_focus(hub, workspace_id, &workspace);
         validate_floats(hub, workspace_id, &workspace);
+        validate_fullscreens(hub, workspace_id, &workspace);
         validate_tree(hub, workspace_id, &workspace);
     }
 
@@ -455,6 +497,13 @@ fn validate_workspace_focus(hub: &Hub, workspace_id: WorkspaceId, workspace: &Wo
             );
             return;
         }
+        if hub.get_window(wid).is_fullscreen() {
+            assert!(
+                workspace.fullscreen_windows().contains(&wid),
+                "Workspace {workspace_id} focused on fullscreen {wid} but fullscreen not in workspace"
+            );
+            return;
+        }
     }
 
     let Some(root) = workspace.root() else {
@@ -489,6 +538,14 @@ fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) 
     }
 }
 
+fn validate_fullscreens(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
+    for &fid in workspace.fullscreen_windows() {
+        let window = hub.get_window(fid);
+        assert_eq!(window.workspace, workspace_id, "Fullscreen {fid} has wrong workspace");
+        assert!(window.is_fullscreen(), "Window {fid} in fullscreen_windows but mode is not Fullscreen");
+    }
+}
+
 fn validate_tree(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
     let Some(root) = workspace.root() else {
         return;
@@ -510,6 +567,7 @@ fn validate_tree(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
 fn validate_window(hub: &Hub, wid: WindowId, expected_parent: Parent, workspace_id: WorkspaceId) {
     let window = hub.get_window(wid);
     assert!(!window.is_float(), "Window {wid} in tree but mode is Float");
+    assert!(!window.is_fullscreen(), "Window {wid} in tree but mode is Fullscreen");
     assert_eq!(window.parent, expected_parent, "Window {wid} has wrong parent");
     assert_eq!(window.workspace, workspace_id, "Window {wid} has wrong workspace");
 
@@ -692,7 +750,13 @@ fn validate_visible_placements(hub: &Hub) {
 
     for mp in &all_placements {
         let screen = hub.get_monitor(mp.monitor_id).dimension();
-        for wp in &mp.windows {
+        let (windows, containers) = match &mp.layout {
+            MonitorLayout::Normal { windows, containers } => {
+                (windows.as_slice(), containers.as_slice())
+            }
+            MonitorLayout::Fullscreen(_) => continue,
+        };
+        for wp in windows {
             assert!(
                 seen_window_ids.insert(wp.id),
                 "Duplicate window {} in visible placements",
@@ -705,7 +769,7 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
         }
-        for cp in &mp.containers {
+        for cp in containers {
             assert_eq!(
                 clip(cp.frame, screen),
                 Some(cp.visible_frame),

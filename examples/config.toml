@@ -72,6 +72,7 @@ active_tab_background_color = "#4d4d66"
 "cmd+alt+shift+k" = ["move monitor up"]
 "cmd+alt+shift+l" = ["move monitor right"]
 "cmd+shift+f" = ["toggle float"]
+"cmd+shift+return" = ["toggle fullscreen"]
 "cmd+shift+q" = ["exit"]
 "cmd+return" = ["exec open -a Terminal"]
 

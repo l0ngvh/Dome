@@ -44,6 +44,8 @@ pub(crate) struct Workspace {
     pub(super) focused: Option<Child>,
     /// All floats in this workspace. Source of truth for rendering.
     pub(super) float_windows: Vec<WindowId>,
+    /// All fullscreen windows in this workspace. Last element is topmost (highest z-order).
+    pub(super) fullscreen_windows: Vec<WindowId>,
     pub(super) viewport_offset: (f32, f32),
 }
 
@@ -59,6 +61,7 @@ impl Workspace {
             name,
             monitor,
             float_windows: Vec::new(),
+            fullscreen_windows: Vec::new(),
             viewport_offset: (0.0, 0.0),
         }
     }
@@ -76,6 +79,11 @@ impl Workspace {
     #[cfg(test)]
     pub(crate) fn float_windows(&self) -> &[WindowId] {
         &self.float_windows
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fullscreen_windows(&self) -> &[WindowId] {
+        &self.fullscreen_windows
     }
 }
 
@@ -408,6 +416,7 @@ pub(crate) enum DisplayMode {
     #[default]
     Tiling,
     Float,
+    Fullscreen,
 }
 
 impl std::fmt::Display for Parent {
@@ -486,6 +495,10 @@ impl Window {
 
     pub(crate) fn is_float(&self) -> bool {
         self.mode == DisplayMode::Float
+    }
+
+    pub(crate) fn is_fullscreen(&self) -> bool {
+        self.mode == DisplayMode::Fullscreen
     }
 
     // Reset spawn mode

@@ -220,12 +220,12 @@ impl Hub {
             Parent::Workspace(workspace_id) => {
                 self.workspaces.get_mut(workspace_id).root = None;
 
-                // Set focus to a float if available, otherwise None
-                let new_focus = self
-                    .workspaces
-                    .get(workspace_id)
-                    .float_windows
+                // Set focus to fullscreen, then float, otherwise None
+                let ws = self.workspaces.get(workspace_id);
+                let new_focus = ws
+                    .fullscreen_windows
                     .last()
+                    .or(ws.float_windows.last())
                     .map(|&f| Child::Window(f));
                 self.workspaces.get_mut(workspace_id).focused = new_focus;
 
@@ -504,7 +504,7 @@ impl Hub {
     fn focused_split_child_in(&self, ws_id: WorkspaceId) -> Option<Child> {
         let ws = self.workspaces.get(ws_id);
         match ws.focused {
-            Some(Child::Window(id)) if self.windows.get(id).is_float() => None,
+            Some(Child::Window(id)) if self.windows.get(id).mode != DisplayMode::Tiling => None,
             focused => focused,
         }
     }

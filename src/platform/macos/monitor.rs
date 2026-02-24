@@ -5,7 +5,16 @@ use objc2_app_kit::NSScreen;
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID, CGWindowID};
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::core::{Dimension, MonitorId};
+use crate::config::Config;
+use crate::core::{
+    Child, Container, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout,
+    MonitorPlacements, WindowPlacement,
+};
+
+use super::dome::Registry;
+use super::overlay::Overlays;
+use super::rendering::{ContainerBorder, build_tab_bar, compute_container_border};
+use super::window::FullscreenState;
 
 #[derive(Clone)]
 pub(super) struct MonitorInfo {
@@ -33,6 +42,155 @@ pub(super) struct MonitorEntry {
     pub(super) id: MonitorId,
     pub(super) screen: MonitorInfo,
     pub(super) displayed_windows: HashSet<CGWindowID>,
+}
+
+impl MonitorEntry {
+    pub(super) fn apply_placements(
+        &mut self,
+        mp: &MonitorPlacements,
+        hub: &Hub,
+        registry: &mut Registry,
+        config: &Config,
+        primary_full_height: f32,
+    ) -> Overlays {
+        match &mp.layout {
+            MonitorLayout::Fullscreen(window_id) => {
+                self.apply_fullscreen(*window_id, registry);
+                Overlays::default()
+            }
+            MonitorLayout::Normal { windows, containers } => {
+                self.apply_normal(windows, containers, hub, registry, config, primary_full_height)
+            }
+        }
+    }
+
+    fn apply_fullscreen(
+        &mut self,
+        window_id: crate::core::WindowId,
+        registry: &mut Registry,
+    ) {
+        let new_windows: HashSet<_> = registry.get_cg_id(window_id).into_iter().collect();
+
+        for cg_id in self.displayed_windows.difference(&new_windows) {
+            if let Some(w) = registry.get_mut(*cg_id)
+                && let Err(e) = w.hide()
+            {
+                tracing::trace!("Failed to hide window: {e:#}");
+            }
+        }
+        self.displayed_windows = new_windows;
+
+        if let Some(w) = registry.get_mut_by_window_id(window_id)
+            && w.fullscreen() != FullscreenState::Native
+        {
+            w.set_fullscreen(self.screen.dimension);
+        }
+    }
+
+    fn apply_normal(
+        &mut self,
+        windows: &[WindowPlacement],
+        containers: &[ContainerPlacement],
+        hub: &Hub,
+        registry: &mut Registry,
+        config: &Config,
+        primary_full_height: f32,
+    ) -> Overlays {
+        let new_windows: HashSet<_> = windows
+            .iter()
+            .filter_map(|p| registry.get_cg_id(p.id))
+            .collect();
+
+        let leaving_native_fs = self.displayed_windows.difference(&new_windows).any(|cg_id| {
+            registry
+                .get(*cg_id)
+                .is_some_and(|w| w.fullscreen() == FullscreenState::Native)
+        });
+
+        for cg_id in self.displayed_windows.difference(&new_windows) {
+            if let Some(w) = registry.get_mut(*cg_id)
+                && let Err(e) = w.hide()
+            {
+                tracing::trace!("Failed to hide window: {e:#}");
+            }
+        }
+        self.displayed_windows = new_windows;
+
+        for wp in windows {
+            let Some(w) = registry.get_mut_by_window_id(wp.id) else {
+                continue;
+            };
+            if w.fullscreen() == FullscreenState::Native {
+                continue;
+            }
+            if let Err(e) = w.show(wp, config) {
+                tracing::trace!("Failed to set position for window: {e:#}");
+            }
+        }
+
+        if leaving_native_fs && !windows.iter().any(|wp| wp.is_focused) {
+            std::process::Command::new("osascript")
+                .arg("-e")
+                .arg("tell application \"System Events\" to key code 111 using {command down, control down, shift down, option down}")
+                .spawn()
+                .ok();
+        }
+
+        let mut container_borders = Vec::new();
+        let mut tab_bars = Vec::new();
+
+        for cp in containers {
+            if cp.is_tabbed {
+                let container = hub.get_container(cp.id);
+                let titles = collect_tab_titles(container, registry);
+                if let Some(tab_bar) = build_tab_bar(
+                    cp.visible_frame,
+                    cp.id,
+                    &titles,
+                    cp.active_tab_index,
+                    config,
+                    primary_full_height,
+                ) {
+                    tab_bars.push(tab_bar);
+                }
+            }
+
+            if cp.is_focused
+                && let Some(border) = compute_container_border(
+                    cp.frame,
+                    cp.visible_frame,
+                    cp.spawn_mode,
+                    config,
+                    primary_full_height,
+                )
+            {
+                container_borders.push(ContainerBorder {
+                    key: cp.id,
+                    frame: border.frame,
+                    edges: border.edges,
+                });
+            }
+        }
+
+        Overlays {
+            container_borders,
+            tab_bars,
+        }
+    }
+}
+
+fn collect_tab_titles(container: &Container, registry: &Registry) -> Vec<String> {
+    container
+        .children()
+        .iter()
+        .map(|c| match c {
+            Child::Window(wid) => registry
+                .get_title(*wid)
+                .unwrap_or("Unknown")
+                .to_owned(),
+            Child::Container(_) => "Container".to_owned(),
+        })
+        .collect()
 }
 
 pub(super) struct MonitorRegistry {
@@ -129,6 +287,13 @@ impl MonitorRegistry {
 
     pub(super) fn all_screens(&self) -> Vec<MonitorInfo> {
         self.map.values().map(|e| e.screen.clone()).collect()
+    }
+
+    pub(super) fn find_monitor_at(&self, x: f32, y: f32) -> Option<&MonitorInfo> {
+        self.map.values().find(|e| {
+            let d = &e.screen.dimension;
+            x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height
+        }).map(|e| &e.screen)
     }
 
     pub(super) fn update_screen(&mut self, screen: &MonitorInfo) -> Option<(MonitorId, Dimension)> {

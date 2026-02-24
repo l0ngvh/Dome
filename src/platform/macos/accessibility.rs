@@ -9,6 +9,8 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
+use crate::core::Dimension;
+
 use super::objc2_wrapper::{
     AXError, get_attribute, get_cg_window_id, is_attribute_settable,
     kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute, kAXFullScreenAttribute,
@@ -97,10 +99,23 @@ impl AXWindow {
     }
 
     pub(super) fn should_tile(&self) -> bool {
-        let is_fullscreen = get_attribute::<CFBoolean>(&self.element, &kAXFullScreenAttribute())
+        !self.is_native_fullscreen()
+    }
+
+    pub(super) fn is_native_fullscreen(&self) -> bool {
+        get_attribute::<CFBoolean>(&self.element, &kAXFullScreenAttribute())
             .map(|b| b.as_bool())
-            .unwrap_or(false);
-        !is_fullscreen
+            .unwrap_or(false)
+    }
+
+    pub(super) fn is_mock_fullscreen(&self, monitor: &Dimension) -> bool {
+        let Ok((x, y)) = self.get_position() else { return false };
+        let Ok((w, h)) = self.get_size() else { return false };
+        let tolerance = 2;
+        (x - monitor.x as i32).abs() <= tolerance
+            && (y - monitor.y as i32).abs() <= tolerance
+            && (w - monitor.width as i32).abs() <= tolerance
+            && (h - monitor.height as i32).abs() <= tolerance
     }
 
     pub(super) fn get_position(&self) -> Result<(i32, i32)> {

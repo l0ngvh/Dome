@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
@@ -6,29 +6,14 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsOnOpenRule, WindowsWindow};
-use crate::core::{Child, ContainerId, Dimension, Hub, MonitorId, SpawnMode, WindowId};
+use crate::core::{Child, ContainerId, Dimension, Hub, MonitorId, WindowId};
 
+use super::monitor::MonitorRegistry;
 use super::recovery;
-use super::window::{Taskbar, WindowHandle, enum_windows, get_size_constraints};
+use super::window::{Registry, Taskbar, WindowHandle, enum_windows};
 use super::{ScreenInfo, compute_global_bounds};
 
 pub(super) const WM_APP_OVERLAY: u32 = 0x8001;
-
-/// Hashable key for window lookups
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct WindowKey(isize);
-
-impl From<HWND> for WindowKey {
-    fn from(hwnd: HWND) -> Self {
-        Self(hwnd.0 as isize)
-    }
-}
-
-impl From<&WindowHandle> for WindowKey {
-    fn from(handle: &WindowHandle) -> Self {
-        Self(handle.hwnd().0 as isize)
-    }
-}
 
 #[expect(
     clippy::large_enum_variant,
@@ -40,7 +25,6 @@ pub(super) enum HubEvent {
     WindowDestroyed(WindowHandle),
     WindowFocused(WindowHandle),
     WindowTitleChanged(WindowHandle),
-    #[expect(dead_code, reason = "TODO: update float window position in hub")]
     WindowMovedOrResized(WindowHandle),
     ScreensChanged(Vec<ScreenInfo>),
     Action(Actions),
@@ -107,114 +91,6 @@ pub(super) struct TabInfo {
     pub(super) is_active: bool,
 }
 
-struct Registry {
-    windows: HashMap<WindowKey, WindowId>,
-    reverse: HashMap<WindowId, WindowHandle>,
-}
-
-impl Registry {
-    fn new() -> Self {
-        Self {
-            windows: HashMap::new(),
-            reverse: HashMap::new(),
-        }
-    }
-
-    fn insert(&mut self, handle: WindowHandle, id: WindowId) {
-        self.windows.insert(WindowKey::from(&handle), id);
-        self.reverse.insert(id, handle);
-    }
-
-    fn remove(&mut self, handle: &WindowHandle) -> Option<WindowId> {
-        let key = WindowKey::from(handle);
-        if let Some(id) = self.windows.remove(&key) {
-            self.reverse.remove(&id);
-            return Some(id);
-        }
-        None
-    }
-
-    fn get_id(&self, handle: &WindowHandle) -> Option<WindowId> {
-        self.windows.get(&WindowKey::from(handle)).copied()
-    }
-
-    fn get_handle(&self, id: WindowId) -> Option<WindowHandle> {
-        self.reverse.get(&id).cloned()
-    }
-
-    fn get_handle_by_key(&self, key: WindowKey) -> Option<WindowHandle> {
-        if let Some(&id) = self.windows.get(&key) {
-            return self.reverse.get(&id).cloned();
-        }
-        None
-    }
-
-    fn contains(&self, handle: &WindowHandle) -> bool {
-        self.windows.contains_key(&WindowKey::from(handle))
-    }
-
-    fn update_title(&mut self, handle: &WindowHandle) {
-        let key = WindowKey::from(handle);
-        if let Some(&id) = self.windows.get(&key) {
-            self.reverse.insert(id, handle.clone());
-        }
-    }
-}
-
-struct MonitorEntry {
-    id: MonitorId,
-    displayed_windows: HashSet<WindowKey>,
-}
-
-struct MonitorRegistry {
-    map: HashMap<isize, MonitorEntry>,
-    reverse: HashMap<MonitorId, isize>,
-    primary_handle: isize,
-}
-
-impl MonitorRegistry {
-    fn new(primary_handle: isize, primary_monitor_id: MonitorId) -> Self {
-        let mut map = HashMap::new();
-        let mut reverse = HashMap::new();
-        map.insert(
-            primary_handle,
-            MonitorEntry {
-                id: primary_monitor_id,
-                displayed_windows: HashSet::new(),
-            },
-        );
-        reverse.insert(primary_monitor_id, primary_handle);
-        Self {
-            map,
-            reverse,
-            primary_handle,
-        }
-    }
-
-    fn insert(&mut self, handle: isize, monitor_id: MonitorId) {
-        self.map.insert(
-            handle,
-            MonitorEntry {
-                id: monitor_id,
-                displayed_windows: HashSet::new(),
-            },
-        );
-        self.reverse.insert(monitor_id, handle);
-    }
-
-    fn remove_by_id(&mut self, monitor_id: MonitorId) {
-        if let Some(handle) = self.reverse.remove(&monitor_id) {
-            self.map.remove(&handle);
-        }
-    }
-
-    fn get_entry_mut(&mut self, monitor_id: MonitorId) -> Option<&mut MonitorEntry> {
-        self.reverse
-            .get(&monitor_id)
-            .and_then(|h| self.map.get_mut(h))
-    }
-}
-
 pub(super) struct Dome {
     hub: Hub,
     registry: Registry,
@@ -234,7 +110,7 @@ impl Dome {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
-        let mut monitor_registry = MonitorRegistry::new(primary.handle, primary_monitor_id);
+        let mut monitor_registry = MonitorRegistry::new(primary.handle, primary_monitor_id, primary.dimension);
         tracing::info!(
             name = %primary.name,
             handle = ?primary.handle,
@@ -245,7 +121,7 @@ impl Dome {
         for screen in &screens {
             if screen.handle != primary.handle {
                 let id = hub.add_monitor(screen.name.clone(), screen.dimension);
-                monitor_registry.insert(screen.handle, id);
+                monitor_registry.insert(screen.handle, id, screen.dimension);
                 tracing::info!(
                     name = %screen.name,
                     handle = ?screen.handle,
@@ -349,8 +225,9 @@ impl Dome {
                     tracing::info!("Window focused");
                 }
             }
-            // TODO: update float window position in hub instead of re-rendering
-            HubEvent::WindowMovedOrResized(_) => {}
+            HubEvent::WindowMovedOrResized(handle) => {
+                self.check_fullscreen_state(&handle);
+            }
             HubEvent::WindowTitleChanged(handle) => {
                 let _span = tracing::info_span!("window_title_changed", %handle).entered();
                 if self.registry.contains(&handle) {
@@ -431,6 +308,7 @@ impl Dome {
                     ToggleTarget::Direction => self.hub.toggle_direction(),
                     ToggleTarget::Layout => self.hub.toggle_container_layout(),
                     ToggleTarget::Float => self.hub.toggle_float(),
+                    ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
                 },
                 Action::Exec { command } => {
                     if let Err(e) = std::process::Command::new("cmd")
@@ -457,7 +335,6 @@ impl Dome {
         deletes: Vec<WindowId>,
         last_focus: Option<Child>,
     ) {
-        let border = self.config.border_size;
         let focused = self.hub.get_workspace(self.hub.current_workspace()).focused();
 
         let mut frame = OverlayFrame {
@@ -473,78 +350,15 @@ impl Dome {
 
         for mp in self.hub.get_visible_placements() {
             if let Some(entry) = self.monitor_registry.get_entry_mut(mp.monitor_id) {
-                let current_windows: HashSet<_> = mp
-                    .windows
-                    .iter()
-                    .filter_map(|p| self.registry.get_handle(p.id).map(|h| WindowKey::from(&h)))
-                    .collect();
-                for key in entry.displayed_windows.difference(&current_windows) {
-                    if let Some(handle) = self.registry.get_handle_by_key(*key) {
-                        handle.hide();
-                        self.taskbar.delete_tab(handle.hwnd()).ok();
-                    }
-                }
-                entry.displayed_windows = current_windows;
-            }
-
-            for wp in &mp.windows {
-                if let Some(handle) = self.registry.get_handle(wp.id) {
-                    let content_dim = apply_inset(wp.frame, border);
-                    self.check_and_set_constraints(&handle, &content_dim);
-                    // TODO: use visible_frame with SetWindowRgn to clip at monitor edges
-                    handle.set_position(&content_dim);
-                    if wp.is_float {
-                        handle.set_topmost();
-                    }
-                    self.taskbar.add_tab(handle.hwnd()).ok();
-
-                    let colors = if wp.is_focused {
-                        if wp.is_float {
-                            [self.config.focused_color; 4]
-                        } else {
-                            spawn_colors(wp.spawn_mode, &self.config)
-                        }
-                    } else {
-                        [self.config.border_color; 4]
-                    };
-                    frame.windows.push(WindowOverlay {
-                        window_id: wp.id,
-                        frame: wp.visible_frame,
-                        edges: border_edges(wp.visible_frame, border, colors),
-                        is_float: wp.is_float,
-                    });
-                }
-            }
-
-            for cp in &mp.containers {
-                let tab_bar = if cp.is_tabbed {
-                    Some(build_tab_info(
-                        &self.hub,
-                        &self.registry,
-                        cp.id,
-                        cp.visible_frame,
-                        &self.config,
-                        cp.is_focused,
-                    ))
-                } else {
-                    None
-                };
-
-                let edges = if cp.is_focused {
-                    let colors = spawn_colors(cp.spawn_mode, &self.config);
-                    border_edges(cp.visible_frame, border, colors)
-                } else {
-                    vec![]
-                };
-
-                if cp.is_tabbed || cp.is_focused {
-                    frame.containers.push(ContainerOverlay {
-                        container_id: cp.id,
-                        frame: cp.visible_frame,
-                        edges,
-                        tab_bar,
-                    });
-                }
+                let (wins, conts) = entry.apply_placements(
+                    &mp.layout,
+                    &self.registry,
+                    &mut self.taskbar,
+                    &mut self.hub,
+                    &self.config,
+                );
+                frame.windows.extend(wins);
+                frame.containers.extend(conts);
             }
         }
 
@@ -561,38 +375,27 @@ impl Dome {
         }
     }
 
-    fn check_and_set_constraints(&mut self, handle: &WindowHandle, dim: &Dimension) {
-        let (min_w, min_h, max_w, max_h) = get_size_constraints(handle.hwnd());
-        let min_w = if min_w > dim.width { min_w } else { 0.0 };
-        let min_h = if min_h > dim.height { min_h } else { 0.0 };
-        let max_w = if max_w > 0.0 && max_w < dim.width {
-            max_w
-        } else {
-            0.0
+    fn check_fullscreen_state(&mut self, handle: &WindowHandle) {
+        let Some(window_id) = self.registry.get_id(handle) else { return };
+        let Some(monitor) = self.monitor_registry.find_monitor_dimension(handle.hwnd()) else {
+            return;
         };
-        let max_h = if max_h > 0.0 && max_h < dim.height {
-            max_h
-        } else {
-            0.0
-        };
-        if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
-            let border = self.config.border_size;
-            let to_opt = |v: f32| {
-                if v > 0.0 {
-                    Some(v + 2.0 * border)
-                } else {
-                    None
+        let is_fs = handle.is_fullscreen(&monitor);
+        let was_fs = self.registry.get_handle(window_id).is_some_and(|h| h.fullscreen());
+        match (was_fs, is_fs) {
+            (false, true) => {
+                if let Some(h) = self.registry.get_mut_handle(handle) {
+                    h.sync_fullscreen(true);
                 }
-            };
-            if let Some(id) = self.registry.get_id(handle) {
-                self.hub.set_window_constraint(
-                    id,
-                    to_opt(min_w),
-                    to_opt(min_h),
-                    to_opt(max_w),
-                    to_opt(max_h),
-                );
+                self.hub.set_fullscreen(window_id);
             }
+            (true, false) => {
+                if let Some(h) = self.registry.get_mut_handle(handle) {
+                    h.sync_fullscreen(false);
+                }
+                self.hub.unset_fullscreen(window_id);
+            }
+            _ => {}
         }
     }
 }
@@ -607,86 +410,6 @@ fn send_overlay_frame(frame: OverlayFrame, app_hwnd: AppHandle) {
     let boxed = Box::new(frame);
     let ptr = Box::into_raw(boxed) as usize;
     unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_OVERLAY, WPARAM(ptr), LPARAM(0)).ok() };
-}
-
-fn build_tab_info(
-    hub: &Hub,
-    registry: &Registry,
-    container_id: ContainerId,
-    visible_frame: Dimension,
-    config: &Config,
-    is_focused: bool,
-) -> TabBarInfo {
-    let container = hub.get_container(container_id);
-    let children = container.children();
-    let tab_width = if children.is_empty() {
-        visible_frame.width
-    } else {
-        visible_frame.width / children.len() as f32
-    };
-    let active_tab = container.active_tab_index();
-
-    let tabs = children
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            let title = match c {
-                Child::Window(wid) => registry
-                    .get_handle(*wid)
-                    .and_then(|h| h.title().map(|s| s.to_owned()))
-                    .unwrap_or_else(|| "Unknown".to_owned()),
-                Child::Container(_) => "Container".to_owned(),
-            };
-            TabInfo {
-                title,
-                x: visible_frame.x + i as f32 * tab_width,
-                width: tab_width,
-                is_active: i == active_tab,
-            }
-        })
-        .collect();
-
-    TabBarInfo {
-        tabs,
-        height: config.tab_bar_height,
-        background_color: config.tab_bar_background_color,
-        active_background_color: config.active_tab_background_color,
-        border_color: if is_focused { config.focused_color } else { config.border_color },
-        border: config.border_size,
-    }
-}
-
-fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
-    let f = config.focused_color;
-    let s = config.spawn_indicator_color;
-    [
-        if spawn.is_tab() { s } else { f },
-        if spawn.is_vertical() { s } else { f },
-        f,
-        if spawn.is_horizontal() { s } else { f },
-    ]
-}
-
-fn apply_inset(dim: Dimension, border: f32) -> Dimension {
-    Dimension {
-        x: dim.x + border,
-        y: dim.y + border,
-        width: (dim.width - 2.0 * border).max(0.0),
-        height: (dim.height - 2.0 * border).max(0.0),
-    }
-}
-
-fn border_edges(dim: Dimension, border: f32, colors: [Color; 4]) -> Vec<(Dimension, Color)> {
-    vec![
-        // Top
-        (Dimension { x: dim.x, y: dim.y, width: dim.width, height: border }, colors[0]),
-        // Bottom
-        (Dimension { x: dim.x, y: dim.y + dim.height - border, width: dim.width, height: border }, colors[1]),
-        // Left
-        (Dimension { x: dim.x, y: dim.y + border, width: border, height: dim.height - 2.0 * border }, colors[2]),
-        // Right
-        (Dimension { x: dim.x + dim.width - border, y: dim.y + border, width: border, height: dim.height - 2.0 * border }, colors[3]),
-    ]
 }
 
 fn on_open_actions(handle: &WindowHandle, rules: &[WindowsOnOpenRule]) -> Option<Actions> {
@@ -727,7 +450,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Ve
     for screen in &screens {
         if !registry.map.contains_key(&screen.handle) {
             let id = hub.add_monitor(screen.name.clone(), screen.dimension);
-            registry.insert(screen.handle, id);
+            registry.insert(screen.handle, id, screen.dimension);
             tracing::info!(
                 name = %screen.name,
                 handle = ?screen.handle,
@@ -758,7 +481,9 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Ve
 
     // Update dimensions for existing monitors
     for screen in &screens {
-        if let Some(monitor_id) = registry.map.get(&screen.handle).map(|e| e.id) {
+        if let Some(entry) = registry.map.get_mut(&screen.handle) {
+            let monitor_id = entry.id;
+            entry.dimension = screen.dimension;
             let old_dim = hub.get_monitor(monitor_id).dimension();
             if old_dim != screen.dimension {
                 tracing::info!(

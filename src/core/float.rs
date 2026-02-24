@@ -41,8 +41,9 @@ impl Hub {
         workspace.float_windows.retain(|&f| f != id);
 
         let new_focus = workspace
-            .float_windows
+            .fullscreen_windows
             .last()
+            .or(workspace.float_windows.last())
             .map(|&f| Child::Window(f))
             .or_else(|| match workspace.root {
                 Some(root) => Some(match root {

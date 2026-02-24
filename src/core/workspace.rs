@@ -87,7 +87,7 @@ impl Hub {
     /// Deletes workspace if empty and not active on its monitor
     pub(super) fn prune_workspace(&mut self, ws_id: WorkspaceId) {
         let ws = self.workspaces.get(ws_id);
-        if ws.root.is_some() || !ws.float_windows.is_empty() {
+        if ws.root.is_some() || !ws.float_windows.is_empty() || !ws.fullscreen_windows.is_empty() {
             return;
         }
         if self.monitors.get(ws.monitor).active_workspace != ws_id {

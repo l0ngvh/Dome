@@ -38,6 +38,7 @@ fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> 
     window
 }
 
+#[derive(Default)]
 pub(super) struct Overlays {
     pub(super) container_borders: Vec<ContainerBorder>,
     pub(super) tab_bars: Vec<TabBarOverlay>,

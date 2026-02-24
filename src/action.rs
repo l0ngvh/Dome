@@ -178,6 +178,7 @@ pub enum ToggleTarget {
     Direction,
     Layout,
     Float,
+    Fullscreen,
 }
 
 impl fmt::Display for ToggleTarget {
@@ -187,6 +188,7 @@ impl fmt::Display for ToggleTarget {
             ToggleTarget::Direction => write!(f, "direction"),
             ToggleTarget::Layout => write!(f, "layout"),
             ToggleTarget::Float => write!(f, "float"),
+            ToggleTarget::Fullscreen => write!(f, "fullscreen"),
         }
     }
 }
@@ -268,6 +270,9 @@ impl FromStr for Action {
             }),
             ["toggle", "float"] => Ok(Action::Toggle {
                 target: ToggleTarget::Float,
+            }),
+            ["toggle", "fullscreen"] => Ok(Action::Toggle {
+                target: ToggleTarget::Fullscreen,
             }),
             ["exit"] => Ok(Action::Exit),
             _ => Err(anyhow!("Unknown action: {}", s)),

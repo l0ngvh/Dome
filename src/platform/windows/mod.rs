@@ -2,6 +2,7 @@ mod app;
 mod dome;
 mod event_listener;
 mod keyboard;
+mod monitor;
 mod recovery;
 mod throttle;
 mod window;

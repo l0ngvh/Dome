@@ -9,6 +9,20 @@ use crate::core::WindowPlacement;
 use crate::core::{Dimension, Window, WindowId};
 use crate::platform::macos::accessibility::AXWindow;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FullscreenState {
+    None,
+    Native,
+    Mock,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FullscreenTransition {
+    Entered(FullscreenState),
+    Exited,
+    Unchanged,
+}
+
 pub(super) struct MacWindow {
     ax: AXWindow,
     window_id: WindowId,
@@ -18,6 +32,7 @@ pub(super) struct MacWindow {
     physical_placement: Option<(RoundedDimension, u8)>,
     is_ax_hidden: bool,
     monitors: Vec<MonitorInfo>,
+    fullscreen: FullscreenState,
 }
 
 impl MacWindow {
@@ -43,6 +58,7 @@ impl MacWindow {
             physical_placement: None,
             is_ax_hidden: false,
             monitors,
+            fullscreen: FullscreenState::None,
         }
     }
 
@@ -63,6 +79,7 @@ impl MacWindow {
         wp: &WindowPlacement,
         config: &Config,
     ) -> anyhow::Result<()> {
+        self.fullscreen = FullscreenState::None;
         // content_dim from the full unclipped frame, NOT visible_frame.
         // apply_inset insets all 4 sides. When we later clip against visible_frame:
         // - Non-clipped edges: content stays inset by border_size (border exists)
@@ -325,6 +342,47 @@ impl MacWindow {
 
     pub(super) fn focus(&self) -> Result<()> {
         self.ax.focus()
+    }
+
+    pub(super) fn sync_fullscreen(&mut self, monitor: &Dimension) -> FullscreenTransition {
+        let new_state = if self.ax.is_native_fullscreen() {
+            FullscreenState::Native
+        } else if self.ax.is_mock_fullscreen(monitor) {
+            FullscreenState::Mock
+        } else {
+            FullscreenState::None
+        };
+        let old = self.fullscreen;
+        self.fullscreen = new_state;
+        match (old, new_state) {
+            (FullscreenState::None, FullscreenState::None) => FullscreenTransition::Unchanged,
+            (FullscreenState::None, entered) => FullscreenTransition::Entered(entered),
+            (_, FullscreenState::None) => FullscreenTransition::Exited,
+            _ => FullscreenTransition::Unchanged,
+        }
+    }
+
+    pub(super) fn fullscreen(&self) -> FullscreenState {
+        self.fullscreen
+    }
+
+    pub(super) fn set_fullscreen(&mut self, dim: Dimension) {
+        self.fullscreen = FullscreenState::Mock;
+        self.sender.send(HubMessage::WindowHide {
+            cg_id: self.ax.cg_id(),
+        });
+        if let Err(e) = self.ax.set_frame(
+            dim.x as i32,
+            dim.y as i32,
+            dim.width as i32,
+            dim.height as i32,
+        ) {
+            tracing::trace!("Failed to set fullscreen frame: {e:#}");
+        }
+    }
+
+    pub(super) fn ax(&self) -> &AXWindow {
+        &self.ax
     }
 
     pub(super) fn on_monitor_change(&mut self, monitors: Vec<MonitorInfo>) {

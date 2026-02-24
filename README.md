@@ -49,6 +49,7 @@ dome toggle spawn_direction  # Toggle between horizontal/vertical/tabbed
 dome toggle direction
 dome toggle layout           # Toggle between split/tabbed layout
 dome toggle float
+dome toggle fullscreen
 
 dome exec <command>
 dome exit
@@ -124,10 +125,19 @@ active_tab_background_color = "#4d4d66"
 "cmd+d" = ["toggle direction"]
 "cmd+b" = ["toggle layout"]
 "cmd+shift+f" = ["toggle float"]
+"cmd+shift+return" = ["toggle fullscreen"]
 
 "cmd+return" = ["exec open -a Terminal"]
 "cmd+shift+q" = ["exit"]
 ```
+
+### macOS Fullscreen Setup
+
+To support switching away from native fullscreen windows to empty workspaces, configure a keyboard shortcut in:
+
+**System Settings > Keyboard > Keyboard Shortcuts > Mission Control**
+
+Set `Cmd+Ctrl+Shift+Option+F12` → "Switch to Desktop 1"
 
 ### Window Rules
 

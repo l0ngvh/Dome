@@ -1,5 +1,6 @@
 mod allocator;
 mod float;
+mod fullscreen;
 mod hub;
 mod node;
 mod split;
@@ -8,8 +9,7 @@ mod tests;
 mod workspace;
 
 pub(crate) use hub::Hub;
-#[cfg(target_os = "macos")]
-pub(crate) use hub::WindowPlacement;
+pub(crate) use hub::{ContainerPlacement, MonitorLayout, MonitorPlacements, WindowPlacement};
 pub(crate) use node::{Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, WindowId};
 #[cfg(target_os = "macos")]
 pub(crate) use node::Window;

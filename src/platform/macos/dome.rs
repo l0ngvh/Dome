@@ -22,8 +22,7 @@ use super::monitor::{MonitorInfo, MonitorRegistry};
 use super::objc2_wrapper::kCGWindowNumber;
 use super::overlay::Overlays;
 use super::recovery;
-use super::rendering::{ContainerBorder, build_tab_bar, compute_container_border};
-use super::window::MacWindow;
+use super::window::{FullscreenTransition, MacWindow};
 
 #[expect(
     clippy::large_enum_variant,
@@ -99,7 +98,7 @@ pub(super) enum HubMessage {
     Shutdown,
 }
 
-struct Registry {
+pub(super) struct Registry {
     windows: HashMap<CGWindowID, MacWindow>,
     id_to_cg: HashMap<WindowId, CGWindowID>,
     pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
@@ -148,11 +147,11 @@ impl Registry {
         Some(window.window_id())
     }
 
-    fn get_mut(&mut self, cg_id: CGWindowID) -> Option<&mut MacWindow> {
+    pub(super) fn get_mut(&mut self, cg_id: CGWindowID) -> Option<&mut MacWindow> {
         self.windows.get_mut(&cg_id)
     }
 
-    fn get_cg_id(&self, window_id: WindowId) -> Option<CGWindowID> {
+    pub(super) fn get_cg_id(&self, window_id: WindowId) -> Option<CGWindowID> {
         self.id_to_cg.get(&window_id).copied()
     }
 
@@ -167,7 +166,7 @@ impl Registry {
             .and_then(|cg_id| self.windows.get(&cg_id))
     }
 
-    fn get_mut_by_window_id(&mut self, window_id: WindowId) -> Option<&mut MacWindow> {
+    pub(super) fn get_mut_by_window_id(&mut self, window_id: WindowId) -> Option<&mut MacWindow> {
         self.id_to_cg
             .get(&window_id)
             .copied()
@@ -201,7 +200,7 @@ impl Registry {
         self.windows.get(&cg_id).is_some_and(|w| w.is_valid())
     }
 
-    fn get_title(&self, window_id: WindowId) -> Option<&str> {
+    pub(super) fn get_title(&self, window_id: WindowId) -> Option<&str> {
         self.id_to_cg
             .get(&window_id)
             .and_then(|cg_id| self.windows.get(cg_id))
@@ -214,7 +213,7 @@ impl Registry {
         }
     }
 
-    fn get(&self, cg_id: CGWindowID) -> Option<&MacWindow> {
+    pub(super) fn get(&self, cg_id: CGWindowID) -> Option<&MacWindow> {
         self.windows.get(&cg_id)
     }
 }
@@ -379,7 +378,7 @@ impl Dome {
             }
             HubEvent::MirrorClicked(cg_id) => {
                 if let Some(window) = self.registry.get(cg_id) {
-                    window.focus().ok();
+                    window.focus();
                 }
                 if let Some(window_id) = self.registry.get_window_id(cg_id) {
                     self.hub.set_focus(window_id);
@@ -400,81 +399,17 @@ impl Dome {
 
     #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
     fn sync_app_windows(&mut self, app: &NSRunningApplication) {
-        let pid = app.processIdentifier();
-        let cg_window_ids = list_cg_window_ids();
-
-        // Remove invalid windows
-        let tracked_cg_ids = self.registry.cg_ids_for_pid(pid);
+        let tracked = self.registry.cg_ids_for_pid(app.processIdentifier());
         if app.isHidden() {
-            for cg_id in tracked_cg_ids {
+            for cg_id in tracked {
                 self.remove_window(cg_id);
             }
             return;
         }
-        for cg_id in tracked_cg_ids {
-            if cg_window_ids.contains(&cg_id) && self.registry.is_valid(cg_id) {
-                continue;
-            }
-            self.remove_window(cg_id);
-        }
 
-        // Add new windows
-        let mut new_cg_ids = Vec::new();
-        for ax in get_ax_windows(app) {
-            if !self.running {
-                return;
-            }
-            if self.registry.contains(ax.cg_id()) {
-                continue;
-            }
-
-            if !ax.is_manageable() {
-                continue;
-            }
-            if should_ignore(&ax, &self.config.macos.ignore) {
-                continue;
-            }
-
-            let Ok((x, y)) = ax.get_position() else {
-                continue;
-            };
-            let Ok((width, height)) = ax.get_size() else {
-                continue;
-            };
-            let window_id = if ax.should_tile() {
-                self.hub.insert_tiling()
-            } else {
-                self.hub.insert_float(Dimension {
-                    x: x as f32,
-                    y: y as f32,
-                    width: width as f32,
-                    height: height as f32,
-                })
-            };
-
-            recovery::track(ax.clone(), self.primary_screen);
-            let hub_window = self.hub.get_window(window_id);
-            let cg_id = ax.cg_id();
-            self.registry.insert(ax, window_id, hub_window);
-
-            let window = self.registry.get_by_window_id(window_id).unwrap();
-            tracing::info!(%window, %window_id, "Window inserted");
-
-            if let Some(actions) = on_open_actions(window, &self.config.macos.on_open) {
-                self.execute_actions(&actions);
-            }
-
-            new_cg_ids.push(cg_id);
-        }
-
-        if !new_cg_ids.is_empty() {
-            create_captures_async(
-                new_cg_ids,
-                self.hub_tx.clone(),
-                self.sender.clone(),
-                self.capture_queue.clone(),
-            );
-        }
+        let valid = self.retain_valid_windows(tracked, &list_cg_window_ids());
+        self.sync_fullscreen(valid);
+        self.add_new_windows(app);
     }
 
     #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
@@ -512,14 +447,36 @@ impl Dome {
             let Some(window_id) = self.registry.get_window_id(cg_id) else {
                 continue;
             };
-            if self.hub.get_window(window_id).is_float() {
+
+            let Some(window) = self.registry.get(cg_id) else { continue };
+            let Ok((x, y)) = window.ax().get_position() else { continue };
+            let Some(monitor) = self.monitor_registry.find_monitor_at(x as f32, y as f32) else {
+                continue;
+            };
+            let monitor_dim = monitor.dimension;
+            let Some(mac_window) = self.registry.get_mut(cg_id) else { continue };
+            match mac_window.sync_fullscreen(&monitor_dim) {
+                FullscreenTransition::Entered(_) => {
+                    self.hub.set_fullscreen(window_id);
+                    continue;
+                }
+                FullscreenTransition::Exited => {
+                    self.hub.unset_fullscreen(window_id);
+                    continue;
+                }
+                FullscreenTransition::Unchanged => {}
+            }
+
+            if self.hub.get_window(window_id).is_float()
+                || self.hub.get_window(window_id).is_fullscreen()
+            {
                 continue;
             }
-            let window = self.hub.get_window(window_id);
+            let hub_window = self.hub.get_window(window_id);
             let Some(mac_window) = self.registry.get_mut(cg_id) else {
                 continue;
             };
-            let Some((min_w, min_h, max_w, max_h)) = mac_window.check_placement(window) else {
+            let Some((min_w, min_h, max_w, max_h)) = mac_window.check_placement(hub_window) else {
                 continue;
             };
             // Convert actual window size back to frame size by adding border back.
@@ -619,6 +576,7 @@ impl Dome {
                     ToggleTarget::Direction => self.hub.toggle_direction(),
                     ToggleTarget::Layout => self.hub.toggle_container_layout(),
                     ToggleTarget::Float => self.hub.toggle_float(),
+                    ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
                 },
                 Action::Exec { command } => {
                     if let Err(e) = std::process::Command::new("sh")
@@ -639,88 +597,134 @@ impl Dome {
 
     #[tracing::instrument(skip_all)]
     fn apply_layout(&mut self) -> Overlays {
-        let mut container_borders = Vec::new();
-        let mut tab_bars = Vec::new();
-
+        let mut overlays = Overlays {
+            container_borders: vec![],
+            tab_bars: vec![],
+        };
         for mp in self.hub.get_visible_placements() {
             let entry = self.monitor_registry.get_entry_mut(mp.monitor_id).unwrap();
+            let o = entry.apply_placements(
+                &mp,
+                &self.hub,
+                &mut self.registry,
+                &self.config,
+                self.primary_full_height,
+            );
+            overlays.container_borders.extend(o.container_borders);
+            overlays.tab_bars.extend(o.tab_bars);
+        }
+        overlays
+    }
 
-            // Hide windows no longer displayed on this monitor
-            let current_windows: HashSet<_> = mp
-                .windows
-                .iter()
-                .filter_map(|p| self.registry.get_cg_id(p.id))
-                .collect();
-            for cg_id in entry.displayed_windows.difference(&current_windows) {
-                if let Some(window_entry) = self.registry.get_mut(*cg_id)
-                    && let Err(e) = window_entry.hide()
-                {
-                    tracing::trace!("Failed to hide window: {e:#}");
-                }
+    fn retain_valid_windows(
+        &mut self,
+        tracked: Vec<CGWindowID>,
+        cg_window_ids: &HashSet<CGWindowID>,
+    ) -> Vec<CGWindowID> {
+        let mut valid = Vec::new();
+        for cg_id in tracked {
+            if cg_window_ids.contains(&cg_id) && self.registry.is_valid(cg_id) {
+                valid.push(cg_id);
+            } else {
+                self.remove_window(cg_id);
             }
-            entry.displayed_windows = current_windows;
+        }
+        valid
+    }
 
-            for wp in &mp.windows {
-                let window = self.registry.get_mut_by_window_id(wp.id).unwrap();
-                if let Err(e) = window.show(wp, &self.config) {
-                    tracing::trace!("Failed to set position for window: {e:#}");
-                }
+    fn sync_fullscreen(&mut self, cg_ids: Vec<CGWindowID>) {
+        let mut transitions = Vec::new();
+        for cg_id in cg_ids {
+            let Some(window_id) = self.registry.get_window_id(cg_id) else { continue };
+            let Some(window) = self.registry.get(cg_id) else { continue };
+            let Ok((x, y)) = window.ax().get_position() else { continue };
+            let Some(monitor) = self.monitor_registry.find_monitor_at(x as f32, y as f32) else {
+                continue;
+            };
+            let monitor_dim = monitor.dimension;
+            let Some(mac_window) = self.registry.get_mut(cg_id) else { continue };
+            let transition = mac_window.sync_fullscreen(&monitor_dim);
+            transitions.push((window_id, transition));
+        }
+        for (window_id, transition) in transitions {
+            match transition {
+                FullscreenTransition::Entered(_) => self.hub.set_fullscreen(window_id),
+                FullscreenTransition::Exited => self.hub.unset_fullscreen(window_id),
+                FullscreenTransition::Unchanged => {}
+            }
+        }
+    }
+
+    fn add_new_windows(&mut self, app: &NSRunningApplication) {
+        let mut new_cg_ids = Vec::new();
+        for ax in get_ax_windows(app) {
+            if !self.running {
+                return;
+            }
+            if self.registry.contains(ax.cg_id()) {
+                continue;
+            }
+            if !ax.is_manageable() {
+                continue;
+            }
+            if should_ignore(&ax, &self.config.macos.ignore) {
+                continue;
             }
 
-            for cp in &mp.containers {
-                if cp.is_tabbed {
-                    let container = self.hub.get_container(cp.id);
-                    let titles = self.collect_tab_titles(container);
-                    if let Some(tab_bar) = build_tab_bar(
-                        cp.visible_frame,
-                        cp.id,
-                        &titles,
-                        cp.active_tab_index,
-                        &self.config,
-                        self.primary_full_height,
+            let Ok((x, y)) = ax.get_position() else {
+                continue;
+            };
+            let Ok((width, height)) = ax.get_size() else {
+                continue;
+            };
+            let window_id = if ax.should_tile() {
+                self.hub.insert_tiling()
+            } else {
+                self.hub.insert_float(Dimension {
+                    x: x as f32,
+                    y: y as f32,
+                    width: width as f32,
+                    height: height as f32,
+                })
+            };
+
+            recovery::track(ax.clone(), self.primary_screen);
+            let hub_window = self.hub.get_window(window_id);
+            let cg_id = ax.cg_id();
+            self.registry.insert(ax, window_id, hub_window);
+
+            let window = self.registry.get_by_window_id(window_id).unwrap();
+            tracing::info!(%window, %window_id, "Window inserted");
+
+            if let Some(actions) = on_open_actions(window, &self.config.macos.on_open) {
+                self.execute_actions(&actions);
+            }
+
+            if let Some(monitor) = self.monitor_registry.find_monitor_at(x as f32, y as f32) {
+                let monitor_dim = monitor.dimension;
+                if let Some(mac_window) = self.registry.get_mut(cg_id) {
+                    if matches!(
+                        mac_window.sync_fullscreen(&monitor_dim),
+                        FullscreenTransition::Entered(_)
                     ) {
-                        tab_bars.push(tab_bar);
+                        self.hub.set_fullscreen(window_id);
                     }
                 }
-
-                if cp.is_focused
-                    && let Some(border) = compute_container_border(
-                        cp.frame,
-                        cp.visible_frame,
-                        cp.spawn_mode,
-                        &self.config,
-                        self.primary_full_height,
-                    )
-                {
-                    container_borders.push(ContainerBorder {
-                        key: cp.id,
-                        frame: border.frame,
-                        edges: border.edges,
-                    });
-                }
             }
+
+            new_cg_ids.push(cg_id);
         }
 
-        Overlays {
-            container_borders,
-            tab_bars,
+        if !new_cg_ids.is_empty() {
+            create_captures_async(
+                new_cg_ids,
+                self.hub_tx.clone(),
+                self.sender.clone(),
+                self.capture_queue.clone(),
+            );
         }
     }
 
-    fn collect_tab_titles(&self, container: &Container) -> Vec<String> {
-        container
-            .children()
-            .iter()
-            .map(|c| match c {
-                Child::Window(wid) => self
-                    .registry
-                    .get_title(*wid)
-                    .unwrap_or("Unknown")
-                    .to_owned(),
-                Child::Container(_) => "Container".to_owned(),
-            })
-            .collect()
-    }
 }
 
 impl Drop for Dome {

@@ -30,8 +30,15 @@ pub(crate) struct ContainerPlacement {
 
 pub(crate) struct MonitorPlacements {
     pub(crate) monitor_id: MonitorId,
-    pub(crate) windows: Vec<WindowPlacement>,
-    pub(crate) containers: Vec<ContainerPlacement>,
+    pub(crate) layout: MonitorLayout,
+}
+
+pub(crate) enum MonitorLayout {
+    Normal {
+        windows: Vec<WindowPlacement>,
+        containers: Vec<ContainerPlacement>,
+    },
+    Fullscreen(WindowId),
 }
 
 #[derive(Debug)]
@@ -219,6 +226,14 @@ impl Hub {
                 let mut windows = Vec::new();
                 let mut containers = Vec::new();
 
+                // Fullscreen: only return topmost, skip tiling/float
+                if let Some(&fs_id) = ws.fullscreen_windows.last() {
+                    return MonitorPlacements {
+                        monitor_id: ws.monitor,
+                        layout: MonitorLayout::Fullscreen(fs_id),
+                    };
+                }
+
                 let mut stack: Vec<Child> = ws.root.into_iter().collect();
                 for _ in super::bounded_loop() {
                     let Some(child) = stack.pop() else { break };
@@ -281,8 +296,7 @@ impl Hub {
 
                 MonitorPlacements {
                     monitor_id: ws.monitor,
-                    windows,
-                    containers,
+                    layout: MonitorLayout::Normal { windows, containers },
                 }
             })
             .collect()
@@ -313,10 +327,10 @@ impl Hub {
     pub(crate) fn delete_window(&mut self, id: WindowId) {
         let window = self.windows.get(id);
         let ws = window.workspace;
-        if window.is_float() {
-            self.detach_float_from_workspace(id);
-        } else {
-            self.detach_split_child_from_workspace(Child::Window(id));
+        match window.mode {
+            DisplayMode::Float => self.detach_float_from_workspace(id),
+            DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
+            DisplayMode::Tiling => self.detach_split_child_from_workspace(Child::Window(id)),
         }
         self.prune_workspace(ws);
         self.windows.delete(id);
@@ -398,6 +412,7 @@ impl Hub {
         };
 
         match self.windows.get(window_id).mode {
+            DisplayMode::Fullscreen => return,
             DisplayMode::Float => {
                 self.detach_float_from_workspace(window_id);
                 self.reattach_float_window_as_split(window_id);
@@ -521,6 +536,10 @@ impl Hub {
         }
 
         match child {
+            Child::Window(id) if self.windows.get(id).mode == DisplayMode::Fullscreen => {
+                self.detach_fullscreen_from_workspace(id);
+                self.attach_fullscreen_to_workspace(target_ws, id);
+            }
             Child::Window(id) if self.windows.get(id).is_float() => {
                 self.detach_float_from_workspace(id);
                 self.attach_float_to_workspace(target_ws, id);

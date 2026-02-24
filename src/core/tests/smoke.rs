@@ -25,6 +25,9 @@ enum Op {
     FocusNextTab,
     FocusPrevTab,
     ToggleFloat,
+    ToggleFullscreen,
+    SetFullscreen,
+    UnsetFullscreen,
     MoveToWorkspace,
     FocusWorkspace,
     AddMonitor,
@@ -56,6 +59,9 @@ const ALL_OPS: &[Op] = &[
     Op::FocusNextTab,
     Op::FocusPrevTab,
     Op::ToggleFloat,
+    Op::ToggleFullscreen,
+    Op::SetFullscreen,
+    Op::UnsetFullscreen,
     Op::MoveToWorkspace,
     Op::FocusWorkspace,
     Op::AddMonitor,
@@ -162,6 +168,28 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize) {
                 Op::ToggleFloat => {
                     hub.toggle_float();
                     "ToggleFloat".into()
+                }
+                Op::ToggleFullscreen => {
+                    hub.toggle_fullscreen();
+                    "ToggleFullscreen".into()
+                }
+                Op::SetFullscreen => {
+                    if windows.is_empty() {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..windows.len());
+                    let id = windows[idx];
+                    hub.set_fullscreen(id);
+                    format!("SetFullscreen({id})")
+                }
+                Op::UnsetFullscreen => {
+                    if windows.is_empty() {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..windows.len());
+                    let id = windows[idx];
+                    hub.unset_fullscreen(id);
+                    format!("UnsetFullscreen({id})")
                 }
                 Op::MoveToWorkspace => {
                     let ws = rng.random_range(0..5);
@@ -301,6 +329,6 @@ fn smoke_test() {
 #[ignore]
 fn reproduce_smoke_failure() {
     setup_logger_with_level("info");
-    let seed = 0; // paste failing seed here
+    let seed = 167; // paste failing seed here
     run_smoke_iteration(seed, 10000);
 }

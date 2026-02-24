@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use crate::core::Dimension;
+use crate::core::WindowId;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
@@ -13,11 +16,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetForegroundWindow, GetWindowLongW,
-    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
-    MINMAXINFO, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW,
-    SetForegroundWindow, SetWindowPos, WM_GETMINMAXINFO, WS_CHILD, WS_EX_DLGMODALFRAME,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
-    WS_THICKFRAME,
+    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+    IsWindowVisible, MINMAXINFO, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_GETMINMAXINFO,
+    WS_CHILD, WS_EX_DLGMODALFRAME, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -28,6 +31,7 @@ pub(super) struct WindowHandle {
     hwnd: HWND,
     title: Option<String>,
     process: String,
+    fullscreen: bool,
 }
 
 unsafe impl Send for WindowHandle {}
@@ -38,6 +42,7 @@ impl WindowHandle {
             hwnd,
             title: get_window_title(hwnd),
             process: get_process_name(hwnd).unwrap_or_default(),
+            fullscreen: false,
         }
     }
 
@@ -126,7 +131,71 @@ impl WindowHandle {
         }
     }
 
-    pub(super) fn set_position(&self, dim: &Dimension) {
+    pub(super) fn is_fullscreen(&self, monitor: &Dimension) -> bool {
+        let dim = self.dimension();
+        dim.x <= monitor.x
+            && dim.y <= monitor.y
+            && dim.x + dim.width >= monitor.x + monitor.width
+            && dim.y + dim.height >= monitor.y + monitor.height
+    }
+
+    pub(super) fn set_fullscreen(&mut self, dim: &Dimension) {
+        self.fullscreen = true;
+        self.set_position(dim);
+    }
+
+    pub(super) fn sync_fullscreen(&mut self, fs: bool) {
+        self.fullscreen = fs;
+    }
+
+    pub(super) fn show(&mut self, dim: &Dimension, border: f32, is_float: bool) {
+        self.fullscreen = false;
+        let content = apply_inset(*dim, border);
+        self.set_position(&content);
+        if is_float {
+            self.set_topmost();
+        }
+    }
+
+    /// Returns (min_width, min_height, max_width, max_height) constraints
+    /// with border added, if any dimension exceeds the content area.
+    pub(super) fn get_constraints(&self, dim: &Dimension, border: f32) -> Option<[Option<f32>; 4]> {
+        let content = apply_inset(*dim, border);
+        let (min_w, min_h, max_w, max_h) = get_size_constraints(self.hwnd);
+        let min_w = if min_w > content.width { min_w } else { 0.0 };
+        let min_h = if min_h > content.height { min_h } else { 0.0 };
+        let max_w = if max_w > 0.0 && max_w < content.width {
+            max_w
+        } else {
+            0.0
+        };
+        let max_h = if max_h > 0.0 && max_h < content.height {
+            max_h
+        } else {
+            0.0
+        };
+        if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
+            let to_opt = |v: f32| {
+                if v > 0.0 {
+                    Some(v + 2.0 * border)
+                } else {
+                    None
+                }
+            };
+            Some([to_opt(min_w), to_opt(min_h), to_opt(max_w), to_opt(max_h)])
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn fullscreen(&self) -> bool {
+        self.fullscreen
+    }
+
+    fn set_position(&self, dim: &Dimension) {
+        if unsafe { IsIconic(self.hwnd) }.as_bool() {
+            let _was_visible = unsafe { ShowWindow(self.hwnd, SW_RESTORE) };
+        }
         let (left, top, right, bottom) = get_invisible_border(self.hwnd);
         unsafe {
             SetWindowPos(
@@ -143,6 +212,10 @@ impl WindowHandle {
     }
 
     pub(super) fn hide(&self) {
+        if self.fullscreen {
+            let _was_visible = unsafe { ShowWindow(self.hwnd, SW_MINIMIZE) };
+            return;
+        }
         unsafe {
             SetWindowPos(
                 self.hwnd,
@@ -231,7 +304,7 @@ where
     }
 }
 
-pub(super) fn get_size_constraints(hwnd: HWND) -> (f32, f32, f32, f32) {
+fn get_size_constraints(hwnd: HWND) -> (f32, f32, f32, f32) {
     let mut info = MINMAXINFO::default();
     unsafe {
         SendMessageW(
@@ -343,5 +416,91 @@ impl Taskbar {
 
     pub(super) fn delete_tab(&self, hwnd: HWND) -> windows::core::Result<()> {
         unsafe { self.0.DeleteTab(hwnd) }
+    }
+}
+
+/// Hashable key for window lookups
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct WindowKey(isize);
+
+impl From<HWND> for WindowKey {
+    fn from(hwnd: HWND) -> Self {
+        Self(hwnd.0 as isize)
+    }
+}
+
+impl From<&WindowHandle> for WindowKey {
+    fn from(handle: &WindowHandle) -> Self {
+        Self(handle.hwnd().0 as isize)
+    }
+}
+
+pub(super) struct Registry {
+    windows: HashMap<WindowKey, WindowId>,
+    reverse: HashMap<WindowId, WindowHandle>,
+}
+
+impl Registry {
+    pub(super) fn new() -> Self {
+        Self {
+            windows: HashMap::new(),
+            reverse: HashMap::new(),
+        }
+    }
+
+    pub(super) fn insert(&mut self, handle: WindowHandle, id: WindowId) {
+        self.windows.insert(WindowKey::from(&handle), id);
+        self.reverse.insert(id, handle);
+    }
+
+    pub(super) fn remove(&mut self, handle: &WindowHandle) -> Option<WindowId> {
+        let key = WindowKey::from(handle);
+        if let Some(id) = self.windows.remove(&key) {
+            self.reverse.remove(&id);
+            return Some(id);
+        }
+        None
+    }
+
+    pub(super) fn get_id(&self, handle: &WindowHandle) -> Option<WindowId> {
+        self.windows.get(&WindowKey::from(handle)).copied()
+    }
+
+    pub(super) fn get_handle(&self, id: WindowId) -> Option<WindowHandle> {
+        self.reverse.get(&id).cloned()
+    }
+
+    pub(super) fn get_mut_handle(&mut self, handle: &WindowHandle) -> Option<&mut WindowHandle> {
+        let key = WindowKey::from(handle);
+        self.windows
+            .get(&key)
+            .and_then(|&id| self.reverse.get_mut(&id))
+    }
+
+    pub(super) fn get_handle_by_key(&self, key: WindowKey) -> Option<WindowHandle> {
+        if let Some(&id) = self.windows.get(&key) {
+            return self.reverse.get(&id).cloned();
+        }
+        None
+    }
+
+    pub(super) fn contains(&self, handle: &WindowHandle) -> bool {
+        self.windows.contains_key(&WindowKey::from(handle))
+    }
+
+    pub(super) fn update_title(&mut self, handle: &WindowHandle) {
+        let key = WindowKey::from(handle);
+        if let Some(&id) = self.windows.get(&key) {
+            self.reverse.insert(id, handle.clone());
+        }
+    }
+}
+
+fn apply_inset(dim: Dimension, border: f32) -> Dimension {
+    Dimension {
+        x: dim.x + border,
+        y: dim.y + border,
+        width: (dim.width - 2.0 * border).max(0.0),
+        height: (dim.height - 2.0 * border).max(0.0),
     }
 }
