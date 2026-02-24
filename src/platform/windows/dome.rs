@@ -166,21 +166,6 @@ impl Dome {
         }
     }
 
-    fn enumerate_windows(&mut self) -> Vec<OverlayCreate> {
-        let mut creates = Vec::new();
-        if let Err(e) = enum_windows(|hwnd| {
-            let handle = WindowHandle::new(hwnd);
-            if handle.is_manageable() && !should_ignore(&handle, &self.config.windows.ignore) {
-                let id = self.insert_window(&handle);
-                let is_float = self.hub.get_window(id).is_float();
-                creates.push(OverlayCreate { window_id: id, hwnd, is_float });
-            }
-        }) {
-            tracing::warn!("Failed to enumerate windows: {e}");
-        }
-        creates
-    }
-
     fn handle_event(&mut self, event: HubEvent) -> (Vec<OverlayCreate>, Vec<WindowId>) {
         let mut creates = Vec::new();
         let mut deletes = Vec::new();
@@ -188,7 +173,21 @@ impl Dome {
         match event {
             HubEvent::AppInitialized(hwnd) => {
                 self.app_hwnd = Some(hwnd);
-                creates = self.enumerate_windows();
+                if let Err(e) = enum_windows(|hwnd| {
+                    let handle = WindowHandle::new(hwnd);
+                    if handle.is_manageable()
+                        && !should_ignore(&handle, &self.config.windows.ignore)
+                    {
+                        // Hide before first frame — window may end up offscreen due to
+                        // viewport scrolling. apply_layout will show the visible ones.
+                        handle.hide();
+                        let id = self.insert_window(&handle);
+                        let is_float = self.hub.get_window(id).is_float();
+                        creates.push(OverlayCreate { window_id: id, hwnd, is_float });
+                    }
+                }) {
+                    tracing::warn!("Failed to enumerate windows: {e}");
+                }
             }
             HubEvent::Shutdown => self.running = false,
             HubEvent::ConfigChanged(new_config) => {
