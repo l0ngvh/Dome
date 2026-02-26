@@ -230,7 +230,7 @@ impl Hub {
 
     // Windows can extend beyond screen visible area
     fn set_root_dimension(&mut self, root: Child, screen: Dimension) {
-        let (min_w, min_h) = self.get_effective_min_size(root);
+        let (min_w, min_h, max_w, max_h) = self.get_effective_constraints(root);
         let base_dim = Dimension {
             x: 0.0,
             y: 0.0,
@@ -239,16 +239,13 @@ impl Hub {
         };
 
         // Apply max_size centering for single window at root
-        let dim = {
-            let (max_w, max_h) = self.get_effective_max_size(root);
-            let (w, x_off) = Self::apply_max_constraint(max_w, base_dim.width);
-            let (h, y_off) = Self::apply_max_constraint(max_h, base_dim.height);
-            Dimension {
-                x: base_dim.x + x_off,
-                y: base_dim.y + y_off,
-                width: w,
-                height: h,
-            }
+        let (w, x_off) = Self::apply_max_constraint(max_w, base_dim.width);
+        let (h, y_off) = Self::apply_max_constraint(max_h, base_dim.height);
+        let dim = Dimension {
+            x: base_dim.x + x_off,
+            y: base_dim.y + y_off,
+            width: w,
+            height: h,
         };
 
         self.set_split_child_dimension(root, dim);
@@ -261,7 +258,10 @@ impl Hub {
 
         let child_mins: Vec<(f32, f32)> = children
             .iter()
-            .map(|&c| self.get_effective_min_size(c))
+            .map(|&c| {
+                let (min_w, min_h, _, _) = self.get_effective_constraints(c);
+                (min_w, min_h)
+            })
             .collect();
 
         let (min_w, min_h) = match direction {
@@ -299,8 +299,7 @@ impl Hub {
         children
             .iter()
             .map(|&c| {
-                let (min_w, min_h) = self.get_effective_min_size(c);
-                let (max_w, max_h) = self.get_effective_max_size(c);
+                let (min_w, min_h, max_w, max_h) = self.get_effective_constraints(c);
                 (min_w, max_w, min_h, max_h)
             })
             .collect()
@@ -330,7 +329,8 @@ impl Hub {
         }
     }
 
-    fn get_effective_min_size(&self, child: Child) -> (f32, f32) {
+    /// Returns (min_w, min_h, max_w, max_h). Window-specific max takes precedence over global min.
+    fn get_effective_constraints(&self, child: Child) -> (f32, f32, f32, f32) {
         let ws_id = match child {
             Child::Window(id) => self.windows.get(id).workspace,
             Child::Container(id) => self.containers.get(id).workspace,
@@ -344,29 +344,34 @@ impl Hub {
 
         match child {
             Child::Window(id) => {
-                let (w, h) = self.windows.get(id).min_size();
-                (w.max(global_min_w), h.max(global_min_h))
-            }
-            Child::Container(id) => self.containers.get(id).min_size(),
-        }
-    }
-
-    fn get_effective_max_size(&self, child: Child) -> (f32, f32) {
-        match child {
-            Child::Window(id) => {
                 let window = self.windows.get(id);
-                let (max_w, max_h) = window.max_size();
-                let screen = self
-                    .monitors
-                    .get(self.workspaces.get(window.workspace).monitor)
-                    .dimension;
+                let (win_min_w, win_min_h) = window.min_size();
+                let (win_max_w, win_max_h) = window.max_size();
+
                 let global_max_w = self.config.max_width.resolve(screen.width);
                 let global_max_h = self.config.max_height.resolve(screen.height);
-                let w = if max_w > 0.0 { max_w } else { global_max_w };
-                let h = if max_h > 0.0 { max_h } else { global_max_h };
-                (w, h)
+
+                let max_w = if win_max_w > 0.0 { win_max_w } else { global_max_w };
+                let max_h = if win_max_h > 0.0 { win_max_h } else { global_max_h };
+
+                // Window-specific max caps the effective min
+                let min_w = if max_w > 0.0 {
+                    win_min_w.max(global_min_w).min(max_w)
+                } else {
+                    win_min_w.max(global_min_w)
+                };
+                let min_h = if max_h > 0.0 {
+                    win_min_h.max(global_min_h).min(max_h)
+                } else {
+                    win_min_h.max(global_min_h)
+                };
+
+                (min_w, min_h, max_w, max_h)
             }
-            Child::Container(_) => (0.0, 0.0),
+            Child::Container(id) => {
+                let (min_w, min_h) = self.containers.get(id).min_size();
+                (min_w, min_h, 0.0, 0.0)
+            }
         }
     }
 

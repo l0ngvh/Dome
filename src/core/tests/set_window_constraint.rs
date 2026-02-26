@@ -1855,3 +1855,156 @@ fn tabbed_window_with_max_larger_than_container_fills_space() {
     ******************************************************************************************************************************************************
     ");
 }
+
+#[test]
+fn window_max_smaller_than_global_min_width() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling();
+
+    hub.sync_config(HubConfig {
+        min_width: SizeConstraint::Pixels(300.0),
+        ..Default::default()
+    });
+
+    // Window max (50) < global min (300) - should not panic, window max takes precedence
+    hub.set_window_constraint(w0, None, None, Some(50.0), None);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=50.00, y=0.00, w=50.00, h=30.00)
+      )
+    )
+
+                                                      **************************************************                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                       W0                       *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      *                                                *                                                  
+                                                      **************************************************
+    ");
+}
+
+#[test]
+fn window_max_smaller_than_global_min_height() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling();
+
+    hub.sync_config(HubConfig {
+        min_height: SizeConstraint::Pixels(300.0),
+        ..Default::default()
+    });
+
+    // Window max (10) < global min (300) - should not panic
+    hub.set_window_constraint(w0, None, None, None, Some(10.0));
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=10.00, w=150.00, h=10.00)
+      )
+    )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
+    ");
+}
+
+#[test]
+fn window_max_smaller_than_global_min_multiple_windows() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling();
+    hub.insert_tiling();
+
+    hub.sync_config(HubConfig {
+        min_width: SizeConstraint::Pixels(100.0),
+        ..Default::default()
+    });
+
+    // Window max (50) < global min (100) - should not panic
+    hub.set_window_constraint(w0, None, None, Some(50.0), None);
+
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=100.00, h=30.00)
+        )
+      )
+    )
+
+    +------------------------------------------------+****************************************************************************************************
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                       W0                       |*                                                W1                                                *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    |                                                |*                                                                                                  *
+    +------------------------------------------------+****************************************************************************************************
+    ");
+}
