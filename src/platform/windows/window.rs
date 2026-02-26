@@ -16,12 +16,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetForegroundWindow, GetWindowLongW,
-    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
-    IsWindowVisible, MINMAXINFO, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SendMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, WM_GETMINMAXINFO,
-    WS_CHILD, WS_EX_DLGMODALFRAME, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
+    EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor,
+    GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, MINMAXINFO, SW_MINIMIZE, SW_RESTORE,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetForegroundWindow,
+    SetWindowPos, ShowWindow, WM_GETMINMAXINFO, WS_CHILD, WS_EX_DLGMODALFRAME, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    WS_THICKFRAME,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -197,6 +198,7 @@ impl WindowHandle {
         if unsafe { IsIconic(self.hwnd) }.as_bool() {
             let _was_visible = unsafe { ShowWindow(self.hwnd, SW_RESTORE) };
         }
+        let old = self.dimension();
         let (left, top, right, bottom) = get_invisible_border(self.hwnd);
         unsafe {
             SetWindowPos(
@@ -210,6 +212,27 @@ impl WindowHandle {
             )
             .ok()
         };
+        let dx = dim.x as i32 - old.x as i32;
+        let dy = dim.y as i32 - old.y as i32;
+        if dx != 0 || dy != 0 {
+            for_each_owned(self.hwnd, |child| {
+                let mut rect = RECT::default();
+                if unsafe { GetWindowRect(child, &mut rect).is_ok() } {
+                    unsafe {
+                        SetWindowPos(
+                            child,
+                            None,
+                            rect.left + dx,
+                            rect.top + dy,
+                            0,
+                            0,
+                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
+                        )
+                        .ok()
+                    };
+                }
+            });
+        }
     }
 
     pub(super) fn hide(&self) {
@@ -244,6 +267,20 @@ impl WindowHandle {
             )
             .ok()
         };
+        for_each_owned(self.hwnd, |child| {
+            unsafe {
+                SetWindowPos(
+                    child,
+                    Some(windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                )
+                .ok()
+            };
+        });
     }
 
     pub(super) fn focus(&self) {
@@ -500,5 +537,26 @@ fn apply_inset(dim: Dimension, border: f32) -> Dimension {
         y: dim.y + border,
         width: (dim.width - 2.0 * border).max(0.0),
         height: (dim.height - 2.0 * border).max(0.0),
+    }
+}
+
+fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, mut callback: F) {
+    let thread_id = unsafe { GetWindowThreadProcessId(hwnd, None) };
+    if thread_id == 0 {
+        return;
+    }
+
+    unsafe extern "system" fn enum_proc<F: FnMut(HWND)>(child: HWND, lparam: LPARAM) -> BOOL {
+        let (owner, callback) = unsafe { &mut *(lparam.0 as *mut (HWND, F)) };
+        let root_owner = unsafe { GetAncestor(child, GA_ROOTOWNER) };
+        if root_owner == *owner && child != *owner {
+            callback(child);
+        }
+        BOOL(1)
+    }
+
+    let mut data = (hwnd, callback);
+    unsafe {
+        EnumThreadWindows(thread_id, Some(enum_proc::<F>), LPARAM(&mut data as *mut _ as isize));
     }
 }
