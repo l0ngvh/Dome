@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender};
 
 use dispatch2::{DispatchQueue, DispatchRetained};
-use objc2::rc::Retained;
+use objc2::rc::{autoreleasepool, Retained};
 use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
 use objc2_application_services::AXUIElement;
 use objc2_core_foundation::{
@@ -307,98 +307,102 @@ impl Dome {
     }
 
     fn initial_sync(&mut self) {
-        let mut new_apps = Vec::new();
-        for app in running_apps() {
-            if !self.running {
-                return;
+        autoreleasepool(|_| {
+            let mut new_apps = Vec::new();
+            for app in running_apps() {
+                if !self.running {
+                    return;
+                }
+                let pid = app.processIdentifier();
+                if self.observed_pids.insert(pid) {
+                    new_apps.push(app.clone());
+                }
+                self.sync_app_windows(&app);
             }
-            let pid = app.processIdentifier();
-            if self.observed_pids.insert(pid) {
-                new_apps.push(app.clone());
+            if !new_apps.is_empty() {
+                self.sender.send(HubMessage::RegisterObservers(new_apps));
             }
-            self.sync_app_windows(&app);
-        }
-        if !new_apps.is_empty() {
-            self.sender.send(HubMessage::RegisterObservers(new_apps));
-        }
-        // Hide all windows before first frame — windows discovered during initial sync
-        // may end up offscreen due to viewport scrolling. apply_layout will show the
-        // visible ones.
-        for window in self.registry.windows.values_mut() {
-            window.hide().ok();
-        }
-        let overlays = self.apply_layout();
+            // Hide all windows before first frame — windows discovered during initial sync
+            // may end up offscreen due to viewport scrolling. apply_layout will show the
+            // visible ones.
+            for window in self.registry.windows.values_mut() {
+                window.hide().ok();
+            }
+            let overlays = self.apply_layout();
 
-        self.sender.send(HubMessage::Overlays(overlays));
+            self.sender.send(HubMessage::Overlays(overlays));
+        });
     }
 
     fn handle_event(&mut self, event: HubEvent) {
-        match event {
-            HubEvent::Shutdown => {
-                tracing::info!("Shutdown requested");
-                self.stop();
-            }
-            HubEvent::ConfigChanged(new_config) => {
-                self.hub.sync_config(new_config.clone().into());
-                self.config = new_config;
-                tracing::info!("Config reloaded");
-            }
-            HubEvent::SyncApp { pid } => {
-                if let Some(app) = get_app_by_pid(pid) {
-                    self.sync_app_windows(&app);
+        autoreleasepool(|_| {
+            match event {
+                HubEvent::Shutdown => {
+                    tracing::info!("Shutdown requested");
+                    self.stop();
+                }
+                HubEvent::ConfigChanged(new_config) => {
+                    self.hub.sync_config(new_config.clone().into());
+                    self.config = new_config;
+                    tracing::info!("Config reloaded");
+                }
+                HubEvent::SyncApp { pid } => {
+                    if let Some(app) = get_app_by_pid(pid) {
+                        self.sync_app_windows(&app);
+                    }
+                }
+                HubEvent::SyncFocus { pid } => {
+                    if let Some(app) = get_app_by_pid(pid) {
+                        self.sync_app_focus(&app);
+                    }
+                }
+                HubEvent::AppTerminated { pid } => {
+                    tracing::debug!(pid, "App terminated");
+                    self.remove_app_windows(pid);
+                }
+                HubEvent::TitleChanged(cg_id) => {
+                    if let Some(window) = self.registry.get_mut(cg_id) {
+                        window.update_title();
+                        tracing::trace!(%window, "Title changed");
+                    }
+                }
+                HubEvent::WindowMovedOrResized { pid } => {
+                    self.handle_window_moved(pid);
+                }
+                HubEvent::Action(actions) => {
+                    tracing::debug!(%actions, "Executing actions");
+                    self.execute_actions(&actions);
+                }
+                // AX notifications are unreliable, when new windows are being rapidly created and
+                // deleted, macOS may decide skip sending notifications. So we poll periodically to
+                // keep the state in sync. https://github.com/nikitabobko/AeroSpace/issues/445
+                HubEvent::Sync => {
+                    self.periodic_sync();
+                }
+                HubEvent::ScreensChanged(screens) => {
+                    tracing::info!(count = screens.len(), "Screens changed");
+                    self.update_screens(screens);
+                }
+                HubEvent::MirrorClicked(cg_id) => {
+                    if let Some(window) = self.registry.get(cg_id) {
+                        window.focus();
+                    }
+                    if let Some(window_id) = self.registry.get_window_id(cg_id) {
+                        self.hub.set_focus(window_id);
+                    }
+                }
+                HubEvent::CaptureReady { cg_id, capture } => {
+                    self.registry.set_capture(cg_id, capture);
                 }
             }
-            HubEvent::SyncFocus { pid } => {
-                if let Some(app) = get_app_by_pid(pid) {
-                    self.sync_app_focus(&app);
-                }
-            }
-            HubEvent::AppTerminated { pid } => {
-                tracing::debug!(pid, "App terminated");
-                self.remove_app_windows(pid);
-            }
-            HubEvent::TitleChanged(cg_id) => {
-                if let Some(window) = self.registry.get_mut(cg_id) {
-                    window.update_title();
-                    tracing::trace!(%window, "Title changed");
-                }
-            }
-            HubEvent::WindowMovedOrResized { pid } => {
-                self.handle_window_moved(pid);
-            }
-            HubEvent::Action(actions) => {
-                tracing::debug!(%actions, "Executing actions");
-                self.execute_actions(&actions);
-            }
-            // AX notifications are unreliable, when new windows are being rapidly created and
-            // deleted, macOS may decide skip sending notifications. So we poll periodically to
-            // keep the state in sync. https://github.com/nikitabobko/AeroSpace/issues/445
-            HubEvent::Sync => {
-                self.periodic_sync();
-            }
-            HubEvent::ScreensChanged(screens) => {
-                tracing::info!(count = screens.len(), "Screens changed");
-                self.update_screens(screens);
-            }
-            HubEvent::MirrorClicked(cg_id) => {
-                if let Some(window) = self.registry.get(cg_id) {
-                    window.focus();
-                }
-                if let Some(window_id) = self.registry.get_window_id(cg_id) {
-                    self.hub.set_focus(window_id);
-                }
-            }
-            HubEvent::CaptureReady { cg_id, capture } => {
-                self.registry.set_capture(cg_id, capture);
-            }
-        }
 
-        if !self.running {
-            return;
-        }
-        let overlays = self.apply_layout();
+            if !self.running {
+                return;
+            }
+            let overlays = self.apply_layout();
 
-        self.sender.send(HubMessage::Overlays(overlays));
+            self.sender.send(HubMessage::Overlays(overlays));
+        });
     }
 
     #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
