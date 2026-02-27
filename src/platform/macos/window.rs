@@ -30,7 +30,9 @@ pub(super) struct MacWindow {
     capture: Option<WindowCapture>,
     sender: MessageSender,
     focused: bool,
-    physical_placement: Option<(RoundedDimension, u8)>,
+    target_placement: Option<RoundedDimension>,
+    actual_placement: Option<RoundedDimension>,
+    placement_retries: u8,
     is_ax_hidden: bool,
     monitors: Vec<MonitorInfo>,
     fullscreen: FullscreenState,
@@ -56,7 +58,9 @@ impl MacWindow {
             capture: None,
             sender,
             focused: false,
-            physical_placement: None,
+            target_placement: None,
+            actual_placement: None,
+            placement_retries: 0,
             is_ax_hidden: false,
             monitors,
             fullscreen: FullscreenState::None,
@@ -185,6 +189,17 @@ impl MacWindow {
         self.ax.hide_at(x, y)
     }
 
+    fn should_retry_placement(&mut self, target: RoundedDimension, actual: RoundedDimension) -> bool {
+        if self.target_placement == Some(target) && self.actual_placement == Some(actual) {
+            self.placement_retries += 1;
+        } else {
+            self.placement_retries = 0;
+        }
+        self.target_placement = Some(target);
+        self.actual_placement = Some(actual);
+        self.placement_retries <= 5
+    }
+
     /// Try to place this physical window on the logical placement. Mac has restrictions on how
     /// windows can be placed, so if we try to put a window above menu bar, or stretch a window
     /// taller than screen height, Mac will instead come up with an alternative placement. For our
@@ -211,45 +226,22 @@ impl MacWindow {
             return;
         };
 
-        let rounded = round_dim(target);
+        let target = round_dim(target);
         let (ax, ay) = self.ax.get_position().unwrap_or((0, 0));
         let (aw, ah) = self.ax.get_size().unwrap_or((0, 0));
-        let at_position =
-            ax == rounded.x && ay == rounded.y && aw == rounded.width && ah == rounded.height;
-        if at_position {
+        let actual = RoundedDimension { x: ax, y: ay, width: aw, height: ah };
+
+        if actual == target {
             return;
         }
 
-        if let Some((prev, count)) = &mut self.physical_placement
-            && *prev == rounded
-            && !self.is_ax_hidden
-        {
-            if *count < 5 {
-                *count += 1;
-            } else if *count == 5 {
-                *count += 1;
-                tracing::debug!(
-                    "Window {} can't be moved to the desired position {:?}",
-                    self.ax,
-                    self.physical_placement
-                );
-            } else {
-                return;
-            }
-        } else {
-            self.physical_placement = Some((rounded, 0));
-            tracing::trace!(
-                "Placing window {self} at {rounded:?}, with its logical placement at {placement:?}"
-            );
+        if !self.should_retry_placement(target, actual) {
+            tracing::debug!("Window {} can't be moved to {:?}", self.ax, target);
+            return;
         }
 
         self.is_ax_hidden = false;
-        if let Err(e) = self.ax.set_frame(
-            rounded.x as i32,
-            rounded.y as i32,
-            rounded.width as i32,
-            rounded.height as i32,
-        ) {
+        if let Err(e) = self.ax.set_frame(target.x, target.y, target.width, target.height) {
             tracing::trace!("Window {} set_frame failed: {e}", self.ax);
         }
     }
@@ -270,48 +262,56 @@ impl MacWindow {
             }
             return None;
         }
-        let (expected, count) = self.physical_placement?;
+
+        let target = self.target_placement?;
         let (actual_x, actual_y) = self.ax.get_position().unwrap_or((0, 0));
-        let (actual_width, actual_height) = self.ax.get_size().unwrap_or((0, 0));
-        let logical = window.dimension();
+        let (actual_w, actual_h) = self.ax.get_size().unwrap_or((0, 0));
+        let actual = RoundedDimension {
+            x: actual_x,
+            y: actual_y,
+            width: actual_w,
+            height: actual_h,
+        };
+
+        // Float can only be moved when focused (otherwise it's the mirror), and focused
+        // floats are always inside viewport
+        if window.is_float() {
+            self.actual_placement = Some(actual);
+            return None;
+        }
 
         // At least one edge must match on each axis - user resize moves both edges on one axis
-        let left = actual_x == expected.x;
-        let right = actual_x + actual_width == expected.x + expected.width;
-        let top = actual_y == expected.y;
-        let bottom = actual_y + actual_height == expected.y + expected.height;
+        let left = actual_x == target.x;
+        let right = actual_x + actual_w == target.x + target.width;
+        let top = actual_y == target.y;
+        let bottom = actual_y + actual_h == target.y + target.height;
 
         if !((left || right) && (top || bottom)) {
-            if count < 5 {
+            if self.should_retry_placement(target, actual) {
                 tracing::trace!(
                     window = %self.ax,
-                    ?expected,
-                    actual = ?(actual_x, actual_y, actual_width, actual_height),
-                    ?logical,
-                    attempt = count + 1,
+                    ?target,
+                    ?actual,
                     "window drifted, correcting"
                 );
-                self.physical_placement = Some((expected, count + 1));
-                if let Err(e) =
-                    self.ax
-                        .set_frame(expected.x, expected.y, expected.width, expected.height)
-                {
+                if let Err(e) = self.ax.set_frame(target.x, target.y, target.width, target.height) {
                     tracing::trace!("Window {} set_frame failed: {e}", self.ax);
                 }
             }
             return None;
         }
 
-        let min_w = (actual_width > expected.width).then_some(actual_width as f32);
-        let min_h = (actual_height > expected.height).then_some(actual_height as f32);
-        let max_w = (actual_width < expected.width).then_some(actual_width as f32);
-        let max_h = (actual_height < expected.height).then_some(actual_height as f32);
+        self.actual_placement = Some(actual);
+
+        let min_w = (actual_w > target.width).then_some(actual_w as f32);
+        let min_h = (actual_h > target.height).then_some(actual_h as f32);
+        let max_w = (actual_w < target.width).then_some(actual_w as f32);
+        let max_h = (actual_h < target.height).then_some(actual_h as f32);
         if min_w.is_some() || min_h.is_some() || max_w.is_some() || max_h.is_some() {
             tracing::trace!(
                 window = %self.ax,
-                ?expected,
-                actual = ?(actual_x, actual_y, actual_width, actual_height),
-                ?logical,
+                ?target,
+                ?actual,
                 ?min_w, ?min_h, ?max_w, ?max_h,
                 "window constrained"
             );

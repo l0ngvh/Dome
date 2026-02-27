@@ -362,7 +362,7 @@ impl Dome {
             }
 
             let hub_window = self.hub.get_window(window_id);
-            if hub_window.is_float() || hub_window.is_fullscreen() {
+            if hub_window.is_fullscreen() {
                 continue;
             }
             let Some((min_w, min_h, max_w, max_h)) = mac_window.check_placement(hub_window) else {
