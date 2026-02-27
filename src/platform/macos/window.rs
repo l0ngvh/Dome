@@ -1,4 +1,5 @@
 use anyhow::Result;
+use objc2_core_graphics::CGWindowID;
 
 use super::dome::{HubMessage, MessageSender};
 use super::mirror::WindowCapture;
@@ -60,6 +61,10 @@ impl MacWindow {
             monitors,
             fullscreen: FullscreenState::None,
         }
+    }
+
+    pub(super) fn cg_id(&self) -> CGWindowID {
+        self.ax.cg_id()
     }
 
     pub(super) fn pid(&self) -> i32 {

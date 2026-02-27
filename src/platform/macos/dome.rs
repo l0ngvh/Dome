@@ -12,7 +12,7 @@ use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
-use crate::core::{Dimension, Hub, Window, WindowId};
+use crate::core::{Dimension, Hub};
 use crate::platform::macos::accessibility::AXWindow;
 
 use super::mirror::{WindowCapture, create_captures_async};
@@ -20,6 +20,7 @@ use super::monitor::{MonitorInfo, MonitorRegistry};
 use super::objc2_wrapper::kCGWindowNumber;
 use super::overlay::Overlays;
 use super::recovery;
+use super::registry::Registry;
 use super::running_application::RunningApp;
 use super::window::{FullscreenTransition, MacWindow};
 
@@ -110,140 +111,6 @@ pub(super) enum HubMessage {
     Shutdown,
 }
 
-pub(super) struct Registry {
-    windows: HashMap<CGWindowID, MacWindow>,
-    id_to_cg: HashMap<WindowId, CGWindowID>,
-    pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
-    monitors: Vec<MonitorInfo>,
-    sender: MessageSender,
-}
-
-impl Registry {
-    fn new(monitors: Vec<MonitorInfo>, sender: MessageSender) -> Self {
-        Self {
-            windows: HashMap::new(),
-            id_to_cg: HashMap::new(),
-            pid_to_cg: HashMap::new(),
-            monitors,
-            sender,
-        }
-    }
-
-    fn insert(&mut self, ax: AXWindow, window_id: WindowId, hub_window: &Window) {
-        let cg_id = ax.cg_id();
-        let pid = ax.pid();
-        if pid as u32 == std::process::id() {
-            return;
-        }
-        self.id_to_cg.insert(window_id, cg_id);
-        self.pid_to_cg.entry(pid).or_default().push(cg_id);
-        self.windows.insert(
-            cg_id,
-            MacWindow::new(
-                ax,
-                window_id,
-                hub_window,
-                self.sender.clone(),
-                self.monitors.clone(),
-            ),
-        );
-    }
-
-    fn remove(&mut self, cg_id: CGWindowID) -> Option<WindowId> {
-        let window = self.windows.remove(&cg_id)?;
-        let pid = window.pid();
-        self.id_to_cg.remove(&window.window_id());
-        if let Some(ids) = self.pid_to_cg.get_mut(&pid) {
-            ids.retain(|&id| id != cg_id);
-            if ids.is_empty() {
-                self.pid_to_cg.remove(&pid);
-            }
-        }
-        tracing::info!(%window, window_id = %window.window_id(), "Window removed");
-        Some(window.window_id())
-    }
-
-    pub(super) fn get_mut(&mut self, cg_id: CGWindowID) -> Option<&mut MacWindow> {
-        self.windows.get_mut(&cg_id)
-    }
-
-    pub(super) fn get_cg_id(&self, window_id: WindowId) -> Option<CGWindowID> {
-        self.id_to_cg.get(&window_id).copied()
-    }
-
-    fn get_window_id(&self, cg_id: CGWindowID) -> Option<WindowId> {
-        self.windows.get(&cg_id).map(|e| e.window_id())
-    }
-
-    fn get_by_window_id(&self, window_id: WindowId) -> Option<&MacWindow> {
-        self.id_to_cg
-            .get(&window_id)
-            .copied()
-            .and_then(|cg_id| self.windows.get(&cg_id))
-    }
-
-    pub(super) fn get_mut_by_window_id(&mut self, window_id: WindowId) -> Option<&mut MacWindow> {
-        self.id_to_cg
-            .get(&window_id)
-            .copied()
-            .and_then(|cg_id| self.windows.get_mut(&cg_id))
-    }
-
-    fn contains(&self, cg_id: CGWindowID) -> bool {
-        self.windows.contains_key(&cg_id)
-    }
-
-    fn cg_ids_for_pid(&self, pid: i32) -> Vec<CGWindowID> {
-        self.pid_to_cg.get(&pid).cloned().unwrap_or_default()
-    }
-
-    fn remove_by_pid(&mut self, pid: i32) -> Vec<(CGWindowID, WindowId)> {
-        let Some(cg_ids) = self.pid_to_cg.remove(&pid) else {
-            return Vec::new();
-        };
-        let mut removed = Vec::new();
-        for cg_id in cg_ids {
-            if let Some(window) = self.windows.remove(&cg_id) {
-                self.id_to_cg.remove(&window.window_id());
-                tracing::info!(%window, window_id = %window.window_id(), "Window removed");
-                removed.push((cg_id, window.window_id()));
-            }
-        }
-        removed
-    }
-
-    pub(super) fn get_title(&self, window_id: WindowId) -> Option<&str> {
-        self.id_to_cg
-            .get(&window_id)
-            .and_then(|cg_id| self.windows.get(cg_id))
-            .and_then(|w| w.title())
-    }
-
-    fn set_capture(&mut self, cg_id: CGWindowID, capture: WindowCapture) {
-        if let Some(window) = self.windows.get_mut(&cg_id) {
-            window.set_capture(capture);
-        }
-    }
-
-    pub(super) fn get(&self, cg_id: CGWindowID) -> Option<&MacWindow> {
-        self.windows.get(&cg_id)
-    }
-
-    fn ax_windows_for_pid(&self, pid: i32) -> HashMap<CGWindowID, AXWindow> {
-        self.cg_ids_for_pid(pid)
-            .into_iter()
-            .filter_map(|cg_id| Some((cg_id, self.windows.get(&cg_id)?.ax().clone())))
-            .collect()
-    }
-
-    fn all_ax_windows(&self) -> HashMap<CGWindowID, AXWindow> {
-        self.windows
-            .iter()
-            .map(|(&cg_id, w)| (cg_id, w.ax().clone()))
-            .collect()
-    }
-}
-
 #[derive(Clone)]
 pub(super) struct MessageSender {
     pub(super) tx: Sender<HubMessage>,
@@ -323,7 +190,7 @@ impl Dome {
     pub(super) fn run(mut self, rx: Receiver<HubEvent>) {
         dispatch_reconcile_all_windows(
             self.observed_pids.clone(),
-            self.registry.all_ax_windows(),
+            self.registry.iter().map(|(id, w)| (id, w.ax().clone())).collect(),
             self.config.macos.ignore.clone(),
             self.hub_tx.clone(),
         );
@@ -348,7 +215,7 @@ impl Dome {
                 HubEvent::VisibleWindowsChanged { pid } => {
                     dispatch_refresh_app_windows(
                         pid,
-                        self.registry.ax_windows_for_pid(pid),
+                        self.registry.for_pid(pid).map(|(id, w)| (id, w.ax().clone())).collect(),
                         self.config.macos.ignore.clone(),
                         self.hub_tx.clone(),
                     );
@@ -378,7 +245,7 @@ impl Dome {
                 HubEvent::Sync => {
                     dispatch_reconcile_all_windows(
                         self.observed_pids.clone(),
-                        self.registry.all_ax_windows(),
+                        self.registry.iter().map(|(id, w)| (id, w.ax().clone())).collect(),
                         self.config.macos.ignore.clone(),
                         self.hub_tx.clone(),
                     );
@@ -390,13 +257,13 @@ impl Dome {
                 HubEvent::MirrorClicked(cg_id) => {
                     if let Some(window) = self.registry.get(cg_id) {
                         window.focus();
-                    }
-                    if let Some(window_id) = self.registry.get_window_id(cg_id) {
-                        self.hub.set_focus(window_id);
+                        self.hub.set_focus(window.window_id());
                     }
                 }
                 HubEvent::CaptureReady { cg_id, capture } => {
-                    self.registry.set_capture(cg_id, capture);
+                    if let Some(w) = self.registry.get_mut(cg_id) {
+                        w.set_capture(capture);
+                    }
                 }
                 HubEvent::AppVisibleWindowsReconciled(result) => {
                     self.apply_visible_windows_change(result);
@@ -437,7 +304,7 @@ impl Dome {
             return;
         }
         if let Some(cg_id) = app.focused_window_cg_id()
-            && let Some(window_id) = self.registry.get_window_id(cg_id)
+            && let Some(window_id) = self.registry.get(cg_id).map(|w| w.window_id())
         {
             self.hub.set_focus(window_id);
         }
@@ -460,26 +327,20 @@ impl Dome {
     #[tracing::instrument(skip(self))]
     fn handle_window_moved(&mut self, pid: i32) {
         let border = self.config.border_size;
-        for cg_id in self.registry.cg_ids_for_pid(pid) {
+        let cg_ids: Vec<_> = self.registry.for_pid(pid).map(|(id, _)| id).collect();
+        for cg_id in cg_ids {
             let _span = tracing::trace_span!("check_placement", %cg_id).entered();
-            let Some(window_id) = self.registry.get_window_id(cg_id) else {
+            let Some(mac_window) = self.registry.get_mut(cg_id) else {
                 continue;
             };
-
-            let Some(window) = self.registry.get(cg_id) else {
-                continue;
-            };
-            let Ok((x, y)) = window.ax().get_position() else {
+            let window_id = mac_window.window_id();
+            let Ok((x, y)) = mac_window.ax().get_position() else {
                 continue;
             };
             let Some(monitor) = self.monitor_registry.find_monitor_at(x as f32, y as f32) else {
                 continue;
             };
-            let monitor_dim = monitor.dimension;
-            let Some(mac_window) = self.registry.get_mut(cg_id) else {
-                continue;
-            };
-            match mac_window.sync_fullscreen(&monitor_dim) {
+            match mac_window.sync_fullscreen(&monitor.dimension) {
                 FullscreenTransition::Entered(_) => {
                     self.hub.set_fullscreen(window_id);
                     continue;
@@ -491,15 +352,10 @@ impl Dome {
                 FullscreenTransition::Unchanged => {}
             }
 
-            if self.hub.get_window(window_id).is_float()
-                || self.hub.get_window(window_id).is_fullscreen()
-            {
+            let hub_window = self.hub.get_window(window_id);
+            if hub_window.is_float() || hub_window.is_fullscreen() {
                 continue;
             }
-            let hub_window = self.hub.get_window(window_id);
-            let Some(mac_window) = self.registry.get_mut(cg_id) else {
-                continue;
-            };
             let Some((min_w, min_h, max_w, max_h)) = mac_window.check_placement(hub_window) else {
                 continue;
             };
@@ -528,11 +384,7 @@ impl Dome {
             self.primary_screen = primary.dimension;
             self.primary_full_height = primary.full_height;
         }
-        self.registry.monitors = screens.clone();
-
-        for window in self.registry.windows.values_mut() {
-            window.on_monitor_change(screens.clone());
-        }
+        self.registry.set_monitors(screens.clone());
 
         reconcile_monitors(&mut self.hub, &mut self.monitor_registry, &screens);
     }
@@ -607,7 +459,8 @@ impl Dome {
 
     fn apply_visible_windows_change(&mut self, result: VisibleWindowsReconciled) {
         if result.is_hidden {
-            for cg_id in self.registry.cg_ids_for_pid(result.pid) {
+            let cg_ids: Vec<_> = self.registry.for_pid(result.pid).map(|(id, _)| id).collect();
+            for cg_id in cg_ids {
                 self.remove_window(cg_id);
             }
             return;
@@ -663,7 +516,7 @@ impl Dome {
             window.hide().ok();
         }
 
-        let window = self.registry.get_by_window_id(window_id).unwrap();
+        let window = self.registry.by_id(window_id).unwrap();
         tracing::info!(%window, %window_id, "Window inserted");
 
         if let Some(actions) = on_open_actions(window, &self.config.macos.on_open) {

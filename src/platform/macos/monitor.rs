@@ -11,8 +11,8 @@ use crate::core::{
     MonitorPlacements, WindowPlacement,
 };
 
-use super::dome::Registry;
 use super::overlay::Overlays;
+use super::registry::Registry;
 use super::rendering::{ContainerBorder, build_tab_bar, compute_container_border};
 use super::window::FullscreenState;
 
@@ -69,7 +69,7 @@ impl MonitorEntry {
         window_id: crate::core::WindowId,
         registry: &mut Registry,
     ) {
-        let new_windows: HashSet<_> = registry.get_cg_id(window_id).into_iter().collect();
+        let new_windows: HashSet<_> = registry.by_id(window_id).map(|w| w.cg_id()).into_iter().collect();
 
         for cg_id in self.displayed_windows.difference(&new_windows) {
             if let Some(w) = registry.get_mut(*cg_id)
@@ -80,7 +80,7 @@ impl MonitorEntry {
         }
         self.displayed_windows = new_windows;
 
-        if let Some(w) = registry.get_mut_by_window_id(window_id)
+        if let Some(w) = registry.by_id_mut(window_id)
             && w.fullscreen() != FullscreenState::Native
         {
             w.set_fullscreen(self.screen.dimension);
@@ -98,7 +98,7 @@ impl MonitorEntry {
     ) -> Overlays {
         let new_windows: HashSet<_> = windows
             .iter()
-            .filter_map(|p| registry.get_cg_id(p.id))
+            .filter_map(|p| registry.by_id(p.id).map(|w| w.cg_id()))
             .collect();
 
         let leaving_native_fs = self.displayed_windows.difference(&new_windows).any(|cg_id| {
@@ -117,7 +117,7 @@ impl MonitorEntry {
         self.displayed_windows = new_windows;
 
         for wp in windows {
-            let Some(w) = registry.get_mut_by_window_id(wp.id) else {
+            let Some(w) = registry.by_id_mut(wp.id) else {
                 continue;
             };
             if w.fullscreen() == FullscreenState::Native {
@@ -185,7 +185,8 @@ fn collect_tab_titles(container: &Container, registry: &Registry) -> Vec<String>
         .iter()
         .map(|c| match c {
             Child::Window(wid) => registry
-                .get_title(*wid)
+                .by_id(*wid)
+                .and_then(|w| w.title())
                 .unwrap_or("Unknown")
                 .to_owned(),
             Child::Container(_) => "Container".to_owned(),
