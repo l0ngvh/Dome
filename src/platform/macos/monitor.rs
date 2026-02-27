@@ -48,6 +48,7 @@ impl MonitorEntry {
     pub(super) fn apply_placements(
         &mut self,
         mp: &MonitorPlacements,
+        is_focused_monitor: bool,
         hub: &Hub,
         registry: &mut Registry,
         config: &Config,
@@ -55,7 +56,7 @@ impl MonitorEntry {
     ) -> Overlays {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
-                self.apply_fullscreen(*window_id, registry);
+                self.apply_fullscreen(*window_id, is_focused_monitor, registry);
                 Overlays::default()
             }
             MonitorLayout::Normal {
@@ -72,7 +73,12 @@ impl MonitorEntry {
         }
     }
 
-    fn apply_fullscreen(&mut self, window_id: crate::core::WindowId, registry: &mut Registry) {
+    fn apply_fullscreen(
+        &mut self,
+        window_id: crate::core::WindowId,
+        is_focused_monitor: bool,
+        registry: &mut Registry,
+    ) {
         let new_windows: HashSet<_> = registry
             .by_id(window_id)
             .map(|w| w.cg_id())
@@ -88,9 +94,14 @@ impl MonitorEntry {
         }
         self.displayed_windows = new_windows;
 
-        if let Some(w) = registry.by_id_mut(window_id)
-            && w.fullscreen() != FullscreenState::Native
-        {
+        let Some(w) = registry.by_id_mut(window_id) else {
+            return;
+        };
+        if w.fullscreen() == FullscreenState::Native {
+            if is_focused_monitor {
+                w.focus().ok();
+            }
+        } else {
             w.set_fullscreen(self.screen.dimension);
         }
     }

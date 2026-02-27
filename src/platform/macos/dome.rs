@@ -3,6 +3,7 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use dispatch2::{DispatchQoS, DispatchQueue, DispatchRetained, GlobalQueueIdentifier};
 use objc2::rc::{Retained, autoreleasepool};
+use objc2_app_kit::NSWorkspace;
 use objc2_core_foundation::{
     CFArray, CFDictionary, CFNumber, CFRetained, CFRunLoop, CFRunLoopSource, CFString, CFType,
 };
@@ -76,6 +77,9 @@ pub(super) enum HubEvent {
         new_apps: Vec<RunningApp>,
         apps: Vec<VisibleWindowsReconciled>,
     },
+    /// macOS Space changed. Used to detect native fullscreen enter/exit since
+    /// native fullscreen moves windows to a separate Space.
+    SpaceChanged,
     Shutdown,
 }
 
@@ -265,7 +269,9 @@ impl Dome {
                 }
                 HubEvent::MirrorClicked(cg_id) => {
                     if let Some(window) = self.registry.get(cg_id) {
-                        window.focus();
+                        if let Err(e) = window.focus() {
+                            tracing::debug!("Failed to focus window: {e:#}");
+                        }
                         self.hub.set_focus(window.window_id());
                     }
                 }
@@ -296,6 +302,9 @@ impl Dome {
                         self.sender.send(HubMessage::RegisterObservers(new_apps));
                     }
                 }
+                HubEvent::SpaceChanged => {
+                    self.handle_space_changed();
+                }
             }
 
             if !self.running {
@@ -312,10 +321,41 @@ impl Dome {
         if !app.is_active() {
             return;
         }
-        if let Some(cg_id) = app.focused_window_cg_id()
-            && let Some(window_id) = self.registry.get(cg_id).map(|w| w.window_id())
+        if let Some(ax) = app.focused_window()
+            && let Some(window_id) = self.registry.get(ax.cg_id()).map(|w| w.window_id())
         {
             self.hub.set_focus(window_id);
+        }
+    }
+
+    fn handle_space_changed(&mut self) {
+        let Some(app) = NSWorkspace::sharedWorkspace().frontmostApplication() else {
+            return;
+        };
+        let app = RunningApp::from(app);
+        let Some(ax) = app.focused_window() else {
+            return;
+        };
+        let cg_id = ax.cg_id();
+        let is_native_fs = ax.is_native_fullscreen();
+
+        if let Some(mac_window) = self.registry.get_mut(cg_id) {
+            let window_id = mac_window.window_id();
+            let was_fs = self.hub.get_window(window_id).is_fullscreen();
+            if is_native_fs && !was_fs {
+                tracing::info!(%mac_window, "Entered native fullscreen");
+                mac_window.set_native_fullscreen();
+                self.hub.set_fullscreen(window_id);
+            } else if !is_native_fs && was_fs {
+                tracing::info!(%mac_window, "Exited native fullscreen");
+                self.hub.unset_fullscreen(window_id);
+            }
+        } else if is_native_fs {
+            tracing::info!(%ax, "New native fullscreen window");
+            let window_id = self.hub.insert_tiling();
+            self.hub.set_fullscreen(window_id);
+            self.registry.insert(ax, window_id, self.hub.get_window(window_id));
+            self.registry.get_mut(cg_id).unwrap().set_native_fullscreen();
         }
     }
 
@@ -451,10 +491,12 @@ impl Dome {
             container_borders: vec![],
             tab_bars: vec![],
         };
+        let focused_monitor = self.hub.focused_monitor();
         for mp in self.hub.get_visible_placements() {
             let entry = self.monitor_registry.get_entry_mut(mp.monitor_id).unwrap();
             let o = entry.apply_placements(
                 &mp,
+                mp.monitor_id == focused_monitor,
                 &self.hub,
                 &mut self.registry,
                 &self.config,

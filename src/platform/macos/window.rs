@@ -363,6 +363,10 @@ impl MacWindow {
         self.fullscreen
     }
 
+    pub(super) fn set_native_fullscreen(&mut self) {
+        self.fullscreen = FullscreenState::Native;
+    }
+
     pub(super) fn set_fullscreen(&mut self, dim: Dimension) {
         self.fullscreen = FullscreenState::Mock;
         self.sender.send(HubMessage::WindowHide {

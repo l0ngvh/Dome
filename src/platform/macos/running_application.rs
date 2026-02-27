@@ -63,10 +63,11 @@ impl RunningApp {
             .collect()
     }
 
-    pub(super) fn focused_window_cg_id(&self) -> Option<CGWindowID> {
+    pub(super) fn focused_window(&self) -> Option<AXWindow> {
         let ax_app = unsafe { AXUIElement::new_application(self.pid()) };
         let focused = get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute()).ok()?;
-        get_cg_window_id(&focused)
+        let cg_id = get_cg_window_id(&focused)?;
+        Some(AXWindow::new(focused, cg_id, &self.0))
     }
 
     pub(super) fn all() -> impl Iterator<Item = RunningApp> {

@@ -13,6 +13,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
     NSApplicationDidChangeScreenParametersNotification, NSWorkspace,
+    NSWorkspaceActiveSpaceDidChangeNotification,
     NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
     NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceScreensDidSleepNotification,
     NSWorkspaceWillSleepNotification,
@@ -206,6 +207,17 @@ fn setup_app_observers(ctx: &mut ListenerCtx) -> (WorkspaceObservers, Distribute
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 tracing::info!("Screen did sleep, suspending window management");
                 (*ctx_ptr).is_suspended.set(true);
+            }),
+        )
+    });
+
+    workspace_observers.push(unsafe {
+        notification_center.addObserverForName_object_queue_usingBlock(
+            Some(NSWorkspaceActiveSpaceDidChangeNotification),
+            None,
+            Some(&NSOperationQueue::mainQueue()),
+            &RcBlock::new(move |_: NonNull<NSNotification>| {
+                send_hub_event(&(*ctx_ptr).hub_sender, HubEvent::SpaceChanged);
             }),
         )
     });
