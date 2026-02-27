@@ -3,8 +3,6 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use dispatch2::{DispatchQoS, DispatchQueue, DispatchRetained, GlobalQueueIdentifier};
 use objc2::rc::{Retained, autoreleasepool};
-use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
-use objc2_application_services::AXUIElement;
 use objc2_core_foundation::{
     CFArray, CFDictionary, CFNumber, CFRetained, CFRunLoop, CFRunLoopSource, CFString, CFType,
 };
@@ -15,13 +13,14 @@ use objc2_io_surface::IOSurface;
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{Dimension, Hub, Window, WindowId};
-use crate::platform::macos::accessibility::{AXWindow, get_ax_windows};
+use crate::platform::macos::accessibility::AXWindow;
 
 use super::mirror::{WindowCapture, create_captures_async};
 use super::monitor::{MonitorInfo, MonitorRegistry};
 use super::objc2_wrapper::kCGWindowNumber;
 use super::overlay::Overlays;
 use super::recovery;
+use super::running_application::RunningApp;
 use super::window::{FullscreenTransition, MacWindow};
 
 pub(super) struct VisibleWindowsReconciled {
@@ -73,7 +72,7 @@ pub(super) enum HubEvent {
     AppVisibleWindowsReconciled(VisibleWindowsReconciled),
     AllVisibleWindowsReconciled {
         terminated_pids: Vec<i32>,
-        new_apps: Vec<Retained<NSRunningApplication>>,
+        new_apps: Vec<RunningApp>,
         apps: Vec<VisibleWindowsReconciled>,
     },
     Shutdown,
@@ -81,7 +80,7 @@ pub(super) enum HubEvent {
 
 pub(super) enum HubMessage {
     Overlays(Overlays),
-    RegisterObservers(Vec<Retained<NSRunningApplication>>),
+    RegisterObservers(Vec<RunningApp>),
     CaptureFrame {
         cg_id: CGWindowID,
         surface: Retained<IOSurface>,
@@ -355,7 +354,7 @@ impl Dome {
                     );
                 }
                 HubEvent::SyncFocus { pid } => {
-                    if let Some(app) = get_app_by_pid(pid) {
+                    if let Some(app) = RunningApp::new(pid) {
                         self.sync_app_focus(&app);
                     }
                 }
@@ -416,7 +415,7 @@ impl Dome {
                     }
                     if !new_apps.is_empty() {
                         for app in &new_apps {
-                            self.observed_pids.insert(app.processIdentifier());
+                            self.observed_pids.insert(app.pid());
                         }
                         self.sender.send(HubMessage::RegisterObservers(new_apps));
                     }
@@ -432,13 +431,12 @@ impl Dome {
         });
     }
 
-    #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
-    fn sync_app_focus(&mut self, app: &NSRunningApplication) {
-        if !app.isActive() {
+    #[tracing::instrument(skip_all, fields(pid = app.pid()))]
+    fn sync_app_focus(&mut self, app: &RunningApp) {
+        if !app.is_active() {
             return;
         }
-        let pid = app.processIdentifier();
-        if let Some(cg_id) = get_focused_window_cg_id(pid)
+        if let Some(cg_id) = app.focused_window_cg_id()
             && let Some(window_id) = self.registry.get_window_id(cg_id)
         {
             self.hub.set_focus(window_id);
@@ -694,7 +692,7 @@ fn dispatch_refresh_app_windows(
     ));
     queue.exec_async(move || {
         autoreleasepool(|_| {
-            let Some(app) = get_app_by_pid(pid) else {
+            let Some(app) = RunningApp::new(pid) else {
                 return;
             };
             let result = compute_app_visible_windows(&app, &tracked, &ignore_rules);
@@ -716,9 +714,8 @@ fn dispatch_reconcile_all_windows(
     ));
     queue.exec_async(move || {
         autoreleasepool(|_| {
-            let running: Vec<_> = running_apps().collect();
-            let running_pids: HashSet<_> =
-                running.iter().map(|app| app.processIdentifier()).collect();
+            let running: Vec<_> = RunningApp::all().collect();
+            let running_pids: HashSet<_> = running.iter().map(|app| app.pid()).collect();
 
             let terminated_pids: Vec<_> = observed_pids
                 .iter()
@@ -728,7 +725,7 @@ fn dispatch_reconcile_all_windows(
 
             let new_apps: Vec<_> = running
                 .iter()
-                .filter(|app| !observed_pids.contains(&app.processIdentifier()))
+                .filter(|app| !observed_pids.contains(&app.pid()))
                 .cloned()
                 .collect();
 
@@ -749,12 +746,12 @@ fn dispatch_reconcile_all_windows(
 }
 
 fn compute_app_visible_windows(
-    app: &NSRunningApplication,
+    app: &RunningApp,
     tracked: &HashMap<CGWindowID, AXWindow>,
     ignore_rules: &[MacosWindow],
 ) -> VisibleWindowsReconciled {
-    let pid = app.processIdentifier();
-    let is_hidden = app.isHidden();
+    let pid = app.pid();
+    let is_hidden = app.is_hidden();
 
     if is_hidden {
         return VisibleWindowsReconciled {
@@ -775,7 +772,7 @@ fn compute_app_visible_windows(
     }
 
     let mut to_add = Vec::new();
-    for ax in get_ax_windows(app) {
+    for ax in app.ax_windows() {
         if tracked.contains_key(&ax.cg_id()) {
             continue;
         }
@@ -794,13 +791,6 @@ fn compute_app_visible_windows(
         to_remove,
         to_add,
     }
-}
-
-fn get_focused_window_cg_id(pid: i32) -> Option<CGWindowID> {
-    use super::objc2_wrapper::{get_attribute, get_cg_window_id, kAXFocusedWindowAttribute};
-    let ax_app = unsafe { AXUIElement::new_application(pid) };
-    let focused = get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute()).ok()?;
-    get_cg_window_id(&focused)
 }
 
 fn on_open_actions(window: &MacWindow, rules: &[MacosOnOpenRule]) -> Option<Actions> {
@@ -895,20 +885,4 @@ fn list_cg_window_ids() -> HashSet<CGWindowID> {
         ids.insert(id as CGWindowID);
     }
     ids
-}
-
-fn running_apps() -> impl Iterator<Item = Retained<NSRunningApplication>> {
-    let own_pid = std::process::id() as i32;
-    NSWorkspace::sharedWorkspace()
-        .runningApplications()
-        .into_iter()
-        .filter(|app| app.activationPolicy() == NSApplicationActivationPolicy::Regular)
-        .filter(move |app| app.processIdentifier() != -1 && app.processIdentifier() != own_pid)
-}
-
-fn get_app_by_pid(pid: i32) -> Option<Retained<NSRunningApplication>> {
-    if pid == std::process::id() as i32 {
-        return None;
-    }
-    NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
 }

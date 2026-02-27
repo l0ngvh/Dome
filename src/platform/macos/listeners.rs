@@ -12,8 +12,7 @@ use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
-    NSApplicationActivationPolicy, NSApplicationDidChangeScreenParametersNotification,
-    NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
+    NSApplicationDidChangeScreenParametersNotification, NSWorkspace,
     NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
     NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceScreensDidSleepNotification,
     NSWorkspaceWillSleepNotification,
@@ -40,6 +39,7 @@ use super::objc2_wrapper::{
     kAXTitleChangedNotification, kAXUIElementDestroyedNotification, kAXWindowCreatedNotification,
     kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification,
 };
+use super::running_application::RunningApp;
 use super::throttle::{Debounce, Throttle};
 
 const FRAME_THROTTLE: Duration = Duration::from_millis(16);
@@ -104,7 +104,7 @@ impl EventListener {
         }
     }
 
-    pub(super) fn register_app(&self, app: &NSRunningApplication) {
+    pub(super) fn register_app(&self, app: &RunningApp) {
         try_register_app(&self.ctx, app);
     }
 }
@@ -316,26 +316,23 @@ unsafe extern "C-unwind" fn sync_timer_callback(_timer: *mut CFRunLoopTimer, inf
 }
 
 fn handle_app_launched(ctx: &ListenerCtx, notification: &NSNotification) {
-    let Some(app) = get_app_from_notification(notification) else {
+    let Some(app) = RunningApp::from_notification(notification) else {
         return;
     };
-    let app_name = app.localizedName().map(|n| n.to_string());
-    tracing::debug!(app = ?app_name, "App launched");
+    tracing::debug!(%app, "App launched");
     try_register_app(ctx, &app);
     send_hub_event(
         &ctx.hub_sender,
-        HubEvent::VisibleWindowsChanged {
-            pid: app.processIdentifier(),
-        },
+        HubEvent::VisibleWindowsChanged { pid: app.pid() },
     );
 }
 
 fn handle_app_terminated(ctx: &ListenerCtx, notification: &NSNotification) {
-    let Some(app) = get_app_from_notification(notification) else {
+    let Some(app) = RunningApp::from_notification(notification) else {
         return;
     };
-    let pid = app.processIdentifier();
-    tracing::debug!(%pid, "App terminated");
+    let pid = app.pid();
+    tracing::debug!(%app, "App terminated");
     if let Some(observer) = ctx.observers.borrow_mut().remove(&pid) {
         let source = unsafe { observer.run_loop_source() };
         if let Some(run_loop) = CFRunLoop::current() {
@@ -349,38 +346,22 @@ fn handle_app_activated(ctx: &mut ListenerCtx, notification: &NSNotification) {
     if ctx.is_suspended.get() {
         return;
     }
-    let Some(app) = get_app_from_notification(notification) else {
+    let Some(app) = RunningApp::from_notification(notification) else {
         return;
     };
-    if app.activationPolicy() != NSApplicationActivationPolicy::Regular {
-        return;
-    }
 
     // This can happen when Mac queue an event for an activated application, but by the time this
     // callback is run the focus have been given to another app. See focus_throttle for more detail
-    if !app.isActive() {
+    if !app.is_active() {
         return;
     }
 
-    let app_name = app.localizedName().map(|n| n.to_string());
-    tracing::debug!(app = ?app_name, "App activated");
-    let pid = app.processIdentifier();
-    ctx.focus_throttle.submit(pid);
+    tracing::debug!(%app, "App activated");
+    ctx.focus_throttle.submit(app.pid());
 }
 
-fn get_app_from_notification(
-    notification: &NSNotification,
-) -> Option<Retained<NSRunningApplication>> {
-    let user_info = notification.userInfo()?;
-    let app = unsafe { user_info.objectForKey(NSWorkspaceApplicationKey)? };
-    Some(unsafe { Retained::cast_unchecked(app) })
-}
-
-fn try_register_app(ctx: &ListenerCtx, app: &NSRunningApplication) {
-    let pid = app.processIdentifier();
-    if pid == -1 || app.activationPolicy() != NSApplicationActivationPolicy::Regular {
-        return;
-    }
+fn try_register_app(ctx: &ListenerCtx, app: &RunningApp) {
+    let pid = app.pid();
 
     let mut observers_ref = ctx.observers.borrow_mut();
     if observers_ref.contains_key(&pid) {
@@ -418,11 +399,7 @@ fn try_register_app(ctx: &ListenerCtx, app: &NSRunningApplication) {
         }
     }
 
-    let app_name = app
-        .localizedName()
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "Unknown".to_string());
-    tracing::info!(%pid, %app_name, "Registered app");
+    tracing::info!(%app, "Registered app");
     observers_ref.insert(pid, observer);
 }
 

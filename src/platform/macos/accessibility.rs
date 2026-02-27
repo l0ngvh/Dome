@@ -4,7 +4,7 @@ use std::ptr::NonNull;
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFArray, CFBoolean, CFDictionary, CFEqual, CFRetained, CFString, CFType, CGPoint, CGSize,
+    CFBoolean, CFDictionary, CFEqual, CFRetained, CFString, CFType, CGPoint, CGSize,
     kCFBooleanFalse, kCFBooleanTrue,
 };
 use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
@@ -12,11 +12,11 @@ use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 use crate::core::Dimension;
 
 use super::objc2_wrapper::{
-    AXError, get_attribute, get_cg_window_id, is_attribute_settable,
-    kAXEnhancedUserInterfaceAttribute, kAXFrontmostAttribute, kAXFullScreenAttribute,
-    kAXMainAttribute, kAXMinimizedAttribute, kAXParentAttribute, kAXPositionAttribute,
-    kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole, kAXSubroleAttribute,
-    kAXTitleAttribute, kAXWindowRole, kAXWindowsAttribute, set_attribute_value,
+    AXError, get_attribute, is_attribute_settable, kAXEnhancedUserInterfaceAttribute,
+    kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute,
+    kAXParentAttribute, kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute,
+    kAXStandardWindowSubrole, kAXSubroleAttribute, kAXTitleAttribute, kAXWindowRole,
+    set_attribute_value,
 };
 
 #[derive(Clone)]
@@ -312,20 +312,6 @@ impl AXWindow {
     fn app_name_(&self) -> &str {
         self.app_name.as_deref().unwrap_or("Unknown")
     }
-}
-
-pub(super) fn get_ax_windows(app: &NSRunningApplication) -> Vec<AXWindow> {
-    let ax_app = unsafe { AXUIElement::new_application(app.processIdentifier()) };
-    let Ok(windows) = get_attribute::<CFArray<AXUIElement>>(&ax_app, &kAXWindowsAttribute()) else {
-        return Vec::new();
-    };
-    windows
-        .into_iter()
-        .filter_map(|w| {
-            let cg_id = get_cg_window_id(&w)?;
-            Some(AXWindow::new(w, cg_id, app))
-        })
-        .collect()
 }
 
 fn is_screen_locked() -> bool {
