@@ -10,8 +10,8 @@ use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSColor, NSFloatingWindowLevel, NSNormalWindowLevel, NSWindow,
-    NSWindowCollectionBehavior, NSWindowOrderingMode, NSWindowStyleMask,
+    NSColor, NSFloatingWindowLevel, NSNormalWindowLevel, NSWindow, NSWindowCollectionBehavior,
+    NSWindowOrderingMode, NSWindowStyleMask,
 };
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
@@ -21,9 +21,7 @@ use objc2_core_foundation::{
 use objc2_core_graphics::{
     CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess, CGWindowID,
 };
-use objc2_foundation::{
-    NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
-};
+use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;

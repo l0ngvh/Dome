@@ -104,7 +104,13 @@ impl Registry {
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
         self.windows.insert(
             cg_id,
-            MacWindow::new(ax, window_id, hub_window, self.sender.clone(), self.monitors.clone()),
+            MacWindow::new(
+                ax,
+                window_id,
+                hub_window,
+                self.sender.clone(),
+                self.monitors.clone(),
+            ),
         );
     }
 

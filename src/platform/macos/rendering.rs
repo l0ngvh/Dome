@@ -48,7 +48,13 @@ pub(super) fn compute_window_border(
     } else {
         spawn_colors(spawn_mode, config)
     };
-    compute_border_edges(frame, visible_frame, colors, config.border_size, primary_full_height)
+    compute_border_edges(
+        frame,
+        visible_frame,
+        colors,
+        config.border_size,
+        primary_full_height,
+    )
 }
 
 /// Compute border edges for a container, clipped to monitor bounds.
@@ -61,7 +67,13 @@ pub(super) fn compute_container_border(
     primary_full_height: f32,
 ) -> Option<BorderEdges> {
     let colors = spawn_colors(spawn_mode, config);
-    compute_border_edges(frame, visible_frame, colors, config.border_size, primary_full_height)
+    compute_border_edges(
+        frame,
+        visible_frame,
+        colors,
+        config.border_size,
+        primary_full_height,
+    )
 }
 
 /// colors: [top, right, bottom, left]
@@ -91,25 +103,45 @@ fn compute_border_edges(
     let mut edges = Vec::new();
 
     // top (y = h - b in Cocoa, at the top)
-    let top = Dimension { x: 0.0, y: h - b, width: w, height: b };
+    let top = Dimension {
+        x: 0.0,
+        y: h - b,
+        width: w,
+        height: b,
+    };
     if let Some(r) = clip_to_bounds(top, clip_local) {
         edges.push((translate_dim(r, -offset_x, -offset_y), colors[0]));
     }
 
     // right (exclude corners)
-    let right = Dimension { x: w - b, y: b, width: b, height: h - 2.0 * b };
+    let right = Dimension {
+        x: w - b,
+        y: b,
+        width: b,
+        height: h - 2.0 * b,
+    };
     if let Some(r) = clip_to_bounds(right, clip_local) {
         edges.push((translate_dim(r, -offset_x, -offset_y), colors[1]));
     }
 
     // bottom (y = 0 in Cocoa, at the bottom)
-    let bottom = Dimension { x: 0.0, y: 0.0, width: w, height: b };
+    let bottom = Dimension {
+        x: 0.0,
+        y: 0.0,
+        width: w,
+        height: b,
+    };
     if let Some(r) = clip_to_bounds(bottom, clip_local) {
         edges.push((translate_dim(r, -offset_x, -offset_y), colors[2]));
     }
 
     // left (exclude corners)
-    let left = Dimension { x: 0.0, y: b, width: b, height: h - 2.0 * b };
+    let left = Dimension {
+        x: 0.0,
+        y: b,
+        width: b,
+        height: h - 2.0 * b,
+    };
     if let Some(r) = clip_to_bounds(left, clip_local) {
         edges.push((translate_dim(r, -offset_x, -offset_y), colors[3]));
     }
@@ -120,7 +152,10 @@ fn compute_border_edges(
 
     Some(BorderEdges {
         frame: dim_to_ns_rect(clipped),
-        edges: edges.into_iter().map(|(r, c)| (dim_to_ns_rect(r), c)).collect(),
+        edges: edges
+            .into_iter()
+            .map(|(r, c)| (dim_to_ns_rect(r), c))
+            .collect(),
     })
 }
 

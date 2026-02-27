@@ -351,8 +351,16 @@ impl Hub {
                 let global_max_w = self.config.max_width.resolve(screen.width);
                 let global_max_h = self.config.max_height.resolve(screen.height);
 
-                let max_w = if win_max_w > 0.0 { win_max_w } else { global_max_w };
-                let max_h = if win_max_h > 0.0 { win_max_h } else { global_max_h };
+                let max_w = if win_max_w > 0.0 {
+                    win_max_w
+                } else {
+                    global_max_w
+                };
+                let max_h = if win_max_h > 0.0 {
+                    win_max_h
+                } else {
+                    global_max_h
+                };
 
                 // Window-specific max caps the effective min
                 let min_w = if max_w > 0.0 {

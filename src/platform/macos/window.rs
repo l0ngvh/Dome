@@ -79,11 +79,7 @@ impl MacWindow {
         self.capture = Some(capture);
     }
 
-    pub(super) fn show(
-        &mut self,
-        wp: &WindowPlacement,
-        config: &Config,
-    ) -> anyhow::Result<()> {
+    pub(super) fn show(&mut self, wp: &WindowPlacement, config: &Config) -> anyhow::Result<()> {
         self.fullscreen = FullscreenState::None;
         // content_dim from the full unclipped frame, NOT visible_frame.
         // apply_inset insets all 4 sides. When we later clip against visible_frame:

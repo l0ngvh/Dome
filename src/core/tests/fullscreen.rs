@@ -128,7 +128,10 @@ fn set_fullscreen_already_fullscreen() {
     hub.set_fullscreen(w1);
     let ws_after = hub.get_workspace(hub.current_workspace());
 
-    assert_eq!(ws_before.fullscreen_windows(), ws_after.fullscreen_windows());
+    assert_eq!(
+        ws_before.fullscreen_windows(),
+        ws_after.fullscreen_windows()
+    );
 }
 
 #[test]

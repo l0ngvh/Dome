@@ -32,9 +32,10 @@ impl MonitorEntry {
                 self.apply_fullscreen(*window_id, registry, taskbar);
                 (vec![], vec![])
             }
-            MonitorLayout::Normal { windows, containers } => {
-                self.apply_normal(windows, containers, registry, taskbar, hub, config)
-            }
+            MonitorLayout::Normal {
+                windows,
+                containers,
+            } => self.apply_normal(windows, containers, registry, taskbar, hub, config),
         }
     }
 
@@ -88,7 +89,9 @@ impl MonitorEntry {
         let mut window_overlays = Vec::new();
         for wp in windows {
             if let Some(handle) = registry.get_handle_mut(wp.id) {
-                if let Some([min_w, min_h, max_w, max_h]) = handle.get_constraints(&wp.frame, border) {
+                if let Some([min_w, min_h, max_w, max_h]) =
+                    handle.get_constraints(&wp.frame, border)
+                {
                     hub.set_window_constraint(wp.id, min_w, min_h, max_w, max_h);
                 }
                 handle.show(&wp.frame, border, wp.is_float);
@@ -246,7 +249,11 @@ fn build_tab_info(
         height: config.tab_bar_height,
         background_color: config.tab_bar_background_color,
         active_background_color: config.active_tab_background_color,
-        border_color: if is_focused { config.focused_color } else { config.border_color },
+        border_color: if is_focused {
+            config.focused_color
+        } else {
+            config.border_color
+        },
         border: config.border_size,
     }
 }
@@ -265,12 +272,44 @@ fn spawn_colors(spawn: SpawnMode, config: &Config) -> [Color; 4] {
 fn border_edges(dim: Dimension, border: f32, colors: [Color; 4]) -> Vec<(Dimension, Color)> {
     vec![
         // Top
-        (Dimension { x: dim.x, y: dim.y, width: dim.width, height: border }, colors[0]),
+        (
+            Dimension {
+                x: dim.x,
+                y: dim.y,
+                width: dim.width,
+                height: border,
+            },
+            colors[0],
+        ),
         // Bottom
-        (Dimension { x: dim.x, y: dim.y + dim.height - border, width: dim.width, height: border }, colors[1]),
+        (
+            Dimension {
+                x: dim.x,
+                y: dim.y + dim.height - border,
+                width: dim.width,
+                height: border,
+            },
+            colors[1],
+        ),
         // Left
-        (Dimension { x: dim.x, y: dim.y + border, width: border, height: dim.height - 2.0 * border }, colors[2]),
+        (
+            Dimension {
+                x: dim.x,
+                y: dim.y + border,
+                width: border,
+                height: dim.height - 2.0 * border,
+            },
+            colors[2],
+        ),
         // Right
-        (Dimension { x: dim.x + dim.width - border, y: dim.y + border, width: border, height: dim.height - 2.0 * border }, colors[3]),
+        (
+            Dimension {
+                x: dim.x + dim.width - border,
+                y: dim.y + border,
+                width: border,
+                height: dim.height - 2.0 * border,
+            },
+            colors[3],
+        ),
     ]
 }

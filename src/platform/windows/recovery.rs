@@ -6,7 +6,7 @@ use windows::Win32::System::Console::{
     CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    IsZoomed, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOZORDER, SW_MAXIMIZE, SW_RESTORE,
+    IsZoomed, SW_MAXIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos, ShowWindow,
 };
 use windows::core::BOOL;
 
@@ -107,4 +107,3 @@ unsafe extern "system" fn console_handler(ctrl_type: u32) -> BOOL {
     }
     BOOL(0)
 }
-

@@ -190,7 +190,10 @@ impl Dome {
     pub(super) fn run(mut self, rx: Receiver<HubEvent>) {
         dispatch_reconcile_all_windows(
             self.observed_pids.clone(),
-            self.registry.iter().map(|(id, w)| (id, w.ax().clone())).collect(),
+            self.registry
+                .iter()
+                .map(|(id, w)| (id, w.ax().clone()))
+                .collect(),
             self.config.macos.ignore.clone(),
             self.hub_tx.clone(),
         );
@@ -215,7 +218,10 @@ impl Dome {
                 HubEvent::VisibleWindowsChanged { pid } => {
                     dispatch_refresh_app_windows(
                         pid,
-                        self.registry.for_pid(pid).map(|(id, w)| (id, w.ax().clone())).collect(),
+                        self.registry
+                            .for_pid(pid)
+                            .map(|(id, w)| (id, w.ax().clone()))
+                            .collect(),
                         self.config.macos.ignore.clone(),
                         self.hub_tx.clone(),
                     );
@@ -245,7 +251,10 @@ impl Dome {
                 HubEvent::Sync => {
                     dispatch_reconcile_all_windows(
                         self.observed_pids.clone(),
-                        self.registry.iter().map(|(id, w)| (id, w.ax().clone())).collect(),
+                        self.registry
+                            .iter()
+                            .map(|(id, w)| (id, w.ax().clone()))
+                            .collect(),
                         self.config.macos.ignore.clone(),
                         self.hub_tx.clone(),
                     );
@@ -459,7 +468,11 @@ impl Dome {
 
     fn apply_visible_windows_change(&mut self, result: VisibleWindowsReconciled) {
         if result.is_hidden {
-            let cg_ids: Vec<_> = self.registry.for_pid(result.pid).map(|(id, _)| id).collect();
+            let cg_ids: Vec<_> = self
+                .registry
+                .for_pid(result.pid)
+                .map(|(id, _)| id)
+                .collect();
             for cg_id in cg_ids {
                 self.remove_window(cg_id);
             }

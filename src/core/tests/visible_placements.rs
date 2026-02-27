@@ -41,8 +41,20 @@ fn focused_window_tagged() {
 
     let p = placements(&hub);
 
-    assert!(normal_windows(&p).iter().find(|wp| wp.id == w0).unwrap().is_focused);
-    assert!(!normal_windows(&p).iter().find(|wp| wp.id == w1).unwrap().is_focused);
+    assert!(
+        normal_windows(&p)
+            .iter()
+            .find(|wp| wp.id == w0)
+            .unwrap()
+            .is_focused
+    );
+    assert!(
+        !normal_windows(&p)
+            .iter()
+            .find(|wp| wp.id == w1)
+            .unwrap()
+            .is_focused
+    );
 }
 
 #[test]
@@ -138,14 +150,23 @@ fn scroll_left_on_focus_before_viewport() {
 
     // Scroll to end
     hub.set_focus(w2);
-    assert!(!normal_windows(&placements(&hub)).iter().any(|wp| wp.id == w0));
+    assert!(
+        !normal_windows(&placements(&hub))
+            .iter()
+            .any(|wp| wp.id == w0)
+    );
 
     // Focus w0 — should scroll left to reveal it
     hub.set_focus(w0);
     let p = placements(&hub);
     assert!(normal_windows(&p).iter().any(|wp| wp.id == w0));
     assert_eq!(
-        normal_windows(&p).iter().find(|wp| wp.id == w0).unwrap().frame.x,
+        normal_windows(&p)
+            .iter()
+            .find(|wp| wp.id == w0)
+            .unwrap()
+            .frame
+            .x,
         0.0
     );
 }

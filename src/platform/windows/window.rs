@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::core::DisplayMode;
 use crate::core::Dimension;
+use crate::core::DisplayMode;
 use crate::core::WindowId;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
@@ -21,8 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowThreadProcessId, IsIconic, IsWindowVisible, MINMAXINFO, SW_MINIMIZE, SW_RESTORE,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetForegroundWindow,
     SetWindowPos, ShowWindow, WM_GETMINMAXINFO, WS_CHILD, WS_EX_DLGMODALFRAME, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
-    WS_THICKFRAME,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -147,7 +146,11 @@ impl WindowHandle {
     }
 
     pub(super) fn sync_fullscreen(&mut self, fs: bool) {
-        self.mode = if fs { DisplayMode::Fullscreen } else { DisplayMode::Tiling };
+        self.mode = if fs {
+            DisplayMode::Fullscreen
+        } else {
+            DisplayMode::Tiling
+        };
     }
 
     pub(super) fn show(&mut self, dim: &Dimension, border: f32, is_float: bool) {
@@ -156,7 +159,11 @@ impl WindowHandle {
         if is_float && self.mode != DisplayMode::Float {
             self.set_topmost();
         }
-        self.mode = if is_float { DisplayMode::Float } else { DisplayMode::Tiling };
+        self.mode = if is_float {
+            DisplayMode::Float
+        } else {
+            DisplayMode::Tiling
+        };
     }
 
     /// Returns (min_width, min_height, max_width, max_height) constraints
@@ -557,6 +564,10 @@ fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, mut callback: F) {
 
     let mut data = (hwnd, callback);
     unsafe {
-        EnumThreadWindows(thread_id, Some(enum_proc::<F>), LPARAM(&mut data as *mut _ as isize));
+        EnumThreadWindows(
+            thread_id,
+            Some(enum_proc::<F>),
+            LPARAM(&mut data as *mut _ as isize),
+        );
     }
 }

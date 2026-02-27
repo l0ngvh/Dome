@@ -26,7 +26,10 @@ pub(crate) struct Monitor {
 }
 
 impl Monitor {
-    #[cfg_attr(all(target_os = "macos", not(test)), expect(dead_code, reason = "used on Windows"))]
+    #[cfg_attr(
+        all(target_os = "macos", not(test)),
+        expect(dead_code, reason = "used on Windows")
+    )]
     pub(crate) fn dimension(&self) -> Dimension {
         self.dimension
     }
@@ -71,7 +74,10 @@ impl Workspace {
         self.root
     }
 
-    #[cfg_attr(all(target_os = "macos", not(test)), expect(dead_code, reason = "used on Windows"))]
+    #[cfg_attr(
+        all(target_os = "macos", not(test)),
+        expect(dead_code, reason = "used on Windows")
+    )]
     pub(crate) fn focused(&self) -> Option<Child> {
         self.focused
     }
@@ -476,7 +482,10 @@ impl Window {
         }
     }
 
-    #[cfg_attr(all(target_os = "windows", not(test)), expect(dead_code, reason = "used on macOS"))]
+    #[cfg_attr(
+        all(target_os = "windows", not(test)),
+        expect(dead_code, reason = "used on macOS")
+    )]
     pub(crate) fn dimension(&self) -> Dimension {
         self.dimension
     }

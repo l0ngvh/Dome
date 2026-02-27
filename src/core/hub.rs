@@ -18,13 +18,19 @@ pub(crate) struct WindowPlacement {
 
 pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
-    #[cfg_attr(all(target_os = "windows", not(test)), expect(dead_code, reason = "used on macOS"))]
+    #[cfg_attr(
+        all(target_os = "windows", not(test)),
+        expect(dead_code, reason = "used on macOS")
+    )]
     pub(crate) frame: Dimension,
     pub(crate) visible_frame: Dimension,
     pub(crate) is_focused: bool,
     pub(crate) spawn_mode: SpawnMode,
     pub(crate) is_tabbed: bool,
-    #[cfg_attr(all(target_os = "windows", not(test)), expect(dead_code, reason = "used on macOS"))]
+    #[cfg_attr(
+        all(target_os = "windows", not(test)),
+        expect(dead_code, reason = "used on macOS")
+    )]
     pub(crate) active_tab_index: usize,
 }
 
@@ -104,7 +110,10 @@ impl Hub {
             .collect()
     }
 
-    #[cfg_attr(all(target_os = "macos", not(test)), expect(dead_code, reason = "used on Windows"))]
+    #[cfg_attr(
+        all(target_os = "macos", not(test)),
+        expect(dead_code, reason = "used on Windows")
+    )]
     pub(crate) fn get_monitor(&self, id: MonitorId) -> &Monitor {
         self.monitors.get(id)
     }
@@ -199,7 +208,10 @@ impl Hub {
         self.workspaces.all_active()
     }
 
-    #[cfg_attr(all(target_os = "macos", not(test)), expect(dead_code, reason = "used on Windows"))]
+    #[cfg_attr(
+        all(target_os = "macos", not(test)),
+        expect(dead_code, reason = "used on Windows")
+    )]
     pub(crate) fn get_workspace(&self, id: WorkspaceId) -> &Workspace {
         self.workspaces.get(id)
     }
@@ -221,7 +233,11 @@ impl Hub {
                 let ws = self.workspaces.get(ws_id);
                 let screen = self.monitors.get(ws.monitor).dimension;
                 let (offset_x, offset_y) = ws.viewport_offset;
-                let focused = if ws_id == current_ws { ws.focused } else { None };
+                let focused = if ws_id == current_ws {
+                    ws.focused
+                } else {
+                    None
+                };
 
                 let mut windows = Vec::new();
                 let mut containers = Vec::new();
@@ -254,8 +270,7 @@ impl Hub {
                         }
                         Child::Container(id) => {
                             let container = self.containers.get(id);
-                            let frame =
-                                translate(container.dimension, offset_x, offset_y, screen);
+                            let frame = translate(container.dimension, offset_x, offset_y, screen);
                             let Some(visible_frame) = clip(frame, screen) else {
                                 continue;
                             };
@@ -296,7 +311,10 @@ impl Hub {
 
                 MonitorPlacements {
                     monitor_id: ws.monitor,
-                    layout: MonitorLayout::Normal { windows, containers },
+                    layout: MonitorLayout::Normal {
+                        windows,
+                        containers,
+                    },
                 }
             })
             .collect()
@@ -648,5 +666,10 @@ fn clip(dim: Dimension, bounds: Dimension) -> Option<Dimension> {
     if x1 >= x2 || y1 >= y2 {
         return None;
     }
-    Some(Dimension { x: x1, y: y1, width: x2 - x1, height: y2 - y1 })
+    Some(Dimension {
+        x: x1,
+        y: y1,
+        width: x2 - x1,
+        height: y2 - y1,
+    })
 }

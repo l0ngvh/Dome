@@ -110,7 +110,8 @@ impl Dome {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
-        let mut monitor_registry = MonitorRegistry::new(primary.handle, primary_monitor_id, primary.dimension);
+        let mut monitor_registry =
+            MonitorRegistry::new(primary.handle, primary_monitor_id, primary.dimension);
         tracing::info!(
             name = %primary.name,
             handle = ?primary.handle,
@@ -159,7 +160,10 @@ impl Dome {
     pub(super) fn run(mut self, rx: Receiver<HubEvent>) {
         while self.running {
             if let Ok(event) = rx.recv() {
-                let last_focus = self.hub.get_workspace(self.hub.current_workspace()).focused();
+                let last_focus = self
+                    .hub
+                    .get_workspace(self.hub.current_workspace())
+                    .focused();
                 let (creates, deletes) = self.handle_event(event);
                 self.apply_layout(creates, deletes, last_focus);
             }
@@ -183,7 +187,11 @@ impl Dome {
                         handle.hide();
                         let id = self.insert_window(&handle);
                         let is_float = self.hub.get_window(id).is_float();
-                        creates.push(OverlayCreate { window_id: id, hwnd, is_float });
+                        creates.push(OverlayCreate {
+                            window_id: id,
+                            hwnd,
+                            is_float,
+                        });
                     }
                 }) {
                     tracing::warn!("Failed to enumerate windows: {e}");
@@ -206,7 +214,11 @@ impl Dome {
                 let hwnd = handle.hwnd();
                 let id = self.insert_window(&handle);
                 let is_float = self.hub.get_window(id).is_float();
-                creates.push(OverlayCreate { window_id: id, hwnd, is_float });
+                creates.push(OverlayCreate {
+                    window_id: id,
+                    hwnd,
+                    is_float,
+                });
                 if let Some(actions) = on_open_actions(&handle, &self.config.windows.on_open) {
                     self.execute_actions(&actions);
                 }
@@ -240,7 +252,11 @@ impl Dome {
                 let hwnd = handle.hwnd();
                 let id = self.insert_window(&handle);
                 let is_float = self.hub.get_window(id).is_float();
-                creates.push(OverlayCreate { window_id: id, hwnd, is_float });
+                creates.push(OverlayCreate {
+                    window_id: id,
+                    hwnd,
+                    is_float,
+                });
                 if let Some(actions) = on_open_actions(&handle, &self.config.windows.on_open) {
                     self.execute_actions(&actions);
                 }
@@ -334,7 +350,10 @@ impl Dome {
         deletes: Vec<WindowId>,
         last_focus: Option<Child>,
     ) {
-        let focused = self.hub.get_workspace(self.hub.current_workspace()).focused();
+        let focused = self
+            .hub
+            .get_workspace(self.hub.current_workspace())
+            .focused();
 
         let mut frame = OverlayFrame {
             creates,
@@ -375,12 +394,17 @@ impl Dome {
     }
 
     fn check_fullscreen_state(&mut self, handle: &WindowHandle) {
-        let Some(window_id) = self.registry.get_id(handle) else { return };
+        let Some(window_id) = self.registry.get_id(handle) else {
+            return;
+        };
         let Some(monitor) = self.monitor_registry.find_monitor_dimension(handle.hwnd()) else {
             return;
         };
         let is_fs = handle.is_fullscreen(&monitor);
-        let was_fs = self.registry.get_handle(window_id).is_some_and(|h| h.fullscreen());
+        let was_fs = self
+            .registry
+            .get_handle(window_id)
+            .is_some_and(|h| h.fullscreen());
         match (was_fs, is_fs) {
             (false, true) => {
                 if let Some(h) = self.registry.get_handle_mut(window_id) {
@@ -408,7 +432,15 @@ impl Drop for Dome {
 fn send_overlay_frame(frame: OverlayFrame, app_hwnd: AppHandle) {
     let boxed = Box::new(frame);
     let ptr = Box::into_raw(boxed) as usize;
-    unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_OVERLAY, WPARAM(ptr), LPARAM(0)).ok() };
+    unsafe {
+        PostMessageW(
+            Some(app_hwnd.hwnd()),
+            WM_APP_OVERLAY,
+            WPARAM(ptr),
+            LPARAM(0),
+        )
+        .ok()
+    };
 }
 
 fn on_open_actions(handle: &WindowHandle, rules: &[WindowsOnOpenRule]) -> Option<Actions> {

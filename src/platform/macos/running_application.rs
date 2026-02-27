@@ -65,8 +65,7 @@ impl RunningApp {
 
     pub(super) fn focused_window_cg_id(&self) -> Option<CGWindowID> {
         let ax_app = unsafe { AXUIElement::new_application(self.pid()) };
-        let focused =
-            get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute()).ok()?;
+        let focused = get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute()).ok()?;
         get_cg_window_id(&focused)
     }
 

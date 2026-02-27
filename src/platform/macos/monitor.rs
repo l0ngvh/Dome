@@ -58,18 +58,26 @@ impl MonitorEntry {
                 self.apply_fullscreen(*window_id, registry);
                 Overlays::default()
             }
-            MonitorLayout::Normal { windows, containers } => {
-                self.apply_normal(windows, containers, hub, registry, config, primary_full_height)
-            }
+            MonitorLayout::Normal {
+                windows,
+                containers,
+            } => self.apply_normal(
+                windows,
+                containers,
+                hub,
+                registry,
+                config,
+                primary_full_height,
+            ),
         }
     }
 
-    fn apply_fullscreen(
-        &mut self,
-        window_id: crate::core::WindowId,
-        registry: &mut Registry,
-    ) {
-        let new_windows: HashSet<_> = registry.by_id(window_id).map(|w| w.cg_id()).into_iter().collect();
+    fn apply_fullscreen(&mut self, window_id: crate::core::WindowId, registry: &mut Registry) {
+        let new_windows: HashSet<_> = registry
+            .by_id(window_id)
+            .map(|w| w.cg_id())
+            .into_iter()
+            .collect();
 
         for cg_id in self.displayed_windows.difference(&new_windows) {
             if let Some(w) = registry.get_mut(*cg_id)
@@ -101,11 +109,14 @@ impl MonitorEntry {
             .filter_map(|p| registry.by_id(p.id).map(|w| w.cg_id()))
             .collect();
 
-        let leaving_native_fs = self.displayed_windows.difference(&new_windows).any(|cg_id| {
-            registry
-                .get(*cg_id)
-                .is_some_and(|w| w.fullscreen() == FullscreenState::Native)
-        });
+        let leaving_native_fs = self
+            .displayed_windows
+            .difference(&new_windows)
+            .any(|cg_id| {
+                registry
+                    .get(*cg_id)
+                    .is_some_and(|w| w.fullscreen() == FullscreenState::Native)
+            });
 
         for cg_id in self.displayed_windows.difference(&new_windows) {
             if let Some(w) = registry.get_mut(*cg_id)
@@ -291,10 +302,13 @@ impl MonitorRegistry {
     }
 
     pub(super) fn find_monitor_at(&self, x: f32, y: f32) -> Option<&MonitorInfo> {
-        self.map.values().find(|e| {
-            let d = &e.screen.dimension;
-            x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height
-        }).map(|e| &e.screen)
+        self.map
+            .values()
+            .find(|e| {
+                let d = &e.screen.dimension;
+                x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height
+            })
+            .map(|e| &e.screen)
     }
 
     pub(super) fn update_screen(&mut self, screen: &MonitorInfo) -> Option<(MonitorId, Dimension)> {

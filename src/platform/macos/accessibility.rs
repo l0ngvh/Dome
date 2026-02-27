@@ -109,8 +109,12 @@ impl AXWindow {
     }
 
     pub(super) fn is_mock_fullscreen(&self, monitor: &Dimension) -> bool {
-        let Ok((x, y)) = self.get_position() else { return false };
-        let Ok((w, h)) = self.get_size() else { return false };
+        let Ok((x, y)) = self.get_position() else {
+            return false;
+        };
+        let Ok((w, h)) = self.get_size() else {
+            return false;
+        };
         let tolerance = 2;
         (x - monitor.x as i32).abs() <= tolerance
             && (y - monitor.y as i32).abs() <= tolerance

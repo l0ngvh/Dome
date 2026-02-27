@@ -64,9 +64,7 @@ pub(super) struct App {
 }
 
 impl App {
-    pub(super) fn new(
-        hub_sender: Sender<HubEvent>,
-    ) -> windows::core::Result<Box<Self>> {
+    pub(super) fn new(hub_sender: Sender<HubEvent>) -> windows::core::Result<Box<Self>> {
         let class_name = windows::core::w!("DomeApp");
         let hinstance = unsafe { GetModuleHandleW(None)? };
 
@@ -85,7 +83,10 @@ impl App {
                 class_name,
                 windows::core::w!(""),
                 WS_POPUP,
-                0, 0, 1, 1,
+                0,
+                0,
+                1,
+                1,
                 None,
                 None,
                 Some(hinstance.into()),
@@ -150,7 +151,8 @@ impl App {
     fn handle_overlay_frame(&mut self, frame: OverlayFrame) {
         // Create new window overlays
         for create in frame.creates {
-            if let Ok(overlay) = OverlayWindow::new(&self.d2d_factory, create.hwnd, create.is_float) {
+            if let Ok(overlay) = OverlayWindow::new(&self.d2d_factory, create.hwnd, create.is_float)
+            {
                 self.window_overlays.insert(create.window_id, overlay);
             }
         }
@@ -172,19 +174,59 @@ impl App {
                     overlay.is_float = window.is_float;
                     unsafe {
                         if window.is_float {
-                            SetWindowPos(overlay.hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
-                            SetWindowPos(overlay.managed_hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
+                            SetWindowPos(
+                                overlay.hwnd,
+                                Some(HWND_TOPMOST),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            )
+                            .ok();
+                            SetWindowPos(
+                                overlay.managed_hwnd,
+                                Some(HWND_TOPMOST),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            )
+                            .ok();
                         } else {
-                            SetWindowPos(overlay.hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
-                            SetWindowPos(overlay.managed_hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
+                            SetWindowPos(
+                                overlay.hwnd,
+                                Some(HWND_NOTOPMOST),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            )
+                            .ok();
+                            SetWindowPos(
+                                overlay.managed_hwnd,
+                                Some(HWND_NOTOPMOST),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            )
+                            .ok();
                         }
                         // Re-establish window behind border
-                        SetWindowPos(overlay.managed_hwnd, Some(overlay.hwnd), 0, 0, 0, 0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
+                        SetWindowPos(
+                            overlay.managed_hwnd,
+                            Some(overlay.hwnd),
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                        )
+                        .ok();
                     }
                 }
                 overlay.update(&self.d2d_factory, &window.frame, &window.edges);
@@ -193,25 +235,43 @@ impl App {
         }
 
         // Update container overlays
-        let frame_container_ids: HashSet<_> = frame.containers.iter()
-            .map(|c| c.container_id)
-            .collect();
-        self.container_overlays.retain(|id, _| frame_container_ids.contains(id));
+        let frame_container_ids: HashSet<_> =
+            frame.containers.iter().map(|c| c.container_id).collect();
+        self.container_overlays
+            .retain(|id, _| frame_container_ids.contains(id));
 
         for container in &frame.containers {
-            let overlay = self.container_overlays
+            let overlay = self
+                .container_overlays
                 .entry(container.container_id)
-                .or_insert_with(|| OverlayWindow::new_container(
-                    &self.d2d_factory,
-                    self.text_format.clone(),
-                    self.text_format_bold.clone(),
-                ).unwrap());
+                .or_insert_with(|| {
+                    OverlayWindow::new_container(
+                        &self.d2d_factory,
+                        self.text_format.clone(),
+                        self.text_format_bold.clone(),
+                    )
+                    .unwrap()
+                });
 
-            overlay.update_container(&self.d2d_factory, &self.dwrite_factory, &container.frame, &container.edges, container.tab_bar.as_ref());
+            overlay.update_container(
+                &self.d2d_factory,
+                &self.dwrite_factory,
+                &container.frame,
+                &container.edges,
+                container.tab_bar.as_ref(),
+            );
             overlay.show();
             unsafe {
-                SetWindowPos(overlay.hwnd, Some(HWND_TOP), 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
+                SetWindowPos(
+                    overlay.hwnd,
+                    Some(HWND_TOP),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                )
+                .ok();
             }
         }
 
@@ -230,13 +290,33 @@ impl App {
                 let above = GetWindow(overlay.managed_hwnd, GW_HWNDPREV);
                 match above {
                     Ok(hwnd) if hwnd != overlay.hwnd => {
-                        SetWindowPos(overlay.hwnd, Some(hwnd), 0, 0, 0, 0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
+                        SetWindowPos(
+                            overlay.hwnd,
+                            Some(hwnd),
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                        )
+                        .ok();
                     }
                     _ => {
-                        let top = if overlay.is_float { Some(HWND_TOPMOST) } else { Some(HWND_TOP) };
-                            SetWindowPos(overlay.hwnd, top, 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
+                        let top = if overlay.is_float {
+                            Some(HWND_TOPMOST)
+                        } else {
+                            Some(HWND_TOP)
+                        };
+                        SetWindowPos(
+                            overlay.hwnd,
+                            top,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                        )
+                        .ok();
                     }
                 }
             }
@@ -297,14 +377,21 @@ fn color_to_d2d(color: &Color) -> D2D1_COLOR_F {
 }
 
 impl OverlayWindow {
-    fn new(d2d_factory: &ID2D1Factory, managed_hwnd: HWND, is_float: bool) -> windows::core::Result<Self> {
+    fn new(
+        d2d_factory: &ID2D1Factory,
+        managed_hwnd: HWND,
+        is_float: bool,
+    ) -> windows::core::Result<Self> {
         let hwnd = unsafe {
             CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 windows::core::w!("DomeApp"),
                 windows::core::w!(""),
                 WS_POPUP,
-                0, 0, 1, 1,
+                0,
+                0,
+                1,
+                1,
                 None,
                 None,
                 Some(GetModuleHandleW(None)?.into()),
@@ -314,15 +401,31 @@ impl OverlayWindow {
 
         if is_float {
             unsafe {
-                SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
+                SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                )
+                .ok();
             }
         }
 
         // Position managed window behind border
         unsafe {
-            SetWindowPos(managed_hwnd, Some(hwnd), 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE).ok();
+            SetWindowPos(
+                managed_hwnd,
+                Some(hwnd),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            .ok();
         }
 
         let (dc_target, mem_dc, bitmap) = create_render_resources(d2d_factory, 1, 1)?;
@@ -353,7 +456,10 @@ impl OverlayWindow {
                 windows::core::w!("DomeApp"),
                 windows::core::w!(""),
                 WS_POPUP,
-                0, 0, 1, 1,
+                0,
+                0,
+                1,
+                1,
                 None,
                 None,
                 Some(GetModuleHandleW(None)?.into()),
@@ -378,7 +484,12 @@ impl OverlayWindow {
         })
     }
 
-    fn update(&mut self, d2d_factory: &ID2D1Factory, frame: &Dimension, edges: &[(Dimension, Color)]) {
+    fn update(
+        &mut self,
+        d2d_factory: &ID2D1Factory,
+        frame: &Dimension,
+        edges: &[(Dimension, Color)],
+    ) {
         let w = frame.width.max(1.0) as u32;
         let h = frame.height.max(1.0) as u32;
 
@@ -399,9 +510,16 @@ impl OverlayWindow {
         self.render_edges(edges, frame);
 
         unsafe {
-            SetWindowPos(self.hwnd, None,
-                frame.x as i32, frame.y as i32, w as i32, h as i32,
-                SWP_NOZORDER | SWP_NOACTIVATE).ok();
+            SetWindowPos(
+                self.hwnd,
+                None,
+                frame.x as i32,
+                frame.y as i32,
+                w as i32,
+                h as i32,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+            .ok();
         }
     }
 
@@ -417,10 +535,18 @@ impl OverlayWindow {
                 return;
             }
             self.dc_target.BeginDraw();
-            self.dc_target.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+            self.dc_target.Clear(Some(&D2D1_COLOR_F {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.0,
+            }));
 
             for (edge, color) in edges {
-                if let Ok(brush) = self.dc_target.CreateSolidColorBrush(&color_to_d2d(color), None) {
+                if let Ok(brush) = self
+                    .dc_target
+                    .CreateSolidColorBrush(&color_to_d2d(color), None)
+                {
                     self.dc_target.FillRectangle(
                         &D2D_RECT_F {
                             left: edge.x - frame.x,
@@ -435,7 +561,10 @@ impl OverlayWindow {
 
             self.dc_target.EndDraw(None, None).ok();
 
-            let size = SIZE { cx: self.width as i32, cy: self.height as i32 };
+            let size = SIZE {
+                cx: self.width as i32,
+                cy: self.height as i32,
+            };
             let src_point = POINT { x: 0, y: 0 };
             let blend = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
@@ -443,8 +572,18 @@ impl OverlayWindow {
                 SourceConstantAlpha: 255,
                 AlphaFormat: AC_SRC_ALPHA as u8,
             };
-            UpdateLayeredWindow(self.hwnd, None, None, Some(&size), Some(self.mem_dc),
-                Some(&src_point), COLORREF(0), Some(&blend), ULW_ALPHA).ok();
+            UpdateLayeredWindow(
+                self.hwnd,
+                None,
+                None,
+                Some(&size),
+                Some(self.mem_dc),
+                Some(&src_point),
+                COLORREF(0),
+                Some(&blend),
+                ULW_ALPHA,
+            )
+            .ok();
         }
     }
 
@@ -484,11 +623,19 @@ impl OverlayWindow {
                 return;
             }
             self.dc_target.BeginDraw();
-            self.dc_target.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+            self.dc_target.Clear(Some(&D2D1_COLOR_F {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.0,
+            }));
 
             // Render border edges
             for (edge, color) in edges {
-                if let Ok(brush) = self.dc_target.CreateSolidColorBrush(&color_to_d2d(color), None) {
+                if let Ok(brush) = self
+                    .dc_target
+                    .CreateSolidColorBrush(&color_to_d2d(color), None)
+                {
                     self.dc_target.FillRectangle(
                         &D2D_RECT_F {
                             left: edge.x - frame.x,
@@ -504,30 +651,61 @@ impl OverlayWindow {
             // Render tab bar
             if let Some(tb) = tab_bar {
                 // Background
-                if let Ok(bg_brush) = self.dc_target.CreateSolidColorBrush(&color_to_d2d(&tb.background_color), None) {
+                if let Ok(bg_brush) = self
+                    .dc_target
+                    .CreateSolidColorBrush(&color_to_d2d(&tb.background_color), None)
+                {
                     self.dc_target.FillRectangle(
-                        &D2D_RECT_F { left: 0.0, top: 0.0, right: frame.width, bottom: tb.height },
+                        &D2D_RECT_F {
+                            left: 0.0,
+                            top: 0.0,
+                            right: frame.width,
+                            bottom: tb.height,
+                        },
                         &bg_brush,
                     );
                 }
 
                 // Border
-                if let Ok(border_brush) = self.dc_target.CreateSolidColorBrush(&color_to_d2d(&tb.border_color), None) {
+                if let Ok(border_brush) = self
+                    .dc_target
+                    .CreateSolidColorBrush(&color_to_d2d(&tb.border_color), None)
+                {
                     let b = tb.border;
                     self.dc_target.FillRectangle(
-                        &D2D_RECT_F { left: 0.0, top: 0.0, right: frame.width, bottom: b },
+                        &D2D_RECT_F {
+                            left: 0.0,
+                            top: 0.0,
+                            right: frame.width,
+                            bottom: b,
+                        },
                         &border_brush,
                     );
                     self.dc_target.FillRectangle(
-                        &D2D_RECT_F { left: 0.0, top: tb.height - b, right: frame.width, bottom: tb.height },
+                        &D2D_RECT_F {
+                            left: 0.0,
+                            top: tb.height - b,
+                            right: frame.width,
+                            bottom: tb.height,
+                        },
                         &border_brush,
                     );
                     self.dc_target.FillRectangle(
-                        &D2D_RECT_F { left: 0.0, top: b, right: b, bottom: tb.height - b },
+                        &D2D_RECT_F {
+                            left: 0.0,
+                            top: b,
+                            right: b,
+                            bottom: tb.height - b,
+                        },
                         &border_brush,
                     );
                     self.dc_target.FillRectangle(
-                        &D2D_RECT_F { left: frame.width - b, top: b, right: frame.width, bottom: tb.height - b },
+                        &D2D_RECT_F {
+                            left: frame.width - b,
+                            top: b,
+                            right: frame.width,
+                            bottom: tb.height - b,
+                        },
                         &border_brush,
                     );
 
@@ -547,7 +725,10 @@ impl OverlayWindow {
                 }
 
                 // Active tab background
-                if let Ok(active_brush) = self.dc_target.CreateSolidColorBrush(&color_to_d2d(&tb.active_background_color), None) {
+                if let Ok(active_brush) = self
+                    .dc_target
+                    .CreateSolidColorBrush(&color_to_d2d(&tb.active_background_color), None)
+                {
                     for tab in &tb.tabs {
                         if tab.is_active {
                             self.dc_target.FillRectangle(
@@ -565,7 +746,12 @@ impl OverlayWindow {
 
                 // Tab labels
                 if let Ok(text_brush) = self.dc_target.CreateSolidColorBrush(
-                    &D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+                    &D2D1_COLOR_F {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                        a: 1.0,
+                    },
                     None,
                 ) {
                     for tab in &tb.tabs {
@@ -610,7 +796,10 @@ impl OverlayWindow {
 
             self.dc_target.EndDraw(None, None).ok();
 
-            let size = SIZE { cx: self.width as i32, cy: self.height as i32 };
+            let size = SIZE {
+                cx: self.width as i32,
+                cy: self.height as i32,
+            };
             let src_point = POINT { x: 0, y: 0 };
             let blend = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
@@ -618,25 +807,46 @@ impl OverlayWindow {
                 SourceConstantAlpha: 255,
                 AlphaFormat: AC_SRC_ALPHA as u8,
             };
-            UpdateLayeredWindow(self.hwnd, None, None, Some(&size), Some(self.mem_dc),
-                Some(&src_point), COLORREF(0), Some(&blend), ULW_ALPHA).ok();
+            UpdateLayeredWindow(
+                self.hwnd,
+                None,
+                None,
+                Some(&size),
+                Some(self.mem_dc),
+                Some(&src_point),
+                COLORREF(0),
+                Some(&blend),
+                ULW_ALPHA,
+            )
+            .ok();
 
-            SetWindowPos(self.hwnd, None,
-                frame.x as i32, frame.y as i32, w as i32, h as i32,
-                SWP_NOZORDER | SWP_NOACTIVATE).ok();
+            SetWindowPos(
+                self.hwnd,
+                None,
+                frame.x as i32,
+                frame.y as i32,
+                w as i32,
+                h as i32,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+            .ok();
         }
     }
 
     fn show(&mut self) {
         if !self.is_visible {
-            unsafe { let _ = ShowWindow(self.hwnd, SW_SHOWNA); }
+            unsafe {
+                let _ = ShowWindow(self.hwnd, SW_SHOWNA);
+            }
             self.is_visible = true;
         }
     }
 
     fn hide(&mut self) {
         if self.is_visible {
-            unsafe { let _ = ShowWindow(self.hwnd, SW_HIDE); }
+            unsafe {
+                let _ = ShowWindow(self.hwnd, SW_HIDE);
+            }
             self.is_visible = false;
         }
     }

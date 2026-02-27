@@ -43,9 +43,10 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     let mp = &all[0];
 
     let (windows, containers) = match &mp.layout {
-        MonitorLayout::Normal { windows, containers } => {
-            (windows.as_slice(), containers.as_slice())
-        }
+        MonitorLayout::Normal {
+            windows,
+            containers,
+        } => (windows.as_slice(), containers.as_slice()),
         MonitorLayout::Fullscreen(id) => {
             let screen = hub.get_monitor(mp.monitor_id).dimension();
             draw_rect(
@@ -186,7 +187,9 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
         } else {
             String::new()
         };
-        let has_content = workspace.root().is_some() || !workspace.float_windows().is_empty() || !workspace.fullscreen_windows().is_empty();
+        let has_content = workspace.root().is_some()
+            || !workspace.float_windows().is_empty()
+            || !workspace.fullscreen_windows().is_empty();
         if !has_content {
             s.push_str(&format!(
                 "  Workspace(id={}, name={}{})\n",
@@ -528,21 +531,33 @@ fn validate_workspace_focus(hub: &Hub, workspace_id: WorkspaceId, workspace: &Wo
 fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
     for &fid in workspace.float_windows() {
         let float = hub.get_window(fid);
-        assert_eq!(float.workspace, workspace_id, "Float {fid} has wrong workspace");
+        assert_eq!(
+            float.workspace, workspace_id,
+            "Float {fid} has wrong workspace"
+        );
         assert_eq!(
             float.parent,
             Parent::Workspace(workspace_id),
             "Float {fid} has wrong parent"
         );
-        assert!(float.is_float(), "Window {fid} in float_windows but mode is not Float");
+        assert!(
+            float.is_float(),
+            "Window {fid} in float_windows but mode is not Float"
+        );
     }
 }
 
 fn validate_fullscreens(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
     for &fid in workspace.fullscreen_windows() {
         let window = hub.get_window(fid);
-        assert_eq!(window.workspace, workspace_id, "Fullscreen {fid} has wrong workspace");
-        assert!(window.is_fullscreen(), "Window {fid} in fullscreen_windows but mode is not Fullscreen");
+        assert_eq!(
+            window.workspace, workspace_id,
+            "Fullscreen {fid} has wrong workspace"
+        );
+        assert!(
+            window.is_fullscreen(),
+            "Window {fid} in fullscreen_windows but mode is not Fullscreen"
+        );
     }
 }
 
@@ -567,24 +582,63 @@ fn validate_tree(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
 fn validate_window(hub: &Hub, wid: WindowId, expected_parent: Parent, workspace_id: WorkspaceId) {
     let window = hub.get_window(wid);
     assert!(!window.is_float(), "Window {wid} in tree but mode is Float");
-    assert!(!window.is_fullscreen(), "Window {wid} in tree but mode is Fullscreen");
-    assert_eq!(window.parent, expected_parent, "Window {wid} has wrong parent");
-    assert_eq!(window.workspace, workspace_id, "Window {wid} has wrong workspace");
+    assert!(
+        !window.is_fullscreen(),
+        "Window {wid} in tree but mode is Fullscreen"
+    );
+    assert_eq!(
+        window.parent, expected_parent,
+        "Window {wid} has wrong parent"
+    );
+    assert_eq!(
+        window.workspace, workspace_id,
+        "Window {wid} has wrong workspace"
+    );
 
     let dim = window.dimension();
     let (min_w, min_h) = window.min_size();
     let (max_w, max_h) = window.max_size();
 
-    assert!(dim.width >= min_w - 0.01, "Window {wid} width {:.2} < min_width {:.2}", dim.width, min_w);
-    assert!(dim.height >= min_h - 0.01, "Window {wid} height {:.2} < min_height {:.2}", dim.height, min_h);
+    assert!(
+        dim.width >= min_w - 0.01,
+        "Window {wid} width {:.2} < min_width {:.2}",
+        dim.width,
+        min_w
+    );
+    assert!(
+        dim.height >= min_h - 0.01,
+        "Window {wid} height {:.2} < min_height {:.2}",
+        dim.height,
+        min_h
+    );
 
     if max_w > 0.0 {
-        assert!(dim.width <= max_w + 0.01, "Window {wid} width {:.2} > max_width {:.2}", dim.width, max_w);
-        assert!(max_w >= min_w, "Window {wid} max_width {:.2} < min_width {:.2}", max_w, min_w);
+        assert!(
+            dim.width <= max_w + 0.01,
+            "Window {wid} width {:.2} > max_width {:.2}",
+            dim.width,
+            max_w
+        );
+        assert!(
+            max_w >= min_w,
+            "Window {wid} max_width {:.2} < min_width {:.2}",
+            max_w,
+            min_w
+        );
     }
     if max_h > 0.0 {
-        assert!(dim.height <= max_h + 0.01, "Window {wid} height {:.2} > max_height {:.2}", dim.height, max_h);
-        assert!(max_h >= min_h, "Window {wid} max_height {:.2} < min_height {:.2}", max_h, min_h);
+        assert!(
+            dim.height <= max_h + 0.01,
+            "Window {wid} height {:.2} > max_height {:.2}",
+            dim.height,
+            max_h
+        );
+        assert!(
+            max_h >= min_h,
+            "Window {wid} max_height {:.2} < min_height {:.2}",
+            max_h,
+            min_h
+        );
     }
 }
 
@@ -596,12 +650,24 @@ fn validate_container(
     stack: &mut Vec<(Child, Parent)>,
 ) {
     let container = hub.get_container(cid);
-    assert_eq!(container.parent, expected_parent, "Container {cid} has wrong parent");
-    assert_eq!(container.workspace, workspace_id, "Container {cid} has wrong workspace");
-    assert!(container.children.len() >= 2, "Container {cid} has less than 2 children");
+    assert_eq!(
+        container.parent, expected_parent,
+        "Container {cid} has wrong parent"
+    );
+    assert_eq!(
+        container.workspace, workspace_id,
+        "Container {cid} has wrong workspace"
+    );
+    assert!(
+        container.children.len() >= 2,
+        "Container {cid} has less than 2 children"
+    );
 
     if let Child::Window(wid) = container.focused {
-        assert!(!hub.get_window(wid).is_float(), "Container {cid} focused on float {wid}");
+        assert!(
+            !hub.get_window(wid).is_float(),
+            "Container {cid} focused on float {wid}"
+        );
     }
 
     validate_container_tabbed(hub, cid, container);
@@ -630,7 +696,9 @@ fn validate_container_tabbed(hub: &Hub, cid: ContainerId, container: &Container)
     assert!(
         container.focused == expected_focus || container.focused == active_tab,
         "Container {cid} focused {:?} doesn't match active_tab {:?} or its focused {:?}",
-        container.focused, active_tab, expected_focus
+        container.focused,
+        active_tab,
+        expected_focus
     );
 }
 
@@ -644,7 +712,10 @@ fn validate_container_direction(
         && let Some(parent_dir) = hub.get_container(parent_cid).direction()
         && let Some(child_dir) = container.direction()
     {
-        assert_ne!(parent_dir, child_dir, "Container {cid} has same direction as parent {parent_cid}");
+        assert_ne!(
+            parent_dir, child_dir,
+            "Container {cid} has same direction as parent {parent_cid}"
+        );
     }
 }
 
@@ -664,7 +735,10 @@ fn child_constraints(hub: &Hub, child: Child) -> (Dimension, (f32, f32), (f32, f
 fn validate_container_dimensions(hub: &Hub, cid: ContainerId, container: &Container) {
     let dim = container.dimension();
     let children = container.children();
-    let constraints: Vec<_> = children.iter().map(|&c| child_constraints(hub, c)).collect();
+    let constraints: Vec<_> = children
+        .iter()
+        .map(|&c| child_constraints(hub, c))
+        .collect();
 
     match container.direction() {
         Some(dir) => {
@@ -684,8 +758,20 @@ fn validate_container_dimensions(hub: &Hub, cid: ContainerId, container: &Contai
             // Cross-axis: each child should fill the container (or be constrained by max)
             for (i, (child_dim, child_min, child_max)) in constraints.iter().enumerate() {
                 let (cross_child, cross_container, cross_min, cross_max, label) = match dir {
-                    Direction::Horizontal => (child_dim.height, dim.height, child_min.1, child_max.1, "height"),
-                    Direction::Vertical => (child_dim.width, dim.width, child_min.0, child_max.0, "width"),
+                    Direction::Horizontal => (
+                        child_dim.height,
+                        dim.height,
+                        child_min.1,
+                        child_max.1,
+                        "height",
+                    ),
+                    Direction::Vertical => (
+                        child_dim.width,
+                        dim.width,
+                        child_min.0,
+                        child_max.0,
+                        "width",
+                    ),
                 };
                 let allows_smaller = cross_max > 0.0 && cross_max < cross_container;
                 assert!(
@@ -704,20 +790,32 @@ fn validate_container_dimensions(hub: &Hub, cid: ContainerId, container: &Contai
                 assert!(
                     (child_dim.width - dim.width).abs() < 0.01 || allows_smaller_w,
                     "Container {cid} tabbed child {i} width {:.2} != container width {:.2}",
-                    child_dim.width, dim.width
+                    child_dim.width,
+                    dim.width
                 );
                 assert!(
                     (child_dim.height - expected_height).abs() < 0.01 || allows_smaller_h,
                     "Container {cid} tabbed child {i} height {:.2} != expected {:.2}",
-                    child_dim.height, expected_height
+                    child_dim.height,
+                    expected_height
                 );
             }
         }
     }
 
     let (min_w, min_h) = container.min_size();
-    assert!(dim.width >= min_w - 0.01, "Container {cid} width {:.2} < min_width {:.2}", dim.width, min_w);
-    assert!(dim.height >= min_h - 0.01, "Container {cid} height {:.2} < min_height {:.2}", dim.height, min_h);
+    assert!(
+        dim.width >= min_w - 0.01,
+        "Container {cid} width {:.2} < min_width {:.2}",
+        dim.width,
+        min_w
+    );
+    assert!(
+        dim.height >= min_h - 0.01,
+        "Container {cid} height {:.2} < min_height {:.2}",
+        dim.height,
+        min_h
+    );
 }
 
 fn validate_container_focus(hub: &Hub, cid: ContainerId, container: &Container) {
@@ -742,7 +840,12 @@ fn validate_visible_placements(hub: &Hub) {
         if x1 >= x2 || y1 >= y2 {
             return None;
         }
-        Some(Dimension { x: x1, y: y1, width: x2 - x1, height: y2 - y1 })
+        Some(Dimension {
+            x: x1,
+            y: y1,
+            width: x2 - x1,
+            height: y2 - y1,
+        })
     }
 
     let all_placements = hub.get_visible_placements();
@@ -751,9 +854,10 @@ fn validate_visible_placements(hub: &Hub) {
     for mp in &all_placements {
         let screen = hub.get_monitor(mp.monitor_id).dimension();
         let (windows, containers) = match &mp.layout {
-            MonitorLayout::Normal { windows, containers } => {
-                (windows.as_slice(), containers.as_slice())
-            }
+            MonitorLayout::Normal {
+                windows,
+                containers,
+            } => (windows.as_slice(), containers.as_slice()),
             MonitorLayout::Fullscreen(_) => continue,
         };
         for wp in windows {
