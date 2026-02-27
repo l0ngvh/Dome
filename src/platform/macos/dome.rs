@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender};
 
-use dispatch2::{DispatchQueue, DispatchRetained};
-use objc2::rc::{autoreleasepool, Retained};
+use dispatch2::{DispatchQoS, DispatchQueue, DispatchRetained, GlobalQueueIdentifier};
+use objc2::rc::{Retained, autoreleasepool};
 use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace};
 use objc2_application_services::AXUIElement;
 use objc2_core_foundation::{
@@ -14,7 +14,7 @@ use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
-use crate::core::{Child, Container, Dimension, Hub, Window, WindowId};
+use crate::core::{Dimension, Hub, Window, WindowId};
 use crate::platform::macos::accessibility::{AXWindow, get_ax_windows};
 
 use super::mirror::{WindowCapture, create_captures_async};
@@ -24,17 +24,24 @@ use super::overlay::Overlays;
 use super::recovery;
 use super::window::{FullscreenTransition, MacWindow};
 
+pub(super) struct VisibleWindowsReconciled {
+    pid: i32,
+    is_hidden: bool,
+    to_remove: Vec<CGWindowID>,
+    to_add: Vec<AXWindow>,
+}
+
 #[expect(
     clippy::large_enum_variant,
     reason = "Config is only sent once every blue moon, so maybe we need to do something here"
 )]
 pub(super) enum HubEvent {
-    /// Sync window state (add/remove windows) for an app. Does NOT update focus.
-    SyncApp {
+    /// Visible windows changed for an app (window created/destroyed/minimized/shown/hidden).
+    VisibleWindowsChanged {
         pid: i32,
     },
-    /// Sync focus for an app. Separated from SyncApp because offscreen windows (on other
-    /// workspaces) still report as "active", which would hijack focus and prevent switching
+    /// Sync focus for an app. Separated from VisibleWindowsChanged because offscreen windows (on
+    /// other workspaces) still report as "active", which would hijack focus and prevent switching
     /// to empty workspaces.
     SyncFocus {
         pid: i32,
@@ -62,6 +69,12 @@ pub(super) enum HubEvent {
     CaptureReady {
         cg_id: CGWindowID,
         capture: WindowCapture,
+    },
+    AppVisibleWindowsReconciled(VisibleWindowsReconciled),
+    AllVisibleWindowsReconciled {
+        terminated_pids: Vec<i32>,
+        new_apps: Vec<Retained<NSRunningApplication>>,
+        apps: Vec<VisibleWindowsReconciled>,
     },
     Shutdown,
 }
@@ -200,10 +213,6 @@ impl Registry {
         removed
     }
 
-    fn is_valid(&self, cg_id: CGWindowID) -> bool {
-        self.windows.get(&cg_id).is_some_and(|w| w.is_valid())
-    }
-
     pub(super) fn get_title(&self, window_id: WindowId) -> Option<&str> {
         self.id_to_cg
             .get(&window_id)
@@ -219,6 +228,20 @@ impl Registry {
 
     pub(super) fn get(&self, cg_id: CGWindowID) -> Option<&MacWindow> {
         self.windows.get(&cg_id)
+    }
+
+    fn ax_windows_for_pid(&self, pid: i32) -> HashMap<CGWindowID, AXWindow> {
+        self.cg_ids_for_pid(pid)
+            .into_iter()
+            .filter_map(|cg_id| Some((cg_id, self.windows.get(&cg_id)?.ax().clone())))
+            .collect()
+    }
+
+    fn all_ax_windows(&self) -> HashMap<CGWindowID, AXWindow> {
+        self.windows
+            .iter()
+            .map(|(&cg_id, w)| (cg_id, w.ax().clone()))
+            .collect()
     }
 }
 
@@ -299,39 +322,16 @@ impl Dome {
     }
 
     pub(super) fn run(mut self, rx: Receiver<HubEvent>) {
-        self.initial_sync();
+        dispatch_reconcile_all_windows(
+            self.observed_pids.clone(),
+            self.registry.all_ax_windows(),
+            self.config.macos.ignore.clone(),
+            self.hub_tx.clone(),
+        );
         while self.running {
             let Ok(event) = rx.recv() else { break };
             self.handle_event(event);
         }
-    }
-
-    fn initial_sync(&mut self) {
-        autoreleasepool(|_| {
-            let mut new_apps = Vec::new();
-            for app in running_apps() {
-                if !self.running {
-                    return;
-                }
-                let pid = app.processIdentifier();
-                if self.observed_pids.insert(pid) {
-                    new_apps.push(app.clone());
-                }
-                self.sync_app_windows(&app);
-            }
-            if !new_apps.is_empty() {
-                self.sender.send(HubMessage::RegisterObservers(new_apps));
-            }
-            // Hide all windows before first frame — windows discovered during initial sync
-            // may end up offscreen due to viewport scrolling. apply_layout will show the
-            // visible ones.
-            for window in self.registry.windows.values_mut() {
-                window.hide().ok();
-            }
-            let overlays = self.apply_layout();
-
-            self.sender.send(HubMessage::Overlays(overlays));
-        });
     }
 
     fn handle_event(&mut self, event: HubEvent) {
@@ -346,10 +346,13 @@ impl Dome {
                     self.config = new_config;
                     tracing::info!("Config reloaded");
                 }
-                HubEvent::SyncApp { pid } => {
-                    if let Some(app) = get_app_by_pid(pid) {
-                        self.sync_app_windows(&app);
-                    }
+                HubEvent::VisibleWindowsChanged { pid } => {
+                    dispatch_refresh_app_windows(
+                        pid,
+                        self.registry.ax_windows_for_pid(pid),
+                        self.config.macos.ignore.clone(),
+                        self.hub_tx.clone(),
+                    );
                 }
                 HubEvent::SyncFocus { pid } => {
                     if let Some(app) = get_app_by_pid(pid) {
@@ -373,11 +376,13 @@ impl Dome {
                     tracing::debug!(%actions, "Executing actions");
                     self.execute_actions(&actions);
                 }
-                // AX notifications are unreliable, when new windows are being rapidly created and
-                // deleted, macOS may decide skip sending notifications. So we poll periodically to
-                // keep the state in sync. https://github.com/nikitabobko/AeroSpace/issues/445
                 HubEvent::Sync => {
-                    self.periodic_sync();
+                    dispatch_reconcile_all_windows(
+                        self.observed_pids.clone(),
+                        self.registry.all_ax_windows(),
+                        self.config.macos.ignore.clone(),
+                        self.hub_tx.clone(),
+                    );
                 }
                 HubEvent::ScreensChanged(screens) => {
                     tracing::info!(count = screens.len(), "Screens changed");
@@ -394,6 +399,28 @@ impl Dome {
                 HubEvent::CaptureReady { cg_id, capture } => {
                     self.registry.set_capture(cg_id, capture);
                 }
+                HubEvent::AppVisibleWindowsReconciled(result) => {
+                    self.apply_visible_windows_change(result);
+                }
+                HubEvent::AllVisibleWindowsReconciled {
+                    terminated_pids,
+                    new_apps,
+                    apps,
+                } => {
+                    for pid in terminated_pids {
+                        self.observed_pids.remove(&pid);
+                        self.remove_app_windows(pid);
+                    }
+                    for result in apps {
+                        self.apply_visible_windows_change(result);
+                    }
+                    if !new_apps.is_empty() {
+                        for app in &new_apps {
+                            self.observed_pids.insert(app.processIdentifier());
+                        }
+                        self.sender.send(HubMessage::RegisterObservers(new_apps));
+                    }
+                }
             }
 
             if !self.running {
@@ -403,21 +430,6 @@ impl Dome {
 
             self.sender.send(HubMessage::Overlays(overlays));
         });
-    }
-
-    #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
-    fn sync_app_windows(&mut self, app: &NSRunningApplication) {
-        let tracked = self.registry.cg_ids_for_pid(app.processIdentifier());
-        if app.isHidden() {
-            for cg_id in tracked {
-                self.remove_window(cg_id);
-            }
-            return;
-        }
-
-        let valid = self.retain_valid_windows(tracked, &list_cg_window_ids());
-        self.sync_fullscreen(valid);
-        self.add_new_windows(app);
     }
 
     #[tracing::instrument(skip_all, fields(pid = app.processIdentifier()))]
@@ -456,13 +468,19 @@ impl Dome {
                 continue;
             };
 
-            let Some(window) = self.registry.get(cg_id) else { continue };
-            let Ok((x, y)) = window.ax().get_position() else { continue };
+            let Some(window) = self.registry.get(cg_id) else {
+                continue;
+            };
+            let Ok((x, y)) = window.ax().get_position() else {
+                continue;
+            };
             let Some(monitor) = self.monitor_registry.find_monitor_at(x as f32, y as f32) else {
                 continue;
             };
             let monitor_dim = monitor.dimension;
-            let Some(mac_window) = self.registry.get_mut(cg_id) else { continue };
+            let Some(mac_window) = self.registry.get_mut(cg_id) else {
+                continue;
+            };
             match mac_window.sync_fullscreen(&monitor_dim) {
                 FullscreenTransition::Entered(_) => {
                     self.hub.set_fullscreen(window_id);
@@ -499,41 +517,6 @@ impl Dome {
                 max_w.map(remove_inset),
                 max_h.map(remove_inset),
             );
-        }
-    }
-
-    // TODO: this is not hiding unmaximized windows, like zoom
-    #[tracing::instrument(skip_all)]
-    fn periodic_sync(&mut self) {
-        let running: Vec<_> = running_apps().collect();
-        let running_pids: HashSet<_> = running.iter().map(|app| app.processIdentifier()).collect();
-
-        // Cleanup terminated apps
-        let terminated: Vec<_> = self
-            .observed_pids
-            .iter()
-            .filter(|pid| !running_pids.contains(pid))
-            .copied()
-            .collect();
-        for pid in terminated {
-            self.observed_pids.remove(&pid);
-            self.remove_app_windows(pid);
-        }
-
-        // Sync running apps
-        let mut new_apps = Vec::new();
-        for app in running {
-            if !self.running {
-                return;
-            }
-            let pid = app.processIdentifier();
-            if self.observed_pids.insert(pid) {
-                new_apps.push(app.clone());
-            }
-            self.sync_app_windows(&app);
-        }
-        if !new_apps.is_empty() {
-            self.sender.send(HubMessage::RegisterObservers(new_apps));
         }
     }
 
@@ -624,103 +607,23 @@ impl Dome {
         overlays
     }
 
-    fn retain_valid_windows(
-        &mut self,
-        tracked: Vec<CGWindowID>,
-        cg_window_ids: &HashSet<CGWindowID>,
-    ) -> Vec<CGWindowID> {
-        let mut valid = Vec::new();
-        for cg_id in tracked {
-            if cg_window_ids.contains(&cg_id) && self.registry.is_valid(cg_id) {
-                valid.push(cg_id);
-            } else {
+    fn apply_visible_windows_change(&mut self, result: VisibleWindowsReconciled) {
+        if result.is_hidden {
+            for cg_id in self.registry.cg_ids_for_pid(result.pid) {
                 self.remove_window(cg_id);
             }
+            return;
         }
-        valid
-    }
 
-    fn sync_fullscreen(&mut self, cg_ids: Vec<CGWindowID>) {
-        let mut transitions = Vec::new();
-        for cg_id in cg_ids {
-            let Some(window_id) = self.registry.get_window_id(cg_id) else { continue };
-            let Some(window) = self.registry.get(cg_id) else { continue };
-            let Ok((x, y)) = window.ax().get_position() else { continue };
-            let Some(monitor) = self.monitor_registry.find_monitor_at(x as f32, y as f32) else {
-                continue;
-            };
-            let monitor_dim = monitor.dimension;
-            let Some(mac_window) = self.registry.get_mut(cg_id) else { continue };
-            let transition = mac_window.sync_fullscreen(&monitor_dim);
-            transitions.push((window_id, transition));
+        for cg_id in result.to_remove {
+            self.remove_window(cg_id);
         }
-        for (window_id, transition) in transitions {
-            match transition {
-                FullscreenTransition::Entered(_) => self.hub.set_fullscreen(window_id),
-                FullscreenTransition::Exited => self.hub.unset_fullscreen(window_id),
-                FullscreenTransition::Unchanged => {}
-            }
-        }
-    }
 
-    fn add_new_windows(&mut self, app: &NSRunningApplication) {
         let mut new_cg_ids = Vec::new();
-        for ax in get_ax_windows(app) {
-            if !self.running {
-                return;
+        for ax in result.to_add {
+            if let Some(cg_id) = self.add_window(ax) {
+                new_cg_ids.push(cg_id);
             }
-            if self.registry.contains(ax.cg_id()) {
-                continue;
-            }
-            if !ax.is_manageable() {
-                continue;
-            }
-            if should_ignore(&ax, &self.config.macos.ignore) {
-                continue;
-            }
-
-            let Ok((x, y)) = ax.get_position() else {
-                continue;
-            };
-            let Ok((width, height)) = ax.get_size() else {
-                continue;
-            };
-            let window_id = if ax.should_tile() {
-                self.hub.insert_tiling()
-            } else {
-                self.hub.insert_float(Dimension {
-                    x: x as f32,
-                    y: y as f32,
-                    width: width as f32,
-                    height: height as f32,
-                })
-            };
-
-            recovery::track(ax.clone(), self.primary_screen);
-            let hub_window = self.hub.get_window(window_id);
-            let cg_id = ax.cg_id();
-            self.registry.insert(ax, window_id, hub_window);
-
-            let window = self.registry.get_by_window_id(window_id).unwrap();
-            tracing::info!(%window, %window_id, "Window inserted");
-
-            if let Some(actions) = on_open_actions(window, &self.config.macos.on_open) {
-                self.execute_actions(&actions);
-            }
-
-            if let Some(monitor) = self.monitor_registry.find_monitor_at(x as f32, y as f32) {
-                let monitor_dim = monitor.dimension;
-                if let Some(mac_window) = self.registry.get_mut(cg_id) {
-                    if matches!(
-                        mac_window.sync_fullscreen(&monitor_dim),
-                        FullscreenTransition::Entered(_)
-                    ) {
-                        self.hub.set_fullscreen(window_id);
-                    }
-                }
-            }
-
-            new_cg_ids.push(cg_id);
         }
 
         if !new_cg_ids.is_empty() {
@@ -733,12 +636,163 @@ impl Dome {
         }
     }
 
+    fn add_window(&mut self, ax: AXWindow) -> Option<CGWindowID> {
+        if self.registry.contains(ax.cg_id()) {
+            return None;
+        }
+
+        let (x, y) = ax.get_position().ok()?;
+        let (width, height) = ax.get_size().ok()?;
+
+        let window_id = if ax.should_tile() {
+            self.hub.insert_tiling()
+        } else {
+            self.hub.insert_float(Dimension {
+                x: x as f32,
+                y: y as f32,
+                width: width as f32,
+                height: height as f32,
+            })
+        };
+
+        recovery::track(ax.clone(), self.primary_screen);
+        let hub_window = self.hub.get_window(window_id);
+        let cg_id = ax.cg_id();
+        self.registry.insert(ax, window_id, hub_window);
+
+        // Hide immediately - window may spawn outside viewport due to scrolling
+        if let Some(window) = self.registry.get_mut(cg_id) {
+            window.hide().ok();
+        }
+
+        let window = self.registry.get_by_window_id(window_id).unwrap();
+        tracing::info!(%window, %window_id, "Window inserted");
+
+        if let Some(actions) = on_open_actions(window, &self.config.macos.on_open) {
+            self.execute_actions(&actions);
+        }
+
+        Some(cg_id)
+    }
 }
 
 impl Drop for Dome {
     fn drop(&mut self) {
         recovery::restore_all();
         self.sender.send(HubMessage::Shutdown);
+    }
+}
+
+fn dispatch_refresh_app_windows(
+    pid: i32,
+    tracked: HashMap<CGWindowID, AXWindow>,
+    ignore_rules: Vec<MacosWindow>,
+    hub_tx: Sender<HubEvent>,
+) {
+    let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
+        DispatchQoS::UserInitiated,
+    ));
+    queue.exec_async(move || {
+        autoreleasepool(|_| {
+            let Some(app) = get_app_by_pid(pid) else {
+                return;
+            };
+            let result = compute_app_visible_windows(&app, &tracked, &ignore_rules);
+            hub_tx
+                .send(HubEvent::AppVisibleWindowsReconciled(result))
+                .ok();
+        });
+    });
+}
+
+fn dispatch_reconcile_all_windows(
+    observed_pids: HashSet<i32>,
+    tracked: HashMap<CGWindowID, AXWindow>,
+    ignore_rules: Vec<MacosWindow>,
+    hub_tx: Sender<HubEvent>,
+) {
+    let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
+        DispatchQoS::UserInitiated,
+    ));
+    queue.exec_async(move || {
+        autoreleasepool(|_| {
+            let running: Vec<_> = running_apps().collect();
+            let running_pids: HashSet<_> =
+                running.iter().map(|app| app.processIdentifier()).collect();
+
+            let terminated_pids: Vec<_> = observed_pids
+                .iter()
+                .filter(|pid| !running_pids.contains(pid))
+                .copied()
+                .collect();
+
+            let new_apps: Vec<_> = running
+                .iter()
+                .filter(|app| !observed_pids.contains(&app.processIdentifier()))
+                .cloned()
+                .collect();
+
+            let apps: Vec<_> = running
+                .iter()
+                .map(|app| compute_app_visible_windows(app, &tracked, &ignore_rules))
+                .collect();
+
+            hub_tx
+                .send(HubEvent::AllVisibleWindowsReconciled {
+                    terminated_pids,
+                    new_apps,
+                    apps,
+                })
+                .ok();
+        });
+    });
+}
+
+fn compute_app_visible_windows(
+    app: &NSRunningApplication,
+    tracked: &HashMap<CGWindowID, AXWindow>,
+    ignore_rules: &[MacosWindow],
+) -> VisibleWindowsReconciled {
+    let pid = app.processIdentifier();
+    let is_hidden = app.isHidden();
+
+    if is_hidden {
+        return VisibleWindowsReconciled {
+            pid,
+            is_hidden,
+            to_remove: Vec::new(),
+            to_add: Vec::new(),
+        };
+    }
+
+    let cg_window_ids = list_cg_window_ids();
+
+    let mut to_remove = Vec::new();
+    for (&cg_id, ax) in tracked.iter().filter(|(_, ax)| ax.pid() == pid) {
+        if !cg_window_ids.contains(&cg_id) || !ax.is_valid() {
+            to_remove.push(cg_id);
+        }
+    }
+
+    let mut to_add = Vec::new();
+    for ax in get_ax_windows(app) {
+        if tracked.contains_key(&ax.cg_id()) {
+            continue;
+        }
+        if !ax.is_manageable() {
+            continue;
+        }
+        if should_ignore(&ax, ignore_rules) {
+            continue;
+        }
+        to_add.push(ax);
+    }
+
+    VisibleWindowsReconciled {
+        pid,
+        is_hidden,
+        to_remove,
+        to_add,
     }
 }
 

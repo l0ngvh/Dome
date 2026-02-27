@@ -324,10 +324,6 @@ impl MacWindow {
         self.ax.update_title();
     }
 
-    pub(super) fn is_valid(&self) -> bool {
-        self.ax.is_valid()
-    }
-
     pub(super) fn title(&self) -> Option<&str> {
         self.ax.title()
     }

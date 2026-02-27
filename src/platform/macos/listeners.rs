@@ -324,7 +324,7 @@ fn handle_app_launched(ctx: &ListenerCtx, notification: &NSNotification) {
     try_register_app(ctx, &app);
     send_hub_event(
         &ctx.hub_sender,
-        HubEvent::SyncApp {
+        HubEvent::VisibleWindowsChanged {
             pid: app.processIdentifier(),
         },
     );
@@ -464,7 +464,7 @@ unsafe extern "C-unwind" fn observer_callback(
         )
     {
         if let Ok(pid) = get_pid(&element) {
-            send_hub_event(&ctx.hub_sender, HubEvent::SyncApp { pid });
+            send_hub_event(&ctx.hub_sender, HubEvent::VisibleWindowsChanged { pid });
         }
         return;
     }
