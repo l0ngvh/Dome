@@ -23,7 +23,7 @@ use super::overlay::Overlays;
 use super::recovery;
 use super::registry::Registry;
 use super::running_application::RunningApp;
-use super::window::{FullscreenTransition, MacWindow};
+use super::window::{FullscreenState, FullscreenTransition, MacWindow};
 
 pub(super) struct VisibleWindowsReconciled {
     pid: i32,
@@ -196,7 +196,7 @@ impl Dome {
             self.observed_pids.clone(),
             self.registry
                 .iter()
-                .map(|(id, w)| (id, w.ax().clone()))
+                .map(|(id, w)| (id, (w.ax().clone(), w.fullscreen())))
                 .collect(),
             self.config.macos.ignore.clone(),
             self.hub_tx.clone(),
@@ -224,7 +224,7 @@ impl Dome {
                         pid,
                         self.registry
                             .for_pid(pid)
-                            .map(|(id, w)| (id, w.ax().clone()))
+                            .map(|(id, w)| (id, (w.ax().clone(), w.fullscreen())))
                             .collect(),
                         self.config.macos.ignore.clone(),
                         self.hub_tx.clone(),
@@ -257,7 +257,7 @@ impl Dome {
                         self.observed_pids.clone(),
                         self.registry
                             .iter()
-                            .map(|(id, w)| (id, w.ax().clone()))
+                            .map(|(id, w)| (id, (w.ax().clone(), w.fullscreen())))
                             .collect(),
                         self.config.macos.ignore.clone(),
                         self.hub_tx.clone(),
@@ -390,11 +390,13 @@ impl Dome {
                 continue;
             };
             match mac_window.sync_fullscreen(&monitor.dimension) {
-                FullscreenTransition::Entered(_) => {
+                FullscreenTransition::Entered(state) => {
+                    tracing::info!(%mac_window, ?state, "Entered fullscreen");
                     self.hub.set_fullscreen(window_id);
                     continue;
                 }
                 FullscreenTransition::Exited => {
+                    tracing::info!(%mac_window, "Exited fullscreen");
                     self.hub.unset_fullscreen(window_id);
                     continue;
                 }
@@ -591,7 +593,7 @@ impl Drop for Dome {
 
 fn dispatch_refresh_app_windows(
     pid: i32,
-    tracked: HashMap<CGWindowID, AXWindow>,
+    tracked: HashMap<CGWindowID, (AXWindow, FullscreenState)>,
     ignore_rules: Vec<MacosWindow>,
     hub_tx: Sender<HubEvent>,
 ) {
@@ -613,7 +615,7 @@ fn dispatch_refresh_app_windows(
 
 fn dispatch_reconcile_all_windows(
     observed_pids: HashSet<i32>,
-    tracked: HashMap<CGWindowID, AXWindow>,
+    tracked: HashMap<CGWindowID, (AXWindow, FullscreenState)>,
     ignore_rules: Vec<MacosWindow>,
     hub_tx: Sender<HubEvent>,
 ) {
@@ -655,7 +657,7 @@ fn dispatch_reconcile_all_windows(
 
 fn compute_app_visible_windows(
     app: &RunningApp,
-    tracked: &HashMap<CGWindowID, AXWindow>,
+    tracked: &HashMap<CGWindowID, (AXWindow, FullscreenState)>,
     ignore_rules: &[MacosWindow],
 ) -> VisibleWindowsReconciled {
     let pid = app.pid();
@@ -673,8 +675,13 @@ fn compute_app_visible_windows(
     let cg_window_ids = list_cg_window_ids();
 
     let mut to_remove = Vec::new();
-    for (&cg_id, ax) in tracked.iter().filter(|(_, ax)| ax.pid() == pid) {
+    for (&cg_id, (ax, fs)) in tracked.iter().filter(|(_, (ax, _))| ax.pid() == pid) {
         if !cg_window_ids.contains(&cg_id) || !ax.is_valid() {
+            to_remove.push(cg_id);
+            continue;
+        }
+        // Skip minimized check for mock fullscreen - we minimize them ourselves
+        if *fs != FullscreenState::Mock && ax.is_minimized() {
             to_remove.push(cg_id);
         }
     }

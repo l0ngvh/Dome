@@ -154,7 +154,15 @@ impl MacWindow {
             cg_id: self.ax.cg_id(),
         });
         self.focused = false;
-        self.hide_ax()
+        // Minimize mock fullscreen windows instead of moving offscreen:
+        // 1. User-zoomed windows maintain their fullscreen state, so moving them is futile
+        // 2. Moving offscreen triggers handle_window_moved which detects fullscreen exit
+        // Native fullscreen windows are on a separate Space and don't need hiding.
+        match self.fullscreen {
+            FullscreenState::Mock => self.ax.minimize(),
+            FullscreenState::Native => Ok(()),
+            FullscreenState::None => self.hide_ax(),
+        }
     }
 
     fn primary_full_height(&self) -> f32 {
@@ -384,9 +392,13 @@ impl MacWindow {
 
     pub(super) fn set_fullscreen(&mut self, dim: Dimension) {
         self.fullscreen = FullscreenState::Mock;
+        // Hide the border overlay for fullscreen windows
         self.sender.send(HubMessage::WindowHide {
             cg_id: self.ax.cg_id(),
         });
+        if let Err(e) = self.ax.unminimize() {
+            tracing::debug!("Failed to unminimize window: {e:#}");
+        }
         if let Err(e) = self.ax.set_frame(
             dim.x as i32,
             dim.y as i32,

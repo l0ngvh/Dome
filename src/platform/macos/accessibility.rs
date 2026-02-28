@@ -145,14 +145,13 @@ impl AXWindow {
             tracing::trace!(app = %self.app_name_(), title = ?self.title, "not valid: window is deleted");
             return false;
         }
-        let is_minimized = get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false);
-        if is_minimized {
-            tracing::trace!(app = %self.app_name_(), title = ?self.title, "not valid: window is minimized");
-            return false;
-        }
         true
+    }
+
+    pub(super) fn is_minimized(&self) -> bool {
+        get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
+            .map(|b| b.as_bool())
+            .unwrap_or(false)
     }
 
     #[tracing::instrument(skip(self))]
@@ -193,6 +192,20 @@ impl AXWindow {
     pub(super) fn hide_at(&self, x: i32, y: i32) -> Result<()> {
         self.with_animation_disabled(|| self.set_position(x, y))
             .with_context(|| format!("hide for {self}"))
+    }
+
+    pub(super) fn minimize(&self) -> Result<()> {
+        set_attribute_value(&self.element, &kAXMinimizedAttribute(), unsafe {
+            kCFBooleanTrue.unwrap()
+        })
+        .with_context(|| format!("minimize for {self}"))
+    }
+
+    pub(super) fn unminimize(&self) -> Result<()> {
+        set_attribute_value(&self.element, &kAXMinimizedAttribute(), unsafe {
+            kCFBooleanFalse.unwrap()
+        })
+        .with_context(|| format!("unminimize for {self}"))
     }
 
     pub(super) fn get_size(&self) -> Result<(i32, i32)> {
