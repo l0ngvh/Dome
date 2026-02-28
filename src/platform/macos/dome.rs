@@ -681,7 +681,7 @@ fn compute_app_visible_windows(
             continue;
         }
         // Skip minimized check for mock fullscreen - we minimize them ourselves
-        if *fs != FullscreenState::Mock && ax.is_minimized() {
+        if *fs != FullscreenState::Borderless && ax.is_minimized() {
             to_remove.push(cg_id);
         }
     }

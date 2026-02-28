@@ -14,7 +14,7 @@ use crate::platform::macos::accessibility::AXWindow;
 pub(super) enum FullscreenState {
     None,
     Native,
-    Mock,
+    Borderless,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,7 +159,7 @@ impl MacWindow {
         // 2. Moving offscreen triggers handle_window_moved which detects fullscreen exit
         // Native fullscreen windows are on a separate Space and don't need hiding.
         match self.fullscreen {
-            FullscreenState::Mock => self.ax.minimize(),
+            FullscreenState::Borderless => self.ax.minimize(),
             FullscreenState::Native => Ok(()),
             FullscreenState::None => self.hide_ax(),
         }
@@ -367,8 +367,8 @@ impl MacWindow {
     pub(super) fn sync_fullscreen(&mut self, monitor: &Dimension) -> FullscreenTransition {
         let new_state = if self.ax.is_native_fullscreen() {
             FullscreenState::Native
-        } else if self.ax.is_mock_fullscreen(monitor) {
-            FullscreenState::Mock
+        } else if self.ax.is_borderless_fullscreen(monitor) {
+            FullscreenState::Borderless
         } else {
             FullscreenState::None
         };
@@ -391,7 +391,7 @@ impl MacWindow {
     }
 
     pub(super) fn set_fullscreen(&mut self, dim: Dimension) {
-        self.fullscreen = FullscreenState::Mock;
+        self.fullscreen = FullscreenState::Borderless;
         // Hide the border overlay for fullscreen windows
         self.sender.send(HubMessage::WindowHide {
             cg_id: self.ax.cg_id(),

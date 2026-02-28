@@ -108,7 +108,7 @@ impl AXWindow {
             .unwrap_or(false)
     }
 
-    pub(super) fn is_mock_fullscreen(&self, monitor: &Dimension) -> bool {
+    pub(super) fn is_borderless_fullscreen(&self, monitor: &Dimension) -> bool {
         let Ok((x, y)) = self.get_position() else {
             return false;
         };
