@@ -6,7 +6,6 @@ use objc2_app_kit::{
 };
 use objc2_application_services::AXUIElement;
 use objc2_core_foundation::CFArray;
-use objc2_core_graphics::CGWindowID;
 use objc2_foundation::NSNotification;
 
 use super::accessibility::AXWindow;

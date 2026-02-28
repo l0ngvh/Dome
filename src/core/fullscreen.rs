@@ -4,6 +4,7 @@ use crate::core::{
 };
 
 impl Hub {
+    #[tracing::instrument(skip(self))]
     pub(crate) fn set_fullscreen(&mut self, window_id: WindowId) {
         let window = self.windows.get(window_id);
         let ws = window.workspace;
@@ -25,6 +26,7 @@ impl Hub {
         ws_mut.viewport_offset = (0.0, 0.0);
     }
 
+    #[tracing::instrument(skip(self))]
     pub(crate) fn unset_fullscreen(&mut self, window_id: WindowId) {
         let window = self.windows.get(window_id);
         if window.mode != DisplayMode::Fullscreen {
@@ -42,6 +44,7 @@ impl Hub {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub(crate) fn toggle_fullscreen(&mut self) {
         let current_ws = self.current_workspace();
         let Some(Child::Window(window_id)) = self.workspaces.get(current_ws).focused else {

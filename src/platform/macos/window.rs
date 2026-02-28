@@ -189,7 +189,11 @@ impl MacWindow {
         self.ax.hide_at(x, y)
     }
 
-    fn should_retry_placement(&mut self, target: RoundedDimension, actual: RoundedDimension) -> bool {
+    fn should_retry_placement(
+        &mut self,
+        target: RoundedDimension,
+        actual: RoundedDimension,
+    ) -> bool {
         if self.target_placement == Some(target) && self.actual_placement == Some(actual) {
             self.placement_retries += 1;
         } else {
@@ -229,20 +233,28 @@ impl MacWindow {
         let target = round_dim(target);
         let (ax, ay) = self.ax.get_position().unwrap_or((0, 0));
         let (aw, ah) = self.ax.get_size().unwrap_or((0, 0));
-        let actual = RoundedDimension { x: ax, y: ay, width: aw, height: ah };
+        let actual = RoundedDimension {
+            x: ax,
+            y: ay,
+            width: aw,
+            height: ah,
+        };
 
         if actual == target {
             return;
         }
 
         if !self.should_retry_placement(target, actual) {
-            tracing::debug!("Window {} can't be moved to {:?}", self.ax, target);
+            tracing::debug!("Window {} can't be moved to {:?}", self, target);
             return;
         }
 
         self.is_ax_hidden = false;
-        if let Err(e) = self.ax.set_frame(target.x, target.y, target.width, target.height) {
-            tracing::trace!("Window {} set_frame failed: {e}", self.ax);
+        if let Err(e) = self
+            .ax
+            .set_frame(target.x, target.y, target.width, target.height)
+        {
+            tracing::trace!("Window {} set_frame failed: {e}", self);
         }
     }
 
@@ -294,7 +306,10 @@ impl MacWindow {
                     ?actual,
                     "window drifted, correcting"
                 );
-                if let Err(e) = self.ax.set_frame(target.x, target.y, target.width, target.height) {
+                if let Err(e) = self
+                    .ax
+                    .set_frame(target.x, target.y, target.width, target.height)
+                {
                     tracing::trace!("Window {} set_frame failed: {e}", self.ax);
                 }
             }
@@ -309,7 +324,7 @@ impl MacWindow {
         let max_h = (actual_h < target.height).then_some(actual_h as f32);
         if min_w.is_some() || min_h.is_some() || max_w.is_some() || max_h.is_some() {
             tracing::trace!(
-                window = %self.ax,
+                window = %self,
                 ?target,
                 ?actual,
                 ?min_w, ?min_h, ?max_w, ?max_h,
@@ -398,7 +413,21 @@ impl MacWindow {
 
 impl std::fmt::Display for MacWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.ax)
+        write!(
+            f,
+            "[{}|{}:{}] {}",
+            self.window_id,
+            self.ax.pid(),
+            self.ax.cg_id(),
+            self.ax.app_name().unwrap_or("Unknown")
+        )?;
+        if let Some(bundle_id) = self.ax.bundle_id() {
+            write!(f, " ({bundle_id})")?;
+        }
+        if let Some(title) = self.ax.title() {
+            write!(f, " - {title}")?;
+        }
+        Ok(())
     }
 }
 
