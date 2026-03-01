@@ -10,10 +10,10 @@ use crate::core::{
     Child, Container, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout,
     MonitorPlacements, WindowPlacement,
 };
+use crate::platform::macos::overlay::to_ns_rect;
 
 use super::overlay::ContainerOverlayData;
 use super::registry::Registry;
-use super::rendering::to_ns_rect;
 use super::window::FullscreenState;
 
 #[derive(Clone)]

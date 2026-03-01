@@ -100,6 +100,7 @@ pub(super) enum HubMessage {
         placement: WindowPlacement,
         cocoa_frame: NSRect,
         scale: f64,
+        visible_content: Option<Dimension>,
     },
     WindowHide {
         cg_id: CGWindowID,

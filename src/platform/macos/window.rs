@@ -4,11 +4,11 @@ use objc2_core_graphics::CGWindowID;
 use super::dome::{HubMessage, MessageSender};
 use super::mirror::WindowCapture;
 use super::monitor::{MonitorInfo, primary_full_height_from};
-use super::rendering::{clip_to_bounds, to_ns_rect};
 use crate::config::Config;
 use crate::core::WindowPlacement;
 use crate::core::{Dimension, Window, WindowId};
 use crate::platform::macos::accessibility::AXWindow;
+use crate::platform::macos::overlay::to_ns_rect;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FullscreenState {
@@ -85,33 +85,34 @@ impl MacWindow {
 
     pub(super) fn show(&mut self, wp: &WindowPlacement, config: &Config) -> anyhow::Result<()> {
         self.fullscreen = FullscreenState::None;
-        // content_dim from the full unclipped frame, NOT visible_frame.
-        // apply_inset insets all 4 sides. When we later clip against visible_frame:
-        // - Non-clipped edges: content stays inset by border_size (border exists)
-        // - Clipped edges: clip overrides the inset (no gap, border is gone on that side)
         let content_dim = apply_inset(wp.frame, config.border_size);
         let scale = self.hidden_monitor().scale;
-        let primary_full_height = self.primary_full_height();
-
+        let primary_full_height = primary_full_height_from(&self.monitors);
         let cocoa_frame = to_ns_rect(primary_full_height, wp.visible_frame);
+        let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
         self.sender.send(HubMessage::WindowShow {
             cg_id: self.ax.cg_id(),
-            placement: wp.clone(),
+            placement: *wp,
             cocoa_frame,
             scale,
+            visible_content,
         });
 
         if wp.is_float && !wp.is_focused {
             if let Some(capture) = &mut self.capture {
-                capture.start(
-                    self.ax.cg_id(),
-                    content_dim,
-                    wp.visible_frame,
-                    scale,
-                    primary_full_height,
-                    self.sender.clone(),
-                );
+                if let Some(visible_content) = visible_content {
+                    capture.start(
+                        self.ax.cg_id(),
+                        content_dim,
+                        visible_content,
+                        scale,
+                        self.sender.clone(),
+                    );
+                } else {
+                    capture.stop();
+                }
             }
+
             self.hide_ax()?;
         } else {
             // try_placement clips to visible_frame bounds — macOS doesn't reliably allow
@@ -149,10 +150,6 @@ impl MacWindow {
             FullscreenState::Native => Ok(()),
             FullscreenState::None => self.hide_ax(),
         }
-    }
-
-    fn primary_full_height(&self) -> f32 {
-        primary_full_height_from(&self.monitors)
     }
 
     /// Returns the monitor used for hiding windows offscreen.
@@ -464,4 +461,25 @@ fn round_dim(dim: Dimension) -> RoundedDimension {
         width: dim.width.round() as i32,
         height: dim.height.round() as i32,
     }
+}
+
+/// Clip rect to bounds. Returns None if fully outside.
+fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimension> {
+    if rect.x >= bounds.x + bounds.width
+        || rect.y >= bounds.y + bounds.height
+        || rect.x + rect.width <= bounds.x
+        || rect.y + rect.height <= bounds.y
+    {
+        return None;
+    }
+    let x = rect.x.max(bounds.x);
+    let y = rect.y.max(bounds.y);
+    let right = (rect.x + rect.width).min(bounds.x + bounds.width);
+    let bottom = (rect.y + rect.height).min(bounds.y + bounds.height);
+    Some(Dimension {
+        x,
+        y,
+        width: right - x,
+        height: bottom - y,
+    })
 }

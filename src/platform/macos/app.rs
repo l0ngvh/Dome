@@ -289,6 +289,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 placement,
                 cocoa_frame,
                 scale,
+                visible_content,
             } => {
                 if let Some(overlay) = delegate
                     .ivars()
@@ -296,7 +297,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     .borrow_mut()
                     .get_mut(&cg_id)
                 {
-                    overlay.render(&placement, cocoa_frame, scale);
+                    overlay.render(&placement, cocoa_frame, scale, visible_content);
                 }
             }
             HubMessage::WindowHide { cg_id } => {

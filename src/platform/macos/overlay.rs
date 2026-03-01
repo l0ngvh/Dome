@@ -11,20 +11,21 @@ use objc2_app_kit::{
 };
 use objc2_core_foundation::CGFloat;
 use objc2_core_graphics::CGWindowID;
-use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
 use objc2_quartz_core::CAMetalLayer;
 
 use super::dome::HubEvent;
-use super::renderer::{MetalBackend, OverlayRenderer};
+use super::renderer::{ContainerRenderer, MetalBackend, WindowRenderer};
 use crate::config::Config;
-use crate::core::{ContainerId, ContainerPlacement, WindowPlacement};
+use crate::core::{ContainerId, ContainerPlacement, Dimension, WindowPlacement};
 use crate::overlay;
 
 pub(super) struct OverlayWindow {
     window: Retained<NSWindow>,
-    renderer: OverlayRenderer,
+    renderer: WindowRenderer,
     placement: Option<WindowPlacement>,
+    mirror_rect: Option<[f32; 4]>,
     scale: f64,
     config: Config,
 }
@@ -60,7 +61,7 @@ impl OverlayWindow {
         unsafe { window.setReleasedWhenClosed(false) };
 
         let scale = window.backingScaleFactor();
-        let renderer = OverlayRenderer::new(backend, scale, frame.size.width, frame.size.height);
+        let renderer = WindowRenderer::new(backend, scale, frame.size.width, frame.size.height);
         let events = renderer.events();
         let view = MetalOverlayView::new(
             mtm,
@@ -76,12 +77,19 @@ impl OverlayWindow {
             window,
             renderer,
             placement: None,
+            mirror_rect: None,
             scale: 1.0,
             config,
         }
     }
 
-    pub(super) fn render(&mut self, placement: &WindowPlacement, cocoa_frame: NSRect, scale: f64) {
+    pub(super) fn render(
+        &mut self,
+        placement: &WindowPlacement,
+        cocoa_frame: NSRect,
+        scale: f64,
+        mirror_rect: Option<Dimension>,
+    ) {
         self.placement = Some(*placement);
         self.scale = scale;
 
@@ -103,18 +111,14 @@ impl OverlayWindow {
             self.renderer.clear_mirror();
         }
 
-        let b = self.config.border_size;
-        let ox = placement.frame.x - placement.visible_frame.x;
-        let oy = placement.frame.y - placement.visible_frame.y;
-        self.renderer.set_mirror_rect([
-            ox + b,
-            oy + b,
-            placement.frame.width - 2.0 * b,
-            placement.frame.height - 2.0 * b,
-        ]);
+        self.mirror_rect = mirror_rect.map(|mr| {
+            let v = placement.visible_frame;
+            [mr.x - v.x, mr.y - v.y, mr.width, mr.height]
+        });
 
         let config = &self.config;
-        self.renderer.render(scale as f32, |ui| {
+        let mr = self.mirror_rect;
+        self.renderer.render(scale as f32, mr, |ui| {
             overlay::paint_window_border(ui.painter(), placement, config);
         });
         self.window.setIsVisible(true);
@@ -124,7 +128,8 @@ impl OverlayWindow {
         self.config = config;
         if let Some(placement) = self.placement {
             let config = &self.config;
-            self.renderer.render(self.scale as f32, |ui| {
+            let mr = self.mirror_rect;
+            self.renderer.render(self.scale as f32, mr, |ui| {
                 overlay::paint_window_border(ui.painter(), &placement, config);
             });
         }
@@ -135,13 +140,11 @@ impl OverlayWindow {
     }
 
     pub(super) fn apply_frame(&mut self, surface: &IOSurface) {
-        let w = surface.width();
-        let h = surface.height();
-        self.renderer
-            .set_mirror_surface(surface, w as usize, h as usize);
+        self.renderer.set_mirror_surface(surface);
         if let Some(placement) = self.placement {
             let config = &self.config;
-            self.renderer.render(self.scale as f32, |ui| {
+            let mr = self.mirror_rect;
+            self.renderer.render(self.scale as f32, mr, |ui| {
                 overlay::paint_window_border(ui.painter(), &placement, config);
             });
         }
@@ -220,7 +223,7 @@ impl OverlayManager {
 
                 let size = data.cocoa_frame.size;
                 let mut renderer =
-                    OverlayRenderer::new(self.backend.clone(), scale, size.width, size.height);
+                    ContainerRenderer::new(self.backend.clone(), scale, size.width, size.height);
                 let events = renderer.events();
                 let view = MetalOverlayView::new(
                     mtm,
@@ -269,7 +272,7 @@ pub(super) struct ContainerOverlayData {
 
 struct ContainerOverlayEntry {
     window: Retained<NSWindow>,
-    renderer: OverlayRenderer,
+    renderer: ContainerRenderer,
     placement: ContainerPlacement,
     tab_titles: Vec<String>,
     scale: f64,
@@ -410,4 +413,15 @@ impl MetalOverlayView {
         let view_loc = self.convertPoint_fromView(loc, None);
         egui::pos2(view_loc.x as f32, view_loc.y as f32)
     }
+}
+
+// Quartz uses top-left origin, Cocoa uses bottom-left origin
+pub(super) fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
+    NSRect::new(
+        NSPoint::new(
+            dim.x as f64,
+            (primary_full_height - dim.y - dim.height) as f64,
+        ),
+        NSSize::new(dim.width as f64, dim.height as f64),
+    )
 }

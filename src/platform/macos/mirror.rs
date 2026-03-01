@@ -16,7 +16,6 @@ use objc2_screen_capture_kit::{
 };
 
 use super::dome::{HubEvent, HubMessage, MessageSender};
-use super::rendering::clip_to_bounds;
 use crate::core::Dimension;
 
 pub(super) struct WindowCapture {
@@ -29,24 +28,21 @@ pub(super) struct WindowCapture {
 unsafe impl Send for WindowCapture {}
 
 impl WindowCapture {
+    /// `content_dim` is the unclipped dimension of the captured window without the border, used to
+    /// calculate where in the window to start capturing
+    /// `visible_content` is the only visible section of the captured window
     /// `scale` is passed separately because the original window may be hidden on a different monitor.
     pub(super) fn start(
         &mut self,
         cg_id: CGWindowID,
         content_dim: Dimension,
-        monitor: Dimension,
+        visible_content: Dimension,
         scale: f64,
-        _primary_full_height: f32,
         app_tx: MessageSender,
     ) {
-        let Some(clipped) = clip_to_bounds(content_dim, monitor) else {
-            self.stop();
-            return;
-        };
-
-        let source_rect = compute_source_rect(content_dim, clipped);
-        let width = (clipped.width as f64 * scale) as usize;
-        let height = (clipped.height as f64 * scale) as usize;
+        let source_rect = compute_source_rect(content_dim, visible_content);
+        let width = (visible_content.width as f64 * scale) as usize;
+        let height = (visible_content.height as f64 * scale) as usize;
 
         let config = unsafe { SCStreamConfiguration::new() };
         unsafe {
