@@ -2,6 +2,7 @@ mod action;
 mod config;
 mod core;
 mod ipc;
+mod overlay;
 mod platform;
 
 pub use action::{Action, FocusTarget, MoveTarget, ToggleTarget};

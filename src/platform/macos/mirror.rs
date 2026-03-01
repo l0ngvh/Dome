@@ -2,79 +2,22 @@ use std::sync::mpsc::Sender;
 
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
+use objc2::AnyThread;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{NSEvent, NSResponder, NSView};
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGWindowID, kCGColorSpaceSRGB};
 use objc2_core_media::CMSampleBuffer;
-use objc2_foundation::{NSError, NSObject, NSObjectProtocol, NSRect};
+use objc2_foundation::{NSError, NSObject, NSObjectProtocol};
 use objc2_io_surface::IOSurface;
-use objc2_quartz_core::CALayer;
 use objc2_screen_capture_kit::{
     SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
     SCStreamOutputType,
 };
 
 use super::dome::{HubEvent, HubMessage, MessageSender};
-use super::rendering::{clip_to_bounds, to_ns_rect};
+use super::rendering::clip_to_bounds;
 use crate::core::Dimension;
-
-pub(super) struct MirrorViewIvars {
-    cg_id: CGWindowID,
-    layer: Retained<CALayer>,
-    hub_tx: Sender<HubEvent>,
-}
-
-define_class!(
-    #[unsafe(super(NSView, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[ivars = MirrorViewIvars]
-    pub(super) struct MirrorView;
-
-    unsafe impl NSObjectProtocol for MirrorView {}
-
-    impl MirrorView {
-        #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, _event: &NSEvent) {
-            self.ivars().hub_tx.send(HubEvent::MirrorClicked(self.ivars().cg_id)).ok();
-        }
-
-        #[unsafe(method(acceptsFirstMouse:))]
-        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
-            true
-        }
-    }
-);
-
-impl MirrorView {
-    pub(super) fn new(
-        mtm: MainThreadMarker,
-        frame: NSRect,
-        cg_id: CGWindowID,
-        hub_tx: Sender<HubEvent>,
-    ) -> Retained<Self> {
-        let layer = CALayer::new();
-        let this = Self::alloc(mtm).set_ivars(MirrorViewIvars {
-            cg_id,
-            hub_tx,
-            layer: layer.clone(),
-        });
-        let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
-        view.setLayer(Some(&layer));
-        view.setWantsLayer(true);
-        view
-    }
-
-    pub(super) fn apply_frame(&self, surface: &IOSurface) {
-        unsafe { self.ivars().layer.setContents(Some(surface)) };
-    }
-
-    pub(super) fn set_scale(&self, scale: f64) {
-        self.ivars().layer.setContentsScale(scale);
-    }
-}
 
 pub(super) struct WindowCapture {
     stream: Retained<SCStream>,
@@ -93,25 +36,24 @@ impl WindowCapture {
         content_dim: Dimension,
         monitor: Dimension,
         scale: f64,
-        primary_full_height: f32,
+        _primary_full_height: f32,
         app_tx: MessageSender,
     ) {
         let Some(clipped) = clip_to_bounds(content_dim, monitor) else {
             self.stop();
             return;
         };
-        let frame = to_ns_rect(primary_full_height, clipped);
-        let source_rect = compute_source_rect(content_dim, clipped);
 
-        let width = (frame.size.width * scale) as usize;
-        let height = (frame.size.height * scale) as usize;
+        let source_rect = compute_source_rect(content_dim, clipped);
+        let width = (clipped.width as f64 * scale) as usize;
+        let height = (clipped.height as f64 * scale) as usize;
 
         let config = unsafe { SCStreamConfiguration::new() };
         unsafe {
             config.setWidth(width);
             config.setHeight(height);
             config.setSourceRect(source_rect);
-            // calayer expects srgb
+            config.setPixelFormat(u32::from_be_bytes(*b"BGRA"));
             config.setColorSpaceName(kCGColorSpaceSRGB);
             config.setCapturesAudio(false);
             config.setCaptureMicrophone(false);
@@ -294,6 +236,8 @@ define_class!(
         }
     }
 );
+
+use objc2::{DefinedClass, define_class, msg_send};
 
 impl StreamOutputHandler {
     fn new(cg_id: CGWindowID, app_tx: MessageSender) -> Retained<Self> {

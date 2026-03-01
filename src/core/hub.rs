@@ -7,6 +7,7 @@ use super::node::{
     SpawnMode, Window, WindowId, Workspace, WorkspaceId,
 };
 
+#[derive(Clone, Copy)]
 pub(crate) struct WindowPlacement {
     pub(crate) id: WindowId,
     pub(crate) frame: Dimension,
@@ -16,6 +17,7 @@ pub(crate) struct WindowPlacement {
     pub(crate) spawn_mode: SpawnMode,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
     #[cfg_attr(

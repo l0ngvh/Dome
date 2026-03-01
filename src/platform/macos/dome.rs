@@ -12,14 +12,15 @@ use objc2_foundation::NSRect;
 use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
-use crate::config::{Color, Config, MacosOnOpenRule, MacosWindow};
+use crate::config::{Config, MacosOnOpenRule, MacosWindow};
+use crate::core::WindowPlacement;
 use crate::core::{Dimension, Hub};
 use crate::platform::macos::accessibility::AXWindow;
 
 use super::mirror::{WindowCapture, create_captures_async};
 use super::monitor::{MonitorInfo, MonitorRegistry};
 use super::objc2_wrapper::kCGWindowNumber;
-use super::overlay::Overlays;
+use super::overlay::ContainerOverlayData;
 use super::recovery;
 use super::registry::Registry;
 use super::running_application::RunningApp;
@@ -67,6 +68,7 @@ pub(super) enum HubEvent {
     Sync,
     ScreensChanged(Vec<MonitorInfo>),
     MirrorClicked(CGWindowID),
+    TabClicked(crate::core::ContainerId, usize),
     CaptureReady {
         cg_id: CGWindowID,
         capture: WindowCapture,
@@ -84,7 +86,7 @@ pub(super) enum HubEvent {
 }
 
 pub(super) enum HubMessage {
-    Overlays(Overlays),
+    Overlays(Vec<ContainerOverlayData>),
     RegisterObservers(Vec<RunningApp>),
     CaptureFrame {
         cg_id: CGWindowID,
@@ -95,12 +97,9 @@ pub(super) enum HubMessage {
     },
     WindowShow {
         cg_id: CGWindowID,
-        frame: NSRect,
-        is_float: bool,
-        is_focus: bool,
-        edges: Vec<(NSRect, Color)>,
+        placement: WindowPlacement,
+        cocoa_frame: NSRect,
         scale: f64,
-        border: f64,
     },
     WindowHide {
         cg_id: CGWindowID,
@@ -112,6 +111,7 @@ pub(super) enum HubMessage {
     WindowDelete {
         cg_id: CGWindowID,
     },
+    ConfigChanged(Config),
     Shutdown,
 }
 
@@ -216,6 +216,8 @@ impl Dome {
                 }
                 HubEvent::ConfigChanged(new_config) => {
                     self.hub.sync_config(new_config.clone().into());
+                    self.sender
+                        .send(HubMessage::ConfigChanged(new_config.clone()));
                     self.config = new_config;
                     tracing::info!("Config reloaded");
                 }
@@ -273,6 +275,17 @@ impl Dome {
                             tracing::debug!("Failed to focus window: {e:#}");
                         }
                         self.hub.set_focus(window.window_id());
+                    }
+                }
+                HubEvent::TabClicked(container_id, tab_idx) => {
+                    let container = self.hub.get_container(container_id);
+                    if let Some(child) = container.children().get(tab_idx) {
+                        match *child {
+                            crate::core::Child::Window(wid) => {
+                                self.hub.set_focus(wid);
+                            }
+                            crate::core::Child::Container(_) => {}
+                        }
                     }
                 }
                 HubEvent::CaptureReady { cg_id, capture } => {
@@ -354,8 +367,12 @@ impl Dome {
             tracing::info!(%ax, "New native fullscreen window");
             let window_id = self.hub.insert_tiling();
             self.hub.set_fullscreen(window_id);
-            self.registry.insert(ax, window_id, self.hub.get_window(window_id));
-            self.registry.get_mut(cg_id).unwrap().set_native_fullscreen();
+            self.registry
+                .insert(ax, window_id, self.hub.get_window(window_id));
+            self.registry
+                .get_mut(cg_id)
+                .unwrap()
+                .set_native_fullscreen();
         }
     }
 
@@ -488,11 +505,8 @@ impl Dome {
     }
 
     #[tracing::instrument(skip_all)]
-    fn apply_layout(&mut self) -> Overlays {
-        let mut overlays = Overlays {
-            container_borders: vec![],
-            tab_bars: vec![],
-        };
+    fn apply_layout(&mut self) -> Vec<ContainerOverlayData> {
+        let mut overlays = Vec::new();
         let focused_monitor = self.hub.focused_monitor();
         for mp in self.hub.get_visible_placements() {
             let entry = self.monitor_registry.get_entry_mut(mp.monitor_id).unwrap();
@@ -504,8 +518,7 @@ impl Dome {
                 &self.config,
                 self.primary_full_height,
             );
-            overlays.container_borders.extend(o.container_borders);
-            overlays.tab_bars.extend(o.tab_bars);
+            overlays.extend(o);
         }
         overlays
     }

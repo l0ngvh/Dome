@@ -13,10 +13,9 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
     NSApplicationDidChangeScreenParametersNotification, NSWorkspace,
-    NSWorkspaceActiveSpaceDidChangeNotification,
-    NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidLaunchApplicationNotification,
-    NSWorkspaceDidTerminateApplicationNotification, NSWorkspaceScreensDidSleepNotification,
-    NSWorkspaceWillSleepNotification,
+    NSWorkspaceActiveSpaceDidChangeNotification, NSWorkspaceDidActivateApplicationNotification,
+    NSWorkspaceDidLaunchApplicationNotification, NSWorkspaceDidTerminateApplicationNotification,
+    NSWorkspaceScreensDidSleepNotification, NSWorkspaceWillSleepNotification,
 };
 use objc2_application_services::{AXObserver, AXUIElement};
 use objc2_core_foundation::{

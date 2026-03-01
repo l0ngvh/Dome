@@ -11,9 +11,9 @@ use crate::core::{
     MonitorPlacements, WindowPlacement,
 };
 
-use super::overlay::Overlays;
+use super::overlay::ContainerOverlayData;
 use super::registry::Registry;
-use super::rendering::{ContainerBorder, build_tab_bar, compute_container_border};
+use super::rendering::to_ns_rect;
 use super::window::FullscreenState;
 
 #[derive(Clone)]
@@ -53,11 +53,11 @@ impl MonitorEntry {
         registry: &mut Registry,
         config: &Config,
         primary_full_height: f32,
-    ) -> Overlays {
+    ) -> Vec<ContainerOverlayData> {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
                 self.apply_fullscreen(*window_id, is_focused_monitor, registry);
-                Overlays::default()
+                Vec::new()
             }
             MonitorLayout::Normal {
                 windows,
@@ -114,7 +114,7 @@ impl MonitorEntry {
         registry: &mut Registry,
         config: &Config,
         primary_full_height: f32,
-    ) -> Overlays {
+    ) -> Vec<ContainerOverlayData> {
         let new_windows: HashSet<_> = windows
             .iter()
             .filter_map(|p| registry.by_id(p.id).map(|w| w.cg_id()))
@@ -158,46 +158,24 @@ impl MonitorEntry {
                 .ok();
         }
 
-        let mut container_borders = Vec::new();
-        let mut tab_bars = Vec::new();
+        let mut container_overlays = Vec::new();
 
         for cp in containers {
-            if cp.is_tabbed {
+            let cocoa_frame = to_ns_rect(primary_full_height, cp.visible_frame);
+            let tab_titles = if cp.is_tabbed {
                 let container = hub.get_container(cp.id);
-                let titles = collect_tab_titles(container, registry);
-                if let Some(tab_bar) = build_tab_bar(
-                    cp.visible_frame,
-                    cp.id,
-                    &titles,
-                    cp.active_tab_index,
-                    config,
-                    primary_full_height,
-                ) {
-                    tab_bars.push(tab_bar);
-                }
-            }
-
-            if cp.is_focused
-                && let Some(border) = compute_container_border(
-                    cp.frame,
-                    cp.visible_frame,
-                    cp.spawn_mode,
-                    config,
-                    primary_full_height,
-                )
-            {
-                container_borders.push(ContainerBorder {
-                    key: cp.id,
-                    frame: border.frame,
-                    edges: border.edges,
-                });
-            }
+                collect_tab_titles(container, registry)
+            } else {
+                Vec::new()
+            };
+            container_overlays.push(ContainerOverlayData {
+                placement: cp.clone(),
+                tab_titles,
+                cocoa_frame,
+            });
         }
 
-        Overlays {
-            container_borders,
-            tab_bars,
-        }
+        container_overlays
     }
 }
 

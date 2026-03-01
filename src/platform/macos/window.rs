@@ -4,7 +4,7 @@ use objc2_core_graphics::CGWindowID;
 use super::dome::{HubMessage, MessageSender};
 use super::mirror::WindowCapture;
 use super::monitor::{MonitorInfo, primary_full_height_from};
-use super::rendering::{clip_to_bounds, compute_window_border, to_ns_rect};
+use super::rendering::{clip_to_bounds, to_ns_rect};
 use crate::config::Config;
 use crate::core::WindowPlacement;
 use crate::core::{Dimension, Window, WindowId};
@@ -93,27 +93,13 @@ impl MacWindow {
         let scale = self.hidden_monitor().scale;
         let primary_full_height = self.primary_full_height();
 
-        if let Some(border) = compute_window_border(
-            wp.frame,
-            wp.visible_frame,
-            wp.spawn_mode,
-            wp.is_float,
-            wp.is_focused,
-            config,
-            primary_full_height,
-        ) {
-            self.sender.send(HubMessage::WindowShow {
-                cg_id: self.ax.cg_id(),
-                frame: border.frame,
-                is_float: wp.is_float,
-                is_focus: wp.is_focused,
-                edges: border.edges,
-                scale,
-                border: config.border_size as f64,
-            });
-        } else {
-            return self.hide();
-        }
+        let cocoa_frame = to_ns_rect(primary_full_height, wp.visible_frame);
+        self.sender.send(HubMessage::WindowShow {
+            cg_id: self.ax.cg_id(),
+            placement: wp.clone(),
+            cocoa_frame,
+            scale,
+        });
 
         if wp.is_float && !wp.is_focused {
             if let Some(capture) = &mut self.capture {

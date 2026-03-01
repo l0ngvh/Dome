@@ -11,7 +11,7 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_se
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
     NSColor, NSFloatingWindowLevel, NSNormalWindowLevel, NSWindow, NSWindowCollectionBehavior,
-    NSWindowOrderingMode, NSWindowStyleMask,
+    NSWindowStyleMask,
 };
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
@@ -21,8 +21,9 @@ use objc2_core_foundation::{
 use objc2_core_graphics::{
     CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess, CGWindowID,
 };
-use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
+use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect};
 use objc2_io_surface::IOSurface;
+use objc2_metal::MTLCreateSystemDefaultDevice;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
@@ -30,12 +31,13 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 use super::dome::{Dome, HubEvent, HubMessage, MessageSender};
 use super::keyboard::KeyboardListener;
 use super::listeners::EventListener;
-use super::mirror::MirrorView;
 use super::monitor::get_all_screens;
-use super::overlay::{BorderView, OverlayManager};
+use super::overlay::{MetalOverlayView, OverlayManager, OverlayRenderer, create_metal_layer};
 use super::recovery;
-use crate::config::{Color, Config, start_config_watcher};
+use crate::config::{Config, start_config_watcher};
+use crate::core::WindowPlacement;
 use crate::ipc;
+use crate::overlay;
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -110,7 +112,15 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let _keyboard_listener = KeyboardListener::new(keymaps, is_suspended, event_tx.clone())?;
 
     let hub_tx = event_tx.clone();
-    let delegate = AppDelegate::new(mtm, event_tx, frame_rx, event_listener);
+    let device = MTLCreateSystemDefaultDevice().expect("no Metal device");
+    let delegate = AppDelegate::new(
+        mtm,
+        event_tx,
+        frame_rx,
+        event_listener,
+        device,
+        config.clone(),
+    );
     let source = create_frame_source(&delegate);
 
     let main_run_loop = CFRunLoop::main().unwrap();
@@ -177,6 +187,8 @@ struct AppDelegateIvars {
     overlay_manager: RefCell<OverlayManager>,
     overlay_windows: RefCell<HashMap<CGWindowID, OverlayWindow>>,
     event_listener: EventListener,
+    device: Retained<ProtocolObject<dyn objc2_metal::MTLDevice>>,
+    config: RefCell<Config>,
 }
 
 define_class!(
@@ -206,13 +218,17 @@ impl AppDelegate {
         hub_sender: Sender<HubEvent>,
         frame_rx: Receiver<HubMessage>,
         event_listener: EventListener,
+        device: Retained<ProtocolObject<dyn objc2_metal::MTLDevice>>,
+        config: Config,
     ) -> Retained<Self> {
         let ivars = AppDelegateIvars {
             hub_sender: hub_sender.clone(),
             frame_rx,
-            overlay_manager: RefCell::new(OverlayManager::new()),
+            overlay_manager: RefCell::new(OverlayManager::new(device.clone())),
             overlay_windows: RefCell::new(HashMap::new()),
             event_listener,
+            device,
+            config: RefCell::new(config),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
@@ -233,11 +249,13 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     while let Ok(msg) = delegate.ivars().frame_rx.try_recv() {
         match msg {
             HubMessage::Overlays(overlays) => {
-                delegate
-                    .ivars()
-                    .overlay_manager
-                    .borrow_mut()
-                    .process(mtm, overlays);
+                let config = delegate.ivars().config.borrow();
+                delegate.ivars().overlay_manager.borrow_mut().process(
+                    mtm,
+                    overlays,
+                    &config,
+                    &delegate.ivars().hub_sender,
+                );
             }
             HubMessage::RegisterObservers(apps) => {
                 for app in &apps {
@@ -245,17 +263,27 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 }
             }
             HubMessage::CaptureFrame { cg_id, surface } => {
-                if let Some(overlay) = delegate.ivars().overlay_windows.borrow().get(&cg_id) {
-                    overlay.apply_frame(&surface);
+                let config = delegate.ivars().config.borrow();
+                if let Some(overlay) = delegate
+                    .ivars()
+                    .overlay_windows
+                    .borrow_mut()
+                    .get_mut(&cg_id)
+                {
+                    overlay.apply_frame(&surface, &config);
                 }
             }
             HubMessage::CaptureFailed { cg_id } => {
-                // TODO: proper error handling
                 tracing::debug!("Failed to screen capture for {cg_id}");
             }
             HubMessage::WindowCreate { cg_id, frame } => {
-                let overlay =
-                    OverlayWindow::new(mtm, frame, cg_id, delegate.ivars().hub_sender.clone());
+                let overlay = OverlayWindow::new(
+                    mtm,
+                    frame,
+                    cg_id,
+                    delegate.ivars().hub_sender.clone(),
+                    &delegate.ivars().device,
+                );
                 delegate
                     .ivars()
                     .overlay_windows
@@ -264,23 +292,18 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
             }
             HubMessage::WindowShow {
                 cg_id,
-                frame,
-                is_float,
-                is_focus,
-                edges,
+                placement,
+                cocoa_frame,
                 scale,
-                border,
             } => {
-                let ui_window = UIWindow {
-                    frame,
-                    is_float,
-                    is_focus,
-                    edges,
-                    scale,
-                    border,
-                };
-                if let Some(overlay) = delegate.ivars().overlay_windows.borrow().get(&cg_id) {
-                    overlay.render(ui_window);
+                let config = delegate.ivars().config.borrow();
+                if let Some(overlay) = delegate
+                    .ivars()
+                    .overlay_windows
+                    .borrow_mut()
+                    .get_mut(&cg_id)
+                {
+                    overlay.render(&placement, cocoa_frame, scale, &config);
                 }
             }
             HubMessage::WindowHide { cg_id } => {
@@ -290,6 +313,9 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
             }
             HubMessage::WindowDelete { cg_id } => {
                 delegate.ivars().overlay_windows.borrow_mut().remove(&cg_id);
+            }
+            HubMessage::ConfigChanged(new_config) => {
+                *delegate.ivars().config.borrow_mut() = new_config;
             }
             HubMessage::Shutdown => {
                 NSApplication::sharedApplication(mtm).terminate(None);
@@ -301,8 +327,9 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
 
 struct OverlayWindow {
     window: Retained<NSWindow>,
-    border_view: Retained<BorderView>,
-    mirror_view: Retained<MirrorView>,
+    renderer: OverlayRenderer,
+    placement: Option<WindowPlacement>,
+    scale: f64,
 }
 
 impl OverlayWindow {
@@ -311,6 +338,7 @@ impl OverlayWindow {
         frame: NSRect,
         source_cg_id: CGWindowID,
         hub_sender: Sender<HubEvent>,
+        device: &ProtocolObject<dyn objc2_metal::MTLDevice>,
     ) -> Self {
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -332,49 +360,80 @@ impl OverlayWindow {
                 | NSWindowCollectionBehavior::IgnoresCycle,
         );
         unsafe { window.setReleasedWhenClosed(false) };
-        let content_view = window.contentView().unwrap();
 
-        let border_view = BorderView::new(mtm, frame);
-        content_view.addSubview(&border_view);
-        let mirror_view = MirrorView::new(mtm, frame, source_cg_id, hub_sender);
-        content_view.addSubview_positioned_relativeTo(
-            &mirror_view,
-            NSWindowOrderingMode::Above,
-            Some(&border_view),
+        let scale = window.backingScaleFactor();
+        let layer = create_metal_layer(device, scale);
+        layer.setDrawableSize(objc2_core_foundation::CGSize {
+            width: frame.size.width * scale,
+            height: frame.size.height * scale,
+        });
+
+        let renderer = OverlayRenderer::new(device, layer.clone());
+        let events = renderer.events();
+        let view = MetalOverlayView::new(
+            mtm,
+            NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
+            layer,
+            events,
+            Some(hub_sender),
         );
+        view.ivars().cg_id.set(source_cg_id);
+        window.setContentView(Some(&view));
+
         Self {
             window,
-            border_view,
-            mirror_view,
+            renderer,
+            placement: None,
+            scale: 1.0,
         }
     }
 
-    fn render(&self, content_window: UIWindow) {
-        let frame = content_window.frame();
-        self.window.setFrame_display(frame, true);
-        let bounds = NSRect::new(NSPoint::new(0.0, 0.0), frame.size);
-        self.border_view.setFrame(bounds);
-        self.border_view.set_edges(content_window.edges());
-        let b = content_window.border;
-        let inner = NSRect::new(
-            NSPoint::new(b, b),
-            NSSize::new(frame.size.width - 2.0 * b, frame.size.height - 2.0 * b),
-        );
-        self.mirror_view.setFrame(inner);
-        self.mirror_view.set_scale(content_window.scale());
-        let level = if content_window.is_float() {
+    fn render(
+        &mut self,
+        placement: &WindowPlacement,
+        cocoa_frame: NSRect,
+        scale: f64,
+        config: &Config,
+    ) {
+        self.placement = Some(*placement);
+        self.scale = scale;
+
+        self.window.setFrame_display(cocoa_frame, true);
+        let layer = &self.renderer.layer;
+        layer.setDrawableSize(objc2_core_foundation::CGSize {
+            width: cocoa_frame.size.width * scale,
+            height: cocoa_frame.size.height * scale,
+        });
+        layer.setContentsScale(scale);
+
+        let level = if placement.is_float {
             NSFloatingWindowLevel
         } else {
             NSNormalWindowLevel - 1
         };
         self.window.setLevel(level);
-        if !content_window.is_focus() && content_window.is_float() {
-            self.mirror_view.setHidden(false);
+
+        if !placement.is_focused && placement.is_float {
             self.window.setIgnoresMouseEvents(false);
         } else {
-            self.mirror_view.setHidden(true);
             self.window.setIgnoresMouseEvents(true);
+            self.renderer.clear_mirror();
         }
+
+        // Mirror rect: content is inset by border_size from frame, in overlay-local coords
+        let b = config.border_size;
+        let ox = placement.frame.x - placement.visible_frame.x;
+        let oy = placement.frame.y - placement.visible_frame.y;
+        self.renderer.set_mirror_rect([
+            ox + b,
+            oy + b,
+            placement.frame.width - 2.0 * b,
+            placement.frame.height - 2.0 * b,
+        ]);
+
+        self.renderer.render(scale as f32, |ui| {
+            overlay::paint_window_border(ui.painter(), placement, config);
+        });
         self.window.setIsVisible(true);
     }
 
@@ -382,40 +441,21 @@ impl OverlayWindow {
         self.window.setIsVisible(false);
     }
 
-    fn apply_frame(&self, surface: &IOSurface) {
-        self.mirror_view.apply_frame(surface);
+    fn apply_frame(&mut self, surface: &IOSurface, config: &Config) {
+        let w = surface.width();
+        let h = surface.height();
+        self.renderer
+            .set_mirror_surface(surface, w as usize, h as usize);
+        if let Some(placement) = self.placement {
+            self.renderer.render(self.scale as f32, |ui| {
+                overlay::paint_window_border(ui.painter(), &placement, config);
+            });
+        }
     }
 }
 
 impl Drop for OverlayWindow {
     fn drop(&mut self) {
         self.window.close();
-    }
-}
-
-struct UIWindow {
-    frame: NSRect,
-    is_float: bool,
-    is_focus: bool,
-    edges: Vec<(NSRect, Color)>,
-    scale: f64,
-    border: f64,
-}
-
-impl UIWindow {
-    fn frame(&self) -> NSRect {
-        self.frame
-    }
-    fn is_float(&self) -> bool {
-        self.is_float
-    }
-    fn is_focus(&self) -> bool {
-        self.is_focus
-    }
-    fn edges(&self) -> Vec<(NSRect, Color)> {
-        self.edges.clone()
-    }
-    fn scale(&self) -> f64 {
-        self.scale
     }
 }
