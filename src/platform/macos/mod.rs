@@ -9,6 +9,7 @@ mod objc2_wrapper;
 mod overlay;
 mod recovery;
 mod registry;
+mod renderer;
 mod rendering;
 mod running_application;
 mod throttle;
