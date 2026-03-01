@@ -344,6 +344,14 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
+    pub(crate) fn insert_fullscreen(&mut self) -> WindowId {
+        let current_ws = self.current_workspace();
+        let window_id = self.windows.allocate(Window::fullscreen(current_ws));
+        self.attach_fullscreen_to_workspace(current_ws, window_id);
+        window_id
+    }
+
+    #[tracing::instrument(skip(self))]
     pub(crate) fn delete_window(&mut self, id: WindowId) {
         let window = self.windows.get(id);
         let ws = window.workspace;

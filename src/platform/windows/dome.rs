@@ -6,11 +6,11 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Color, Config, WindowsOnOpenRule, WindowsWindow};
-use crate::core::{Child, ContainerId, Dimension, Hub, MonitorId, WindowId};
+use crate::core::{Child, ContainerId, Dimension, DisplayMode, Hub, MonitorId, WindowId};
 
 use super::monitor::MonitorRegistry;
 use super::recovery;
-use super::window::{Registry, Taskbar, WindowHandle, enum_windows};
+use super::window::{Registry, Taskbar, WindowHandle, enum_windows, initial_display_mode};
 use super::{ScreenInfo, compute_global_bounds};
 
 pub(super) const WM_APP_OVERLAY: u32 = 0x8001;
@@ -275,10 +275,11 @@ impl Dome {
 
     fn insert_window(&mut self, handle: &WindowHandle) -> WindowId {
         recovery::track(handle);
-        let id = if handle.should_tile() {
-            self.hub.insert_tiling()
-        } else {
-            self.hub.insert_float(handle.dimension())
+        let monitor = self.monitor_registry.find_monitor_dimension(handle.hwnd());
+        let id = match initial_display_mode(handle, monitor.as_ref()) {
+            DisplayMode::Fullscreen => self.hub.insert_fullscreen(),
+            DisplayMode::Tiling => self.hub.insert_tiling(),
+            DisplayMode::Float => self.hub.insert_float(handle.dimension()),
         };
         self.registry.insert(handle.clone(), id);
         tracing::info!("Window inserted");

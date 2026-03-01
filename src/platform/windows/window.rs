@@ -96,31 +96,6 @@ impl WindowHandle {
         true
     }
 
-    pub(super) fn should_tile(&self) -> bool {
-        let style = unsafe { GetWindowLongW(self.hwnd, GWL_STYLE) } as u32;
-        let ex_style = unsafe { GetWindowLongW(self.hwnd, GWL_EXSTYLE) } as u32;
-
-        if style & WS_POPUP.0 != 0 {
-            return false;
-        }
-        if style & WS_THICKFRAME.0 == 0 {
-            return false;
-        }
-        if ex_style & WS_EX_TOPMOST.0 != 0 {
-            return false;
-        }
-        if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
-            return false;
-        }
-        if ex_style & WS_EX_LAYERED.0 != 0 {
-            return false;
-        }
-        if ex_style & WS_EX_TRANSPARENT.0 != 0 {
-            return false;
-        }
-        true
-    }
-
     pub(super) fn dimension(&self) -> Dimension {
         let mut rect = RECT::default();
         unsafe { GetWindowRect(self.hwnd, &mut rect).ok() };
@@ -570,4 +545,34 @@ fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, mut callback: F) {
             LPARAM(&mut data as *mut _ as isize),
         );
     }
+}
+
+pub(super) fn initial_display_mode(
+    handle: &WindowHandle,
+    monitor: Option<&Dimension>,
+) -> DisplayMode {
+    if monitor.is_some_and(|m| handle.is_fullscreen(m)) {
+        return DisplayMode::Fullscreen;
+    }
+    let style = unsafe { GetWindowLongW(handle.hwnd(), GWL_STYLE) } as u32;
+    let ex_style = unsafe { GetWindowLongW(handle.hwnd(), GWL_EXSTYLE) } as u32;
+
+    if style & WS_POPUP.0 != 0 {
+        return DisplayMode::Float;
+    }
+    if style & WS_THICKFRAME.0 == 0 {
+        return DisplayMode::Float;
+    }
+    if ex_style & WS_EX_TOPMOST.0 != 0 {
+        return DisplayMode::Float;
+    }
+    if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
+        return DisplayMode::Float;
+    }
+    // WS_EX_LAYERED is not checked because apps like Steam use it for custom UI rendering.
+    // WS_EX_TRANSPARENT catches actual overlay windows that should float.
+    if ex_style & WS_EX_TRANSPARENT.0 != 0 {
+        return DisplayMode::Float;
+    }
+    DisplayMode::Tiling
 }

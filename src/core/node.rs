@@ -482,6 +482,20 @@ impl Window {
         }
     }
 
+    pub(super) fn fullscreen(workspace: WorkspaceId) -> Self {
+        Self {
+            parent: Parent::Workspace(workspace),
+            workspace,
+            dimension: Dimension::default(),
+            mode: DisplayMode::Fullscreen,
+            spawn_mode: SpawnMode::default(),
+            min_width: 0.0,
+            min_height: 0.0,
+            max_width: 0.0,
+            max_height: 0.0,
+        }
+    }
+
     #[cfg_attr(
         all(target_os = "windows", not(test)),
         expect(dead_code, reason = "used on macOS")
