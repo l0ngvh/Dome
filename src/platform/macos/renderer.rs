@@ -55,14 +55,20 @@ impl MetalBackend {
         unsafe { attr2.setOffset(16) };
         unsafe { attr2.setBufferIndex(0) };
         let layout0 = unsafe { vertex_desc.layouts().objectAtIndexedSubscript(0) };
-        unsafe { layout0.setStride(20) };
+        unsafe { layout0.setStride(VERTEX_STRIDE) };
         layout0.setStepFunction(MTLVertexStepFunction::PerVertex);
 
+        // Two pipelines share the same vertex shader but differ in fragment processing:
+        // egui premultiplies color by alpha for correct text/UI blending;
+        // mirror passes through captured pixels as-is since they're already composited.
         let egui_pipeline =
             Self::create_pipeline(device, &vertex_fn, &fragment_egui_fn, &vertex_desc);
         let mirror_pipeline =
             Self::create_pipeline(device, &vertex_fn, &fragment_mirror_fn, &vertex_desc);
 
+        // Linear smooths the mirror quad when capture resolution doesn't exactly match
+        // the drawable (rounding between logical and physical pixels). egui works with
+        // either filter mode, but its official backends also use linear.
         let sampler_desc = MTLSamplerDescriptor::new();
         sampler_desc.setMinFilter(MTLSamplerMinMagFilter::Linear);
         sampler_desc.setMagFilter(MTLSamplerMinMagFilter::Linear);
@@ -84,6 +90,7 @@ impl MetalBackend {
     }
 }
 
+/// For container overlays (tab bars). No mirror capability needed.
 pub(super) struct ContainerRenderer {
     inner: EguiRenderer,
 }
@@ -112,13 +119,14 @@ impl ContainerRenderer {
         self.inner.events()
     }
 
+    #[tracing::instrument(skip_all)]
     pub(super) fn render<R>(
         &mut self,
         pixels_per_point: f32,
         ui_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> R {
-        let (meshes, delta, screen_size, result) = self.inner.prepare(pixels_per_point, ui_fn);
-        if let Some(ctx) = self.inner.begin_frame(&delta, screen_size) {
+        let (meshes, delta, surface_size, result) = self.inner.prepare(pixels_per_point, ui_fn);
+        if let Some(ctx) = self.inner.begin_frame(&delta, surface_size) {
             self.inner.draw_egui_meshes(&ctx, &meshes, pixels_per_point);
             ctx.finish();
         }
@@ -126,6 +134,8 @@ impl ContainerRenderer {
     }
 }
 
+/// For per-window overlays. Draws borders via egui, and optionally shows a mirror of the
+/// window content from screen capture.
 pub(super) struct WindowRenderer {
     inner: EguiRenderer,
     mirror_texture: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
@@ -156,9 +166,12 @@ impl WindowRenderer {
         self.inner.events()
     }
 
+    /// Wraps the IOSurface as a Metal texture for zero-copy GPU reads from the capture buffer.
+    #[tracing::instrument(skip_all)]
     pub(super) fn set_mirror_surface(&mut self, surface: &IOSurface) {
         let w = surface.width() as usize;
         let h = surface.height() as usize;
+        // BGRA8 to match SCStream's capture pixel format. No mipmaps — displayed at ~1:1.
         let desc = unsafe {
             MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
                 MTLPixelFormat::BGRA8Unorm,
@@ -167,30 +180,39 @@ impl WindowRenderer {
                 false,
             )
         };
+        // ShaderRead-only — the GPU only samples this; capture writes to the IOSurface directly.
         desc.setUsage(MTLTextureUsage::ShaderRead);
+        // objc2 has separate IOSurface and IOSurfaceRef types for the same underlying CF type.
         let surface_ref: &objc2_io_surface::IOSurfaceRef =
             unsafe { &*(surface as *const IOSurface as *const objc2_io_surface::IOSurfaceRef) };
         self.mirror_texture = self
             .inner
             .backend()
             .device
+            // Plane 0 — BGRA is a single interleaved plane (unlike YCbCr which has separate planes).
             .newTextureWithDescriptor_iosurface_plane(&desc, surface_ref, 0);
+        if self.mirror_texture.is_none() {
+            tracing::trace!("failed to create mirror texture from IOSurface");
+        }
     }
 
     pub(super) fn clear_mirror(&mut self) {
         self.mirror_texture = None;
     }
 
+    #[tracing::instrument(skip_all)]
     pub(super) fn render<R>(
         &mut self,
         pixels_per_point: f32,
-        mirror_rect: Option<[f32; 4]>,
+        visible_content_bound: Option<[f32; 4]>,
         ui_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> R {
-        let (meshes, delta, screen_size, result) = self.inner.prepare(pixels_per_point, ui_fn);
-        if let Some(ctx) = self.inner.begin_frame(&delta, screen_size) {
-            if let Some(tex) = &self.mirror_texture {
-                draw_mirror_quad(self.inner.backend(), &ctx, tex, mirror_rect, screen_size);
+        let (meshes, delta, surface_size, result) = self.inner.prepare(pixels_per_point, ui_fn);
+        if let Some(ctx) = self.inner.begin_frame(&delta, surface_size) {
+            if let Some(tex) = &self.mirror_texture
+                && let Some(visible_content_bound) = visible_content_bound
+            {
+                draw_mirror_quad(self.inner.backend(), &ctx, tex, visible_content_bound);
             }
             self.inner.draw_egui_meshes(&ctx, &meshes, pixels_per_point);
             ctx.finish();
@@ -217,12 +239,14 @@ struct VertexOut {
 
 vertex VertexOut vertex_main(
     VertexIn in [[stage_in]],
-    constant float2 &screen_size [[buffer(1)]]
+    constant float2 &surface_size [[buffer(1)]]
 ) {
     VertexOut out;
+    // Convert from egui coords (top-left origin, Y-down, in points) to Metal NDC
+    // (-1..1, center origin, Y-up). Y is negated to flip the axis.
     out.position = float4(
-        2.0 * in.pos.x / screen_size.x - 1.0,
-        -(2.0 * in.pos.y / screen_size.y - 1.0),
+        2.0 * in.pos.x / surface_size.x - 1.0,
+        -(2.0 * in.pos.y / surface_size.y - 1.0),
         0.0,
         1.0
     );
@@ -250,6 +274,10 @@ fragment float4 fragment_mirror(
 }
 "#;
 
+/// pos(f32×2) + uv(f32×2) + color(u8×4). Shared by egui meshes and mirror quad
+/// so both can use the same vertex descriptor and pipeline layout.
+const VERTEX_STRIDE: usize = 20;
+
 impl MetalBackend {
     fn create_pipeline(
         device: &ProtocolObject<dyn MTLDevice>,
@@ -265,6 +293,7 @@ impl MetalBackend {
         let color0 = unsafe { desc.colorAttachments().objectAtIndexedSubscript(0) };
         color0.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
         color0.setBlendingEnabled(true);
+        // Source is One (not SrcAlpha) because egui outputs premultiplied-alpha colors.
         color0.setSourceRGBBlendFactor(MTLBlendFactor::One);
         color0.setDestinationRGBBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
         color0.setSourceAlphaBlendFactor(MTLBlendFactor::OneMinusDestinationAlpha);
@@ -276,6 +305,7 @@ impl MetalBackend {
     }
 }
 
+#[must_use]
 struct FrameContext {
     encoder: Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>,
     cmd_buf: Retained<ProtocolObject<dyn MTLCommandBuffer>>,
@@ -285,16 +315,29 @@ struct FrameContext {
 }
 
 impl FrameContext {
+    /// Registers drawable presentation, then Drop handles the rest.
     fn finish(self) {
-        self.encoder.endEncoding();
         unsafe {
             let _: () = objc2::msg_send![&*self.cmd_buf, presentDrawable: &*self.drawable];
         }
+    }
+}
+
+impl Drop for FrameContext {
+    /// Always commits the command buffer so the drawable returns to the pool.
+    /// On the normal path (finish called), this also presents the new frame.
+    /// On error paths, no present was registered — previous frame stays visible.
+    fn drop(&mut self) {
+        self.encoder.endEncoding();
         self.cmd_buf.commit();
+        // Overlays are event-driven (not vsync), so we wait for the GPU to finish
+        // before returning to avoid tearing.
         self.cmd_buf.waitUntilCompleted();
     }
 }
 
+/// Split into prepare → begin_frame → draw_egui_meshes so callers can inject custom
+/// draw calls (e.g. mirror quad) between Metal setup and egui mesh drawing.
 struct EguiRenderer {
     backend: Rc<MetalBackend>,
     layer: Retained<CAMetalLayer>,
@@ -308,6 +351,9 @@ impl EguiRenderer {
         let layer = CAMetalLayer::layer();
         layer.setDevice(Some(backend.device()));
         layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+        // Overlays composite over other windows, so non-drawn areas must be fully transparent.
+        // Must be premultiplied (0,0,0,0) — non-zero RGB with zero alpha would leak color
+        // through the premultiplied-alpha blend.
         layer.setOpaque(false);
         layer.setContentsScale(scale);
         layer.setDrawableSize(objc2_core_foundation::CGSize {
@@ -395,21 +441,29 @@ impl EguiRenderer {
         )
     }
 
+    #[tracing::instrument(skip_all)]
     fn begin_frame(
         &mut self,
         textures_delta: &egui::TexturesDelta,
-        screen_size_points: [f32; 2],
+        surface_size_points: [f32; 2],
     ) -> Option<FrameContext> {
         self.update_textures(textures_delta);
 
-        let drawable = self.layer.nextDrawable()?;
+        let Some(drawable) = self.layer.nextDrawable() else {
+            tracing::trace!("no drawable available");
+            return None;
+        };
         let b = &self.backend;
-        let cmd_buf = b.command_queue.commandBuffer()?;
+        let Some(cmd_buf) = b.command_queue.commandBuffer() else {
+            tracing::trace!("failed to create command buffer");
+            return None;
+        };
 
         let pass_desc = MTLRenderPassDescriptor::renderPassDescriptor();
         let color0 = unsafe { pass_desc.colorAttachments().objectAtIndexedSubscript(0) };
         color0.setTexture(Some(&drawable.texture()));
         color0.setLoadAction(MTLLoadAction::Clear);
+        // Premultiplied transparent — see setOpaque(false) above.
         color0.setClearColor(MTLClearColor {
             red: 0.0,
             green: 0.0,
@@ -418,7 +472,10 @@ impl EguiRenderer {
         });
         color0.setStoreAction(MTLStoreAction::Store);
 
-        let encoder = cmd_buf.renderCommandEncoderWithDescriptor(&pass_desc)?;
+        let Some(encoder) = cmd_buf.renderCommandEncoderWithDescriptor(&pass_desc) else {
+            tracing::trace!("failed to create render encoder");
+            return None;
+        };
 
         let drawable_w = drawable.texture().width();
         let drawable_h = drawable.texture().height();
@@ -435,7 +492,7 @@ impl EguiRenderer {
         unsafe {
             encoder.setFragmentSamplerState_atIndex(Some(&b.sampler), 0);
             encoder.setVertexBytes_length_atIndex(
-                NonNull::new(screen_size_points.as_ptr() as *mut c_void).unwrap(),
+                NonNull::new(surface_size_points.as_ptr() as *mut c_void).unwrap(),
                 8,
                 1,
             );
@@ -456,6 +513,7 @@ impl EguiRenderer {
         })
     }
 
+    #[tracing::instrument(skip_all)]
     fn draw_egui_meshes(
         &self,
         ctx: &FrameContext,
@@ -481,6 +539,7 @@ impl EguiRenderer {
                 continue;
             };
 
+            // Clamp to drawable bounds — Metal crashes if scissor rect exceeds drawable.
             let ppp = pixels_per_point;
             let sx = (clip_rect.min.x * ppp).round() as NSUInteger;
             let sy = (clip_rect.min.y * ppp).round() as NSUInteger;
@@ -496,22 +555,26 @@ impl EguiRenderer {
                 continue;
             }
 
-            let vbuf = unsafe {
+            let Some(vbuf) = (unsafe {
                 b.device.newBufferWithBytes_length_options(
                     NonNull::new(mesh.vertices.as_ptr() as *mut c_void).unwrap(),
-                    (mesh.vertices.len() * 20) as NSUInteger,
+                    (mesh.vertices.len() * VERTEX_STRIDE) as NSUInteger,
                     MTLResourceOptions::StorageModeShared,
                 )
-            }
-            .expect("failed to create vertex buffer");
-            let ibuf = unsafe {
+            }) else {
+                tracing::trace!("failed to create vertex buffer");
+                continue;
+            };
+            let Some(ibuf) = (unsafe {
                 b.device.newBufferWithBytes_length_options(
                     NonNull::new(mesh.indices.as_ptr() as *mut c_void).unwrap(),
                     (mesh.indices.len() * 4) as NSUInteger,
                     MTLResourceOptions::StorageModeShared,
                 )
-            }
-            .expect("failed to create index buffer");
+            }) else {
+                tracing::trace!("failed to create index buffer");
+                continue;
+            };
 
             encoder.setScissorRect(MTLScissorRect {
                 x: sx,
@@ -533,6 +596,7 @@ impl EguiRenderer {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     fn update_textures(&mut self, delta: &egui::TexturesDelta) {
         for (id, image_delta) in &delta.set {
             let pixels: Vec<u8> = match &image_delta.image {
@@ -579,11 +643,10 @@ impl EguiRenderer {
                 };
                 desc.setUsage(MTLTextureUsage::ShaderRead);
                 desc.setStorageMode(MTLStorageMode::Shared);
-                let tex = self
-                    .backend
-                    .device
-                    .newTextureWithDescriptor(&desc)
-                    .expect("failed to create texture");
+                let Some(tex) = self.backend.device.newTextureWithDescriptor(&desc) else {
+                    tracing::trace!("failed to create egui texture");
+                    continue;
+                };
                 let region = MTLRegion {
                     origin: MTLOrigin { x: 0, y: 0, z: 0 },
                     size: MTLSize {
@@ -609,23 +672,29 @@ impl EguiRenderer {
     }
 }
 
+/// `visible_content_bound` is `[x, y, w, h]` in logical points, overlay-local (top-left origin).
+/// Vertices share the same coordinate space as egui meshes, so `vertex_main` handles both.
+#[tracing::instrument(skip_all)]
 fn draw_mirror_quad(
     b: &MetalBackend,
     ctx: &FrameContext,
     texture: &ProtocolObject<dyn MTLTexture>,
-    mirror_rect: Option<[f32; 4]>,
-    screen_size: [f32; 2],
+    visible_content_bound: [f32; 4],
 ) {
-    let [mx, my, mw, mh] = mirror_rect.unwrap_or([0.0, 0.0, screen_size[0], screen_size[1]]);
+    let [mx, my, mw, mh] = visible_content_bound;
     let encoder = &ctx.encoder;
     encoder.setRenderPipelineState(&b.mirror_pipeline);
+    // [pos_x, pos_y, u, v, _]. UVs 0→1 sample the full texture, which already
+    // contains only the visible portion (capture source rect matches mirror_rect).
     let verts: [[f32; 5]; 4] = [
         [mx, my, 0.0, 0.0, 0.0],
         [mx + mw, my, 1.0, 0.0, 0.0],
         [mx, my + mh, 0.0, 1.0, 0.0],
         [mx + mw, my + mh, 1.0, 1.0, 0.0],
     ];
-    let mut vert_data = Vec::with_capacity(4 * 20);
+    // Pack into vertex layout: 4 floats (pos + uv) + 4 color bytes.
+    // Color is white — unused by mirror fragment shader but fills the shared layout.
+    let mut vert_data = Vec::with_capacity(4 * VERTEX_STRIDE);
     for v in &verts {
         vert_data.extend_from_slice(&v[0].to_le_bytes());
         vert_data.extend_from_slice(&v[1].to_le_bytes());
@@ -633,23 +702,31 @@ fn draw_mirror_quad(
         vert_data.extend_from_slice(&v[3].to_le_bytes());
         vert_data.extend_from_slice(&[255, 255, 255, 255]);
     }
+    // Two triangles forming a quad: top-left (0,1,2) and bottom-right (2,1,3).
     let indices: [u32; 6] = [0, 1, 2, 2, 1, 3];
-    let vbuf = unsafe {
+    // Shared storage — CPU writes, GPU reads. Fine for small per-frame buffers.
+    // Vertex buffer: per-corner data (pos, uv, color).
+    // Index buffer: which vertices form each triangle, so shared corners aren't duplicated.
+    let Some(vbuf) = (unsafe {
         b.device.newBufferWithBytes_length_options(
             NonNull::new(vert_data.as_ptr() as *mut c_void).unwrap(),
             vert_data.len() as NSUInteger,
             MTLResourceOptions::StorageModeShared,
         )
-    }
-    .expect("failed to create vertex buffer");
-    let ibuf = unsafe {
+    }) else {
+        tracing::trace!("failed to create mirror vertex buffer");
+        return;
+    };
+    let Some(ibuf) = (unsafe {
         b.device.newBufferWithBytes_length_options(
             NonNull::new(indices.as_ptr() as *mut c_void).unwrap(),
             (indices.len() * 4) as NSUInteger,
             MTLResourceOptions::StorageModeShared,
         )
-    }
-    .expect("failed to create index buffer");
+    }) else {
+        tracing::trace!("failed to create mirror index buffer");
+        return;
+    };
 
     unsafe {
         encoder.setVertexBuffer_offset_atIndex(Some(&vbuf), 0, 0);

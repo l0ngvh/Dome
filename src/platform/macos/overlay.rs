@@ -25,7 +25,7 @@ pub(super) struct OverlayWindow {
     window: Retained<NSWindow>,
     renderer: WindowRenderer,
     placement: Option<WindowPlacement>,
-    mirror_rect: Option<[f32; 4]>,
+    visible_content_bounds: Option<[f32; 4]>,
     scale: f64,
     config: Config,
 }
@@ -77,7 +77,7 @@ impl OverlayWindow {
             window,
             renderer,
             placement: None,
-            mirror_rect: None,
+            visible_content_bounds: None,
             scale: 1.0,
             config,
         }
@@ -88,7 +88,7 @@ impl OverlayWindow {
         placement: &WindowPlacement,
         cocoa_frame: NSRect,
         scale: f64,
-        mirror_rect: Option<Dimension>,
+        visible_content_dim: Option<Dimension>,
     ) {
         self.placement = Some(*placement);
         self.scale = scale;
@@ -111,13 +111,13 @@ impl OverlayWindow {
             self.renderer.clear_mirror();
         }
 
-        self.mirror_rect = mirror_rect.map(|mr| {
+        self.visible_content_bounds = visible_content_dim.map(|mr| {
             let v = placement.visible_frame;
             [mr.x - v.x, mr.y - v.y, mr.width, mr.height]
         });
 
         let config = &self.config;
-        let mr = self.mirror_rect;
+        let mr = self.visible_content_bounds;
         self.renderer.render(scale as f32, mr, |ui| {
             overlay::paint_window_border(ui.painter(), placement, config);
         });
@@ -128,7 +128,7 @@ impl OverlayWindow {
         self.config = config;
         if let Some(placement) = self.placement {
             let config = &self.config;
-            let mr = self.mirror_rect;
+            let mr = self.visible_content_bounds;
             self.renderer.render(self.scale as f32, mr, |ui| {
                 overlay::paint_window_border(ui.painter(), &placement, config);
             });
@@ -143,7 +143,7 @@ impl OverlayWindow {
         self.renderer.set_mirror_surface(surface);
         if let Some(placement) = self.placement {
             let config = &self.config;
-            let mr = self.mirror_rect;
+            let mr = self.visible_content_bounds;
             self.renderer.render(self.scale as f32, mr, |ui| {
                 overlay::paint_window_border(ui.painter(), &placement, config);
             });
