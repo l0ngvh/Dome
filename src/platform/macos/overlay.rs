@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
@@ -62,13 +62,11 @@ impl OverlayWindow {
 
         let scale = window.backingScaleFactor();
         let renderer = WindowRenderer::new(backend, scale, frame.size.width, frame.size.height);
-        let events = renderer.events();
         let view = MetalOverlayView::new(
             mtm,
             NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
             renderer.layer(),
-            events,
-            Some(hub_sender),
+            hub_sender,
         );
         view.ivars().cg_id.set(source_cg_id);
         window.setContentView(Some(&view));
@@ -173,12 +171,9 @@ impl OverlayManager {
     }
 
     pub(super) fn set_config(&mut self, config: Config) {
-        self.config = config;
-        for entry in self.containers.values_mut() {
-            let config = &self.config;
-            entry.renderer.render(entry.scale as f32, |ui| {
-                overlay::show_container(ui, &entry.placement, &entry.tab_titles, config)
-            });
+        self.config = config.clone();
+        for entry in self.containers.values() {
+            entry.view.set_config(config.clone());
         }
     }
 
@@ -202,57 +197,36 @@ impl OverlayManager {
             let id = data.placement.id;
             let scale = self.backing_scale(mtm);
 
-            if let Some(entry) = self.containers.get_mut(&id) {
-                entry.placement = data.placement;
-                entry.tab_titles = data.tab_titles;
-                entry.scale = scale;
+            if let Some(entry) = self.containers.get(&id) {
                 entry.window.setFrame_display(data.cocoa_frame, true);
-                let size = data.cocoa_frame.size;
-                entry.renderer.resize(size.width, size.height, scale);
-                let config = &self.config;
-                let clicked = entry.renderer.render(scale as f32, |ui| {
-                    overlay::show_container(ui, &entry.placement, &entry.tab_titles, config)
-                });
-                if let Some(tab_idx) = clicked {
-                    hub_sender.send(HubEvent::TabClicked(id, tab_idx)).ok();
-                }
+                entry.view.update(
+                    data.placement,
+                    data.tab_titles,
+                    scale,
+                    data.cocoa_frame.size,
+                );
             } else {
-                let window = create_overlay_window(mtm, data.cocoa_frame, NSNormalWindowLevel - 1);
+                let window = create_overlay_window(mtm, data.cocoa_frame, NSNormalWindowLevel);
                 window.setIgnoresMouseEvents(false);
                 window.setAcceptsMouseMovedEvents(true);
 
                 let size = data.cocoa_frame.size;
-                let mut renderer =
-                    ContainerRenderer::new(self.backend.clone(), scale, size.width, size.height);
-                let events = renderer.events();
-                let view = MetalOverlayView::new(
+                let view = ContainerOverlayView::new(
                     mtm,
-                    NSRect::new(NSPoint::new(0.0, 0.0), data.cocoa_frame.size),
-                    renderer.layer(),
-                    events,
-                    None,
+                    NSRect::new(NSPoint::new(0.0, 0.0), size),
+                    self.backend.clone(),
+                    scale,
+                    size,
+                    data.placement,
+                    data.tab_titles,
+                    self.config.clone(),
+                    hub_sender.clone(),
                 );
                 window.setContentView(Some(&view));
                 window.orderFront(None);
 
-                let config = &self.config;
-                let clicked = renderer.render(scale as f32, |ui| {
-                    overlay::show_container(ui, &data.placement, &data.tab_titles, config)
-                });
-                if let Some(tab_idx) = clicked {
-                    hub_sender.send(HubEvent::TabClicked(id, tab_idx)).ok();
-                }
-
-                self.containers.insert(
-                    id,
-                    ContainerOverlayEntry {
-                        window,
-                        renderer,
-                        placement: data.placement,
-                        tab_titles: data.tab_titles,
-                        scale,
-                    },
-                );
+                self.containers
+                    .insert(id, ContainerOverlayEntry { window, view });
             }
         }
     }
@@ -272,10 +246,7 @@ pub(super) struct ContainerOverlayData {
 
 struct ContainerOverlayEntry {
     window: Retained<NSWindow>,
-    renderer: ContainerRenderer,
-    placement: ContainerPlacement,
-    tab_titles: Vec<String>,
-    scale: f64,
+    view: Retained<ContainerOverlayView>,
 }
 
 fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> Retained<NSWindow> {
@@ -300,9 +271,8 @@ fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> 
 
 pub(super) struct MetalOverlayViewIvars {
     layer: Retained<CAMetalLayer>,
-    events: Rc<RefCell<Vec<egui::Event>>>,
-    hub_sender: Option<Sender<HubEvent>>,
-    pub(super) cg_id: std::cell::Cell<u32>,
+    hub_sender: Sender<HubEvent>,
+    pub(super) cg_id: Cell<u32>,
 }
 
 define_class!(
@@ -332,55 +302,11 @@ define_class!(
         }
 
         #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, event: &NSEvent) {
-            if let Some(sender) = &self.ivars().hub_sender {
-                sender
-                    .send(HubEvent::MirrorClicked(self.ivars().cg_id.get()))
-                    .ok();
-            } else {
-                let pos = self.event_pos(event);
-                self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed: true,
-                    modifiers: egui::Modifiers::NONE,
-                });
-            }
-        }
-
-        #[unsafe(method(mouseUp:))]
-        fn mouse_up(&self, event: &NSEvent) {
-            if self.ivars().hub_sender.is_none() {
-                let pos = self.event_pos(event);
-                self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: egui::Modifiers::NONE,
-                });
-            }
-        }
-
-        #[unsafe(method(mouseMoved:))]
-        fn mouse_moved(&self, event: &NSEvent) {
-            if self.ivars().hub_sender.is_none() {
-                let pos = self.event_pos(event);
-                self.ivars()
-                    .events
-                    .borrow_mut()
-                    .push(egui::Event::PointerMoved(pos));
-            }
-        }
-
-        #[unsafe(method(mouseDragged:))]
-        fn mouse_dragged(&self, event: &NSEvent) {
-            if self.ivars().hub_sender.is_none() {
-                let pos = self.event_pos(event);
-                self.ivars()
-                    .events
-                    .borrow_mut()
-                    .push(egui::Event::PointerMoved(pos));
-            }
+        fn mouse_down(&self, _event: &NSEvent) {
+            self.ivars()
+                .hub_sender
+                .send(HubEvent::MirrorClicked(self.ivars().cg_id.get()))
+                .ok();
         }
 
         #[unsafe(method(acceptsFirstMouse:))]
@@ -395,17 +321,169 @@ impl MetalOverlayView {
         mtm: MainThreadMarker,
         frame: NSRect,
         layer: Retained<CAMetalLayer>,
-        events: Rc<RefCell<Vec<egui::Event>>>,
-        hub_sender: Option<Sender<HubEvent>>,
+        hub_sender: Sender<HubEvent>,
     ) -> Retained<Self> {
         let ivars = MetalOverlayViewIvars {
             layer,
-            events,
             hub_sender,
-            cg_id: std::cell::Cell::new(0),
+            cg_id: Cell::new(0),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), initWithFrame: frame] }
+    }
+}
+
+struct ContainerOverlayViewIvars {
+    layer: Retained<CAMetalLayer>,
+    events: Rc<RefCell<Vec<egui::Event>>>,
+    renderer: RefCell<ContainerRenderer>,
+    placement: Cell<ContainerPlacement>,
+    tab_titles: RefCell<Vec<String>>,
+    config: RefCell<Config>,
+    scale: Cell<f64>,
+    container_id: Cell<ContainerId>,
+    hub_sender: Sender<HubEvent>,
+}
+
+define_class!(
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = ContainerOverlayViewIvars]
+    struct ContainerOverlayView;
+
+    unsafe impl NSObjectProtocol for ContainerOverlayView {}
+
+    impl ContainerOverlayView {
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            let pos = self.event_pos(event);
+            self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            });
+
+            self.render_now();
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            let pos = self.event_pos(event);
+            self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            self.render_now();
+        }
+
+        #[unsafe(method(mouseMoved:))]
+        fn mouse_moved(&self, event: &NSEvent) {
+            let pos = self.event_pos(event);
+            self.ivars()
+                .events
+                .borrow_mut()
+                .push(egui::Event::PointerMoved(pos));
+            self.render_now();
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            let pos = self.event_pos(event);
+            self.ivars()
+                .events
+                .borrow_mut()
+                .push(egui::Event::PointerMoved(pos));
+            self.render_now();
+        }
+
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+            true
+        }
+    }
+);
+
+impl ContainerOverlayView {
+    fn new(
+        mtm: MainThreadMarker,
+        frame: NSRect,
+        backend: Rc<MetalBackend>,
+        scale: f64,
+        size: NSSize,
+        placement: ContainerPlacement,
+        tab_titles: Vec<String>,
+        config: Config,
+        hub_sender: Sender<HubEvent>,
+    ) -> Retained<Self> {
+        let renderer = ContainerRenderer::new(backend, scale, size.width, size.height);
+        let events = renderer.events();
+        let layer = renderer.layer();
+        let ivars = ContainerOverlayViewIvars {
+            layer: layer.clone(),
+            events,
+            renderer: RefCell::new(renderer),
+            placement: Cell::new(placement),
+            tab_titles: RefCell::new(tab_titles),
+            config: RefCell::new(config),
+            scale: Cell::new(scale),
+            container_id: Cell::new(placement.id),
+            hub_sender,
+        };
+        let this = Self::alloc(mtm).set_ivars(ivars);
+        let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        view.setLayer(Some(&layer));
+        view.setWantsLayer(true);
+        view.render_now();
+        view
+    }
+
+    fn update(
+        &self,
+        placement: ContainerPlacement,
+        tab_titles: Vec<String>,
+        scale: f64,
+        size: NSSize,
+    ) {
+        let ivars = self.ivars();
+        ivars.placement.set(placement);
+        ivars.container_id.set(placement.id);
+        *ivars.tab_titles.borrow_mut() = tab_titles;
+        ivars.scale.set(scale);
+        ivars
+            .renderer
+            .borrow()
+            .resize(size.width, size.height, scale);
+        self.render_now();
+    }
+
+    fn set_config(&self, config: Config) {
+        *self.ivars().config.borrow_mut() = config;
+        self.render_now();
+    }
+
+    fn render_now(&self) {
+        let ivars = self.ivars();
+        let scale = ivars.scale.get();
+        let placement = ivars.placement.get();
+        let tab_titles = ivars.tab_titles.borrow();
+        let config = ivars.config.borrow();
+        let clicked = ivars.renderer.borrow_mut().render(scale as f32, |ui| {
+            overlay::show_container(ui, &placement, &tab_titles, &config)
+        });
+        if let Some(tab_idx) = clicked {
+            ivars
+                .hub_sender
+                .send(HubEvent::TabClicked(ivars.container_id.get(), tab_idx))
+                .ok();
+        }
     }
 
     fn event_pos(&self, event: &NSEvent) -> egui::Pos2 {

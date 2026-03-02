@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::sync::mpsc::{Receiver, Sender};
 
 use dispatch2::{DispatchQoS, DispatchQueue, DispatchRetained, GlobalQueueIdentifier};
@@ -13,8 +14,8 @@ use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
-use crate::core::WindowPlacement;
-use crate::core::{Dimension, Hub};
+use crate::core::{Child, Dimension, Hub};
+use crate::core::{ContainerId, WindowPlacement};
 use crate::platform::macos::accessibility::AXWindow;
 
 use super::mirror::{WindowCapture, create_captures_async};
@@ -25,13 +26,6 @@ use super::recovery;
 use super::registry::Registry;
 use super::running_application::RunningApp;
 use super::window::{FullscreenState, FullscreenTransition, MacWindow};
-
-pub(super) struct VisibleWindowsReconciled {
-    pid: i32,
-    is_hidden: bool,
-    to_remove: Vec<CGWindowID>,
-    to_add: Vec<AXWindow>,
-}
 
 #[expect(
     clippy::large_enum_variant,
@@ -68,7 +62,7 @@ pub(super) enum HubEvent {
     Sync,
     ScreensChanged(Vec<MonitorInfo>),
     MirrorClicked(CGWindowID),
-    TabClicked(crate::core::ContainerId, usize),
+    TabClicked(ContainerId, usize),
     CaptureReady {
         cg_id: CGWindowID,
         capture: WindowCapture,
@@ -83,6 +77,39 @@ pub(super) enum HubEvent {
     /// native fullscreen moves windows to a separate Space.
     SpaceChanged,
     Shutdown,
+}
+
+impl fmt::Display for HubEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::VisibleWindowsChanged { pid } => write!(f, "VisibleWindowsChanged(pid={pid})"),
+            Self::SyncFocus { pid } => write!(f, "SyncFocus(pid={pid})"),
+            Self::AppTerminated { pid } => write!(f, "AppTerminated(pid={pid})"),
+            Self::TitleChanged(cg_id) => write!(f, "TitleChanged(cg_id={cg_id})"),
+            Self::WindowMovedOrResized { pid } => {
+                write!(f, "WindowMovedOrResized(pid={pid})")
+            }
+            Self::Action(actions) => write!(f, "Action({actions})"),
+            Self::ConfigChanged(_) => write!(f, "ConfigChanged"),
+            Self::Sync => write!(f, "Sync"),
+            Self::ScreensChanged(monitors) => {
+                write!(f, "ScreensChanged(count={})", monitors.len())
+            }
+            Self::MirrorClicked(cg_id) => write!(f, "MirrorClicked(cg_id={cg_id})"),
+            Self::TabClicked(container_id, tab_idx) => {
+                write!(f, "TabClicked({container_id}, tab_idx={tab_idx})")
+            }
+            Self::CaptureReady { cg_id, .. } => write!(f, "CaptureReady(cg_id={cg_id})"),
+            Self::AppVisibleWindowsReconciled(r) => {
+                write!(f, "AppVisibleWindowsReconciled(pid={})", r.pid)
+            }
+            Self::AllVisibleWindowsReconciled { apps, .. } => {
+                write!(f, "AllVisibleWindowsReconciled(apps={})", apps.len())
+            }
+            Self::SpaceChanged => write!(f, "SpaceChanged"),
+            Self::Shutdown => write!(f, "Shutdown"),
+        }
+    }
 }
 
 pub(super) enum HubMessage {
@@ -208,6 +235,7 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(%event))]
     fn handle_event(&mut self, event: HubEvent) {
         autoreleasepool(|_| {
             match event {
@@ -280,12 +308,13 @@ impl Dome {
                 }
                 HubEvent::TabClicked(container_id, tab_idx) => {
                     let container = self.hub.get_container(container_id);
+                    // FIXME: This is wrong. Hub must expose an fn to change tab
                     if let Some(child) = container.children().get(tab_idx) {
                         match *child {
-                            crate::core::Child::Window(wid) => {
+                            Child::Window(wid) => {
                                 self.hub.set_focus(wid);
                             }
-                            crate::core::Child::Container(_) => {}
+                            Child::Container(_) => {}
                         }
                     }
                 }
@@ -603,6 +632,13 @@ impl Drop for Dome {
         recovery::restore_all();
         self.sender.send(HubMessage::Shutdown);
     }
+}
+
+struct VisibleWindowsReconciled {
+    pid: i32,
+    is_hidden: bool,
+    to_remove: Vec<CGWindowID>,
+    to_add: Vec<AXWindow>,
 }
 
 fn dispatch_refresh_app_windows(

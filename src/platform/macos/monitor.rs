@@ -16,7 +16,7 @@ use super::overlay::ContainerOverlayData;
 use super::registry::Registry;
 use super::window::FullscreenState;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct MonitorInfo {
     pub(super) display_id: CGDirectDisplayID,
     pub(super) name: String,
