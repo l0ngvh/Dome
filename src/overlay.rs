@@ -37,47 +37,131 @@ pub(crate) fn show_container(
     tab_titles: &[String],
     config: &Config,
 ) -> Option<usize> {
-    if placement.is_focused {
-        let colors = border_colors(true, false, placement.spawn_mode, config);
-        paint_border_edges(
-            ui.painter(),
-            placement.frame,
-            placement.visible_frame,
-            config.border_size,
-            colors,
-        );
-    }
-
-    if !placement.is_tabbed || tab_titles.is_empty() {
-        return None;
-    }
-
     let vf = placement.visible_frame;
     let f = placement.frame;
     let ox = f.x - vf.x;
     let oy = f.y - vf.y;
     let b = config.border_size;
     let w = f.width;
+    let h = f.height;
+    let is_tabbed = placement.is_tabbed && !tab_titles.is_empty();
+    let th = config.tab_bar_height;
+
+    let border_c = to_color32(if placement.is_focused {
+        config.focused_color
+    } else {
+        config.border_color
+    });
+
+    if placement.is_focused {
+        let colors = border_colors(true, false, placement.spawn_mode, config);
+        let painter = ui.painter();
+
+        if is_tabbed {
+            // Left border: from tab bar bottom to container bottom
+            painter.rect_filled(
+                Rect::from_min_size(pos2(ox, oy + th), vec2(b, h - th - b)),
+                CornerRadius::ZERO,
+                colors[3],
+            );
+            // Right border: from tab bar bottom to container bottom
+            painter.rect_filled(
+                Rect::from_min_size(pos2(ox + w - b, oy + th), vec2(b, h - th - b)),
+                CornerRadius::ZERO,
+                colors[1],
+            );
+            // Bottom border
+            painter.rect_filled(
+                Rect::from_min_size(pos2(ox, oy + h - b), vec2(w, b)),
+                CornerRadius::ZERO,
+                colors[2],
+            );
+        } else {
+            paint_border_edges(painter, f, vf, b, colors);
+        }
+    }
+
+    if !is_tabbed {
+        return None;
+    }
 
     let bg = to_color32(config.tab_bar_background_color);
     let active_bg = to_color32(config.active_tab_background_color);
 
-    let tab_bar_rect = Rect::from_min_size(pos2(ox, oy + b), vec2(w, config.tab_bar_height));
+    // Tab bar background
+    let tab_bar_rect = Rect::from_min_size(pos2(ox, oy), vec2(w, th));
     ui.painter()
         .rect_filled(tab_bar_rect, CornerRadius::ZERO, bg);
 
+    // Tab bar borders: top, bottom, left, right
+    ui.painter().rect_filled(
+        Rect::from_min_size(pos2(ox, oy), vec2(w, b)),
+        CornerRadius::ZERO,
+        border_c,
+    );
+    ui.painter().rect_filled(
+        Rect::from_min_size(pos2(ox, oy + th - b), vec2(w, b)),
+        CornerRadius::ZERO,
+        border_c,
+    );
+    ui.painter().rect_filled(
+        Rect::from_min_size(pos2(ox, oy + b), vec2(b, th - 2.0 * b)),
+        CornerRadius::ZERO,
+        border_c,
+    );
+    ui.painter().rect_filled(
+        Rect::from_min_size(pos2(ox + w - b, oy + b), vec2(b, th - 2.0 * b)),
+        CornerRadius::ZERO,
+        border_c,
+    );
+
+    // Tabs
     let tab_width = w / tab_titles.len() as f32;
     let mut clicked = None;
+    let focused_c = to_color32(config.focused_color);
 
     for (i, title) in tab_titles.iter().enumerate() {
-        let tab_rect = Rect::from_min_size(
-            pos2(ox + i as f32 * tab_width, oy + b),
-            vec2(tab_width, config.tab_bar_height),
-        );
-        if i == placement.active_tab_index {
+        let tab_x = ox + i as f32 * tab_width;
+        let tab_rect = Rect::from_min_size(pos2(tab_x, oy), vec2(tab_width, th));
+        let is_active = i == placement.active_tab_index;
+
+        if is_active {
             ui.painter()
                 .rect_filled(tab_rect, CornerRadius::ZERO, active_bg);
+
+            if placement.is_focused {
+                // Active tab border: top, bottom, left, right
+                ui.painter().rect_filled(
+                    Rect::from_min_size(pos2(tab_x, oy), vec2(tab_width, b)),
+                    CornerRadius::ZERO,
+                    focused_c,
+                );
+                ui.painter().rect_filled(
+                    Rect::from_min_size(pos2(tab_x, oy + th - b), vec2(tab_width, b)),
+                    CornerRadius::ZERO,
+                    focused_c,
+                );
+                ui.painter().rect_filled(
+                    Rect::from_min_size(pos2(tab_x, oy + b), vec2(b, th - 2.0 * b)),
+                    CornerRadius::ZERO,
+                    focused_c,
+                );
+                ui.painter().rect_filled(
+                    Rect::from_min_size(pos2(tab_x + tab_width - b, oy + b), vec2(b, th - 2.0 * b)),
+                    CornerRadius::ZERO,
+                    focused_c,
+                );
+            }
         }
+
+        if i > 0 && !is_active && i != placement.active_tab_index + 1 {
+            ui.painter().rect_filled(
+                Rect::from_min_size(pos2(tab_rect.min.x - b / 2.0, oy), vec2(b, th)),
+                CornerRadius::ZERO,
+                border_c,
+            );
+        }
+
         let response = ui.allocate_rect(tab_rect, Sense::click());
         if response.clicked() {
             clicked = Some(i);
