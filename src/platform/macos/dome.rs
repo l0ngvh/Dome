@@ -386,8 +386,7 @@ impl Dome {
             }
         } else if is_native_fs {
             tracing::info!(%ax, "New native fullscreen window");
-            let window_id = self.hub.insert_tiling();
-            self.hub.set_fullscreen(window_id);
+            let window_id = self.hub.insert_fullscreen();
             self.registry
                 .insert(ax, window_id, self.hub.get_window(window_id));
             self.registry
