@@ -3,6 +3,7 @@ mod dome;
 mod event_listener;
 mod keyboard;
 mod monitor;
+mod overlay;
 mod recovery;
 mod throttle;
 mod window;
@@ -50,7 +51,7 @@ pub(super) struct ScreenInfo {
 pub fn run_app(config_path: Option<String>) -> Result<()> {
     unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).ok() };
 
-    // COM needed for Direct2D rendering on main thread
+    // COM needed for shell APIs on main thread
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
 
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -88,7 +89,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
         unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
     });
 
-    let _app = App::new(sender.clone())?;
+    let _app = App::new(sender.clone(), config.clone())?;
 
     let keyboard_hook = install_keyboard_hook(sender.clone(), config)?;
     let _event_hooks = install_event_hooks(sender.clone())?;

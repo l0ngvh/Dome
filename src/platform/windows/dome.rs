@@ -5,8 +5,10 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
-use crate::config::{Color, Config, WindowsOnOpenRule, WindowsWindow};
-use crate::core::{Child, ContainerId, Dimension, DisplayMode, Hub, MonitorId, WindowId};
+use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
+use crate::core::{
+    Child, ContainerId, ContainerPlacement, Dimension, DisplayMode, Hub, WindowId, WindowPlacement,
+};
 
 use super::monitor::MonitorRegistry;
 use super::recovery;
@@ -14,6 +16,7 @@ use super::window::{Registry, Taskbar, WindowHandle, enum_windows, initial_displ
 use super::{ScreenInfo, compute_global_bounds};
 
 pub(super) const WM_APP_OVERLAY: u32 = 0x8001;
+pub(super) const WM_APP_CONFIG: u32 = 0x8002;
 
 #[expect(
     clippy::large_enum_variant,
@@ -29,6 +32,7 @@ pub(super) enum HubEvent {
     ScreensChanged(Vec<ScreenInfo>),
     Action(Actions),
     ConfigChanged(Config),
+    TabClicked(ContainerId, usize),
     Shutdown,
 }
 
@@ -51,8 +55,8 @@ pub(super) struct OverlayFrame {
     pub(super) creates: Vec<OverlayCreate>,
     pub(super) deletes: Vec<WindowId>,
     pub(super) focused: Option<WindowId>,
-    pub(super) windows: Vec<WindowOverlay>,
-    pub(super) containers: Vec<ContainerOverlay>,
+    pub(super) windows: Vec<WindowPlacement>,
+    pub(super) containers: Vec<ContainerOverlayData>,
 }
 
 pub(super) struct OverlayCreate {
@@ -61,34 +65,10 @@ pub(super) struct OverlayCreate {
     pub(super) is_float: bool,
 }
 
-pub(super) struct WindowOverlay {
-    pub(super) window_id: WindowId,
-    pub(super) frame: Dimension,
-    pub(super) edges: Vec<(Dimension, Color)>,
-    pub(super) is_float: bool,
-}
-
-pub(super) struct ContainerOverlay {
-    pub(super) container_id: ContainerId,
-    pub(super) frame: Dimension,
-    pub(super) edges: Vec<(Dimension, Color)>,
-    pub(super) tab_bar: Option<TabBarInfo>,
-}
-
-pub(super) struct TabBarInfo {
-    pub(super) tabs: Vec<TabInfo>,
-    pub(super) height: f32,
-    pub(super) background_color: Color,
-    pub(super) active_background_color: Color,
-    pub(super) border_color: Color,
-    pub(super) border: f32,
-}
-
-pub(super) struct TabInfo {
-    pub(super) title: String,
-    pub(super) x: f32,
-    pub(super) width: f32,
-    pub(super) is_active: bool,
+#[derive(Clone)]
+pub(super) struct ContainerOverlayData {
+    pub(super) placement: ContainerPlacement,
+    pub(super) tab_titles: Vec<String>,
 }
 
 pub(super) struct Dome {
@@ -200,6 +180,9 @@ impl Dome {
             HubEvent::Shutdown => self.running = false,
             HubEvent::ConfigChanged(new_config) => {
                 self.hub.sync_config(new_config.clone().into());
+                if let Some(app_hwnd) = self.app_hwnd {
+                    send_config(new_config.clone(), app_hwnd);
+                }
                 self.config = new_config;
                 tracing::info!("Config reloaded");
             }
@@ -267,6 +250,14 @@ impl Dome {
             }
             HubEvent::Action(actions) => {
                 self.execute_actions(&actions);
+            }
+            HubEvent::TabClicked(container_id, tab_idx) => {
+                let container = self.hub.get_container(container_id);
+                if let Some(child) = container.children().get(tab_idx) {
+                    if let Child::Window(wid) = *child {
+                        self.hub.set_focus(wid);
+                    }
+                }
             }
         }
 
@@ -442,6 +433,12 @@ fn send_overlay_frame(frame: OverlayFrame, app_hwnd: AppHandle) {
         )
         .ok()
     };
+}
+
+fn send_config(config: Config, app_hwnd: AppHandle) {
+    let boxed = Box::new(config);
+    let ptr = Box::into_raw(boxed) as usize;
+    unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_CONFIG, WPARAM(ptr), LPARAM(0)).ok() };
 }
 
 fn on_open_actions(handle: &WindowHandle, rules: &[WindowsOnOpenRule]) -> Option<Actions> {

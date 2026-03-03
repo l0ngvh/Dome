@@ -7,7 +7,7 @@ use super::node::{
     SpawnMode, Window, WindowId, Workspace, WorkspaceId,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct WindowPlacement {
     pub(crate) id: WindowId,
     pub(crate) frame: Dimension,
@@ -17,22 +17,14 @@ pub(crate) struct WindowPlacement {
     pub(crate) spawn_mode: SpawnMode,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
-    #[cfg_attr(
-        all(target_os = "windows", not(test)),
-        expect(dead_code, reason = "used on macOS")
-    )]
     pub(crate) frame: Dimension,
     pub(crate) visible_frame: Dimension,
     pub(crate) is_focused: bool,
     pub(crate) spawn_mode: SpawnMode,
     pub(crate) is_tabbed: bool,
-    #[cfg_attr(
-        all(target_os = "windows", not(test)),
-        expect(dead_code, reason = "used on macOS")
-    )]
     pub(crate) active_tab_index: usize,
 }
 
