@@ -327,7 +327,7 @@ pub(super) unsafe extern "system" fn container_wnd_proc(
                 pressed: false,
                 modifiers: egui::Modifiers::NONE,
             });
-            unsafe { InvalidateRect(Some(hwnd), None, false) };
+            invalidate_rect(hwnd);
             LRESULT(0)
         }
         WM_PAINT => {
@@ -335,7 +335,7 @@ pub(super) unsafe extern "system" fn container_wnd_proc(
                 let mut ps = std::mem::zeroed::<PAINTSTRUCT>();
                 BeginPaint(hwnd, &mut ps);
                 overlay.rerender();
-                EndPaint(hwnd, &ps);
+                EndPaint(hwnd, &ps).ok().ok(); // always returns nonzero per MSDN
             }
             LRESULT(0)
         }
@@ -389,14 +389,16 @@ impl OwnedHwnd {
 
     fn show(&mut self) {
         if !self.is_visible {
-            unsafe { ShowWindow(self.hwnd, SW_SHOWNA) };
+            // BOOL is previous visibility state, not an error indicator
+            unsafe { ShowWindow(self.hwnd, SW_SHOWNA).ok().ok() };
             self.is_visible = true;
         }
     }
 
     fn hide(&mut self) {
         if self.is_visible {
-            unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+            // BOOL is previous visibility state, not an error indicator
+            unsafe { ShowWindow(self.hwnd, SW_HIDE).ok().ok() };
             self.is_visible = false;
         }
     }
@@ -530,6 +532,13 @@ impl Drop for OverlayRenderer {
     }
 }
 
+/// MSDN says InvalidateRect "returns zero if the function fails" but
+/// documents no specific failure conditions. We have no actionable
+/// recovery path, so we discard the result.
+fn invalidate_rect(hwnd: HWND) {
+    unsafe { InvalidateRect(Some(hwnd), None, false).ok().ok() };
+}
+
 fn enable_blur_behind(hwnd: HWND) {
     let margins = MARGINS {
         cxLeftWidth: -1,
@@ -571,10 +580,12 @@ fn build_window_border_region(placement: &WindowPlacement, config: &Config) -> H
         CombineRgn(Some(region), Some(top), Some(bottom), RGN_OR);
         CombineRgn(Some(region), Some(region), Some(left), RGN_OR);
         CombineRgn(Some(region), Some(region), Some(right), RGN_OR);
-        DeleteObject(top.into()).ok();
-        DeleteObject(bottom.into()).ok();
-        DeleteObject(left.into()).ok();
-        DeleteObject(right.into()).ok();
+        // DeleteObject only fails for invalid or DC-selected handles;
+        // these regions are freshly created and never selected into a DC.
+        DeleteObject(top.into()).ok().ok();
+        DeleteObject(bottom.into()).ok().ok();
+        DeleteObject(left.into()).ok().ok();
+        DeleteObject(right.into()).ok().ok();
         region
     }
 }
@@ -611,19 +622,21 @@ fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HR
             // Tab bar: (ox, oy) to (ox + fw, oy + th)
             let tab = clamped_rgn(ox, oy, ox + fw, oy + th);
             CombineRgn(Some(region), Some(region), Some(tab), RGN_OR);
-            DeleteObject(tab.into()).ok();
+            // DeleteObject only fails for invalid or DC-selected handles;
+            // these regions are freshly created and never selected into a DC.
+            DeleteObject(tab.into()).ok().ok();
             // Left border below tab bar
             let left = clamped_rgn(ox, oy + th, ox + b, oy + fh - b);
             CombineRgn(Some(region), Some(region), Some(left), RGN_OR);
-            DeleteObject(left.into()).ok();
+            DeleteObject(left.into()).ok().ok();
             // Right border below tab bar
             let right = clamped_rgn(ox + fw - b, oy + th, ox + fw, oy + fh - b);
             CombineRgn(Some(region), Some(region), Some(right), RGN_OR);
-            DeleteObject(right.into()).ok();
+            DeleteObject(right.into()).ok().ok();
             // Bottom border
             let bottom = clamped_rgn(ox, oy + fh - b, ox + fw, oy + fh);
             CombineRgn(Some(region), Some(region), Some(bottom), RGN_OR);
-            DeleteObject(bottom.into()).ok();
+            DeleteObject(bottom.into()).ok().ok();
         } else {
             // Four border strips
             let top = clamped_rgn(ox, oy, ox + fw, oy + b);
@@ -633,10 +646,12 @@ fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HR
             CombineRgn(Some(region), Some(top), Some(bottom), RGN_OR);
             CombineRgn(Some(region), Some(region), Some(left), RGN_OR);
             CombineRgn(Some(region), Some(region), Some(right), RGN_OR);
-            DeleteObject(top.into()).ok();
-            DeleteObject(bottom.into()).ok();
-            DeleteObject(left.into()).ok();
-            DeleteObject(right.into()).ok();
+            // DeleteObject only fails for invalid or DC-selected handles;
+            // these regions are freshly created and never selected into a DC.
+            DeleteObject(top.into()).ok().ok();
+            DeleteObject(bottom.into()).ok().ok();
+            DeleteObject(left.into()).ok().ok();
+            DeleteObject(right.into()).ok().ok();
         }
 
         region

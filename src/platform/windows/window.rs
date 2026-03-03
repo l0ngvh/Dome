@@ -538,12 +538,16 @@ fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, mut callback: F) {
     }
 
     let mut data = (hwnd, callback);
+    // BOOL is FALSE when the callback returns FALSE or no windows are found,
+    // neither of which is an error condition.
     unsafe {
         EnumThreadWindows(
             thread_id,
             Some(enum_proc::<F>),
             LPARAM(&mut data as *mut _ as isize),
-        );
+        )
+        .ok()
+        .ok();
     }
 }
 
