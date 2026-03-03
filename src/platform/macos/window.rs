@@ -186,6 +186,9 @@ impl MacWindow {
         actual: RoundedDimension,
     ) -> bool {
         if self.target_placement == Some(target) && self.actual_placement == Some(actual) {
+            if self.placement_retries > 5 {
+                return false;
+            }
             self.placement_retries += 1;
         } else {
             self.placement_retries = 0;
