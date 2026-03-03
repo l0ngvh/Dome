@@ -335,7 +335,7 @@ impl MetalOverlayView {
 
 struct ContainerOverlayViewIvars {
     layer: Retained<CAMetalLayer>,
-    events: Rc<RefCell<Vec<egui::Event>>>,
+    events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<ContainerRenderer>,
     placement: Cell<ContainerPlacement>,
     tab_titles: RefCell<Vec<String>>,
@@ -424,11 +424,10 @@ impl ContainerOverlayView {
         hub_sender: Sender<HubEvent>,
     ) -> Retained<Self> {
         let renderer = ContainerRenderer::new(backend, scale, size.width, size.height);
-        let events = renderer.events();
         let layer = renderer.layer();
         let ivars = ContainerOverlayViewIvars {
             layer: layer.clone(),
-            events,
+            events: RefCell::new(Vec::new()),
             renderer: RefCell::new(renderer),
             placement: Cell::new(placement),
             tab_titles: RefCell::new(tab_titles),
@@ -475,9 +474,13 @@ impl ContainerOverlayView {
         let placement = ivars.placement.get();
         let tab_titles = ivars.tab_titles.borrow();
         let config = ivars.config.borrow();
-        let clicked = ivars.renderer.borrow_mut().render(scale as f32, |ui| {
-            overlay::show_container(ui, &placement, &tab_titles, &config)
-        });
+        let events = std::mem::take(&mut *ivars.events.borrow_mut());
+        let clicked = ivars
+            .renderer
+            .borrow_mut()
+            .render(scale as f32, events, |ui| {
+                overlay::show_container(ui, &placement, &tab_titles, &config)
+            });
         if let Some(tab_idx) = clicked {
             ivars
                 .hub_sender

@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -115,17 +114,15 @@ impl ContainerRenderer {
         self.inner.resize(logical_w, logical_h, scale);
     }
 
-    pub(super) fn events(&self) -> Rc<RefCell<Vec<egui::Event>>> {
-        self.inner.events()
-    }
-
     #[tracing::instrument(skip_all)]
     pub(super) fn render<R>(
         &mut self,
         pixels_per_point: f32,
+        events: Vec<egui::Event>,
         ui_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> R {
-        let (meshes, delta, surface_size, result) = self.inner.prepare(pixels_per_point, ui_fn);
+        let (meshes, delta, surface_size, result) =
+            self.inner.prepare(pixels_per_point, events, ui_fn);
         if let Some(ctx) = self.inner.begin_frame(&delta, surface_size) {
             self.inner.draw_egui_meshes(&ctx, &meshes, pixels_per_point);
             ctx.finish();
@@ -160,10 +157,6 @@ impl WindowRenderer {
 
     pub(super) fn resize(&self, logical_w: f64, logical_h: f64, scale: f64) {
         self.inner.resize(logical_w, logical_h, scale);
-    }
-
-    pub(super) fn events(&self) -> Rc<RefCell<Vec<egui::Event>>> {
-        self.inner.events()
     }
 
     /// Wraps the IOSurface as a Metal texture for zero-copy GPU reads from the capture buffer.
@@ -207,7 +200,8 @@ impl WindowRenderer {
         visible_content_bound: Option<[f32; 4]>,
         ui_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> R {
-        let (meshes, delta, surface_size, result) = self.inner.prepare(pixels_per_point, ui_fn);
+        let (meshes, delta, surface_size, result) =
+            self.inner.prepare(pixels_per_point, Vec::new(), ui_fn);
         if let Some(ctx) = self.inner.begin_frame(&delta, surface_size) {
             if let Some(tex) = &self.mirror_texture
                 && let Some(visible_content_bound) = visible_content_bound
@@ -343,7 +337,6 @@ struct EguiRenderer {
     layer: Retained<CAMetalLayer>,
     egui_ctx: egui::Context,
     egui_textures: HashMap<egui::TextureId, Retained<ProtocolObject<dyn MTLTexture>>>,
-    events: Rc<RefCell<Vec<egui::Event>>>,
 }
 
 impl EguiRenderer {
@@ -366,7 +359,6 @@ impl EguiRenderer {
             layer,
             egui_ctx: egui::Context::default(),
             egui_textures: HashMap::new(),
-            events: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -382,10 +374,6 @@ impl EguiRenderer {
         self.layer.setContentsScale(scale);
     }
 
-    fn events(&self) -> Rc<RefCell<Vec<egui::Event>>> {
-        self.events.clone()
-    }
-
     fn backend(&self) -> &MetalBackend {
         &self.backend
     }
@@ -393,6 +381,7 @@ impl EguiRenderer {
     fn prepare<R>(
         &mut self,
         pixels_per_point: f32,
+        events: Vec<egui::Event>,
         mut ui_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> (
         Vec<egui::ClippedPrimitive>,
@@ -417,7 +406,7 @@ impl EguiRenderer {
                 },
             ))
             .collect(),
-            events: std::mem::take(&mut *self.events.borrow_mut()),
+            events,
             ..Default::default()
         };
 
