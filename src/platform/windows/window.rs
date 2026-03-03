@@ -568,21 +568,43 @@ pub(super) fn initial_display_mode(
     let ex_style = unsafe { GetWindowLongW(handle.hwnd(), GWL_EXSTYLE) } as u32;
 
     if style & WS_POPUP.0 != 0 {
+        tracing::debug!(window=%handle, "Window identified as float due to WS_POPUP style.");
+
         return DisplayMode::Float;
     }
     if style & WS_THICKFRAME.0 == 0 {
+        tracing::debug!(
+            %handle,
+            "Window identified as float due to absence of WS_THICKFRAME style."
+        );
+
         return DisplayMode::Float;
     }
     if ex_style & WS_EX_TOPMOST.0 != 0 {
+        tracing::debug!(
+            window=%handle,
+            "Window identified as float due to WS_EX_TOPMOST extended style."
+        );
+
         return DisplayMode::Float;
     }
     if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
+        tracing::debug!(
+            window=%handle,
+            "Window identified as float due to WS_EX_DLGMODALFRAME extended style."
+        );
+
         return DisplayMode::Float;
     }
     // WS_EX_LAYERED is not checked because apps like Steam use it for custom UI rendering.
     // WS_EX_TRANSPARENT catches actual overlay windows that should float.
     if ex_style & WS_EX_TRANSPARENT.0 != 0 {
+        tracing::debug!(
+            window=%handle,
+            "Window identified as float due to WS_EX_TRANSPARENT extended style."
+        );
         return DisplayMode::Float;
     }
+    tracing::debug!(window=%handle, "Window determined to be Tiling.");
     DisplayMode::Tiling
 }
