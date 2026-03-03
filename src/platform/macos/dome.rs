@@ -307,16 +307,7 @@ impl Dome {
                     }
                 }
                 HubEvent::TabClicked(container_id, tab_idx) => {
-                    let container = self.hub.get_container(container_id);
-                    // FIXME: This is wrong. Hub must expose an fn to change tab
-                    if let Some(child) = container.children().get(tab_idx) {
-                        match *child {
-                            Child::Window(wid) => {
-                                self.hub.set_focus(wid);
-                            }
-                            Child::Container(_) => {}
-                        }
-                    }
+                    self.hub.focus_tab_index(container_id, tab_idx);
                 }
                 HubEvent::CaptureReady { cg_id, capture } => {
                     if let Some(w) = self.registry.get_mut(cg_id) {

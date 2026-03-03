@@ -208,6 +208,14 @@ impl Container {
         Some(self.children[new_tab])
     }
 
+    pub(super) fn set_active_tab_by_index(&mut self, index: usize) -> Option<Child> {
+        if !self.is_tabbed || index >= self.children.len() {
+            return None;
+        }
+        self.active_tab_index = index;
+        Some(self.children[index])
+    }
+
     pub(crate) fn children(&self) -> &[Child] {
         &self.children
     }

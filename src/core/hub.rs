@@ -401,6 +401,18 @@ impl Hub {
         self.focus_tab(false);
     }
 
+    pub(crate) fn focus_tab_index(&mut self, container_id: ContainerId, index: usize) {
+        let container = self.containers.get_mut(container_id);
+        let Some(new_child) = container.set_active_tab_by_index(index) else {
+            return;
+        };
+        let focus_target = match new_child {
+            Child::Window(_) => new_child,
+            Child::Container(id) => self.containers.get(id).focused,
+        };
+        self.set_workspace_focus(focus_target);
+    }
+
     #[tracing::instrument(skip(self))]
     pub(crate) fn toggle_container_layout(&mut self) {
         let current_ws = self.current_workspace();

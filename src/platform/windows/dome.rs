@@ -252,12 +252,7 @@ impl Dome {
                 self.execute_actions(&actions);
             }
             HubEvent::TabClicked(container_id, tab_idx) => {
-                let container = self.hub.get_container(container_id);
-                if let Some(child) = container.children().get(tab_idx) {
-                    if let Child::Window(wid) = *child {
-                        self.hub.set_focus(wid);
-                    }
-                }
+                self.hub.focus_tab_index(container_id, tab_idx);
             }
         }
 
