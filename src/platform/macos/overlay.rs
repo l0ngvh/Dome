@@ -98,7 +98,7 @@ impl OverlayWindow {
         let level = if placement.is_float {
             NSFloatingWindowLevel
         } else {
-            NSNormalWindowLevel - 1
+            NSNormalWindowLevel - 2
         };
         self.window.setLevel(level);
 
@@ -206,7 +206,7 @@ impl OverlayManager {
                     data.cocoa_frame.size,
                 );
             } else {
-                let window = create_overlay_window(mtm, data.cocoa_frame, NSNormalWindowLevel);
+                let window = create_overlay_window(mtm, data.cocoa_frame, NSNormalWindowLevel - 1);
                 window.setIgnoresMouseEvents(false);
                 window.setAcceptsMouseMovedEvents(true);
 
