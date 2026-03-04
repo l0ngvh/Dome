@@ -93,6 +93,12 @@ impl WindowHandle {
             return false;
         }
 
+        let dim = self.dimension();
+        if dim.width == 0.0 || dim.height == 0.0 {
+            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, "not manageable: window has empty size");
+            return false;
+        }
+
         true
     }
 

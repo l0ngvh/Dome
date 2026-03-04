@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
 
+use calloop::channel::Sender;
 use glow::HasContext;
 use glutin::config::ConfigTemplateBuilder;
 use glutin::context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentContext};

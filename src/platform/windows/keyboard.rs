@@ -1,5 +1,6 @@
-use std::sync::{OnceLock, RwLock, mpsc::Sender};
+use std::sync::{OnceLock, RwLock};
 
+use calloop::channel::Sender;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LMENU, VK_LWIN, VK_MENU, VK_RMENU, VK_RWIN, VK_SHIFT,

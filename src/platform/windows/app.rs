@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::Sender;
 
+use calloop::channel::Sender;
 use glutin::display::{Display, DisplayApiPreference};
 use raw_window_handle::{RawDisplayHandle, WindowsDisplayHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};

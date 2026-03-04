@@ -1,9 +1,7 @@
-use std::cell::{OnceCell, RefCell};
-use std::pin::Pin;
-use std::sync::mpsc::Sender;
-use std::time::Duration;
+use std::cell::OnceCell;
 
 use anyhow::{Result, anyhow};
+use calloop::channel::Sender;
 use windows::Win32::Foundation::{GetLastError, HWND};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -15,16 +13,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::dome::HubEvent;
-use super::throttle::Throttle;
 use super::window::WindowHandle;
-
-const FOCUS_THROTTLE: Duration = Duration::from_millis(50);
-const RESIZE_THROTTLE: Duration = Duration::from_millis(16);
 
 thread_local! {
     static SENDER: OnceCell<Sender<HubEvent>> = const { OnceCell::new() };
-    static FOCUS_THROTTLE_CELL: RefCell<Pin<Box<Throttle<HWND>>>> = RefCell::new(Throttle::new(FOCUS_THROTTLE));
-    static RESIZE_THROTTLE_CELL: RefCell<Pin<Box<Throttle<HWND>>>> = RefCell::new(Throttle::new(RESIZE_THROTTLE));
 }
 
 pub(super) struct EventHooks(Vec<HWINEVENTHOOK>);
@@ -40,25 +32,7 @@ impl Drop for EventHooks {
 }
 
 pub(super) fn install_event_hooks(sender: Sender<HubEvent>) -> Result<EventHooks> {
-    SENDER.with(|s| s.set(sender.clone()).ok());
-
-    FOCUS_THROTTLE_CELL.with(|c| {
-        let focus_sender = sender.clone();
-        c.borrow_mut().set_callback(move |hwnd| {
-            focus_sender
-                .send(HubEvent::WindowFocused(WindowHandle::new(hwnd)))
-                .ok();
-        });
-    });
-
-    RESIZE_THROTTLE_CELL.with(|c| {
-        let resize_sender = sender;
-        c.borrow_mut().set_callback(move |hwnd| {
-            resize_sender
-                .send(HubEvent::WindowMovedOrResized(WindowHandle::new(hwnd)))
-                .ok();
-        });
-    });
+    SENDER.with(|s| s.set(sender).ok());
 
     // We need separate hooks because SetWinEventHook only accepts contiguous
     // event ranges (min <= max). A single hook covering all events would include
@@ -111,7 +85,7 @@ unsafe extern "system" fn event_hook_proc(
     }
 
     SENDER.with(|s| {
-        let sender = s.get().unwrap();
+        let Some(sender) = s.get() else { return };
         match event {
             EVENT_OBJECT_CREATE
             | EVENT_OBJECT_SHOW
@@ -144,12 +118,16 @@ unsafe extern "system" fn event_hook_proc(
                 if unsafe { GetForegroundWindow() } != hwnd {
                     return;
                 }
-                FOCUS_THROTTLE_CELL.with(|c| c.borrow_mut().submit(hwnd));
+                sender
+                    .send(HubEvent::WindowFocused(WindowHandle::new(hwnd)))
+                    .ok();
             }
             // MOVESIZEEND fires after user drag/resize. LOCATIONCHANGE catches programmatic
             // resizes (e.g. maximize, restore) which don't trigger the move/size cycle.
             EVENT_SYSTEM_MOVESIZEEND | EVENT_OBJECT_LOCATIONCHANGE => {
-                RESIZE_THROTTLE_CELL.with(|c| c.borrow_mut().submit(hwnd));
+                sender
+                    .send(HubEvent::WindowMovedOrResized(WindowHandle::new(hwnd)))
+                    .ok();
             }
             _ => {}
         }

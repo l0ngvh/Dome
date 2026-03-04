@@ -1,6 +1,9 @@
 use std::collections::HashSet;
-use std::sync::mpsc::Receiver;
+use std::time::Duration;
 
+use calloop::channel::{Channel, Event as ChannelEvent};
+use calloop::timer::{TimeoutAction, Timer};
+use calloop::{EventLoop, LoopHandle, LoopSignal};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
 
@@ -12,11 +15,15 @@ use crate::core::{
 
 use super::monitor::MonitorRegistry;
 use super::recovery;
+use super::throttle::{Throttle, ThrottleResult};
 use super::window::{Registry, Taskbar, WindowHandle, enum_windows, initial_display_mode};
 use super::{ScreenInfo, compute_global_bounds};
 
 pub(super) const WM_APP_OVERLAY: u32 = 0x8001;
 pub(super) const WM_APP_CONFIG: u32 = 0x8002;
+
+const FOCUS_THROTTLE: Duration = Duration::from_millis(50);
+const RESIZE_THROTTLE: Duration = Duration::from_millis(16);
 
 #[expect(
     clippy::large_enum_variant,
@@ -71,6 +78,12 @@ pub(super) struct ContainerOverlayData {
     pub(super) tab_titles: Vec<String>,
 }
 
+#[derive(Clone, Copy)]
+enum ThrottleKind {
+    Focus,
+    Resize,
+}
+
 pub(super) struct Dome {
     hub: Hub,
     registry: Registry,
@@ -82,11 +95,20 @@ pub(super) struct Dome {
     /// Bounding box of all monitors for hiding windows offscreen
     global_bounds: Dimension,
     app_hwnd: Option<AppHandle>,
-    running: bool,
+    signal: LoopSignal,
+    handle: LoopHandle<'static, Self>,
+    focus_throttle: Throttle<WindowHandle>,
+    resize_throttle: Throttle<WindowHandle>,
 }
 
 impl Dome {
-    pub(super) fn new(config: Config, screens: Vec<ScreenInfo>, global_bounds: Dimension) -> Self {
+    pub(super) fn new(
+        config: Config,
+        screens: Vec<ScreenInfo>,
+        global_bounds: Dimension,
+        handle: LoopHandle<'static, Self>,
+        signal: LoopSignal,
+    ) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
@@ -121,7 +143,10 @@ impl Dome {
             primary_screen: primary.dimension,
             global_bounds,
             app_hwnd: None,
-            running: true,
+            signal,
+            handle,
+            focus_throttle: Throttle::new(FOCUS_THROTTLE),
+            resize_throttle: Throttle::new(RESIZE_THROTTLE),
         }
     }
 
@@ -137,17 +162,29 @@ impl Dome {
         reconcile_monitors(&mut self.hub, &mut self.monitor_registry, screens);
     }
 
-    pub(super) fn run(mut self, rx: Receiver<HubEvent>) {
-        while self.running {
-            if let Ok(event) = rx.recv() {
-                let last_focus = self
-                    .hub
-                    .get_workspace(self.hub.current_workspace())
-                    .focused();
-                let (creates, deletes) = self.handle_event(event);
-                self.apply_layout(creates, deletes, last_focus);
-            }
-        }
+    pub(super) fn run(
+        mut self,
+        channel: Channel<HubEvent>,
+        mut event_loop: EventLoop<'static, Self>,
+    ) {
+        event_loop
+            .handle()
+            .insert_source(channel, |event, _, dome| match event {
+                ChannelEvent::Msg(hub_event) => {
+                    let last_focus = dome
+                        .hub
+                        .get_workspace(dome.hub.current_workspace())
+                        .focused();
+                    let (creates, deletes) = dome.handle_event(hub_event);
+                    dome.apply_layout(creates, deletes, last_focus);
+                }
+                ChannelEvent::Closed => dome.signal.stop(),
+            })
+            .expect("Failed to insert channel source");
+
+        event_loop
+            .run(None, &mut self, |_| {})
+            .expect("Event loop failed");
     }
 
     fn handle_event(&mut self, event: HubEvent) -> (Vec<OverlayCreate>, Vec<WindowId>) {
@@ -177,7 +214,7 @@ impl Dome {
                     tracing::warn!("Failed to enumerate windows: {e}");
                 }
             }
-            HubEvent::Shutdown => self.running = false,
+            HubEvent::Shutdown => self.signal.stop(),
             HubEvent::ConfigChanged(new_config) => {
                 self.hub.sync_config(new_config.clone().into());
                 if let Some(app_hwnd) = self.app_hwnd {
@@ -213,14 +250,12 @@ impl Dome {
                 }
             }
             HubEvent::WindowFocused(handle) => {
-                let _span = tracing::info_span!("window_focused", %handle).entered();
-                if let Some(id) = self.registry.get_id(&handle) {
-                    self.hub.set_focus(id);
-                    tracing::info!("Window focused");
-                }
+                self.submit_focus(handle);
+                return (creates, deletes);
             }
             HubEvent::WindowMovedOrResized(handle) => {
-                self.check_fullscreen_state(&handle);
+                self.submit_resize(handle);
+                return (creates, deletes);
             }
             HubEvent::WindowTitleChanged(handle) => {
                 let _span = tracing::info_span!("window_title_changed", %handle).entered();
@@ -257,6 +292,77 @@ impl Dome {
         }
 
         (creates, deletes)
+    }
+
+    fn submit_focus(&mut self, handle: WindowHandle) {
+        match self.focus_throttle.submit(handle.clone()) {
+            ThrottleResult::Send(h) => self.handle_focus(h),
+            ThrottleResult::Pending => {
+                if let Some(delay) = self.focus_throttle.schedule_delay() {
+                    self.schedule_throttle_timer(delay, ThrottleKind::Focus);
+                }
+            }
+        }
+    }
+
+    fn submit_resize(&mut self, handle: WindowHandle) {
+        match self.resize_throttle.submit(handle.clone()) {
+            ThrottleResult::Send(h) => self.handle_resize(h),
+            ThrottleResult::Pending => {
+                if let Some(delay) = self.resize_throttle.schedule_delay() {
+                    self.schedule_throttle_timer(delay, ThrottleKind::Resize);
+                }
+            }
+        }
+    }
+
+    fn schedule_throttle_timer(&mut self, delay: Duration, kind: ThrottleKind) {
+        let timer = Timer::from_duration(delay);
+        let token = self
+            .handle
+            .insert_source(timer, move |_, _, dome| {
+                match kind {
+                    ThrottleKind::Focus => {
+                        if let Some(h) = dome.focus_throttle.flush() {
+                            dome.handle_focus(h);
+                        }
+                    }
+                    ThrottleKind::Resize => {
+                        if let Some(h) = dome.resize_throttle.flush() {
+                            dome.handle_resize(h);
+                        }
+                    }
+                }
+                TimeoutAction::Drop
+            })
+            .expect("Failed to insert timer");
+
+        match kind {
+            ThrottleKind::Focus => self.focus_throttle.set_timer_token(token),
+            ThrottleKind::Resize => self.resize_throttle.set_timer_token(token),
+        }
+    }
+
+    fn handle_focus(&mut self, handle: WindowHandle) {
+        let _span = tracing::info_span!("window_focused", %handle).entered();
+        if let Some(id) = self.registry.get_id(&handle) {
+            let last_focus = self
+                .hub
+                .get_workspace(self.hub.current_workspace())
+                .focused();
+            self.hub.set_focus(id);
+            tracing::info!("Window focused");
+            self.apply_layout(Vec::new(), Vec::new(), last_focus);
+        }
+    }
+
+    fn handle_resize(&mut self, handle: WindowHandle) {
+        let last_focus = self
+            .hub
+            .get_workspace(self.hub.current_workspace())
+            .focused();
+        self.check_fullscreen_state(&handle);
+        self.apply_layout(Vec::new(), Vec::new(), last_focus);
     }
 
     fn insert_window(&mut self, handle: &WindowHandle) -> WindowId {
@@ -470,7 +576,6 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Ve
 
     let current_keys: HashSet<_> = screens.iter().map(|s| s.handle).collect();
 
-    // Add new monitors first
     for screen in &screens {
         if !registry.map.contains_key(&screen.handle) {
             let id = hub.add_monitor(screen.name.clone(), screen.dimension);
@@ -484,7 +589,6 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Ve
         }
     }
 
-    // Remove monitors that no longer exist
     let to_remove: Vec<_> = registry
         .map
         .iter()
@@ -503,7 +607,6 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Ve
         }
     }
 
-    // Update dimensions for existing monitors
     for screen in &screens {
         if let Some(entry) = registry.map.get_mut(&screen.handle) {
             let monitor_id = entry.id;

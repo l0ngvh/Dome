@@ -8,10 +8,10 @@ mod recovery;
 mod throttle;
 mod window;
 
-use std::sync::mpsc;
 use std::thread;
 
 use anyhow::Result;
+use calloop::channel::channel;
 use std::mem::size_of;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -72,7 +72,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     anyhow::ensure!(!screens.is_empty(), "No monitors detected");
     let global_bounds = compute_global_bounds(&screens);
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = channel();
     let sender = tx.clone();
     let config_clone = config.clone();
     let main_thread_id = unsafe { GetCurrentThreadId() };
@@ -81,7 +81,10 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
             unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
                 .ok()
                 .expect("CoInitializeEx failed");
-            Dome::new(config_clone, screens, global_bounds).run(rx);
+            let event_loop = calloop::EventLoop::try_new().expect("Failed to create event loop");
+            let handle = event_loop.handle();
+            let signal = event_loop.get_signal();
+            Dome::new(config_clone, screens, global_bounds, handle, signal).run(rx, event_loop);
         }));
         if result.is_err() {
             recovery::restore_all();
