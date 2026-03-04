@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Sender;
+
+use calloop::channel::{Channel, Event as ChannelEvent, Sender as CalloopSender};
+use calloop::{EventLoop, LoopSignal};
 
 use dispatch2::{DispatchQoS, DispatchQueue, DispatchRetained, GlobalQueueIdentifier};
 use objc2::rc::{Retained, autoreleasepool};
@@ -174,17 +177,18 @@ pub(super) struct Dome {
     primary_full_height: f32,
     observed_pids: HashSet<i32>,
     sender: MessageSender,
-    hub_tx: Sender<HubEvent>,
+    hub_tx: CalloopSender<HubEvent>,
     capture_queue: DispatchRetained<DispatchQueue>,
-    running: bool,
+    signal: LoopSignal,
 }
 
 impl Dome {
     pub(super) fn new(
         config: Config,
         screens: Vec<MonitorInfo>,
-        hub_tx: Sender<HubEvent>,
+        hub_tx: CalloopSender<HubEvent>,
         sender: MessageSender,
+        signal: LoopSignal,
     ) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
@@ -211,15 +215,23 @@ impl Dome {
             sender,
             hub_tx,
             capture_queue: DispatchQueue::main().into(),
-            running: true,
+            signal,
         }
     }
 
-    fn stop(&mut self) {
-        self.running = false;
-    }
+    pub(super) fn run(
+        mut self,
+        channel: Channel<HubEvent>,
+        mut event_loop: EventLoop<'static, Self>,
+    ) {
+        event_loop
+            .handle()
+            .insert_source(channel, |event, _, dome| match event {
+                ChannelEvent::Msg(hub_event) => dome.handle_event(hub_event),
+                ChannelEvent::Closed => dome.signal.stop(),
+            })
+            .expect("Failed to insert channel source");
 
-    pub(super) fn run(mut self, rx: Receiver<HubEvent>) {
         dispatch_reconcile_all_windows(
             self.observed_pids.clone(),
             self.registry
@@ -229,10 +241,9 @@ impl Dome {
             self.config.macos.ignore.clone(),
             self.hub_tx.clone(),
         );
-        while self.running {
-            let Ok(event) = rx.recv() else { break };
-            self.handle_event(event);
-        }
+        event_loop
+            .run(None, &mut self, |_| {})
+            .expect("Event loop failed");
     }
 
     #[tracing::instrument(skip(self), fields(%event))]
@@ -241,7 +252,8 @@ impl Dome {
             match event {
                 HubEvent::Shutdown => {
                     tracing::info!("Shutdown requested");
-                    self.stop();
+                    self.signal.stop();
+                    return;
                 }
                 HubEvent::ConfigChanged(new_config) => {
                     self.hub.sync_config(new_config.clone().into());
@@ -341,9 +353,6 @@ impl Dome {
                 }
             }
 
-            if !self.running {
-                return;
-            }
             let overlays = self.apply_layout();
 
             self.sender.send(HubMessage::Overlays(overlays));
@@ -518,7 +527,7 @@ impl Dome {
                 }
                 Action::Exit => {
                     tracing::debug!("Exiting hub thread");
-                    self.stop();
+                    self.signal.stop();
                 }
             }
         }
@@ -635,7 +644,7 @@ fn dispatch_refresh_app_windows(
     pid: i32,
     tracked: HashMap<CGWindowID, (AXWindow, FullscreenState)>,
     ignore_rules: Vec<MacosWindow>,
-    hub_tx: Sender<HubEvent>,
+    hub_tx: CalloopSender<HubEvent>,
 ) {
     let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
         DispatchQoS::UserInitiated,
@@ -657,7 +666,7 @@ fn dispatch_reconcile_all_windows(
     observed_pids: HashSet<i32>,
     tracked: HashMap<CGWindowID, (AXWindow, FullscreenState)>,
     ignore_rules: Vec<MacosWindow>,
-    hub_tx: Sender<HubEvent>,
+    hub_tx: CalloopSender<HubEvent>,
 ) {
     let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
         DispatchQoS::UserInitiated,

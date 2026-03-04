@@ -1,4 +1,4 @@
-use std::sync::mpsc::Sender;
+use calloop::channel::Sender as CalloopSender;
 
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
@@ -136,7 +136,7 @@ impl Drop for WindowCapture {
 
 pub(super) fn create_captures_async(
     cg_ids: Vec<CGWindowID>,
-    hub_tx: Sender<HubEvent>,
+    hub_tx: CalloopSender<HubEvent>,
     app_tx: MessageSender,
     queue: DispatchRetained<DispatchQueue>,
 ) {

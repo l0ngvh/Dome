@@ -175,8 +175,9 @@ impl Dome {
                         .hub
                         .get_workspace(dome.hub.current_workspace())
                         .focused();
-                    let (creates, deletes) = dome.handle_event(hub_event);
-                    dome.apply_layout(creates, deletes, last_focus);
+                    if let Some((creates, deletes)) = dome.handle_event(hub_event) {
+                        dome.apply_layout(creates, deletes, last_focus);
+                    }
                 }
                 ChannelEvent::Closed => dome.signal.stop(),
             })
@@ -187,7 +188,7 @@ impl Dome {
             .expect("Event loop failed");
     }
 
-    fn handle_event(&mut self, event: HubEvent) -> (Vec<OverlayCreate>, Vec<WindowId>) {
+    fn handle_event(&mut self, event: HubEvent) -> Option<(Vec<OverlayCreate>, Vec<WindowId>)> {
         let mut creates = Vec::new();
         let mut deletes = Vec::new();
 
@@ -214,7 +215,10 @@ impl Dome {
                     tracing::warn!("Failed to enumerate windows: {e}");
                 }
             }
-            HubEvent::Shutdown => self.signal.stop(),
+            HubEvent::Shutdown => {
+                self.signal.stop();
+                return None;
+            }
             HubEvent::ConfigChanged(new_config) => {
                 self.hub.sync_config(new_config.clone().into());
                 if let Some(app_hwnd) = self.app_hwnd {
@@ -226,10 +230,10 @@ impl Dome {
             HubEvent::WindowCreated(handle) => {
                 let _span = tracing::info_span!("window_created", %handle).entered();
                 if self.registry.contains(&handle) {
-                    return (creates, deletes);
+                    return Some((creates, deletes));
                 }
                 if should_ignore(&handle, &self.config.windows.ignore) {
-                    return (creates, deletes);
+                    return Some((creates, deletes));
                 }
                 let hwnd = handle.hwnd();
                 let id = self.insert_window(&handle);
@@ -251,21 +255,21 @@ impl Dome {
             }
             HubEvent::WindowFocused(handle) => {
                 self.submit_focus(handle);
-                return (creates, deletes);
+                return Some((creates, deletes));
             }
             HubEvent::WindowMovedOrResized(handle) => {
                 self.submit_resize(handle);
-                return (creates, deletes);
+                return Some((creates, deletes));
             }
             HubEvent::WindowTitleChanged(handle) => {
                 let _span = tracing::info_span!("window_title_changed", %handle).entered();
                 if self.registry.contains(&handle) {
                     self.registry.update_title(&handle);
-                    return (creates, deletes);
+                    return Some((creates, deletes));
                 }
                 // Some apps have a brief moment where their title is empty
                 if should_ignore(&handle, &self.config.windows.ignore) {
-                    return (creates, deletes);
+                    return Some((creates, deletes));
                 }
                 let hwnd = handle.hwnd();
                 let id = self.insert_window(&handle);
@@ -291,7 +295,7 @@ impl Dome {
             }
         }
 
-        (creates, deletes)
+        Some((creates, deletes))
     }
 
     fn submit_focus(&mut self, handle: WindowHandle) {

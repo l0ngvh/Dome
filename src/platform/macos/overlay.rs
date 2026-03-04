@@ -1,8 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
 
+use calloop::channel::Sender as CalloopSender;
 use objc2::rc::Retained;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
@@ -35,7 +35,7 @@ impl OverlayWindow {
         mtm: MainThreadMarker,
         frame: NSRect,
         source_cg_id: CGWindowID,
-        hub_sender: Sender<HubEvent>,
+        hub_sender: CalloopSender<HubEvent>,
         backend: Rc<MetalBackend>,
         config: Config,
     ) -> Self {
@@ -181,7 +181,7 @@ impl OverlayManager {
         &mut self,
         mtm: MainThreadMarker,
         overlays: Vec<ContainerOverlayData>,
-        hub_sender: &Sender<HubEvent>,
+        hub_sender: &CalloopSender<HubEvent>,
     ) {
         let new_ids: std::collections::HashSet<_> =
             overlays.iter().map(|o| o.placement.id).collect();
@@ -271,7 +271,7 @@ fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> 
 
 pub(super) struct MetalOverlayViewIvars {
     layer: Retained<CAMetalLayer>,
-    hub_sender: Sender<HubEvent>,
+    hub_sender: CalloopSender<HubEvent>,
     pub(super) cg_id: Cell<u32>,
 }
 
@@ -321,7 +321,7 @@ impl MetalOverlayView {
         mtm: MainThreadMarker,
         frame: NSRect,
         layer: Retained<CAMetalLayer>,
-        hub_sender: Sender<HubEvent>,
+        hub_sender: CalloopSender<HubEvent>,
     ) -> Retained<Self> {
         let ivars = MetalOverlayViewIvars {
             layer,
@@ -342,7 +342,7 @@ struct ContainerOverlayViewIvars {
     config: RefCell<Config>,
     scale: Cell<f64>,
     container_id: Cell<ContainerId>,
-    hub_sender: Sender<HubEvent>,
+    hub_sender: CalloopSender<HubEvent>,
 }
 
 define_class!(
@@ -421,7 +421,7 @@ impl ContainerOverlayView {
         placement: ContainerPlacement,
         tab_titles: Vec<String>,
         config: Config,
-        hub_sender: Sender<HubEvent>,
+        hub_sender: CalloopSender<HubEvent>,
     ) -> Retained<Self> {
         let renderer = ContainerRenderer::new(backend, scale, size.width, size.height);
         let layer = renderer.layer();

@@ -4,8 +4,9 @@ use std::ffi::c_void;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
 use std::time::Duration;
+
+use calloop::channel::Sender as CalloopSender;
 
 use block2::RcBlock;
 use objc2::MainThreadMarker;
@@ -62,7 +63,7 @@ struct ListenerCtx {
     // being evaluated while being resize. This is especially necessary since we can't track
     // resize/move finishing on a per window level.
     resize_debounce: ResizeDebounce,
-    hub_sender: Sender<HubEvent>,
+    hub_sender: CalloopSender<HubEvent>,
 }
 
 pub(super) struct EventListener {
@@ -79,7 +80,7 @@ type TitleThrottle = Pin<Box<Throttle<CGWindowID>>>;
 type ResizeDebounce = Pin<Box<Debounce<i32>>>;
 
 impl EventListener {
-    pub(super) fn new(hub_sender: Sender<HubEvent>, is_suspended: Rc<Cell<bool>>) -> Self {
+    pub(super) fn new(hub_sender: CalloopSender<HubEvent>, is_suspended: Rc<Cell<bool>>) -> Self {
         let (focus_throttle, title_throttle, resize_debounce) = setup_throttles(hub_sender.clone());
 
         let mut ctx = Box::new(ListenerCtx {
@@ -271,7 +272,9 @@ fn setup_screen_observer(ctx: &ListenerCtx) -> ScreenObserver {
     }
 }
 
-fn setup_throttles(hub_sender: Sender<HubEvent>) -> (FocusThrottle, TitleThrottle, ResizeDebounce) {
+fn setup_throttles(
+    hub_sender: CalloopSender<HubEvent>,
+) -> (FocusThrottle, TitleThrottle, ResizeDebounce) {
     let hub_sender2 = hub_sender.clone();
     let hub_sender3 = hub_sender.clone();
 

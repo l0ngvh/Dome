@@ -2,10 +2,10 @@ use std::cell::{Cell, OnceCell};
 use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
+use calloop::channel::Sender as CalloopSender;
 use objc2_core_foundation::{
     CFMachPort, CFRetained, CFRunLoop, CFRunLoopSource, kCFAllocatorDefault, kCFRunLoopDefaultMode,
 };
@@ -24,7 +24,7 @@ pub(super) type Keymaps = Arc<RwLock<HashMap<Keymap, Actions>>>;
 struct KeyboardCtx {
     keymaps: Keymaps,
     is_suspended: Rc<Cell<bool>>,
-    hub_sender: Sender<HubEvent>,
+    hub_sender: CalloopSender<HubEvent>,
     event_tap: OnceCell<CFRetained<CFMachPort>>,
 }
 
@@ -48,7 +48,7 @@ impl KeyboardListener {
     pub(super) fn new(
         keymaps: Keymaps,
         is_suspended: Rc<Cell<bool>>,
-        hub_sender: Sender<HubEvent>,
+        hub_sender: CalloopSender<HubEvent>,
     ) -> Result<Self> {
         let ctx = Box::new(KeyboardCtx {
             keymaps,

@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::rc::Rc;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
@@ -69,7 +69,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
-    let (event_tx, event_rx) = mpsc::channel();
+    let (event_tx, event_rx) = calloop::channel::channel();
     let (frame_tx, frame_rx) = mpsc::channel();
 
     let hub_config = config.clone();
@@ -129,7 +129,9 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     let hub_thread = thread::spawn(move || {
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Dome::new(hub_config, screens, hub_tx, sender).run(event_rx);
+            let event_loop = calloop::EventLoop::try_new().expect("Failed to create event loop");
+            let signal = event_loop.get_signal();
+            Dome::new(hub_config, screens, hub_tx, sender, signal).run(event_rx, event_loop);
         }))
         .is_err()
         {
@@ -177,7 +179,7 @@ fn init_tracing(config: &Config) {
 }
 
 struct AppDelegateIvars {
-    hub_sender: Sender<HubEvent>,
+    hub_sender: calloop::channel::Sender<HubEvent>,
     frame_rx: Receiver<HubMessage>,
     overlay_manager: RefCell<OverlayManager>,
     overlay_windows: RefCell<HashMap<CGWindowID, OverlayWindow>>,
@@ -210,7 +212,7 @@ define_class!(
 impl AppDelegate {
     fn new(
         mtm: MainThreadMarker,
-        hub_sender: Sender<HubEvent>,
+        hub_sender: calloop::channel::Sender<HubEvent>,
         frame_rx: Receiver<HubMessage>,
         event_listener: EventListener,
         backend: Rc<MetalBackend>,
@@ -230,7 +232,7 @@ impl AppDelegate {
     }
 }
 
-pub(super) fn send_hub_event(hub_sender: &Sender<HubEvent>, event: HubEvent) {
+pub(super) fn send_hub_event(hub_sender: &calloop::channel::Sender<HubEvent>, event: HubEvent) {
     if hub_sender.send(event).is_err() {
         tracing::error!("Hub thread died, shutting down");
         let mtm = MainThreadMarker::new().unwrap();
