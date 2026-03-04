@@ -515,9 +515,48 @@ pub(crate) struct MacosConfig {
 }
 
 #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
+fn default_windows_ignore() -> Vec<WindowsWindow> {
+    vec![
+        WindowsWindow {
+            process: Some("LockApp.exe".into()),
+            title: None,
+        },
+        WindowsWindow {
+            process: Some("SearchHost.exe".into()),
+            title: None,
+        },
+        WindowsWindow {
+            process: Some("StartMenuExperienceHost.exe".into()),
+            title: None,
+        },
+        WindowsWindow {
+            process: None,
+            title: Some("MSCTFIME UI".into()),
+        },
+        WindowsWindow {
+            process: None,
+            title: Some("OLEChannelWnd".into()),
+        },
+    ]
+}
+
+#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
+fn deserialize_windows_ignore<'de, D>(deserializer: D) -> Result<Vec<WindowsWindow>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut rules: Vec<WindowsWindow> = Vec::deserialize(deserializer)?;
+    rules.extend(default_windows_ignore());
+    Ok(rules)
+}
+
+#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct WindowsConfig {
-    #[serde(default)]
+    #[serde(
+        default = "default_windows_ignore",
+        deserialize_with = "deserialize_windows_ignore"
+    )]
     pub(crate) ignore: Vec<WindowsWindow>,
     #[serde(default)]
     pub(crate) on_open: Vec<WindowsOnOpenRule>,
