@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::core::Dimension;
 use crate::core::DisplayMode;
 use crate::core::WindowId;
-use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
@@ -17,11 +17,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor,
-    GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindowVisible, MINMAXINFO, SW_MINIMIZE, SW_RESTORE,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageW, SetForegroundWindow,
-    SetWindowPos, ShowWindow, WM_GETMINMAXINFO, WS_CHILD, WS_EX_DLGMODALFRAME, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
+    GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic,
+    IsWindowVisible, MINMAXINFO, SMTO_ABORTIFHUNG, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow, SetWindowPos,
+    ShowWindow, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_DLGMODALFRAME,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    WS_THICKFRAME,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -330,14 +331,20 @@ where
     }
 }
 
+const MSG_TIMEOUT_MS: u32 = 100;
+
 fn get_size_constraints(hwnd: HWND) -> (f32, f32, f32, f32) {
     let mut info = MINMAXINFO::default();
+    let mut result = 0usize;
     unsafe {
-        SendMessageW(
+        SendMessageTimeoutW(
             hwnd,
             WM_GETMINMAXINFO,
-            Some(WPARAM(0)),
-            Some(LPARAM(&mut info as *mut _ as isize)),
+            WPARAM(0),
+            LPARAM(&mut info as *mut _ as isize),
+            SMTO_ABORTIFHUNG,
+            MSG_TIMEOUT_MS,
+            Some(&mut result),
         )
     };
     let (left, top, right, bottom) = get_invisible_border(hwnd);
@@ -389,16 +396,38 @@ fn is_cloaked(hwnd: HWND) -> bool {
 }
 
 pub(super) fn get_window_title(hwnd: HWND) -> Option<String> {
-    let len = unsafe { GetWindowTextLengthW(hwnd) };
-    if len == 0 {
+    let mut len = 0usize;
+    let ret = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXTLENGTH,
+            WPARAM(0),
+            LPARAM(0),
+            SMTO_ABORTIFHUNG,
+            MSG_TIMEOUT_MS,
+            Some(&mut len),
+        )
+    };
+    if ret == LRESULT(0) || len == 0 {
         return None;
     }
-    let mut buf = vec![0u16; (len + 1) as usize];
-    let copied = unsafe { GetWindowTextW(hwnd, &mut buf) };
-    if copied == 0 {
+    let mut buf = vec![0u16; len + 1];
+    let mut copied = 0usize;
+    let ret = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXT,
+            WPARAM(buf.len()),
+            LPARAM(buf.as_mut_ptr() as isize),
+            SMTO_ABORTIFHUNG,
+            MSG_TIMEOUT_MS,
+            Some(&mut copied),
+        )
+    };
+    if ret == LRESULT(0) || copied == 0 {
         return None;
     }
-    Some(String::from_utf16_lossy(&buf[..copied as usize]))
+    Some(String::from_utf16_lossy(&buf[..copied]))
 }
 
 pub(super) fn get_process_name(hwnd: HWND) -> anyhow::Result<String> {
