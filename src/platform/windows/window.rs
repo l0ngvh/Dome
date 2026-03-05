@@ -61,17 +61,17 @@ impl WindowHandle {
 
     pub(super) fn is_manageable(&self) -> bool {
         if !unsafe { IsWindowVisible(self.hwnd) }.as_bool() {
-            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, "not manageable: window is not visible");
+            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, process = self.process, "not manageable: window is not visible");
             return false;
         }
 
         if is_cloaked(self.hwnd) {
-            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, "not manageable: window is cloaked");
+            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, process = self.process, "not manageable: window is cloaked");
             return false;
         }
 
         if unsafe { GetAncestor(self.hwnd, GA_ROOT) } != self.hwnd {
-            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, "not manageable: window is not root");
+            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, process = self.process, "not manageable: window is not root");
             return false;
         }
 
@@ -79,23 +79,23 @@ impl WindowHandle {
         let ex_style = unsafe { GetWindowLongW(self.hwnd, GWL_EXSTYLE) } as u32;
 
         if style & WS_CHILD.0 != 0 {
-            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, "not manageable: window is a child window");
+            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, process = self.process, "not manageable: window is a child window");
             return false;
         }
 
         if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
-            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, "not manageable: window is a tool window");
+            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, process = self.process, "not manageable: window is a tool window");
             return false;
         }
 
         if ex_style & WS_EX_NOACTIVATE.0 != 0 {
-            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, "not manageable: window has WS_EX_NOACTIVATE");
+            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, process = self.process, "not manageable: window has WS_EX_NOACTIVATE");
             return false;
         }
 
         let dim = self.dimension();
         if dim.width == 0.0 || dim.height == 0.0 {
-            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, "not manageable: window has empty size");
+            tracing::trace!(hwnd = ?self.hwnd, title = ?self.title, process = self.process, "not manageable: window has empty size");
             return false;
         }
 
