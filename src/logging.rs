@@ -1,29 +1,54 @@
 use tracing_error::ErrorLayer;
 use tracing_subscriber::fmt::format::DefaultFields;
+use tracing_subscriber::reload::{self, Handle};
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
+use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
 
-use crate::config::Config;
+use crate::config::{Config, LogLevel};
 
-pub(crate) fn init_tracing(config: &Config) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("off,dome={}", config.log_level.as_str())));
-    let log_dir = Config::log_dir();
-    let file_layer = std::fs::create_dir_all(&log_dir)
-        .and_then(|_| std::fs::File::create(format!("{log_dir}/dome.log")))
-        .ok()
-        .map(|f| {
-            fmt::layer()
-                .fmt_fields(FileFields(DefaultFields::new()))
-                .with_ansi(false)
-                .with_writer(std::sync::Mutex::new(f))
-        });
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt::layer())
-        .with(file_layer)
-        .with(ErrorLayer::default())
-        .init();
+type FilterHandle = Handle<EnvFilter, Registry>;
+
+pub(crate) struct Logger {
+    handle: Option<FilterHandle>,
+}
+
+impl Logger {
+    pub(crate) fn init(config: &Config) -> Self {
+        let (filter, handle) = match EnvFilter::try_from_default_env() {
+            Ok(f) => (reload::Layer::new(f).0, None),
+            Err(_) => {
+                let (layer, h) = reload::Layer::new(make_filter(config.log_level));
+                (layer, Some(h))
+            }
+        };
+        let log_dir = Config::log_dir();
+        let file_layer = std::fs::create_dir_all(&log_dir)
+            .and_then(|_| std::fs::File::create(format!("{log_dir}/dome.log")))
+            .ok()
+            .map(|f| {
+                fmt::layer()
+                    .fmt_fields(FileFields(DefaultFields::new()))
+                    .with_ansi(false)
+                    .with_writer(std::sync::Mutex::new(f))
+            });
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt::layer())
+            .with(file_layer)
+            .with(ErrorLayer::default())
+            .init();
+        Self { handle }
+    }
+
+    pub(crate) fn set_level(&self, level: LogLevel) {
+        if let Some(h) = &self.handle {
+            let _ = h.reload(make_filter(level));
+        }
+    }
+}
+
+fn make_filter(level: LogLevel) -> EnvFilter {
+    EnvFilter::new(format!("off,dome={}", level.as_str()))
 }
 
 // Newtype so the file layer gets its own FormattedFields span extension,

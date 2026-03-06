@@ -29,7 +29,7 @@ use super::recovery;
 use super::renderer::MetalBackend;
 use crate::config::{Config, start_config_watcher};
 use crate::ipc;
-use crate::logging::init_tracing;
+use crate::logging::Logger;
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -39,7 +39,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     });
 
     recovery::install_handlers();
-    init_tracing(&config);
+    let logger = Logger::init(&config);
     tracing::info!(%config_path, "Loaded config");
 
     std::panic::set_hook(Box::new(|panic_info| {
@@ -77,6 +77,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
         let keymaps = keymaps.clone();
         let tx = event_tx.clone();
         move |cfg| {
+            logger.set_level(cfg.log_level);
             *keymaps.write().unwrap() = cfg.keymaps.clone();
             tx.send(HubEvent::ConfigChanged(cfg)).ok();
         }

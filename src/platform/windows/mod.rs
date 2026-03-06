@@ -10,7 +10,7 @@ mod window;
 
 use std::thread;
 
-use crate::logging::init_tracing;
+use crate::logging::Logger;
 use anyhow::Result;
 use calloop::channel::channel;
 use std::mem::size_of;
@@ -58,7 +58,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
         Config::default()
     });
 
-    init_tracing(&config);
+    let logger = Logger::init(&config);
     recovery::install_handlers();
 
     std::panic::set_hook(Box::new(|panic_info| {
@@ -107,6 +107,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     let _config_watcher = start_config_watcher(&config_path, {
         let tx = sender.clone();
         move |cfg| {
+            logger.set_level(cfg.log_level);
             keyboard::update_config(cfg.clone());
             tx.send(HubEvent::ConfigChanged(cfg)).ok();
         }
