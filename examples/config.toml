@@ -28,6 +28,9 @@ tab_bar_background_color = "#262633"
 # Active tab background color
 active_tab_background_color = "#4d4d66"
 
+# Log level filter (default: none, uses RUST_LOG env var)
+# log_level = "debug"
+
 [keymaps]
 "cmd+0" = ["focus workspace 0"]
 "cmd+1" = ["focus workspace 1"]

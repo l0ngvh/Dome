@@ -19,9 +19,6 @@ use objc2_core_graphics::{
 };
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol};
 use objc2_metal::MTLCreateSystemDefaultDevice;
-use tracing_error::ErrorLayer;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
 use super::dome::{Dome, HubEvent, HubMessage, MessageSender};
 use super::keyboard::KeyboardListener;
@@ -32,6 +29,7 @@ use super::recovery;
 use super::renderer::MetalBackend;
 use crate::config::{Config, start_config_watcher};
 use crate::ipc;
+use crate::logging::init_tracing;
 
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
@@ -163,19 +161,6 @@ fn create_frame_source(delegate: &Retained<AppDelegate>) -> CFRetained<CFRunLoop
         perform: Some(frame_callback),
     };
     unsafe { CFRunLoopSource::new(None, 0, &mut context).unwrap() }
-}
-
-fn init_tracing(config: &Config) {
-    let filter = config
-        .log_level
-        .as_ref()
-        .and_then(|l| l.parse().ok())
-        .unwrap_or_else(EnvFilter::from_default_env);
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt::layer())
-        .with(ErrorLayer::default())
-        .init();
 }
 
 struct AppDelegateIvars {

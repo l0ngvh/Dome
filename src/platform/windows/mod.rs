@@ -10,12 +10,10 @@ mod window;
 
 use std::thread;
 
+use crate::logging::init_tracing;
 use anyhow::Result;
 use calloop::channel::channel;
 use std::mem::size_of;
-use tracing_error::ErrorLayer;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
 use windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -213,19 +211,6 @@ fn compute_global_bounds(screens: &[ScreenInfo]) -> Dimension {
         width: max_x - min_x,
         height: max_y - min_y,
     }
-}
-
-fn init_tracing(config: &Config) {
-    let filter = config
-        .log_level
-        .as_ref()
-        .and_then(|l| l.parse().ok())
-        .unwrap_or_else(EnvFilter::from_default_env);
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt::layer())
-        .with(ErrorLayer::default())
-        .init();
 }
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows

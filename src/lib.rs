@@ -2,6 +2,7 @@ mod action;
 mod config;
 mod core;
 mod ipc;
+mod logging;
 mod overlay;
 mod platform;
 

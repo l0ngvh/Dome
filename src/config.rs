@@ -514,7 +514,6 @@ pub(crate) struct MacosConfig {
     pub(crate) on_open: Vec<MacosOnOpenRule>,
 }
 
-#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
 fn default_windows_ignore() -> Vec<WindowsWindow> {
     vec![
         WindowsWindow {
@@ -540,7 +539,6 @@ fn default_windows_ignore() -> Vec<WindowsWindow> {
     ]
 }
 
-#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
 fn deserialize_windows_ignore<'de, D>(deserializer: D) -> Result<Vec<WindowsWindow>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -598,7 +596,30 @@ pub(crate) struct Config {
     #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
     pub(crate) windows: WindowsConfig,
     #[serde(default)]
-    pub(crate) log_level: Option<String>,
+    pub(crate) log_level: LogLevel,
+}
+
+#[derive(Debug, Deserialize, Default, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum LogLevel {
+    Trace,
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            LogLevel::Trace => "trace",
+            LogLevel::Debug => "debug",
+            LogLevel::Info => "info",
+            LogLevel::Warn => "warn",
+            LogLevel::Error => "error",
+        }
+    }
 }
 
 fn default_border_size() -> f32 {
@@ -631,7 +652,7 @@ impl Default for Config {
             active_tab_background_color: default_active_tab_background_color(),
             macos: MacosConfig::default(),
             windows: WindowsConfig::default(),
-            log_level: None,
+            log_level: LogLevel::default(),
         }
     }
 }
@@ -656,6 +677,33 @@ impl Config {
                 format!("{home}/.config")
             });
         format!("{config_dir}/dome/config.toml")
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn log_dir() -> String {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{home}/Library/Logs/dome")
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn log_dir() -> String {
+        let config_dir = std::env::var("APPDATA").unwrap_or_else(|_| {
+            let home = std::env::var("USERPROFILE").unwrap_or_default();
+            format!("{home}\\AppData\\Roaming")
+        });
+        format!("{config_dir}\\dome\\logs")
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn log_dir() -> String {
+        let data_dir = std::env::var("XDG_STATE_HOME")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                let home = std::env::var("HOME").unwrap_or_default();
+                format!("{home}/.local/state")
+            });
+        format!("{data_dir}/dome")
     }
 
     pub(crate) fn load(path: &str) -> Result<Self> {

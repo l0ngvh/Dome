@@ -86,7 +86,18 @@ tab_bar_background_color = "#262633"
 
 # Active tab background color
 active_tab_background_color = "#4d4d66"
+
+# Log level (default: info)
+# log_level = "debug"
 ```
+
+### Log File
+
+Dome writes logs to a single `dome.log` file, overwritten on each launch:
+
+- macOS: `~/Library/Logs/dome/dome.log`
+- Windows: `%APPDATA%\dome\logs\dome.log`
+- Linux: `$XDG_STATE_HOME/dome/dome.log` (defaults to `~/.local/state/dome/dome.log`)
 
 ### Keybindings
 
