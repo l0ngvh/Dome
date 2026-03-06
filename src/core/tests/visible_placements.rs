@@ -214,7 +214,10 @@ fn float_scrolls_with_viewport() {
     hub.set_window_constraint(w2, Some(100.0), None, None, None);
 
     hub.set_focus(w1);
-    hub.toggle_float(); // w1 becomes float
+    hub.toggle_float(); // w1 becomes float, stays at its tiling position
+
+    // Scroll viewport left by focusing w0
+    hub.set_focus(w0);
     let float_x_before = normal_windows(&placements(&hub))
         .iter()
         .find(|wp| wp.id == w1)

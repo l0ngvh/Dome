@@ -1,5 +1,5 @@
 use crate::core::{
-    Child, Dimension, Hub, WindowId,
+    Child, Hub, WindowId,
     node::{DisplayMode, Parent, WorkspaceId},
 };
 
@@ -15,20 +15,10 @@ impl Hub {
 
     pub(super) fn attach_split_as_float(&mut self, workspace_id: WorkspaceId, id: WindowId) {
         let window = self.windows.get_mut(id);
-        let dim = window.dimension;
-
         window.mode = DisplayMode::Float;
         window.parent = Parent::Workspace(workspace_id);
         window.workspace = workspace_id;
         let workspace = self.workspaces.get_mut(workspace_id);
-
-        let screen = self.monitors.get(workspace.monitor).dimension;
-        window.dimension = Dimension {
-            width: dim.width,
-            height: dim.height,
-            x: screen.x + (screen.width - dim.width) / 2.0,
-            y: screen.y + (screen.height - dim.height) / 2.0,
-        };
         workspace.float_windows.push(id);
         self.set_workspace_focus(Child::Window(id));
     }
