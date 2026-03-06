@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, CornerRadius, FontId, Rect, Sense, pos2, vec2};
+use egui::{Align, Color32, CornerRadius, Layout, Rect, RichText, Sense, pos2, vec2};
 
 use crate::config::{Color, Config};
 use crate::core::SpawnMode;
@@ -166,12 +166,18 @@ pub(crate) fn show_container(
         if response.clicked() {
             clicked = Some(i);
         }
-        ui.painter().text(
-            tab_rect.center(),
-            Align2::CENTER_CENTER,
-            title,
-            FontId::proportional(12.0),
-            Color32::WHITE,
+        let inner = tab_rect.shrink2(vec2(b * 2.0, 0.0));
+        let mut tab_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        tab_ui.add(
+            egui::Label::new(
+                RichText::new(title).color(Color32::WHITE).size(12.0),
+            )
+            .truncate()
+            .halign(Align::Center),
         );
     }
 
