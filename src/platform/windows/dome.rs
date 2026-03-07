@@ -299,31 +299,30 @@ impl Dome {
     }
 
     fn submit_focus(&mut self, handle: WindowHandle) {
-        match self.focus_throttle.submit(handle.clone()) {
+        match self.focus_throttle.submit(handle) {
             ThrottleResult::Send(h) => self.handle_focus(h),
-            ThrottleResult::Pending => {
-                if let Some(delay) = self.focus_throttle.schedule_delay() {
-                    self.schedule_throttle_timer(delay, ThrottleKind::Focus);
-                }
+            ThrottleResult::Pending => {}
+            ThrottleResult::ScheduleFlush(delay) => {
+                self.schedule_throttle_timer(delay, ThrottleKind::Focus);
             }
         }
     }
 
     fn submit_resize(&mut self, handle: WindowHandle) {
-        match self.resize_throttle.submit(handle.clone()) {
+        match self.resize_throttle.submit(handle) {
             ThrottleResult::Send(h) => self.handle_resize(h),
-            ThrottleResult::Pending => {
-                if let Some(delay) = self.resize_throttle.schedule_delay() {
-                    self.schedule_throttle_timer(delay, ThrottleKind::Resize);
-                }
+            ThrottleResult::Pending => {}
+            ThrottleResult::ScheduleFlush(delay) => {
+                self.schedule_throttle_timer(delay, ThrottleKind::Resize);
             }
         }
     }
 
     fn schedule_throttle_timer(&mut self, delay: Duration, kind: ThrottleKind) {
         let timer = Timer::from_duration(delay);
-        let token = self
-            .handle
+        // Token is intentionally discarded: at most one timer exists at a time
+        // (guarded by has_pending_timer), and it always self-removes via TimeoutAction::Drop.
+        self.handle
             .insert_source(timer, move |_, _, dome| {
                 match kind {
                     ThrottleKind::Focus => {
@@ -342,8 +341,8 @@ impl Dome {
             .expect("Failed to insert timer");
 
         match kind {
-            ThrottleKind::Focus => self.focus_throttle.set_timer_token(token),
-            ThrottleKind::Resize => self.resize_throttle.set_timer_token(token),
+            ThrottleKind::Focus => self.focus_throttle.mark_timer_scheduled(),
+            ThrottleKind::Resize => self.resize_throttle.mark_timer_scheduled(),
         }
     }
 
