@@ -9,12 +9,12 @@ use crate::core::{
 };
 
 use super::dome::ContainerOverlayData;
-use super::window::{Registry, Taskbar, WindowKey};
+use super::window::{ManagedHwnd, Registry, Taskbar};
 
 pub(super) struct MonitorEntry {
     pub(super) id: MonitorId,
     pub(super) dimension: Dimension,
-    pub(super) displayed_windows: HashSet<WindowKey>,
+    pub(super) displayed_windows: HashSet<ManagedHwnd>,
 }
 
 impl MonitorEntry {
@@ -46,11 +46,11 @@ impl MonitorEntry {
     ) {
         let current_windows: HashSet<_> = registry
             .get_handle(window_id)
-            .map(|h| WindowKey::from(h))
+            .map(|h| ManagedHwnd::new(h.hwnd()))
             .into_iter()
             .collect();
         for key in self.displayed_windows.difference(&current_windows) {
-            if let Some(handle) = registry.get_handle_by_key(*key) {
+            if let Some(handle) = registry.get_handle_by(*key) {
                 handle.hide();
                 taskbar.delete_tab(handle.hwnd()).ok();
             }
@@ -75,10 +75,10 @@ impl MonitorEntry {
         let border = config.border_size;
         let current_windows: HashSet<_> = windows
             .iter()
-            .filter_map(|p| registry.get_handle(p.id).map(|h| WindowKey::from(h)))
+            .filter_map(|p| registry.get_handle(p.id).map(|h| ManagedHwnd::new(h.hwnd())))
             .collect();
         for key in self.displayed_windows.difference(&current_windows) {
-            if let Some(handle) = registry.get_handle_by_key(*key) {
+            if let Some(handle) = registry.get_handle_by(*key) {
                 handle.hide();
                 taskbar.delete_tab(handle.hwnd()).ok();
             }

@@ -26,6 +26,21 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PWSTR};
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct ManagedHwnd(isize);
+
+impl ManagedHwnd {
+    pub(super) fn new(hwnd: HWND) -> Self {
+        Self(hwnd.0 as isize)
+    }
+
+    pub(super) fn hwnd(self) -> HWND {
+        HWND(self.0 as *mut _)
+    }
+}
+
+unsafe impl Send for ManagedHwnd {}
+
 // HWND is safe to send across threads, but doesn't implement Send
 // https://users.rust-lang.org/t/moving-window-hwnd-or-handle-from-one-thread-to-a-new-one/126341/2
 #[derive(Clone)]
@@ -474,24 +489,8 @@ impl Taskbar {
     }
 }
 
-/// Hashable key for window lookups
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct WindowKey(isize);
-
-impl From<HWND> for WindowKey {
-    fn from(hwnd: HWND) -> Self {
-        Self(hwnd.0 as isize)
-    }
-}
-
-impl From<&WindowHandle> for WindowKey {
-    fn from(handle: &WindowHandle) -> Self {
-        Self(handle.hwnd().0 as isize)
-    }
-}
-
 pub(super) struct Registry {
-    windows: HashMap<WindowKey, WindowId>,
+    windows: HashMap<ManagedHwnd, WindowId>,
     reverse: HashMap<WindowId, WindowHandle>,
 }
 
@@ -504,21 +503,20 @@ impl Registry {
     }
 
     pub(super) fn insert(&mut self, handle: WindowHandle, id: WindowId) {
-        self.windows.insert(WindowKey::from(&handle), id);
+        self.windows.insert(ManagedHwnd::new(handle.hwnd()), id);
         self.reverse.insert(id, handle);
     }
 
-    pub(super) fn remove(&mut self, handle: &WindowHandle) -> Option<WindowId> {
-        let key = WindowKey::from(handle);
-        if let Some(id) = self.windows.remove(&key) {
+    pub(super) fn remove(&mut self, hwnd: ManagedHwnd) -> Option<WindowId> {
+        if let Some(id) = self.windows.remove(&hwnd) {
             self.reverse.remove(&id);
             return Some(id);
         }
         None
     }
 
-    pub(super) fn get_id(&self, handle: &WindowHandle) -> Option<WindowId> {
-        self.windows.get(&WindowKey::from(handle)).copied()
+    pub(super) fn get_id(&self, hwnd: ManagedHwnd) -> Option<WindowId> {
+        self.windows.get(&hwnd).copied()
     }
 
     pub(super) fn get_handle(&self, id: WindowId) -> Option<&WindowHandle> {
@@ -529,21 +527,21 @@ impl Registry {
         self.reverse.get_mut(&id)
     }
 
-    pub(super) fn get_handle_by_key(&self, key: WindowKey) -> Option<WindowHandle> {
-        if let Some(&id) = self.windows.get(&key) {
-            return self.reverse.get(&id).cloned();
-        }
-        None
+    pub(super) fn get_handle_by(&self, hwnd: ManagedHwnd) -> Option<&WindowHandle> {
+        self.windows
+            .get(&hwnd)
+            .and_then(|id| self.reverse.get(id))
     }
 
-    pub(super) fn contains(&self, handle: &WindowHandle) -> bool {
-        self.windows.contains_key(&WindowKey::from(handle))
+    pub(super) fn contains(&self, hwnd: ManagedHwnd) -> bool {
+        self.windows.contains_key(&hwnd)
     }
 
-    pub(super) fn update_title(&mut self, handle: &WindowHandle) {
-        let key = WindowKey::from(handle);
-        if let Some(&id) = self.windows.get(&key) {
-            self.reverse.insert(id, handle.clone());
+    pub(super) fn update_title(&mut self, hwnd: ManagedHwnd) {
+        if let Some(&id) = self.windows.get(&hwnd) {
+            if let Some(handle) = self.reverse.get_mut(&id) {
+                handle.title = get_window_title(hwnd.hwnd());
+            }
         }
     }
 }

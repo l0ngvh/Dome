@@ -16,7 +16,7 @@ use crate::core::{
 use super::monitor::MonitorRegistry;
 use super::recovery;
 use super::throttle::{Throttle, ThrottleResult};
-use super::window::{Registry, Taskbar, WindowHandle, enum_windows, initial_display_mode};
+use super::window::{ManagedHwnd, Registry, Taskbar, WindowHandle, enum_windows, initial_display_mode};
 use super::{ScreenInfo, compute_global_bounds};
 
 pub(super) const WM_APP_OVERLAY: u32 = 0x8001;
@@ -31,11 +31,11 @@ const RESIZE_THROTTLE: Duration = Duration::from_millis(16);
 )]
 pub(super) enum HubEvent {
     AppInitialized(AppHandle),
-    WindowCreated(WindowHandle),
-    WindowDestroyed(WindowHandle),
-    WindowFocused(WindowHandle),
-    WindowTitleChanged(WindowHandle),
-    WindowMovedOrResized(WindowHandle),
+    WindowCreated(ManagedHwnd),
+    WindowDestroyed(ManagedHwnd),
+    WindowFocused(ManagedHwnd),
+    WindowTitleChanged(ManagedHwnd),
+    WindowMovedOrResized(ManagedHwnd),
     ScreensChanged(Vec<ScreenInfo>),
     Action(Actions),
     ConfigChanged(Config),
@@ -97,8 +97,8 @@ pub(super) struct Dome {
     app_hwnd: Option<AppHandle>,
     signal: LoopSignal,
     handle: LoopHandle<'static, Self>,
-    focus_throttle: Throttle<WindowHandle>,
-    resize_throttle: Throttle<WindowHandle>,
+    focus_throttle: Throttle<ManagedHwnd>,
+    resize_throttle: Throttle<ManagedHwnd>,
 }
 
 impl Dome {
@@ -227,56 +227,55 @@ impl Dome {
                 self.config = new_config;
                 tracing::info!("Config reloaded");
             }
-            HubEvent::WindowCreated(handle) => {
-                let _span = tracing::info_span!("window_created", %handle).entered();
-                if self.registry.contains(&handle) {
+            HubEvent::WindowCreated(h) => {
+                if self.registry.contains(h) {
                     return Some((creates, deletes));
                 }
+                let handle = WindowHandle::new(h.hwnd());
+                let _span = tracing::info_span!("window_created", %handle).entered();
                 if should_ignore(&handle, &self.config.windows.ignore) {
                     return Some((creates, deletes));
                 }
-                let hwnd = handle.hwnd();
                 let id = self.insert_window(&handle);
                 let is_float = self.hub.get_window(id).is_float();
                 creates.push(OverlayCreate {
                     window_id: id,
-                    hwnd,
+                    hwnd: h.hwnd(),
                     is_float,
                 });
                 if let Some(actions) = on_open_actions(&handle, &self.config.windows.on_open) {
                     self.execute_actions(&actions);
                 }
             }
-            HubEvent::WindowDestroyed(handle) => {
-                let _span = tracing::info_span!("window_destroyed", %handle).entered();
-                if let Some(id) = self.remove_window(&handle) {
+            HubEvent::WindowDestroyed(h) => {
+                if let Some(id) = self.remove_window(h) {
                     deletes.push(id);
                 }
             }
-            HubEvent::WindowFocused(handle) => {
-                self.submit_focus(handle);
+            HubEvent::WindowFocused(h) => {
+                self.submit_focus(h);
                 return Some((creates, deletes));
             }
-            HubEvent::WindowMovedOrResized(handle) => {
-                self.submit_resize(handle);
+            HubEvent::WindowMovedOrResized(h) => {
+                self.submit_resize(h);
                 return Some((creates, deletes));
             }
-            HubEvent::WindowTitleChanged(handle) => {
-                let _span = tracing::info_span!("window_title_changed", %handle).entered();
-                if self.registry.contains(&handle) {
-                    self.registry.update_title(&handle);
+            HubEvent::WindowTitleChanged(h) => {
+                if self.registry.contains(h) {
+                    self.registry.update_title(h);
                     return Some((creates, deletes));
                 }
+                let handle = WindowHandle::new(h.hwnd());
+                let _span = tracing::info_span!("window_title_changed", %handle).entered();
                 // Some apps have a brief moment where their title is empty
                 if should_ignore(&handle, &self.config.windows.ignore) {
                     return Some((creates, deletes));
                 }
-                let hwnd = handle.hwnd();
                 let id = self.insert_window(&handle);
                 let is_float = self.hub.get_window(id).is_float();
                 creates.push(OverlayCreate {
                     window_id: id,
-                    hwnd,
+                    hwnd: h.hwnd(),
                     is_float,
                 });
                 if let Some(actions) = on_open_actions(&handle, &self.config.windows.on_open) {
@@ -298,8 +297,8 @@ impl Dome {
         Some((creates, deletes))
     }
 
-    fn submit_focus(&mut self, handle: WindowHandle) {
-        match self.focus_throttle.submit(handle) {
+    fn submit_focus(&mut self, h: ManagedHwnd) {
+        match self.focus_throttle.submit(h) {
             ThrottleResult::Send(h) => self.handle_focus(h),
             ThrottleResult::Pending => {}
             ThrottleResult::ScheduleFlush(delay) => {
@@ -308,8 +307,8 @@ impl Dome {
         }
     }
 
-    fn submit_resize(&mut self, handle: WindowHandle) {
-        match self.resize_throttle.submit(handle) {
+    fn submit_resize(&mut self, h: ManagedHwnd) {
+        match self.resize_throttle.submit(h) {
             ThrottleResult::Send(h) => self.handle_resize(h),
             ThrottleResult::Pending => {}
             ThrottleResult::ScheduleFlush(delay) => {
@@ -346,25 +345,24 @@ impl Dome {
         }
     }
 
-    fn handle_focus(&mut self, handle: WindowHandle) {
-        let _span = tracing::info_span!("window_focused", %handle).entered();
-        if let Some(id) = self.registry.get_id(&handle) {
+    fn handle_focus(&mut self, h: ManagedHwnd) {
+        if let Some(id) = self.registry.get_id(h) {
             let last_focus = self
                 .hub
                 .get_workspace(self.hub.current_workspace())
                 .focused();
             self.hub.set_focus(id);
-            tracing::info!("Window focused");
+            tracing::info!(hwnd = ?h.hwnd(), "Window focused");
             self.apply_layout(Vec::new(), Vec::new(), last_focus);
         }
     }
 
-    fn handle_resize(&mut self, handle: WindowHandle) {
+    fn handle_resize(&mut self, h: ManagedHwnd) {
         let last_focus = self
             .hub
             .get_workspace(self.hub.current_workspace())
             .focused();
-        self.check_fullscreen_state(&handle);
+        self.check_fullscreen_state(h);
         self.apply_layout(Vec::new(), Vec::new(), last_focus);
     }
 
@@ -381,11 +379,11 @@ impl Dome {
         id
     }
 
-    fn remove_window(&mut self, handle: &WindowHandle) -> Option<WindowId> {
-        if let Some(id) = self.registry.remove(handle) {
-            recovery::untrack(handle);
+    fn remove_window(&mut self, h: ManagedHwnd) -> Option<WindowId> {
+        if let Some(id) = self.registry.remove(h) {
+            recovery::untrack(h);
             self.hub.delete_window(id);
-            tracing::info!("Window deleted");
+            tracing::info!(hwnd = ?h.hwnd(), "Window deleted");
             return Some(id);
         }
         None
@@ -489,18 +487,18 @@ impl Dome {
         }
     }
 
-    fn check_fullscreen_state(&mut self, handle: &WindowHandle) {
-        let Some(window_id) = self.registry.get_id(handle) else {
+    fn check_fullscreen_state(&mut self, h: ManagedHwnd) {
+        let Some(window_id) = self.registry.get_id(h) else {
             return;
         };
-        let Some(monitor) = self.monitor_registry.find_monitor_dimension(handle.hwnd()) else {
+        let Some(monitor) = self.monitor_registry.find_monitor_dimension(h.hwnd()) else {
+            return;
+        };
+        let Some(handle) = self.registry.get_handle(window_id) else {
             return;
         };
         let is_fs = handle.is_fullscreen(&monitor);
-        let was_fs = self
-            .registry
-            .get_handle(window_id)
-            .is_some_and(|h| h.fullscreen());
+        let was_fs = handle.fullscreen();
         match (was_fs, is_fs) {
             (false, true) => {
                 if let Some(h) = self.registry.get_handle_mut(window_id) {

@@ -13,7 +13,7 @@ use windows::core::BOOL;
 use crate::core::Dimension;
 
 use super::OFFSCREEN_POS;
-use super::window::WindowHandle;
+use super::window::{ManagedHwnd, WindowHandle};
 
 const DEFAULT_WIDTH: f32 = 800.0;
 const DEFAULT_HEIGHT: f32 = 600.0;
@@ -61,9 +61,9 @@ pub(super) fn track(handle: &WindowHandle) {
     }
 }
 
-pub(super) fn untrack(handle: &WindowHandle) {
+pub(super) fn untrack(h: ManagedHwnd) {
     if let Ok(mut state) = RECOVERY_STATE.lock() {
-        state.remove(&(handle.hwnd().0 as isize));
+        state.remove(&(h.hwnd().0 as isize));
     }
 }
 
