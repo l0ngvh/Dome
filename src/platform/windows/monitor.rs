@@ -92,9 +92,7 @@ impl MonitorEntry {
         let mut window_placements = Vec::new();
         for wp in windows {
             if let Some(handle) = registry.get_handle_mut(wp.id) {
-                if let Some([min_w, min_h, max_w, max_h]) =
-                    handle.get_constraints(&wp.frame, border)
-                {
+                if let Some([min_w, min_h, max_w, max_h]) = handle.get_constraints(border) {
                     hub.set_window_constraint(wp.id, min_w, min_h, max_w, max_h);
                 }
                 handle.show(&wp.frame, border, wp.is_float);

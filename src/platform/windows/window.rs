@@ -49,6 +49,7 @@ pub(super) struct WindowHandle {
     title: Option<String>,
     process: String,
     mode: DisplayMode,
+    constraints: (f32, f32, f32, f32),
 }
 
 unsafe impl Send for WindowHandle {}
@@ -60,6 +61,7 @@ impl WindowHandle {
             title: get_window_title(hwnd),
             process: get_process_name(hwnd).unwrap_or_default(),
             mode: DisplayMode::Tiling,
+            constraints: get_size_constraints(hwnd),
         }
     }
 
@@ -163,23 +165,20 @@ impl WindowHandle {
         };
     }
 
+    /// Refresh windows constraints. This can be used for example when the managed window changes
+    /// its size, or when the display configuration is updated. Technically windows can change
+    /// their min/max size without emitting any of these notifications, but that's rare, and we
+    /// receive enough window moved/resize notifications.
+    /// This can be slow, due to the fact that external windows may take time to response or even
+    /// hang
+    pub(super) fn refresh_constraints(&mut self) {
+        self.constraints = get_size_constraints(self.hwnd);
+    }
+
     /// Returns (min_width, min_height, max_width, max_height) constraints
     /// with border added, if any dimension exceeds the content area.
-    pub(super) fn get_constraints(&self, dim: &Dimension, border: f32) -> Option<[Option<f32>; 4]> {
-        let content = apply_inset(*dim, border);
-        let (min_w, min_h, max_w, max_h) = get_size_constraints(self.hwnd);
-        let min_w = if min_w > content.width { min_w } else { 0.0 };
-        let min_h = if min_h > content.height { min_h } else { 0.0 };
-        let max_w = if max_w > 0.0 && max_w < content.width {
-            max_w
-        } else {
-            0.0
-        };
-        let max_h = if max_h > 0.0 && max_h < content.height {
-            max_h
-        } else {
-            0.0
-        };
+    pub(super) fn get_constraints(&self, border: f32) -> Option<[Option<f32>; 4]> {
+        let (min_w, min_h, max_w, max_h) = self.constraints;
         if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
             let to_opt = |v: f32| {
                 if v > 0.0 {
@@ -540,6 +539,20 @@ impl Registry {
             && let Some(handle) = self.reverse.get_mut(&id)
         {
             handle.title = get_window_title(hwnd.hwnd());
+        }
+    }
+
+    pub(super) fn refresh_constraints(&mut self, hwnd: ManagedHwnd) {
+        if let Some(&id) = self.windows.get(&hwnd)
+            && let Some(handle) = self.reverse.get_mut(&id)
+        {
+            handle.refresh_constraints();
+        }
+    }
+
+    pub(super) fn refresh_all_constraints(&mut self) {
+        for handle in self.reverse.values_mut() {
+            handle.refresh_constraints();
         }
     }
 }

@@ -162,6 +162,7 @@ impl Dome {
         }
         self.global_bounds = compute_global_bounds(&screens);
         reconcile_monitors(&mut self.hub, &mut self.monitor_registry, screens);
+        self.registry.refresh_all_constraints();
     }
 
     pub(super) fn run(
@@ -360,6 +361,7 @@ impl Dome {
     }
 
     fn handle_resize(&mut self, h: ManagedHwnd) {
+        self.registry.refresh_constraints(h);
         let last_focus = self
             .hub
             .get_workspace(self.hub.current_workspace())
