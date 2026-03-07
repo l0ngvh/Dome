@@ -18,11 +18,11 @@ use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor,
     GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic,
-    IsWindowVisible, MINMAXINFO, SMTO_ABORTIFHUNG, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow, SetWindowPos,
-    ShowWindow, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_DLGMODALFRAME,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
-    WS_THICKFRAME,
+    IsWindowVisible, MINMAXINFO, SMTO_ABORTIFHUNG, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow,
+    SetWindowPos, ShowWindow, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD,
+    WS_EX_DLGMODALFRAME, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -212,7 +212,7 @@ impl WindowHandle {
                 dim.y as i32 - top,
                 dim.width as i32 + left + right,
                 dim.height as i32 + top + bottom,
-                SWP_NOZORDER | SWP_NOACTIVATE,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
             )
             .ok()
         };
@@ -230,7 +230,7 @@ impl WindowHandle {
                             rect.top + dy,
                             0,
                             0,
-                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
+                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
                         )
                         .ok()
                     };
@@ -252,7 +252,7 @@ impl WindowHandle {
                 super::OFFSCREEN_POS as i32,
                 0,
                 0,
-                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
             )
             .ok()
         };
@@ -267,7 +267,7 @@ impl WindowHandle {
                 0,
                 0,
                 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
             )
             .ok()
         };
@@ -280,7 +280,7 @@ impl WindowHandle {
                     0,
                     0,
                     0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
                 )
                 .ok()
             };
