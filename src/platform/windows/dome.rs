@@ -16,7 +16,9 @@ use crate::core::{
 use super::monitor::MonitorRegistry;
 use super::recovery;
 use super::throttle::{Throttle, ThrottleResult};
-use super::window::{ManagedHwnd, Registry, Taskbar, WindowHandle, enum_windows, initial_display_mode};
+use super::window::{
+    ManagedHwnd, Registry, Taskbar, WindowHandle, enum_windows, initial_display_mode,
+};
 use super::{ScreenInfo, compute_global_bounds};
 
 pub(super) const WM_APP_OVERLAY: u32 = 0x8001;

@@ -528,9 +528,7 @@ impl Registry {
     }
 
     pub(super) fn get_handle_by(&self, hwnd: ManagedHwnd) -> Option<&WindowHandle> {
-        self.windows
-            .get(&hwnd)
-            .and_then(|id| self.reverse.get(id))
+        self.windows.get(&hwnd).and_then(|id| self.reverse.get(id))
     }
 
     pub(super) fn contains(&self, hwnd: ManagedHwnd) -> bool {
@@ -538,10 +536,10 @@ impl Registry {
     }
 
     pub(super) fn update_title(&mut self, hwnd: ManagedHwnd) {
-        if let Some(&id) = self.windows.get(&hwnd) {
-            if let Some(handle) = self.reverse.get_mut(&id) {
-                handle.title = get_window_title(hwnd.hwnd());
-            }
+        if let Some(&id) = self.windows.get(&hwnd)
+            && let Some(handle) = self.reverse.get_mut(&id)
+        {
+            handle.title = get_window_title(hwnd.hwnd());
         }
     }
 }

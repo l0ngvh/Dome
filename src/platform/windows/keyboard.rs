@@ -1,17 +1,27 @@
+use std::sync::mpsc;
 use std::sync::{OnceLock, RwLock};
+use std::thread::{self, JoinHandle};
 
 use calloop::channel::Sender;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LMENU, VK_LWIN, VK_MENU, VK_RMENU, VK_RWIN, VK_SHIFT,
+    GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LMENU, VK_LWIN, VK_MENU, VK_RMENU, VK_RWIN,
+    VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, HHOOK, KBDLLHOOKSTRUCT, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
-    WM_KEYDOWN, WM_SYSKEYDOWN,
+    CallNextHookEx, DispatchMessageW, GetMessageW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
+    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT,
+    WM_SYSKEYDOWN,
 };
 
 use super::dome::HubEvent;
 use crate::config::{Config, Keymap, Modifiers};
+
+pub(super) struct KeyboardHookHandle {
+    thread_id: u32,
+    join_handle: Option<JoinHandle<()>>,
+}
 
 struct KeyboardState {
     sender: Sender<HubEvent>,
@@ -23,14 +33,46 @@ static STATE: OnceLock<KeyboardState> = OnceLock::new();
 pub(super) fn install_keyboard_hook(
     sender: Sender<HubEvent>,
     config: Config,
-) -> windows::core::Result<HHOOK> {
+) -> anyhow::Result<KeyboardHookHandle> {
     STATE
         .set(KeyboardState {
             sender,
             config: RwLock::new(config),
         })
         .ok();
-    unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0) }
+
+    let (tx, rx) = mpsc::sync_channel::<Result<u32, windows::core::Error>>(0);
+
+    let join_handle = thread::spawn(move || {
+        let thread_id = unsafe { GetCurrentThreadId() };
+        match unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0) } {
+            Ok(hook) => {
+                tx.send(Ok(thread_id)).ok();
+                let mut msg = MSG::default();
+                unsafe {
+                    while GetMessageW(&mut msg, None, 0, 0).into() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                }
+                if let Err(e) = unsafe { UnhookWindowsHookEx(hook) } {
+                    tracing::warn!("UnhookWindowsHookEx failed: {e}");
+                }
+            }
+            Err(e) => {
+                tx.send(Err(e)).ok();
+            }
+        }
+    });
+
+    let thread_id = rx
+        .recv()
+        .map_err(|_| anyhow::anyhow!("keyboard hook thread died"))??;
+
+    Ok(KeyboardHookHandle {
+        thread_id,
+        join_handle: Some(join_handle),
+    })
 }
 
 pub(super) fn update_config(config: Config) {
@@ -39,9 +81,10 @@ pub(super) fn update_config(config: Config) {
     }
 }
 
-pub(super) fn uninstall_keyboard_hook(hook: HHOOK) {
-    if let Err(e) = unsafe { UnhookWindowsHookEx(hook) } {
-        tracing::warn!("UnhookWindowsHookEx failed: {e}");
+pub(super) fn uninstall_keyboard_hook(mut handle: KeyboardHookHandle) {
+    unsafe { PostThreadMessageW(handle.thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+    if let Some(jh) = handle.join_handle.take() {
+        jh.join().ok();
     }
 }
 
@@ -99,7 +142,7 @@ fn get_actions(vk: VIRTUAL_KEY) -> Option<crate::action::Actions> {
 }
 
 fn is_key_pressed(vk: VIRTUAL_KEY) -> bool {
-    unsafe { GetKeyState(vk.0 as i32) < 0 }
+    unsafe { GetAsyncKeyState(vk.0 as i32) < 0 }
 }
 
 fn vk_to_string(vk: VIRTUAL_KEY) -> Option<String> {

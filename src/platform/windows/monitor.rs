@@ -75,7 +75,11 @@ impl MonitorEntry {
         let border = config.border_size;
         let current_windows: HashSet<_> = windows
             .iter()
-            .filter_map(|p| registry.get_handle(p.id).map(|h| ManagedHwnd::new(h.hwnd())))
+            .filter_map(|p| {
+                registry
+                    .get_handle(p.id)
+                    .map(|h| ManagedHwnd::new(h.hwnd()))
+            })
             .collect();
         for key in self.displayed_windows.difference(&current_windows) {
             if let Some(handle) = registry.get_handle_by(*key) {
