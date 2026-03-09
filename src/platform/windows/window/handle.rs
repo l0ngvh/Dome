@@ -51,12 +51,17 @@ unsafe impl Send for WindowHandle {}
 impl WindowHandle {
     /// Construct from pre-queried data — no Win32 calls. Used by the UI thread
     /// when it receives a WindowCreate from the dome thread.
-    pub(super) fn new_from_create(hwnd: HWND, title: Option<String>, process: String) -> Self {
+    pub(super) fn new_from_create(
+        hwnd: HWND,
+        title: Option<String>,
+        process: String,
+        mode: DisplayMode,
+    ) -> Self {
         Self {
             hwnd,
             title,
             process,
-            mode: DisplayMode::Tiling,
+            mode,
         }
     }
 
@@ -152,7 +157,11 @@ impl WindowHandle {
 impl std::fmt::Display for WindowHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let title = self.title().unwrap_or("<no title>");
-        write!(f, "'{title}' from '{}'", self.process)
+        write!(
+            f,
+            "'{title}' from '{}' hwnd={:?} mode={}",
+            self.process, self.hwnd, self.mode
+        )
     }
 }
 

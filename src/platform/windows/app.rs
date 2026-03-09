@@ -133,7 +133,7 @@ impl App {
                 create.hwnd,
                 create.title.clone(),
                 create.process.clone(),
-                create.is_float,
+                create.mode,
             );
             self.registry.insert(mw, create.id);
         }
@@ -203,8 +203,9 @@ impl App {
         }
 
         for data in &update.container_overlays {
+            let titles = self.registry.resolve_tab_titles(&data.children);
             if let Some(overlay) = self.container_overlays.get_mut(&data.placement.id) {
-                overlay.update(data);
+                overlay.update(data.placement, titles);
             }
         }
     }
@@ -234,8 +235,9 @@ impl App {
                     }
                 }
             }
+            let titles = self.registry.resolve_tab_titles(&data.children);
             if let Some(overlay) = self.container_overlays.get_mut(&id) {
-                overlay.update(data);
+                overlay.update(data.placement, titles);
                 overlay.show();
                 unsafe {
                     SetWindowPos(

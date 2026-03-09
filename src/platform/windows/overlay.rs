@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-use super::dome::{ContainerOverlayData, HubEvent};
+use super::dome::HubEvent;
 use crate::config::Config;
 use crate::core::{ContainerPlacement, WindowPlacement};
 use crate::overlay;
@@ -39,7 +39,8 @@ pub(super) struct ContainerOverlay {
     events: Vec<egui::Event>,
     width: u32,
     height: u32,
-    last_data: Option<ContainerOverlayData>,
+    placement: Option<ContainerPlacement>,
+    tab_titles: Vec<String>,
     pub(super) config: Config,
     hub_sender: Sender<HubEvent>,
     window: OwnedHwnd,
@@ -65,7 +66,8 @@ impl ContainerOverlay {
             events: Vec::new(),
             width: 1,
             height: 1,
-            last_data: None,
+            placement: None,
+            tab_titles: Vec::new(),
             config,
             hub_sender,
             window,
@@ -75,8 +77,8 @@ impl ContainerOverlay {
         Ok(boxed)
     }
 
-    pub(super) fn update(&mut self, data: &ContainerOverlayData) {
-        let vf = data.placement.visible_frame;
+    pub(super) fn update(&mut self, placement: ContainerPlacement, tab_titles: Vec<String>) {
+        let vf = placement.visible_frame;
         let w = vf.width.max(1.0) as u32;
         let h = vf.height.max(1.0) as u32;
 
@@ -86,12 +88,11 @@ impl ContainerOverlay {
             self.height = h;
         }
 
-        // Rebuild hit-test region: border strips + tab bar, accounting for
-        // the offset between full frame and visible (clipped) frame.
-        let region = build_container_region(&data.placement, &self.config);
+        let region = build_container_region(&placement, &self.config);
         unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
 
-        self.last_data = Some(data.clone());
+        self.placement = Some(placement);
+        self.tab_titles = tab_titles;
         self.rerender();
 
         unsafe {
@@ -113,11 +114,10 @@ impl ContainerOverlay {
     }
 
     fn rerender(&mut self) {
-        let Some(data) = self.last_data.as_ref() else {
+        let Some(placement) = self.placement.as_ref() else {
             return;
         };
-        let placement = &data.placement;
-        let tab_titles = &data.tab_titles;
+        let tab_titles = &self.tab_titles;
         let config = &self.config;
         let events = std::mem::take(&mut self.events);
         let clicked = self

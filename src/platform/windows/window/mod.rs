@@ -19,7 +19,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use self::handle::WindowHandle;
 use self::overlay::WindowOverlay;
 use crate::config::Config;
-use crate::core::{Dimension, WindowId, WindowPlacement};
+use crate::core::{Child, DisplayMode, WindowId};
+use crate::core::{Dimension, WindowPlacement};
 
 pub(super) struct ManagedWindow {
     handle: WindowHandle,
@@ -33,9 +34,9 @@ impl ManagedWindow {
         hwnd: HWND,
         title: Option<String>,
         process: String,
-        is_float: bool,
+        mode: DisplayMode,
     ) -> Self {
-        let handle = WindowHandle::new_from_create(hwnd, title, process);
+        let handle = WindowHandle::new_from_create(hwnd, title, process, mode);
         // Hide before first frame — window may end up offscreen due to
         // viewport scrolling. apply_layout will show the visible ones.
         handle.hide();
@@ -49,7 +50,7 @@ impl ManagedWindow {
         let mut mw = Self {
             handle,
             overlay,
-            is_float,
+            is_float: mode == DisplayMode::Float,
         };
         mw.sync_z_order();
         mw
@@ -61,6 +62,10 @@ impl ManagedWindow {
 
     pub(super) fn managed_hwnd(&self) -> ManagedHwnd {
         ManagedHwnd::new(self.handle.hwnd())
+    }
+
+    pub(super) fn title(&self) -> Option<&str> {
+        self.handle.title()
     }
 
     pub(super) fn show(
@@ -174,6 +179,12 @@ impl ManagedWindow {
     }
 }
 
+impl std::fmt::Display for ManagedWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.handle.fmt(f)
+    }
+}
+
 pub(super) struct Registry {
     windows: HashMap<ManagedHwnd, WindowId>,
     reverse: HashMap<WindowId, ManagedWindow>,
@@ -188,12 +199,14 @@ impl Registry {
     }
 
     pub(super) fn insert(&mut self, mw: ManagedWindow, id: WindowId) {
+        tracing::info!(%mw, %id, "Window inserted");
         self.windows.insert(mw.managed_hwnd(), id);
         self.reverse.insert(id, mw);
     }
 
     pub(super) fn remove(&mut self, id: WindowId) {
         if let Some(mw) = self.reverse.remove(&id) {
+            tracing::info!(%mw, %id, "Window removed");
             self.windows.remove(&mw.managed_hwnd());
         }
     }
@@ -226,5 +239,19 @@ impl Registry {
 
     pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = (WindowId, &mut ManagedWindow)> {
         self.reverse.iter_mut().map(|(&id, mw)| (id, mw))
+    }
+
+    pub(super) fn resolve_tab_titles(&self, children: &[Child]) -> Vec<String> {
+        children
+            .iter()
+            .map(|c| match c {
+                Child::Window(wid) => self
+                    .get(*wid)
+                    .and_then(|mw| mw.title())
+                    .unwrap_or("<no title>")
+                    .to_owned(),
+                Child::Container(_) => "Container".to_owned(),
+            })
+            .collect()
     }
 }

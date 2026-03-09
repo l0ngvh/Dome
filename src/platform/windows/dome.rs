@@ -80,7 +80,7 @@ pub(super) struct FrameMonitor {
 pub(super) struct WindowCreate {
     pub(super) hwnd: HWND,
     pub(super) id: WindowId,
-    pub(super) is_float: bool,
+    pub(super) mode: DisplayMode,
     pub(super) title: Option<String>,
     pub(super) process: String,
 }
@@ -88,28 +88,12 @@ pub(super) struct WindowCreate {
 #[derive(Clone)]
 pub(super) struct ContainerOverlayData {
     pub(super) placement: ContainerPlacement,
-    pub(super) tab_titles: Vec<String>,
+    pub(super) children: Vec<Child>,
 }
 
 pub(super) struct TitleUpdate {
     pub(super) titles: Vec<(ManagedHwnd, Option<String>)>,
     pub(super) container_overlays: Vec<ContainerOverlayData>,
-}
-
-struct WindowInfo {
-    hwnd: ManagedHwnd,
-    title: Option<String>,
-    process: String,
-}
-
-impl std::fmt::Display for WindowInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.process)?;
-        if let Some(title) = &self.title {
-            write!(f, " ({title})")?;
-        }
-        write!(f, " hwnd={:?}", self.hwnd.hwnd())
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -121,7 +105,6 @@ enum ThrottleKind {
 pub(super) struct Dome {
     hub: Hub,
     window_map: HashMap<ManagedHwnd, WindowId>,
-    window_info: HashMap<WindowId, WindowInfo>,
     monitor_handles: HashMap<isize, MonitorId>,
     monitor_dimensions: HashMap<MonitorId, Dimension>,
     config: Config,
@@ -172,7 +155,6 @@ impl Dome {
         Self {
             hub,
             window_map: HashMap::new(),
-            window_info: HashMap::new(),
             monitor_handles,
             monitor_dimensions,
             config,
@@ -215,20 +197,8 @@ impl Dome {
             HubEvent::AppInitialized(hwnd) => {
                 self.app_hwnd = Some(hwnd);
                 if let Err(e) = enum_windows(|hwnd| {
-                    if is_manageable(hwnd) {
-                        let title = get_window_title(hwnd);
-                        let process = get_process_name(hwnd).unwrap_or_default();
-                        if !should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
-                            let id = self.insert_window(hwnd, title.clone(), process.clone());
-                            let is_float = self.hub.get_window(id).is_float();
-                            creates.push(WindowCreate {
-                                hwnd,
-                                id,
-                                is_float,
-                                title,
-                                process,
-                            });
-                        }
+                    if let Some(wc) = self.try_manage_window(hwnd) {
+                        creates.push(wc);
                     }
                 }) {
                     tracing::warn!("Failed to enumerate windows: {e}");
@@ -250,30 +220,9 @@ impl Dome {
                 if self.window_map.contains_key(&h) {
                     return Some((creates, deletes));
                 }
-                let hwnd = h.hwnd();
-                let title = get_window_title(hwnd);
-                let process = get_process_name(hwnd).unwrap_or_default();
-                let _span =
-                    tracing::info_span!("window_created", %process, ?title, ?hwnd).entered();
-                if !is_manageable(hwnd)
-                    || should_ignore(&process, title.as_deref(), &self.config.windows.ignore)
-                {
-                    return Some((creates, deletes));
+                if let Some(wc) = self.try_manage_window(h.hwnd()) {
+                    creates.push(wc);
                 }
-                let id = self.insert_window(hwnd, title.clone(), process.clone());
-                let is_float = self.hub.get_window(id).is_float();
-                if let Some(actions) =
-                    on_open_actions(&process, title.as_deref(), &self.config.windows.on_open)
-                {
-                    self.execute_actions(&actions);
-                }
-                creates.push(WindowCreate {
-                    hwnd,
-                    id,
-                    is_float,
-                    title,
-                    process,
-                });
             }
             HubEvent::WindowDestroyed(h) => {
                 let _span = tracing::info_span!("window_destroyed").entered();
@@ -304,40 +253,14 @@ impl Dome {
             }
             HubEvent::WindowTitleChanged(h) => {
                 if self.window_map.contains_key(&h) {
-                    if let Some(&id) = self.window_map.get(&h) {
-                        let new_title = get_window_title(h.hwnd());
-                        if let Some(info) = self.window_info.get_mut(&id) {
-                            info.title = new_title.clone();
-                        }
-                        self.send_title_update(vec![(h, new_title)]);
-                    }
+                    let new_title = get_window_title(h.hwnd());
+                    self.send_title_update(vec![(h, new_title)]);
                     return Some((creates, deletes));
                 }
-                let hwnd = h.hwnd();
-                let title = get_window_title(hwnd);
-                let process = get_process_name(hwnd).unwrap_or_default();
-                let _span =
-                    tracing::info_span!("window_title_changed", %process, ?title, ?hwnd).entered();
                 // Some apps have a brief moment where their title is empty
-                if !is_manageable(hwnd)
-                    || should_ignore(&process, title.as_deref(), &self.config.windows.ignore)
-                {
-                    return Some((creates, deletes));
+                if let Some(wc) = self.try_manage_window(h.hwnd()) {
+                    creates.push(wc);
                 }
-                let id = self.insert_window(hwnd, title.clone(), process.clone());
-                let is_float = self.hub.get_window(id).is_float();
-                if let Some(actions) =
-                    on_open_actions(&process, title.as_deref(), &self.config.windows.on_open)
-                {
-                    self.execute_actions(&actions);
-                }
-                creates.push(WindowCreate {
-                    hwnd,
-                    id,
-                    is_float,
-                    title,
-                    process,
-                });
             }
             HubEvent::ScreensChanged(screens) => {
                 tracing::info!(count = screens.len(), "Screen parameters changed");
@@ -354,7 +277,32 @@ impl Dome {
         Some((creates, deletes))
     }
 
-    fn insert_window(&mut self, hwnd: HWND, title: Option<String>, process: String) -> WindowId {
+    fn try_manage_window(&mut self, hwnd: HWND) -> Option<WindowCreate> {
+        if !is_manageable(hwnd) {
+            return None;
+        }
+        let title = get_window_title(hwnd);
+        let process = get_process_name(hwnd).unwrap_or_default();
+        if should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
+            return None;
+        }
+        let wc = self.insert_window(hwnd, title, process);
+        if let Some(actions) = on_open_actions(
+            &wc.process,
+            wc.title.as_deref(),
+            &self.config.windows.on_open,
+        ) {
+            self.execute_actions(&actions);
+        }
+        Some(wc)
+    }
+
+    fn insert_window(
+        &mut self,
+        hwnd: HWND,
+        title: Option<String>,
+        process: String,
+    ) -> WindowCreate {
         let managed = ManagedHwnd::new(hwnd);
         let dim = get_dimension(hwnd);
         let monitor = self.find_monitor_dimension(hwnd);
@@ -369,26 +317,19 @@ impl Dome {
         self.set_constraints(id, hwnd);
 
         self.window_map.insert(managed, id);
-        self.window_info.insert(
+        WindowCreate {
+            hwnd,
             id,
-            WindowInfo {
-                hwnd: managed,
-                title,
-                process,
-            },
-        );
-        tracing::info!(%mode, "Window inserted");
-        id
+            mode,
+            title,
+            process,
+        }
     }
 
     fn remove_window(&mut self, h: ManagedHwnd) -> Option<WindowId> {
         if let Some(id) = self.window_map.remove(&h) {
-            let info = self.window_info.remove(&id);
             recovery::untrack(h);
             self.hub.delete_window(id);
-            if let Some(info) = info {
-                tracing::info!(%info, "Window deleted");
-            }
             return Some(id);
         }
         None
@@ -509,15 +450,9 @@ impl Dome {
 
         match (was_fs, is_fs) {
             (false, true) => {
-                if let Some(info) = self.window_info.get(&id) {
-                    tracing::info!(%info, "Fullscreen entered");
-                }
                 self.hub.set_fullscreen(id);
             }
             (true, false) => {
-                if let Some(info) = self.window_info.get(&id) {
-                    tracing::info!(%info, "Fullscreen exited");
-                }
                 self.hub.unset_fullscreen(id);
             }
             _ => {}
@@ -602,14 +537,14 @@ impl Dome {
                     if !cp.is_tabbed && !cp.is_focused {
                         continue;
                     }
-                    let tab_titles = if cp.is_tabbed {
-                        self.collect_tab_titles(cp.id)
+                    let children = if cp.is_tabbed {
+                        self.hub.get_container(cp.id).children().to_vec()
                     } else {
                         vec![]
                     };
                     container_overlays.push(ContainerOverlayData {
                         placement: *cp,
-                        tab_titles,
+                        children,
                     });
                 }
             }
@@ -629,22 +564,6 @@ impl Dome {
         if let Some(app_hwnd) = self.app_hwnd {
             send_layout_frame(frame, app_hwnd);
         }
-    }
-
-    fn collect_tab_titles(&self, container_id: ContainerId) -> Vec<String> {
-        let container = self.hub.get_container(container_id);
-        container
-            .children()
-            .iter()
-            .map(|c| match c {
-                Child::Window(wid) => self
-                    .window_info
-                    .get(wid)
-                    .and_then(|info| info.title.clone())
-                    .unwrap_or_else(|| "Unknown".to_owned()),
-                Child::Container(_) => "Container".to_owned(),
-            })
-            .collect()
     }
 
     fn send_title_update(&self, titles: Vec<(ManagedHwnd, Option<String>)>) {
@@ -684,10 +603,10 @@ impl Dome {
                         .iter()
                         .any(|c| matches!(c, Child::Window(wid) if affected_ids.contains(wid)));
                     if has_affected {
-                        let tab_titles = self.collect_tab_titles(cp.id);
+                        let children = container.children().to_vec();
                         overlays.push(ContainerOverlayData {
                             placement: *cp,
-                            tab_titles,
+                            children,
                         });
                     }
                 }
