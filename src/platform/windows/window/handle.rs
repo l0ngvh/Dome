@@ -430,8 +430,8 @@ fn set_position(hwnd: HWND, dim: &Dimension, z_after: Option<HWND>) {
         )
         .ok()
     };
-    let dx = dim.x as i32 - old.x as i32;
-    let dy = dim.y as i32 - old.y as i32;
+    let dx = (dim.x as i32 - left) - old.x as i32;
+    let dy = (dim.y as i32 - top) - old.y as i32;
     if dx != 0 || dy != 0 {
         for_each_owned(hwnd, |child| {
             let mut rect = RECT::default();

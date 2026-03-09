@@ -448,9 +448,10 @@ impl Dome {
     }
 
     fn handle_resize(&mut self, h: ManagedHwnd) {
-        if let Some(&id) = self.window_map.get(&h) {
-            self.set_constraints(id, h.hwnd());
-        }
+        let Some(&id) = self.window_map.get(&h) else {
+            return;
+        };
+        self.set_constraints(id, h.hwnd());
         self.check_fullscreen_state(h);
         self.apply_layout(Vec::new(), Vec::new());
     }
