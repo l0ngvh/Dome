@@ -15,7 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic,
     IsWindowVisible, MINMAXINFO, SMTO_ABORTIFHUNG, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow,
-    SetWindowPos, ShowWindow, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD,
+    SetWindowPos, ShowWindowAsync, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD,
     WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     WS_POPUP, WS_THICKFRAME,
 };
@@ -98,7 +98,7 @@ impl WindowHandle {
 
     pub(super) fn hide(&self) {
         if self.mode == DisplayMode::Fullscreen {
-            let _was_visible = unsafe { ShowWindow(self.hwnd, SW_MINIMIZE) };
+            let _was_visible = unsafe { ShowWindowAsync(self.hwnd, SW_MINIMIZE) };
             return;
         }
         unsafe {
@@ -410,7 +410,7 @@ fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, callback: F) {
 
 fn set_position(hwnd: HWND, dim: &Dimension, z_after: Option<HWND>) {
     if unsafe { IsIconic(hwnd) }.as_bool() {
-        let _was_visible = unsafe { ShowWindow(hwnd, SW_RESTORE) };
+        let _was_visible = unsafe { ShowWindowAsync(hwnd, SW_RESTORE) };
     }
     let old = get_dimension(hwnd);
     let (left, top, right, bottom) = get_invisible_border(hwnd);
