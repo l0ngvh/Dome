@@ -379,8 +379,12 @@ impl Dome {
                     None
                 }
             };
-            let (new_min_w, new_min_h, new_max_w, new_max_h) =
-                (to_frame(min_w), to_frame(min_h), to_frame(max_w), to_frame(max_h));
+            let (new_min_w, new_min_h, new_max_w, new_max_h) = (
+                to_frame(min_w),
+                to_frame(min_h),
+                to_frame(max_w),
+                to_frame(max_h),
+            );
             let (cur_min_w, cur_min_h) = self.hub.get_window(id).min_size();
             let (cur_max_w, cur_max_h) = self.hub.get_window(id).max_size();
             if new_min_w.unwrap_or(cur_min_w) == cur_min_w
@@ -390,13 +394,8 @@ impl Dome {
             {
                 return;
             }
-            self.hub.set_window_constraint(
-                id,
-                new_min_w,
-                new_min_h,
-                new_max_w,
-                new_max_h,
-            );
+            self.hub
+                .set_window_constraint(id, new_min_w, new_min_h, new_max_w, new_max_h);
         }
     }
 
