@@ -167,34 +167,27 @@ impl std::fmt::Display for WindowHandle {
 
 pub(crate) fn is_manageable(hwnd: HWND) -> bool {
     if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
-        tracing::trace!(?hwnd, "not manageable: window is not visible");
         return false;
     }
     if is_cloaked(hwnd) {
-        tracing::trace!(?hwnd, "not manageable: window is cloaked");
         return false;
     }
     if unsafe { GetAncestor(hwnd, GA_ROOT) } != hwnd {
-        tracing::trace!(?hwnd, "not manageable: window is not root");
         return false;
     }
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
     let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
     if style & WS_CHILD.0 != 0 {
-        tracing::trace!(?hwnd, "not manageable: window is a child window");
         return false;
     }
     if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
-        tracing::trace!(?hwnd, "not manageable: window is a tool window");
         return false;
     }
     if ex_style & WS_EX_NOACTIVATE.0 != 0 {
-        tracing::trace!(?hwnd, "not manageable: window has WS_EX_NOACTIVATE");
         return false;
     }
     let dim = get_dimension(hwnd);
     if dim.width == 0.0 || dim.height == 0.0 {
-        tracing::trace!(?hwnd, "not manageable: window has empty size");
         return false;
     }
     true
