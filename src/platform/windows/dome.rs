@@ -38,6 +38,7 @@ pub(super) enum HubEvent {
     AppInitialized(AppHandle),
     WindowCreated(ManagedHwnd),
     WindowDestroyed(ManagedHwnd),
+    WindowMinimized(ManagedHwnd),
     WindowFocused(ManagedHwnd),
     WindowTitleChanged(ManagedHwnd),
     WindowMovedOrResized(ManagedHwnd),
@@ -268,6 +269,18 @@ impl Dome {
             HubEvent::WindowDestroyed(h) => {
                 if let Some(id) = self.remove_window(h) {
                     deletes.push(id);
+                }
+            }
+            HubEvent::WindowMinimized(h) => {
+                let is_fullscreen = self
+                    .window_map
+                    .get(&h)
+                    .and_then(|id| self.window_info.get(id))
+                    .is_some_and(|info| info.fullscreen);
+                if !is_fullscreen {
+                    if let Some(id) = self.remove_window(h) {
+                        deletes.push(id);
+                    }
                 }
             }
             HubEvent::WindowFocused(h) => {

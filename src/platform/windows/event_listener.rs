@@ -97,11 +97,11 @@ unsafe extern "system" fn event_hook_proc(
             EVENT_OBJECT_NAMECHANGE => {
                 sender.send(HubEvent::WindowTitleChanged(managed)).ok();
             }
-            EVENT_OBJECT_DESTROY
-            | EVENT_OBJECT_HIDE
-            | EVENT_SYSTEM_MINIMIZESTART
-            | EVENT_OBJECT_CLOAKED => {
+            EVENT_OBJECT_DESTROY | EVENT_OBJECT_HIDE | EVENT_OBJECT_CLOAKED => {
                 sender.send(HubEvent::WindowDestroyed(managed)).ok();
+            }
+            EVENT_SYSTEM_MINIMIZESTART => {
+                sender.send(HubEvent::WindowMinimized(managed)).ok();
             }
             EVENT_SYSTEM_FOREGROUND => {
                 // This can happen when Windows queue an event for an activated application, but by
