@@ -372,19 +372,30 @@ impl Dome {
         let border = self.config.border_size;
         let (min_w, min_h, max_w, max_h) = get_size_constraints(hwnd);
         if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
-            let to_opt = |v: f32| {
+            let to_frame = |v: f32| {
                 if v > 0.0 {
                     Some(v + 2.0 * border)
                 } else {
                     None
                 }
             };
+            let (new_min_w, new_min_h, new_max_w, new_max_h) =
+                (to_frame(min_w), to_frame(min_h), to_frame(max_w), to_frame(max_h));
+            let (cur_min_w, cur_min_h) = self.hub.get_window(id).min_size();
+            let (cur_max_w, cur_max_h) = self.hub.get_window(id).max_size();
+            if new_min_w.unwrap_or(cur_min_w) == cur_min_w
+                && new_min_h.unwrap_or(cur_min_h) == cur_min_h
+                && new_max_w.unwrap_or(cur_max_w) == cur_max_w
+                && new_max_h.unwrap_or(cur_max_h) == cur_max_h
+            {
+                return;
+            }
             self.hub.set_window_constraint(
                 id,
-                to_opt(min_w),
-                to_opt(min_h),
-                to_opt(max_w),
-                to_opt(max_h),
+                new_min_w,
+                new_min_h,
+                new_max_w,
+                new_max_h,
             );
         }
     }
