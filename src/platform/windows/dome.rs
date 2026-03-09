@@ -100,7 +100,6 @@ struct WindowInfo {
     hwnd: ManagedHwnd,
     title: Option<String>,
     process: String,
-    fullscreen: bool,
 }
 
 impl std::fmt::Display for WindowInfo {
@@ -287,8 +286,8 @@ impl Dome {
                 let is_fullscreen = self
                     .window_map
                     .get(&h)
-                    .and_then(|id| self.window_info.get(id))
-                    .is_some_and(|info| info.fullscreen);
+                    .map(|&id| self.hub.get_window(id).is_fullscreen())
+                    .unwrap_or(false);
                 if !is_fullscreen {
                     if let Some(id) = self.remove_window(h) {
                         deletes.push(id);
@@ -376,7 +375,6 @@ impl Dome {
                 hwnd: managed,
                 title,
                 process,
-                fullscreen: matches!(mode, DisplayMode::Fullscreen),
             },
         );
         tracing::info!(%mode, "Window inserted");
@@ -505,21 +503,21 @@ impl Dome {
         let Some(monitor_dim) = self.find_monitor_dimension(h.hwnd()) else {
             return;
         };
-        let Some(info) = self.window_info.get_mut(&id) else {
-            return;
-        };
 
+        let was_fs = self.hub.get_window(id).is_fullscreen();
         let is_fs = is_fullscreen(h.hwnd(), &monitor_dim);
 
-        match (info.fullscreen, is_fs) {
+        match (was_fs, is_fs) {
             (false, true) => {
-                tracing::info!(%info, "Fullscreen entered");
-                info.fullscreen = true;
+                if let Some(info) = self.window_info.get(&id) {
+                    tracing::info!(%info, "Fullscreen entered");
+                }
                 self.hub.set_fullscreen(id);
             }
             (true, false) => {
-                tracing::info!(%info, "Fullscreen exited");
-                info.fullscreen = false;
+                if let Some(info) = self.window_info.get(&id) {
+                    tracing::info!(%info, "Fullscreen exited");
+                }
                 self.hub.unset_fullscreen(id);
             }
             _ => {}
