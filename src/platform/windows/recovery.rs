@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use windows::Win32::Foundation::HWND;
+use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::Console::{
     CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler,
 };
@@ -13,6 +14,7 @@ use windows::core::BOOL;
 use crate::core::Dimension;
 
 use super::OFFSCREEN_POS;
+use super::taskbar::Taskbar;
 use super::window::ManagedHwnd;
 
 const DEFAULT_WIDTH: f32 = 800.0;
@@ -71,7 +73,6 @@ pub(super) fn restore_all() {
             let hwnd = HWND(hwnd_val as *mut _);
             let dim = window_state.dimension;
             unsafe {
-                // Restore the window before setting its position if it was maximized
                 if window_state.is_maximized {
                     let _ = ShowWindow(hwnd, SW_RESTORE);
                 }
@@ -84,10 +85,15 @@ pub(super) fn restore_all() {
                     dim.height as i32,
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
-                // Maximize the window again if it was originally maximized
                 if window_state.is_maximized {
                     let _ = ShowWindow(hwnd, SW_MAXIMIZE);
                 }
+            }
+        }
+
+        if let Ok(taskbar) = Taskbar::new() {
+            for &hwnd_val in state.keys() {
+                taskbar.add_tab(HWND(hwnd_val as *mut _)).ok();
             }
         }
     }
@@ -101,6 +107,7 @@ pub(super) fn install_handlers() {
 
 unsafe extern "system" fn console_handler(ctrl_type: u32) -> BOOL {
     if ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT || ctrl_type == CTRL_CLOSE_EVENT {
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() };
         restore_all();
     }
     BOOL(0)
