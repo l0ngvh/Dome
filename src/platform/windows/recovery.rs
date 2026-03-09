@@ -13,7 +13,7 @@ use windows::core::BOOL;
 use crate::core::Dimension;
 
 use super::OFFSCREEN_POS;
-use super::window::{ManagedHwnd, WindowHandle};
+use super::window::ManagedHwnd;
 
 const DEFAULT_WIDTH: f32 = 800.0;
 const DEFAULT_HEIGHT: f32 = 600.0;
@@ -26,9 +26,7 @@ struct WindowState {
 static RECOVERY_STATE: LazyLock<Mutex<HashMap<isize, WindowState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub(super) fn track(handle: &WindowHandle) {
-    let dim = handle.dimension();
-    let hwnd = handle.hwnd();
+pub(super) fn track(hwnd: HWND, dim: Dimension) {
     // These windows belongs to previous crashed Dome instances
     let original_dim = if dim.x <= OFFSCREEN_POS || dim.y <= OFFSCREEN_POS {
         Dimension {

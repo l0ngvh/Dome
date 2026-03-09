@@ -1,28 +1,31 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use calloop::channel::{Channel, Event as ChannelEvent};
 use calloop::timer::{TimeoutAction, Timer};
 use calloop::{EventLoop, LoopHandle, LoopSignal};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_QUIT};
+use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow};
+use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, PostThreadMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
-    Child, ContainerId, ContainerPlacement, Dimension, DisplayMode, Hub, WindowId, WindowPlacement,
+    Child, ContainerId, ContainerPlacement, Dimension, DisplayMode, Hub, MonitorId, MonitorLayout,
+    WindowId,
 };
 
-use super::monitor::MonitorRegistry;
+use super::ScreenInfo;
 use super::recovery;
 use super::throttle::{Throttle, ThrottleResult};
 use super::window::{
-    ManagedHwnd, Registry, Taskbar, WindowHandle, enum_windows, initial_display_mode,
+    ManagedHwnd, enum_windows, get_dimension, get_process_name, get_size_constraints,
+    get_window_title, initial_display_mode, is_fullscreen, is_manageable,
 };
-use super::{ScreenInfo, compute_global_bounds};
 
-pub(super) const WM_APP_OVERLAY: u32 = 0x8001;
+pub(super) const WM_APP_LAYOUT: u32 = 0x8001;
 pub(super) const WM_APP_CONFIG: u32 = 0x8002;
+pub(super) const WM_APP_TITLE: u32 = 0x8003;
 
 const FOCUS_THROTTLE: Duration = Duration::from_millis(50);
 const RESIZE_THROTTLE: Duration = Duration::from_millis(16);
@@ -60,24 +63,43 @@ impl AppHandle {
 
 unsafe impl Send for AppHandle {}
 
-pub(super) struct OverlayFrame {
-    pub(super) creates: Vec<OverlayCreate>,
+pub(super) struct LayoutFrame {
+    pub(super) monitors: Vec<FrameMonitor>,
+    pub(super) creates: Vec<WindowCreate>,
     pub(super) deletes: Vec<WindowId>,
     pub(super) focused: Option<WindowId>,
-    pub(super) windows: Vec<WindowPlacement>,
-    pub(super) containers: Vec<ContainerOverlayData>,
+    pub(super) container_overlays: Vec<ContainerOverlayData>,
 }
 
-pub(super) struct OverlayCreate {
-    pub(super) window_id: WindowId,
+pub(super) struct FrameMonitor {
+    pub(super) layout: MonitorLayout,
+    pub(super) dimension: Dimension,
+}
+
+pub(super) struct WindowCreate {
     pub(super) hwnd: HWND,
+    pub(super) id: WindowId,
     pub(super) is_float: bool,
+    pub(super) title: Option<String>,
+    pub(super) process: String,
 }
 
 #[derive(Clone)]
 pub(super) struct ContainerOverlayData {
     pub(super) placement: ContainerPlacement,
     pub(super) tab_titles: Vec<String>,
+}
+
+pub(super) struct TitleUpdate {
+    pub(super) titles: Vec<(ManagedHwnd, Option<String>)>,
+    pub(super) container_overlays: Vec<ContainerOverlayData>,
+}
+
+struct WindowInfo {
+    hwnd: ManagedHwnd,
+    title: Option<String>,
+    process: String,
+    fullscreen: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -88,15 +110,13 @@ enum ThrottleKind {
 
 pub(super) struct Dome {
     hub: Hub,
-    registry: Registry,
-    monitor_registry: MonitorRegistry,
-    taskbar: Taskbar,
+    window_map: HashMap<ManagedHwnd, WindowId>,
+    window_info: HashMap<WindowId, WindowInfo>,
+    monitor_handles: HashMap<isize, MonitorId>,
+    monitor_dimensions: HashMap<MonitorId, Dimension>,
     config: Config,
-    /// Primary screen dimension for crash recovery
-    primary_screen: Dimension,
-    /// Bounding box of all monitors for hiding windows offscreen
-    global_bounds: Dimension,
     app_hwnd: Option<AppHandle>,
+    main_thread_id: u32,
     signal: LoopSignal,
     handle: LoopHandle<'static, Self>,
     focus_throttle: Throttle<ManagedHwnd>,
@@ -107,15 +127,17 @@ impl Dome {
     pub(super) fn new(
         config: Config,
         screens: Vec<ScreenInfo>,
-        global_bounds: Dimension,
         handle: LoopHandle<'static, Self>,
         signal: LoopSignal,
+        main_thread_id: u32,
     ) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
-        let mut monitor_registry =
-            MonitorRegistry::new(primary.handle, primary_monitor_id, primary.dimension);
+        let mut monitor_handles = HashMap::new();
+        let mut monitor_dimensions = HashMap::new();
+        monitor_handles.insert(primary.handle, primary_monitor_id);
+        monitor_dimensions.insert(primary_monitor_id, primary.dimension);
         tracing::info!(
             name = %primary.name,
             handle = ?primary.handle,
@@ -126,7 +148,8 @@ impl Dome {
         for screen in &screens {
             if screen.handle != primary.handle {
                 let id = hub.add_monitor(screen.name.clone(), screen.dimension);
-                monitor_registry.insert(screen.handle, id, screen.dimension);
+                monitor_handles.insert(screen.handle, id);
+                monitor_dimensions.insert(id, screen.dimension);
                 tracing::info!(
                     name = %screen.name,
                     handle = ?screen.handle,
@@ -138,31 +161,18 @@ impl Dome {
 
         Self {
             hub,
-            registry: Registry::new(),
-            monitor_registry,
-            taskbar: Taskbar::new().expect("Failed to create taskbar"),
+            window_map: HashMap::new(),
+            window_info: HashMap::new(),
+            monitor_handles,
+            monitor_dimensions,
             config,
-            primary_screen: primary.dimension,
-            global_bounds,
             app_hwnd: None,
+            main_thread_id,
             signal,
             handle,
             focus_throttle: Throttle::new(FOCUS_THROTTLE),
             resize_throttle: Throttle::new(RESIZE_THROTTLE),
         }
-    }
-
-    fn update_screens(&mut self, screens: Vec<ScreenInfo>) {
-        if screens.is_empty() {
-            tracing::warn!("Empty screen list, skipping update");
-            return;
-        }
-        if let Some(primary) = screens.iter().find(|s| s.is_primary) {
-            self.primary_screen = primary.dimension;
-        }
-        self.global_bounds = compute_global_bounds(&screens);
-        reconcile_monitors(&mut self.hub, &mut self.monitor_registry, screens);
-        self.registry.refresh_all_constraints();
     }
 
     pub(super) fn run(
@@ -174,12 +184,8 @@ impl Dome {
             .handle()
             .insert_source(channel, |event, _, dome| match event {
                 ChannelEvent::Msg(hub_event) => {
-                    let last_focus = dome
-                        .hub
-                        .get_workspace(dome.hub.current_workspace())
-                        .focused();
                     if let Some((creates, deletes)) = dome.handle_event(hub_event) {
-                        dome.apply_layout(creates, deletes, last_focus);
+                        dome.apply_layout(creates, deletes);
                     }
                 }
                 ChannelEvent::Closed => dome.signal.stop(),
@@ -191,7 +197,7 @@ impl Dome {
             .expect("Event loop failed");
     }
 
-    fn handle_event(&mut self, event: HubEvent) -> Option<(Vec<OverlayCreate>, Vec<WindowId>)> {
+    fn handle_event(&mut self, event: HubEvent) -> Option<(Vec<WindowCreate>, Vec<WindowId>)> {
         let mut creates = Vec::new();
         let mut deletes = Vec::new();
 
@@ -199,20 +205,20 @@ impl Dome {
             HubEvent::AppInitialized(hwnd) => {
                 self.app_hwnd = Some(hwnd);
                 if let Err(e) = enum_windows(|hwnd| {
-                    let handle = WindowHandle::new(hwnd);
-                    if handle.is_manageable()
-                        && !should_ignore(&handle, &self.config.windows.ignore)
-                    {
-                        // Hide before first frame — window may end up offscreen due to
-                        // viewport scrolling. apply_layout will show the visible ones.
-                        handle.hide();
-                        let id = self.insert_window(&handle);
-                        let is_float = self.hub.get_window(id).is_float();
-                        creates.push(OverlayCreate {
-                            window_id: id,
-                            hwnd,
-                            is_float,
-                        });
+                    if is_manageable(hwnd) {
+                        let title = get_window_title(hwnd);
+                        let process = get_process_name(hwnd).unwrap_or_default();
+                        if !should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
+                            let id = self.insert_window(hwnd, title.clone(), process.clone());
+                            let is_float = self.hub.get_window(id).is_float();
+                            creates.push(WindowCreate {
+                                hwnd,
+                                id,
+                                is_float,
+                                title,
+                                process,
+                            });
+                        }
                     }
                 }) {
                     tracing::warn!("Failed to enumerate windows: {e}");
@@ -231,24 +237,31 @@ impl Dome {
                 tracing::info!("Config reloaded");
             }
             HubEvent::WindowCreated(h) => {
-                if self.registry.contains(h) {
+                if self.window_map.contains_key(&h) {
                     return Some((creates, deletes));
                 }
-                let handle = WindowHandle::new(h.hwnd());
-                let _span = tracing::info_span!("window_created", %handle).entered();
-                if should_ignore(&handle, &self.config.windows.ignore) {
+                let hwnd = h.hwnd();
+                let title = get_window_title(hwnd);
+                let process = get_process_name(hwnd).unwrap_or_default();
+                if !is_manageable(hwnd)
+                    || should_ignore(&process, title.as_deref(), &self.config.windows.ignore)
+                {
                     return Some((creates, deletes));
                 }
-                let id = self.insert_window(&handle);
+                let id = self.insert_window(hwnd, title.clone(), process.clone());
                 let is_float = self.hub.get_window(id).is_float();
-                creates.push(OverlayCreate {
-                    window_id: id,
-                    hwnd: h.hwnd(),
-                    is_float,
-                });
-                if let Some(actions) = on_open_actions(&handle, &self.config.windows.on_open) {
+                if let Some(actions) =
+                    on_open_actions(&process, title.as_deref(), &self.config.windows.on_open)
+                {
                     self.execute_actions(&actions);
                 }
+                creates.push(WindowCreate {
+                    hwnd,
+                    id,
+                    is_float,
+                    title,
+                    process,
+                });
             }
             HubEvent::WindowDestroyed(h) => {
                 if let Some(id) = self.remove_window(h) {
@@ -264,26 +277,39 @@ impl Dome {
                 return Some((creates, deletes));
             }
             HubEvent::WindowTitleChanged(h) => {
-                if self.registry.contains(h) {
-                    self.registry.update_title(h);
+                if self.window_map.contains_key(&h) {
+                    if let Some(&id) = self.window_map.get(&h) {
+                        let new_title = get_window_title(h.hwnd());
+                        if let Some(info) = self.window_info.get_mut(&id) {
+                            info.title = new_title.clone();
+                        }
+                        self.send_title_update(vec![(h, new_title)]);
+                    }
                     return Some((creates, deletes));
                 }
-                let handle = WindowHandle::new(h.hwnd());
-                let _span = tracing::info_span!("window_title_changed", %handle).entered();
+                let hwnd = h.hwnd();
+                let title = get_window_title(hwnd);
+                let process = get_process_name(hwnd).unwrap_or_default();
                 // Some apps have a brief moment where their title is empty
-                if should_ignore(&handle, &self.config.windows.ignore) {
+                if !is_manageable(hwnd)
+                    || should_ignore(&process, title.as_deref(), &self.config.windows.ignore)
+                {
                     return Some((creates, deletes));
                 }
-                let id = self.insert_window(&handle);
+                let id = self.insert_window(hwnd, title.clone(), process.clone());
                 let is_float = self.hub.get_window(id).is_float();
-                creates.push(OverlayCreate {
-                    window_id: id,
-                    hwnd: h.hwnd(),
-                    is_float,
-                });
-                if let Some(actions) = on_open_actions(&handle, &self.config.windows.on_open) {
+                if let Some(actions) =
+                    on_open_actions(&process, title.as_deref(), &self.config.windows.on_open)
+                {
                     self.execute_actions(&actions);
                 }
+                creates.push(WindowCreate {
+                    hwnd,
+                    id,
+                    is_float,
+                    title,
+                    process,
+                });
             }
             HubEvent::ScreensChanged(screens) => {
                 tracing::info!(count = screens.len(), "Screen parameters changed");
@@ -298,6 +324,71 @@ impl Dome {
         }
 
         Some((creates, deletes))
+    }
+
+    fn insert_window(&mut self, hwnd: HWND, title: Option<String>, process: String) -> WindowId {
+        let managed = ManagedHwnd::new(hwnd);
+        let dim = get_dimension(hwnd);
+        let monitor = self.find_monitor_dimension(hwnd);
+        recovery::track(hwnd, dim);
+
+        let id = match initial_display_mode(hwnd, monitor.as_ref()) {
+            DisplayMode::Fullscreen => self.hub.insert_fullscreen(),
+            DisplayMode::Tiling => self.hub.insert_tiling(),
+            DisplayMode::Float => self.hub.insert_float(dim),
+        };
+        self.set_constraints(id, hwnd);
+
+        self.window_map.insert(managed, id);
+        self.window_info.insert(
+            id,
+            WindowInfo {
+                hwnd: managed,
+                title,
+                process,
+                fullscreen: false,
+            },
+        );
+        tracing::info!("Window inserted");
+        id
+    }
+
+    fn remove_window(&mut self, h: ManagedHwnd) -> Option<WindowId> {
+        if let Some(id) = self.window_map.remove(&h) {
+            self.window_info.remove(&id);
+            recovery::untrack(h);
+            self.hub.delete_window(id);
+            tracing::info!(hwnd = ?h.hwnd(), "Window deleted");
+            return Some(id);
+        }
+        None
+    }
+
+    fn set_constraints(&mut self, id: WindowId, hwnd: HWND) {
+        let border = self.config.border_size;
+        let (min_w, min_h, max_w, max_h) = get_size_constraints(hwnd);
+        if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
+            let to_opt = |v: f32| {
+                if v > 0.0 {
+                    Some(v + 2.0 * border)
+                } else {
+                    None
+                }
+            };
+            self.hub.set_window_constraint(
+                id,
+                to_opt(min_w),
+                to_opt(min_h),
+                to_opt(max_w),
+                to_opt(max_h),
+            );
+        }
+    }
+
+    fn find_monitor_dimension(&self, hwnd: HWND) -> Option<Dimension> {
+        let hmonitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) };
+        let id = self.monitor_handles.get(&(hmonitor.0 as isize))?;
+        self.monitor_dimensions.get(id).copied()
     }
 
     fn submit_focus(&mut self, h: ManagedHwnd) {
@@ -349,48 +440,45 @@ impl Dome {
     }
 
     fn handle_focus(&mut self, h: ManagedHwnd) {
-        if let Some(id) = self.registry.get_id(h) {
-            let last_focus = self
-                .hub
-                .get_workspace(self.hub.current_workspace())
-                .focused();
+        if let Some(&id) = self.window_map.get(&h) {
             self.hub.set_focus(id);
             tracing::info!(hwnd = ?h.hwnd(), "Window focused");
-            self.apply_layout(Vec::new(), Vec::new(), last_focus);
+            self.apply_layout(Vec::new(), Vec::new());
         }
     }
 
     fn handle_resize(&mut self, h: ManagedHwnd) {
-        self.registry.refresh_constraints(h);
-        let last_focus = self
-            .hub
-            .get_workspace(self.hub.current_workspace())
-            .focused();
-        self.check_fullscreen_state(h);
-        self.apply_layout(Vec::new(), Vec::new(), last_focus);
-    }
-
-    fn insert_window(&mut self, handle: &WindowHandle) -> WindowId {
-        recovery::track(handle);
-        let monitor = self.monitor_registry.find_monitor_dimension(handle.hwnd());
-        let id = match initial_display_mode(handle, monitor.as_ref()) {
-            DisplayMode::Fullscreen => self.hub.insert_fullscreen(),
-            DisplayMode::Tiling => self.hub.insert_tiling(),
-            DisplayMode::Float => self.hub.insert_float(handle.dimension()),
-        };
-        self.registry.insert(handle.clone(), id);
-        tracing::info!("Window inserted");
-        id
-    }
-
-    fn remove_window(&mut self, h: ManagedHwnd) -> Option<WindowId> {
-        if let Some(id) = self.registry.remove(h) {
-            recovery::untrack(h);
-            self.hub.delete_window(id);
-            tracing::info!(hwnd = ?h.hwnd(), "Window deleted");
-            return Some(id);
+        if let Some(&id) = self.window_map.get(&h) {
+            self.set_constraints(id, h.hwnd());
         }
-        None
+        self.check_fullscreen_state(h);
+        self.apply_layout(Vec::new(), Vec::new());
+    }
+
+    fn check_fullscreen_state(&mut self, h: ManagedHwnd) {
+        let Some(&id) = self.window_map.get(&h) else {
+            return;
+        };
+        let Some(monitor_dim) = self.find_monitor_dimension(h.hwnd()) else {
+            return;
+        };
+        let Some(info) = self.window_info.get_mut(&id) else {
+            return;
+        };
+
+        let is_fs = is_fullscreen(h.hwnd(), &monitor_dim);
+
+        match (info.fullscreen, is_fs) {
+            (false, true) => {
+                info.fullscreen = true;
+                self.hub.set_fullscreen(id);
+            }
+            (true, false) => {
+                info.fullscreen = false;
+                self.hub.unset_fullscreen(id);
+            }
+            _ => {}
+        }
     }
 
     #[tracing::instrument(skip(self), fields(actions = %actions))]
@@ -432,91 +520,199 @@ impl Dome {
                     }
                 }
                 Action::Exit => {
-                    if let Some(hwnd) = self.app_hwnd {
-                        unsafe {
-                            PostMessageW(Some(hwnd.hwnd()), WM_QUIT, WPARAM(0), LPARAM(0)).ok()
-                        };
-                    }
+                    unsafe {
+                        PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
+                    };
+                    self.signal.stop();
                 }
             }
         }
     }
 
-    fn apply_layout(
-        &mut self,
-        creates: Vec<OverlayCreate>,
-        deletes: Vec<WindowId>,
-        last_focus: Option<Child>,
-    ) {
+    fn apply_layout(&mut self, creates: Vec<WindowCreate>, deletes: Vec<WindowId>) {
         let focused = self
             .hub
             .get_workspace(self.hub.current_workspace())
             .focused();
 
-        let mut frame = OverlayFrame {
+        let placements = self.hub.get_visible_placements();
+
+        let monitors: Vec<FrameMonitor> = placements
+            .into_iter()
+            .map(|mp| {
+                let dimension = self
+                    .monitor_dimensions
+                    .get(&mp.monitor_id)
+                    .copied()
+                    .unwrap_or_default();
+                FrameMonitor {
+                    layout: mp.layout,
+                    dimension,
+                }
+            })
+            .collect();
+
+        let mut container_overlays = Vec::new();
+        for fm in &monitors {
+            if let MonitorLayout::Normal { containers, .. } = &fm.layout {
+                for cp in containers {
+                    if !cp.is_tabbed && !cp.is_focused {
+                        continue;
+                    }
+                    let tab_titles = if cp.is_tabbed {
+                        self.collect_tab_titles(cp.id)
+                    } else {
+                        vec![]
+                    };
+                    container_overlays.push(ContainerOverlayData {
+                        placement: *cp,
+                        tab_titles,
+                    });
+                }
+            }
+        }
+
+        let frame = LayoutFrame {
+            monitors,
             creates,
             deletes,
             focused: match focused {
                 Some(Child::Window(id)) => Some(id),
                 _ => None,
             },
-            windows: Vec::new(),
-            containers: Vec::new(),
+            container_overlays,
         };
 
-        for mp in self.hub.get_visible_placements() {
-            if let Some(entry) = self.monitor_registry.get_entry_mut(mp.monitor_id) {
-                let (wins, conts) = entry.apply_placements(
-                    &mp.layout,
-                    &mut self.registry,
-                    &mut self.taskbar,
-                    &mut self.hub,
-                    &self.config,
-                );
-                frame.windows.extend(wins);
-                frame.containers.extend(conts);
-            }
-        }
-
-        // Focus window if focus changed
-        if focused != last_focus
-            && let Some(Child::Window(id)) = focused
-            && let Some(handle) = self.registry.get_handle(id)
-        {
-            handle.focus();
-        }
-
         if let Some(app_hwnd) = self.app_hwnd {
-            send_overlay_frame(frame, app_hwnd);
+            send_layout_frame(frame, app_hwnd);
         }
     }
 
-    fn check_fullscreen_state(&mut self, h: ManagedHwnd) {
-        let Some(window_id) = self.registry.get_id(h) else {
+    fn collect_tab_titles(&self, container_id: ContainerId) -> Vec<String> {
+        let container = self.hub.get_container(container_id);
+        container
+            .children()
+            .iter()
+            .map(|c| match c {
+                Child::Window(wid) => self
+                    .window_info
+                    .get(wid)
+                    .and_then(|info| info.title.clone())
+                    .unwrap_or_else(|| "Unknown".to_owned()),
+                Child::Container(_) => "Container".to_owned(),
+            })
+            .collect()
+    }
+
+    fn send_title_update(&self, titles: Vec<(ManagedHwnd, Option<String>)>) {
+        let Some(app_hwnd) = self.app_hwnd else {
             return;
         };
-        let Some(monitor) = self.monitor_registry.find_monitor_dimension(h.hwnd()) else {
-            return;
+
+        let affected_ids: HashSet<WindowId> = titles
+            .iter()
+            .filter_map(|(h, _)| self.window_map.get(h).copied())
+            .collect();
+        let container_overlays = self.build_container_overlays_for(&affected_ids);
+
+        let update = TitleUpdate {
+            titles,
+            container_overlays,
         };
-        let Some(handle) = self.registry.get_handle(window_id) else {
-            return;
-        };
-        let is_fs = handle.is_fullscreen(&monitor);
-        let was_fs = handle.fullscreen();
-        match (was_fs, is_fs) {
-            (false, true) => {
-                if let Some(h) = self.registry.get_handle_mut(window_id) {
-                    h.sync_fullscreen(true);
+        let boxed = Box::new(update);
+        let ptr = Box::into_raw(boxed) as usize;
+        unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_TITLE, WPARAM(ptr), LPARAM(0)).ok() };
+    }
+
+    fn build_container_overlays_for(
+        &self,
+        affected_ids: &HashSet<WindowId>,
+    ) -> Vec<ContainerOverlayData> {
+        let mut overlays = Vec::new();
+        for mp in self.hub.get_visible_placements() {
+            if let MonitorLayout::Normal { containers, .. } = &mp.layout {
+                for cp in containers {
+                    if !cp.is_tabbed {
+                        continue;
+                    }
+                    let container = self.hub.get_container(cp.id);
+                    let has_affected = container
+                        .children()
+                        .iter()
+                        .any(|c| matches!(c, Child::Window(wid) if affected_ids.contains(wid)));
+                    if has_affected {
+                        let tab_titles = self.collect_tab_titles(cp.id);
+                        overlays.push(ContainerOverlayData {
+                            placement: *cp,
+                            tab_titles,
+                        });
+                    }
                 }
-                self.hub.set_fullscreen(window_id);
             }
-            (true, false) => {
-                if let Some(h) = self.registry.get_handle_mut(window_id) {
-                    h.sync_fullscreen(false);
+        }
+        overlays
+    }
+
+    fn update_screens(&mut self, screens: Vec<ScreenInfo>) {
+        if screens.is_empty() {
+            tracing::warn!("Empty screen list, skipping update");
+            return;
+        }
+        self.reconcile_monitors(screens);
+
+        let windows: Vec<_> = self.window_map.iter().map(|(&h, &id)| (h, id)).collect();
+        for (managed, id) in windows {
+            self.set_constraints(id, managed.hwnd());
+        }
+    }
+
+    fn reconcile_monitors(&mut self, screens: Vec<ScreenInfo>) {
+        let current_handles: HashSet<isize> = screens.iter().map(|s| s.handle).collect();
+
+        for screen in &screens {
+            if !self.monitor_handles.contains_key(&screen.handle) {
+                let id = self.hub.add_monitor(screen.name.clone(), screen.dimension);
+                self.monitor_handles.insert(screen.handle, id);
+                self.monitor_dimensions.insert(id, screen.dimension);
+                tracing::info!(
+                    name = %screen.name,
+                    handle = ?screen.handle,
+                    dimension = ?screen.dimension,
+                    "Monitor added"
+                );
+            }
+        }
+
+        let to_remove: Vec<_> = self
+            .monitor_handles
+            .iter()
+            .filter(|(h, _)| !current_handles.contains(h))
+            .map(|(_, &id)| id)
+            .collect();
+
+        let fallback = screens
+            .iter()
+            .find(|s| s.is_primary)
+            .and_then(|s| self.monitor_handles.get(&s.handle).copied());
+
+        for monitor_id in to_remove {
+            if let Some(fallback_id) = fallback
+                && fallback_id != monitor_id
+            {
+                self.hub.remove_monitor(monitor_id, fallback_id);
+                self.monitor_handles.retain(|_, &mut id| id != monitor_id);
+                self.monitor_dimensions.remove(&monitor_id);
+                tracing::info!(%monitor_id, fallback = %fallback_id, "Monitor removed");
+            }
+        }
+
+        for screen in &screens {
+            if let Some(&id) = self.monitor_handles.get(&screen.handle) {
+                if self.monitor_dimensions.get(&id) != Some(&screen.dimension) {
+                    self.monitor_dimensions.insert(id, screen.dimension);
+                    self.hub.update_monitor_dimension(id, screen.dimension);
                 }
-                self.hub.unset_fullscreen(window_id);
             }
-            _ => {}
         }
     }
 }
@@ -527,18 +723,10 @@ impl Drop for Dome {
     }
 }
 
-fn send_overlay_frame(frame: OverlayFrame, app_hwnd: AppHandle) {
+fn send_layout_frame(frame: LayoutFrame, app_hwnd: AppHandle) {
     let boxed = Box::new(frame);
     let ptr = Box::into_raw(boxed) as usize;
-    unsafe {
-        PostMessageW(
-            Some(app_hwnd.hwnd()),
-            WM_APP_OVERLAY,
-            WPARAM(ptr),
-            LPARAM(0),
-        )
-        .ok()
-    };
+    unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_LAYOUT, WPARAM(ptr), LPARAM(0)).ok() };
 }
 
 fn send_config(config: Config, app_hwnd: AppHandle) {
@@ -547,85 +735,16 @@ fn send_config(config: Config, app_hwnd: AppHandle) {
     unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_CONFIG, WPARAM(ptr), LPARAM(0)).ok() };
 }
 
-fn on_open_actions(handle: &WindowHandle, rules: &[WindowsOnOpenRule]) -> Option<Actions> {
-    let rule = rules
-        .iter()
-        .find(|r| r.window.matches(handle.process(), handle.title()))?;
-    tracing::debug!(%handle, actions = %rule.run, "Running on_open actions");
+fn on_open_actions(
+    process: &str,
+    title: Option<&str>,
+    rules: &[WindowsOnOpenRule],
+) -> Option<Actions> {
+    let rule = rules.iter().find(|r| r.window.matches(process, title))?;
+    tracing::debug!(%process, ?title, actions = %rule.run, "Running on_open actions");
     Some(rule.run.clone())
 }
 
-fn should_ignore(handle: &WindowHandle, rules: &[WindowsWindow]) -> bool {
-    if !handle.is_manageable() {
-        tracing::debug!(%handle, "Window ignored: not manageable");
-        return true;
-    }
-    let matched = rules
-        .iter()
-        .find(|r| r.matches(handle.process(), handle.title()));
-    if let Some(rule) = matched {
-        tracing::debug!(%handle, ?rule, "Window ignored by rule");
-        return true;
-    }
-    false
-}
-
-fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: Vec<ScreenInfo>) {
-    if screens.is_empty() {
-        return;
-    }
-
-    if let Some(new_primary) = screens.iter().find(|s| s.is_primary) {
-        registry.primary_handle = new_primary.handle;
-    }
-
-    let current_keys: HashSet<_> = screens.iter().map(|s| s.handle).collect();
-
-    for screen in &screens {
-        if !registry.map.contains_key(&screen.handle) {
-            let id = hub.add_monitor(screen.name.clone(), screen.dimension);
-            registry.insert(screen.handle, id, screen.dimension);
-            tracing::info!(
-                name = %screen.name,
-                handle = ?screen.handle,
-                dimension = ?screen.dimension,
-                "Monitor added"
-            );
-        }
-    }
-
-    let to_remove: Vec<_> = registry
-        .map
-        .iter()
-        .filter(|(key, _)| !current_keys.contains(key))
-        .map(|(_, entry)| entry.id)
-        .collect();
-
-    let fallback_id = registry.map.get(&registry.primary_handle).map(|e| e.id);
-    for monitor_id in to_remove {
-        if let Some(fallback) = fallback_id
-            && fallback != monitor_id
-        {
-            hub.remove_monitor(monitor_id, fallback);
-            registry.remove_by_id(monitor_id);
-            tracing::info!(%monitor_id, fallback = %fallback, "Monitor removed");
-        }
-    }
-
-    for screen in &screens {
-        if let Some(entry) = registry.map.get_mut(&screen.handle) {
-            let monitor_id = entry.id;
-            entry.dimension = screen.dimension;
-            let old_dim = hub.get_monitor(monitor_id).dimension();
-            if old_dim != screen.dimension {
-                tracing::info!(
-                    name = %screen.name,
-                    ?old_dim,
-                    new_dim = ?screen.dimension,
-                    "Monitor dimension changed"
-                );
-            }
-            hub.update_monitor_dimension(monitor_id, screen.dimension);
-        }
-    }
+fn should_ignore(process: &str, title: Option<&str>, rules: &[WindowsWindow]) -> bool {
+    rules.iter().any(|r| r.matches(process, title))
 }

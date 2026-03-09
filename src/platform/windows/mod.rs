@@ -2,12 +2,14 @@ mod app;
 mod dome;
 mod event_listener;
 mod keyboard;
-mod monitor;
 mod overlay;
 mod recovery;
+mod taskbar;
 mod throttle;
 mod window;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 
 use crate::logging::Logger;
@@ -68,12 +70,32 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     let screens = get_all_screens()?;
     anyhow::ensure!(!screens.is_empty(), "No monitors detected");
-    let global_bounds = compute_global_bounds(&screens);
 
     let (tx, rx) = channel();
     let sender = tx.clone();
     let config_clone = config.clone();
     let main_thread_id = unsafe { GetCurrentThreadId() };
+    let ui_thread_id = Arc::new(AtomicU32::new(0));
+
+    // Spawn UI thread with its own message pump
+    let ui_sender = tx.clone();
+    let ui_config = config.clone();
+    let ui_tid = Arc::clone(&ui_thread_id);
+    let ui_thread = thread::spawn(move || {
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+            .ok()
+            .expect("COM init failed on UI thread");
+        ui_tid.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
+        let _app = App::new(ui_sender, ui_config).expect("Failed to create App");
+        let mut msg = MSG::default();
+        unsafe {
+            while GetMessageW(&mut msg, None, 0, 0).into() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    });
+
     let dome_thread = thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
@@ -82,15 +104,13 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
             let event_loop = calloop::EventLoop::try_new().expect("Failed to create event loop");
             let handle = event_loop.handle();
             let signal = event_loop.get_signal();
-            Dome::new(config_clone, screens, global_bounds, handle, signal).run(rx, event_loop);
+            Dome::new(config_clone, screens, handle, signal, main_thread_id).run(rx, event_loop);
         }));
         if result.is_err() {
             recovery::restore_all();
         }
         unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
     });
-
-    let _app = App::new(sender.clone(), config.clone())?;
 
     let keyboard_hook = install_keyboard_hook(sender.clone(), config)?;
     let _event_hooks = install_event_hooks(sender.clone())?;
@@ -115,6 +135,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
     .ok();
 
+    // Main thread: bare message pump for hooks only
     let mut msg = MSG::default();
     unsafe {
         while GetMessageW(&mut msg, None, 0, 0).into() {
@@ -125,6 +146,11 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     sender.send(HubEvent::Shutdown).ok();
     dome_thread.join().ok();
+    let ui_tid = ui_thread_id.load(Ordering::Acquire);
+    if ui_tid != 0 {
+        unsafe { PostThreadMessageW(ui_tid, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+    }
+    ui_thread.join().ok();
     uninstall_keyboard_hook(keyboard_hook);
 
     Ok(())
@@ -184,34 +210,6 @@ pub(super) fn get_all_screens() -> Result<Vec<ScreenInfo>> {
     };
     anyhow::ensure!(success.as_bool(), "EnumDisplayMonitors failed");
     Ok(monitors)
-}
-
-fn compute_global_bounds(screens: &[ScreenInfo]) -> Dimension {
-    if screens.is_empty() {
-        return Dimension::default();
-    }
-    let min_x = screens
-        .iter()
-        .map(|s| s.dimension.x)
-        .fold(f32::MAX, f32::min);
-    let min_y = screens
-        .iter()
-        .map(|s| s.dimension.y)
-        .fold(f32::MAX, f32::min);
-    let max_x = screens
-        .iter()
-        .map(|s| s.dimension.x + s.dimension.width)
-        .fold(f32::MIN, f32::max);
-    let max_y = screens
-        .iter()
-        .map(|s| s.dimension.y + s.dimension.height)
-        .fold(f32::MIN, f32::max);
-    Dimension {
-        x: min_x,
-        y: min_y,
-        width: max_x - min_x,
-        height: max_y - min_y,
-    }
 }
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows

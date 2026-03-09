@@ -18,9 +18,8 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetWindowLongPtrW,
-    HWND_NOTOPMOST, HWND_TOPMOST, SW_HIDE, SW_SHOWNA, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetWindowLongPtrW, SW_HIDE,
+    SW_SHOWNA, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow,
     WINDOW_EX_STYLE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_POPUP,
 };
@@ -31,155 +30,7 @@ use crate::config::Config;
 use crate::core::{ContainerPlacement, WindowPlacement};
 use crate::overlay;
 
-pub(super) const WINDOW_OVERLAY_CLASS: PCWSTR = windows::core::w!("DomeWindowOverlay");
 pub(super) const CONTAINER_OVERLAY_CLASS: PCWSTR = windows::core::w!("DomeContainerOverlay");
-
-/// `renderer` is declared before `window` so it drops first —
-/// GL cleanup runs while the window's HDC is still alive.
-pub(super) struct WindowOverlay {
-    renderer: OverlayRenderer,
-    pub(super) managed_hwnd: HWND,
-    width: u32,
-    height: u32,
-    pub(super) is_float: bool,
-    window: OwnedHwnd,
-}
-
-impl WindowOverlay {
-    pub(super) fn new(
-        display: &Display,
-        managed_hwnd: HWND,
-        is_float: bool,
-    ) -> anyhow::Result<Self> {
-        let window = OwnedHwnd::new(WINDOW_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
-        let hwnd = window.hwnd();
-
-        if is_float {
-            unsafe {
-                SetWindowPos(
-                    hwnd,
-                    Some(HWND_TOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                )
-                .ok();
-            }
-        }
-        // Position managed window behind border
-        unsafe {
-            SetWindowPos(
-                managed_hwnd,
-                Some(hwnd),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
-            )
-            .ok();
-        }
-
-        let renderer = OverlayRenderer::new(display, hwnd, 1, 1)?;
-
-        Ok(Self {
-            renderer,
-            managed_hwnd,
-            width: 1,
-            height: 1,
-            is_float,
-            window,
-        })
-    }
-
-    pub(super) fn hwnd(&self) -> HWND {
-        self.window.hwnd()
-    }
-
-    pub(super) fn update(&mut self, placement: &WindowPlacement, config: &Config) {
-        let vf = placement.visible_frame;
-        let w = vf.width.max(1.0) as u32;
-        let h = vf.height.max(1.0) as u32;
-
-        if self.width != w || self.height != h {
-            self.renderer.resize(w, h);
-            self.width = w;
-            self.height = h;
-        }
-
-        // Handle float toggle
-        if self.is_float != placement.is_float {
-            self.is_float = placement.is_float;
-            unsafe {
-                let z = if placement.is_float {
-                    HWND_TOPMOST
-                } else {
-                    HWND_NOTOPMOST
-                };
-                SetWindowPos(
-                    self.window.hwnd(),
-                    Some(z),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                )
-                .ok();
-                SetWindowPos(
-                    self.managed_hwnd,
-                    Some(z),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
-                )
-                .ok();
-                SetWindowPos(
-                    self.managed_hwnd,
-                    Some(self.window.hwnd()),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
-                )
-                .ok();
-            }
-        }
-
-        self.renderer.render(w, h, 1.0, vec![], |ui| {
-            overlay::paint_window_border(ui.painter(), placement, config);
-        });
-
-        let region = build_window_border_region(placement, config);
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
-
-        unsafe {
-            SetWindowPos(
-                self.window.hwnd(),
-                None,
-                vf.x as i32,
-                vf.y as i32,
-                w as i32,
-                h as i32,
-                SWP_NOZORDER | SWP_NOACTIVATE,
-            )
-            .ok();
-        }
-    }
-
-    pub(super) fn show(&mut self) {
-        self.window.show();
-    }
-
-    pub(super) fn hide(&mut self) {
-        self.window.hide();
-    }
-}
 
 /// `renderer` is declared before `window` so it drops first —
 /// GL cleanup runs while the window's HDC is still alive.
@@ -354,13 +205,13 @@ pub(super) fn raw_window_handle(hwnd: HWND) -> RawWindowHandle {
 /// Owns an HWND and calls `DestroyWindow` on drop.
 /// Fields declared before this in a struct are dropped first,
 /// ensuring GL resources are cleaned up while the window's HDC is still alive.
-struct OwnedHwnd {
+pub(super) struct OwnedHwnd {
     hwnd: HWND,
     is_visible: bool,
 }
 
 impl OwnedHwnd {
-    fn new(class: PCWSTR, ex_style: WINDOW_EX_STYLE) -> anyhow::Result<Self> {
+    pub(super) fn new(class: PCWSTR, ex_style: WINDOW_EX_STYLE) -> anyhow::Result<Self> {
         let hwnd = unsafe {
             CreateWindowExW(
                 ex_style,
@@ -384,11 +235,11 @@ impl OwnedHwnd {
         })
     }
 
-    fn hwnd(&self) -> HWND {
+    pub(super) fn hwnd(&self) -> HWND {
         self.hwnd
     }
 
-    fn show(&mut self) {
+    pub(super) fn show(&mut self) {
         if !self.is_visible {
             // BOOL is previous visibility state, not an error indicator
             unsafe { ShowWindow(self.hwnd, SW_SHOWNA).ok().ok() };
@@ -396,7 +247,7 @@ impl OwnedHwnd {
         }
     }
 
-    fn hide(&mut self) {
+    pub(super) fn hide(&mut self) {
         if self.is_visible {
             // BOOL is previous visibility state, not an error indicator
             unsafe { ShowWindow(self.hwnd, SW_HIDE).ok().ok() };
@@ -411,7 +262,7 @@ impl Drop for OwnedHwnd {
     }
 }
 
-struct OverlayRenderer {
+pub(super) struct OverlayRenderer {
     surface: Surface<WindowSurface>,
     gl_context: PossiblyCurrentContext,
     gl: Arc<glow::Context>,
@@ -420,7 +271,12 @@ struct OverlayRenderer {
 }
 
 impl OverlayRenderer {
-    fn new(display: &Display, hwnd: HWND, width: u32, height: u32) -> anyhow::Result<Self> {
+    pub(super) fn new(
+        display: &Display,
+        hwnd: HWND,
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<Self> {
         let raw_window = raw_window_handle(hwnd);
 
         let config_template = ConfigTemplateBuilder::new().with_alpha_size(8).build();
@@ -462,13 +318,13 @@ impl OverlayRenderer {
         })
     }
 
-    fn resize(&self, width: u32, height: u32) {
+    pub(super) fn resize(&self, width: u32, height: u32) {
         let w = NonZeroU32::new(width.max(1)).unwrap();
         let h = NonZeroU32::new(height.max(1)).unwrap();
         self.surface.resize(&self.gl_context, w, h);
     }
 
-    fn render<R>(
+    pub(super) fn render<R>(
         &mut self,
         width: u32,
         height: u32,
@@ -550,7 +406,7 @@ fn enable_blur_behind(hwnd: HWND) {
     unsafe { DwmExtendFrameIntoClientArea(hwnd, &margins).ok() };
 }
 
-fn build_window_border_region(placement: &WindowPlacement, config: &Config) -> HRGN {
+pub(super) fn build_window_border_region(placement: &WindowPlacement, config: &Config) -> HRGN {
     let vf = placement.visible_frame;
     let f = placement.frame;
     let ox = (f.x - vf.x) as i32;

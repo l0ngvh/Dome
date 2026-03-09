@@ -6,28 +6,35 @@ use raw_window_handle::{RawDisplayHandle, WindowsDisplayHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, GW_HWNDPREV, GWLP_USERDATA, GetWindow,
-    GetWindowLongPtrW, HWND_TOP, HWND_TOPMOST, PostMessageW, RegisterClassW, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT,
-    WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW,
+    HWND_TOP, PostMessageW, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SetWindowLongPtrW, SetWindowPos, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT, WNDCLASSW,
+    WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::PCWSTR;
 
-use super::dome::{AppHandle, HubEvent, OverlayFrame, WM_APP_CONFIG, WM_APP_OVERLAY};
+use super::dome::{
+    AppHandle, ContainerOverlayData, HubEvent, LayoutFrame, TitleUpdate, WM_APP_CONFIG,
+    WM_APP_LAYOUT, WM_APP_TITLE,
+};
 use super::get_all_screens;
 use super::overlay::{
-    CONTAINER_OVERLAY_CLASS, ContainerOverlay, WINDOW_OVERLAY_CLASS, WindowOverlay,
-    container_wnd_proc, raw_window_handle,
+    CONTAINER_OVERLAY_CLASS, ContainerOverlay, container_wnd_proc, raw_window_handle,
 };
+use super::taskbar::Taskbar;
+use super::window::{ManagedHwnd, ManagedWindow, Registry, WINDOW_OVERLAY_CLASS};
 use crate::config::Config;
-use crate::core::{ContainerId, WindowId};
+use crate::core::{ContainerId, MonitorLayout, WindowId};
 
 pub(super) struct App {
     hwnd: HWND,
     display: Display,
     hub_sender: Sender<HubEvent>,
     config: Config,
-    window_overlays: HashMap<WindowId, WindowOverlay>,
+    registry: Registry,
+    taskbar: Taskbar,
+    displayed_windows: HashSet<ManagedHwnd>,
+    last_focused: Option<WindowId>,
     container_overlays: HashMap<ContainerId, Box<ContainerOverlay>>,
 }
 
@@ -40,7 +47,6 @@ impl App {
 
         const APP_CLASS: PCWSTR = windows::core::w!("DomeApp");
 
-        // Register app window class
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(wnd_proc),
@@ -50,7 +56,6 @@ impl App {
         };
         unsafe { RegisterClassW(&wc) };
 
-        // Register window overlay class
         let wc_window = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(window_overlay_wnd_proc),
@@ -60,7 +65,6 @@ impl App {
         };
         unsafe { RegisterClassW(&wc_window) };
 
-        // Register container overlay class
         let wc_container = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(container_wnd_proc),
@@ -93,12 +97,17 @@ impl App {
             unsafe { Display::new(raw_display, DisplayApiPreference::Wgl(Some(raw_window))) }
                 .expect("failed to create GL display");
 
+        let taskbar = Taskbar::new()?;
+
         let app = Box::new(Self {
             hwnd,
             display,
             hub_sender,
             config,
-            window_overlays: HashMap::new(),
+            registry: Registry::new(),
+            taskbar,
+            displayed_windows: HashSet::new(),
+            last_focused: None,
             container_overlays: HashMap::new(),
         });
 
@@ -117,42 +126,96 @@ impl App {
         }
     }
 
-    fn handle_overlay_frame(&mut self, frame: OverlayFrame) {
-        // Create new window overlays
-        for create in frame.creates {
-            match WindowOverlay::new(&self.display, create.hwnd, create.is_float) {
-                Ok(overlay) => {
-                    self.window_overlays.insert(create.window_id, overlay);
+    fn apply_layout_frame(&mut self, frame: LayoutFrame) {
+        for create in &frame.creates {
+            let mw = ManagedWindow::new(
+                &self.display,
+                create.hwnd,
+                create.title.clone(),
+                create.process.clone(),
+                create.is_float,
+            );
+            self.registry.insert(mw, create.id);
+        }
+
+        for id in &frame.deletes {
+            self.registry.remove(*id);
+        }
+
+        let mut new_displayed = HashSet::new();
+        let mut seen_windows = HashSet::new();
+        let border = self.config.border_size;
+
+        for fm in &frame.monitors {
+            match &fm.layout {
+                MonitorLayout::Fullscreen(window_id) => {
+                    if let Some(mw) = self.registry.get_mut(*window_id) {
+                        new_displayed.insert(mw.managed_hwnd());
+                        mw.set_fullscreen(&fm.dimension);
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(id = ?create.window_id, "Failed to create window overlay: {e:#}")
+                MonitorLayout::Normal { windows, .. } => {
+                    for wp in windows {
+                        if let Some(mw) = self.registry.get_mut(wp.id) {
+                            new_displayed.insert(mw.managed_hwnd());
+                            mw.show(wp, border, &self.config, frame.focused == Some(wp.id));
+                            seen_windows.insert(wp.id);
+                        }
+                    }
                 }
             }
         }
 
-        // Delete window overlays
-        for id in frame.deletes {
-            self.window_overlays.remove(&id);
+        for hwnd in new_displayed.difference(&self.displayed_windows) {
+            if let Some(mw) = self.registry.get_by_hwnd(*hwnd) {
+                self.taskbar.add_tab(mw.hwnd()).ok();
+            }
         }
+        for hwnd in self.displayed_windows.difference(&new_displayed) {
+            if let Some(mw) = self.registry.get_by_hwnd_mut(*hwnd) {
+                mw.hide();
+                self.taskbar.delete_tab(mw.hwnd()).ok();
+            }
+        }
+        self.displayed_windows = new_displayed;
 
-        let mut seen_windows: HashSet<WindowId> = HashSet::new();
-
-        // Update window overlays
-        for wp in &frame.windows {
-            seen_windows.insert(wp.id);
-            if let Some(overlay) = self.window_overlays.get_mut(&wp.id) {
-                overlay.update(wp, &self.config);
-                overlay.show();
+        if frame.focused != self.last_focused {
+            self.last_focused = frame.focused;
+            if let Some(id) = frame.focused {
+                if let Some(mw) = self.registry.get(id) {
+                    mw.focus();
+                }
             }
         }
 
-        // Update container overlays
+        for (id, mw) in self.registry.iter_mut() {
+            if !seen_windows.contains(&id) {
+                mw.hide_overlay();
+            }
+        }
+
+        self.update_container_overlays(&frame.container_overlays);
+    }
+
+    fn apply_title_update(&mut self, update: TitleUpdate) {
+        for (hwnd, title) in &update.titles {
+            self.registry.set_title(*hwnd, title.clone());
+        }
+
+        for data in &update.container_overlays {
+            if let Some(overlay) = self.container_overlays.get_mut(&data.placement.id) {
+                overlay.update(data);
+            }
+        }
+    }
+
+    fn update_container_overlays(&mut self, container_data: &[ContainerOverlayData]) {
         let frame_container_ids: HashSet<_> =
-            frame.containers.iter().map(|c| c.placement.id).collect();
+            container_data.iter().map(|c| c.placement.id).collect();
         self.container_overlays
             .retain(|id, _| frame_container_ids.contains(id));
 
-        for data in &frame.containers {
+        for data in container_data {
             let id = data.placement.id;
             if let std::collections::hash_map::Entry::Vacant(entry) =
                 self.container_overlays.entry(id)
@@ -188,53 +251,6 @@ impl App {
                 }
             }
         }
-
-        // Hide unseen window overlays (workspace switch)
-        for (id, overlay) in &mut self.window_overlays {
-            if !seen_windows.contains(id) {
-                overlay.hide();
-            }
-        }
-
-        // Bring focused window's border above its window
-        if let Some(id) = frame.focused
-            && let Some(overlay) = self.window_overlays.get(&id)
-        {
-            unsafe {
-                let above = GetWindow(overlay.managed_hwnd, GW_HWNDPREV);
-                match above {
-                    Ok(hwnd) if hwnd != overlay.hwnd() => {
-                        SetWindowPos(
-                            overlay.hwnd(),
-                            Some(hwnd),
-                            0,
-                            0,
-                            0,
-                            0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                        )
-                        .ok();
-                    }
-                    _ => {
-                        let top = if overlay.is_float {
-                            Some(HWND_TOPMOST)
-                        } else {
-                            Some(HWND_TOP)
-                        };
-                        SetWindowPos(
-                            overlay.hwnd(),
-                            top,
-                            0,
-                            0,
-                            0,
-                            0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                        )
-                        .ok();
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -245,10 +261,16 @@ unsafe extern "system" fn wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
-        WM_APP_OVERLAY => {
+        WM_APP_LAYOUT => {
             let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
-            let frame = unsafe { *Box::from_raw(wparam.0 as *mut OverlayFrame) };
-            unsafe { (*ptr).handle_overlay_frame(frame) };
+            let frame = unsafe { *Box::from_raw(wparam.0 as *mut LayoutFrame) };
+            unsafe { (*ptr).apply_layout_frame(frame) };
+            LRESULT(0)
+        }
+        WM_APP_TITLE => {
+            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
+            let update = unsafe { *Box::from_raw(wparam.0 as *mut TitleUpdate) };
+            unsafe { (*ptr).apply_title_update(update) };
             LRESULT(0)
         }
         WM_APP_CONFIG => {
