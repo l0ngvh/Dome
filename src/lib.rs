@@ -14,3 +14,6 @@ pub use platform::macos::run_app;
 
 #[cfg(target_os = "windows")]
 pub use platform::windows::run_app;
+
+#[cfg(target_os = "linux")]
+pub use platform::linux::run_app;

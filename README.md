@@ -201,6 +201,24 @@ process = "slack.exe"
 run = ["move workspace 3"]
 ```
 
+#### Linux
+
+```toml
+# Run actions on window open (match by app_id or title)
+[[linux.on_open]]
+app_id = "Slack"
+run = ["move workspace 3"]
+
+[[linux.on_open]]
+app_id = "firefox"
+run = ["move workspace 2"]
+
+# Regex matching
+[[linux.on_open]]
+title = "/.*Settings.*/"
+run = ["toggle float"]
+```
+
 ## Development
 
 ```bash

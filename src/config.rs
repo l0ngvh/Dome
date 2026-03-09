@@ -560,6 +560,47 @@ pub(crate) struct WindowsConfig {
     pub(crate) on_open: Vec<WindowsOnOpenRule>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct LinuxWindow {
+    #[serde(default)]
+    pub(crate) app_id: Option<String>,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+}
+
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
+impl LinuxWindow {
+    pub(crate) fn matches(&self, app_id: Option<&str>, title: Option<&str>) -> bool {
+        if let Some(pattern) = &self.app_id
+            && !app_id.is_some_and(|a| pattern_matches(pattern, a))
+        {
+            return false;
+        }
+        if let Some(pattern) = &self.title
+            && !title.is_some_and(|t| pattern_matches(pattern, t))
+        {
+            return false;
+        }
+        self.app_id.is_some() || self.title.is_some()
+    }
+}
+
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct LinuxOnOpenRule {
+    #[serde(flatten)]
+    pub(crate) window: LinuxWindow,
+    #[serde(default)]
+    pub(crate) run: Actions,
+}
+
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct LinuxConfig {
+    #[serde(default)]
+    pub(crate) on_open: Vec<LinuxOnOpenRule>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
@@ -595,6 +636,9 @@ pub(crate) struct Config {
     #[serde(default)]
     #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
     pub(crate) windows: WindowsConfig,
+    #[serde(default)]
+    #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
+    pub(crate) linux: LinuxConfig,
     #[serde(default)]
     pub(crate) log_level: LogLevel,
 }
@@ -652,6 +696,7 @@ impl Default for Config {
             active_tab_background_color: default_active_tab_background_color(),
             macos: MacosConfig::default(),
             windows: WindowsConfig::default(),
+            linux: LinuxConfig::default(),
             log_level: LogLevel::default(),
         }
     }
