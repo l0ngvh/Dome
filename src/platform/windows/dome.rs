@@ -103,6 +103,16 @@ struct WindowInfo {
     fullscreen: bool,
 }
 
+impl std::fmt::Display for WindowInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.process)?;
+        if let Some(title) = &self.title {
+            write!(f, " ({title})")?;
+        }
+        write!(f, " hwnd={:?}", self.hwnd.hwnd())
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ThrottleKind {
     Focus,
@@ -267,11 +277,13 @@ impl Dome {
                 });
             }
             HubEvent::WindowDestroyed(h) => {
+                let _span = tracing::info_span!("window_destroyed").entered();
                 if let Some(id) = self.remove_window(h) {
                     deletes.push(id);
                 }
             }
             HubEvent::WindowMinimized(h) => {
+                let _span = tracing::info_span!("window_minimized").entered();
                 let is_fullscreen = self
                     .window_map
                     .get(&h)
@@ -372,10 +384,12 @@ impl Dome {
 
     fn remove_window(&mut self, h: ManagedHwnd) -> Option<WindowId> {
         if let Some(id) = self.window_map.remove(&h) {
-            self.window_info.remove(&id);
+            let info = self.window_info.remove(&id);
             recovery::untrack(h);
             self.hub.delete_window(id);
-            tracing::info!(hwnd = ?h.hwnd(), "Window deleted");
+            if let Some(info) = info {
+                tracing::info!(%info, "Window deleted");
+            }
             return Some(id);
         }
         None
@@ -498,10 +512,12 @@ impl Dome {
 
         match (info.fullscreen, is_fs) {
             (false, true) => {
+                tracing::info!(%info, "Fullscreen entered");
                 info.fullscreen = true;
                 self.hub.set_fullscreen(id);
             }
             (true, false) => {
+                tracing::info!(%info, "Fullscreen exited");
                 info.fullscreen = false;
                 self.hub.unset_fullscreen(id);
             }
