@@ -361,7 +361,8 @@ impl Dome {
         let monitor = self.find_monitor_dimension(hwnd);
         recovery::track(hwnd, dim);
 
-        let id = match initial_display_mode(hwnd, monitor.as_ref()) {
+        let mode = initial_display_mode(hwnd, monitor.as_ref());
+        let id = match mode {
             DisplayMode::Fullscreen => self.hub.insert_fullscreen(),
             DisplayMode::Tiling => self.hub.insert_tiling(),
             DisplayMode::Float => self.hub.insert_float(dim),
@@ -375,10 +376,10 @@ impl Dome {
                 hwnd: managed,
                 title,
                 process,
-                fullscreen: false,
+                fullscreen: matches!(mode, DisplayMode::Fullscreen),
             },
         );
-        tracing::info!("Window inserted");
+        tracing::info!(%mode, "Window inserted");
         id
     }
 

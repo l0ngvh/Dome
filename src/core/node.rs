@@ -433,6 +433,16 @@ pub(crate) enum DisplayMode {
     Fullscreen,
 }
 
+impl std::fmt::Display for DisplayMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tiling => write!(f, "tiling"),
+            Self::Float => write!(f, "float"),
+            Self::Fullscreen => write!(f, "fullscreen"),
+        }
+    }
+}
+
 impl std::fmt::Display for Parent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
