@@ -158,27 +158,34 @@ impl std::fmt::Display for WindowHandle {
 
 pub(crate) fn is_manageable(hwnd: HWND) -> bool {
     if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+        tracing::trace!(?hwnd, "not manageable: window is not visible");
         return false;
     }
     if is_cloaked(hwnd) {
+        tracing::trace!(?hwnd, "not manageable: window is cloaked");
         return false;
     }
     if unsafe { GetAncestor(hwnd, GA_ROOT) } != hwnd {
+        tracing::trace!(?hwnd, "not manageable: window is not root");
         return false;
     }
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
     let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
     if style & WS_CHILD.0 != 0 {
+        tracing::trace!(?hwnd, "not manageable: window is a child window");
         return false;
     }
     if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+        tracing::trace!(?hwnd, "not manageable: window is a tool window");
         return false;
     }
     if ex_style & WS_EX_NOACTIVATE.0 != 0 {
+        tracing::trace!(?hwnd, "not manageable: window has WS_EX_NOACTIVATE");
         return false;
     }
     let dim = get_dimension(hwnd);
     if dim.width == 0.0 || dim.height == 0.0 {
+        tracing::trace!(?hwnd, "not manageable: window has empty size");
         return false;
     }
     true
@@ -211,24 +218,42 @@ pub(crate) fn initial_display_mode(hwnd: HWND, monitor: Option<&Dimension>) -> D
     let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
 
     if style & WS_POPUP.0 != 0 {
+        tracing::debug!(?hwnd, "Window identified as float due to WS_POPUP style.");
         return DisplayMode::Float;
     }
     if style & WS_THICKFRAME.0 == 0 {
+        tracing::debug!(?hwnd, "Window identified as float due to no WS_THICKFRAME.");
         return DisplayMode::Float;
     }
     if ex_style & WS_EX_TOPMOST.0 != 0 {
+        tracing::debug!(?hwnd, "Window identified as float due to WS_EX_TOPMOST.");
         return DisplayMode::Float;
     }
     if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
+        tracing::debug!(
+            ?hwnd,
+            "Window identified as float due to WS_EX_DLGMODALFRAME."
+        );
         return DisplayMode::Float;
     }
+    // WS_EX_LAYERED is not checked because apps like Steam use it for custom UI rendering.
     // WS_EX_TRANSPARENT catches actual overlay windows that should float.
     if ex_style & WS_EX_TRANSPARENT.0 != 0 {
+        tracing::debug!(
+            ?hwnd,
+            "Window identified as float due to WS_EX_TRANSPARENT."
+        );
         return DisplayMode::Float;
     }
+    tracing::debug!(?hwnd, "Window determined to be Tiling.");
     DisplayMode::Tiling
 }
 
+/// Returns (min_width, min_height, max_width, max_height) constraints
+/// with invisible borders subtracted.
+///
+/// This can be slow, due to the fact that external windows may take time to respond or even
+/// hang
 pub(crate) fn get_size_constraints(hwnd: HWND) -> (f32, f32, f32, f32) {
     let mut info = MINMAXINFO::default();
     let mut result = 0usize;

@@ -243,6 +243,8 @@ impl Dome {
                 let hwnd = h.hwnd();
                 let title = get_window_title(hwnd);
                 let process = get_process_name(hwnd).unwrap_or_default();
+                let _span =
+                    tracing::info_span!("window_created", %process, ?title, ?hwnd).entered();
                 if !is_manageable(hwnd)
                     || should_ignore(&process, title.as_deref(), &self.config.windows.ignore)
                 {
@@ -290,6 +292,8 @@ impl Dome {
                 let hwnd = h.hwnd();
                 let title = get_window_title(hwnd);
                 let process = get_process_name(hwnd).unwrap_or_default();
+                let _span =
+                    tracing::info_span!("window_title_changed", %process, ?title, ?hwnd).entered();
                 // Some apps have a brief moment where their title is empty
                 if !is_manageable(hwnd)
                     || should_ignore(&process, title.as_deref(), &self.config.windows.ignore)
@@ -710,6 +714,13 @@ impl Dome {
         for screen in &screens {
             if let Some(&id) = self.monitor_handles.get(&screen.handle) {
                 if self.monitor_dimensions.get(&id) != Some(&screen.dimension) {
+                    let old_dim = self.monitor_dimensions.get(&id).copied();
+                    tracing::info!(
+                        name = %screen.name,
+                        ?old_dim,
+                        new_dim = ?screen.dimension,
+                        "Monitor dimension changed"
+                    );
                     self.monitor_dimensions.insert(id, screen.dimension);
                     self.hub.update_monitor_dimension(id, screen.dimension);
                 }
@@ -747,5 +758,9 @@ fn on_open_actions(
 }
 
 fn should_ignore(process: &str, title: Option<&str>, rules: &[WindowsWindow]) -> bool {
-    rules.iter().any(|r| r.matches(process, title))
+    if let Some(rule) = rules.iter().find(|r| r.matches(process, title)) {
+        tracing::debug!(%process, ?title, ?rule, "Window ignored by rule");
+        return true;
+    }
+    false
 }

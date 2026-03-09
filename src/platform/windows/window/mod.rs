@@ -36,8 +36,16 @@ impl ManagedWindow {
         is_float: bool,
     ) -> Self {
         let handle = WindowHandle::new_from_create(hwnd, title, process);
+        // Hide before first frame — window may end up offscreen due to
+        // viewport scrolling. apply_layout will show the visible ones.
         handle.hide();
-        let overlay = WindowOverlay::new(display).ok();
+        let overlay = match WindowOverlay::new(display) {
+            Ok(o) => Some(o),
+            Err(e) => {
+                tracing::warn!("Failed to create window overlay: {e:#}");
+                None
+            }
+        };
         let mut mw = Self {
             handle,
             overlay,
@@ -132,6 +140,7 @@ impl ManagedWindow {
         }
     }
 
+    // Position managed window behind border overlay
     fn sync_z_order(&mut self) {
         let Some(overlay) = &self.overlay else {
             return;
