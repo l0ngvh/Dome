@@ -27,7 +27,7 @@ pub(super) const WM_APP_LAYOUT: u32 = 0x8001;
 pub(super) const WM_APP_CONFIG: u32 = 0x8002;
 pub(super) const WM_APP_TITLE: u32 = 0x8003;
 
-const FOCUS_THROTTLE: Duration = Duration::from_millis(50);
+const FOCUS_THROTTLE: Duration = Duration::from_millis(500);
 const RESIZE_THROTTLE: Duration = Duration::from_millis(16);
 
 #[expect(
