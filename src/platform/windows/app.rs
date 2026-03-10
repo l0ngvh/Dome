@@ -22,10 +22,30 @@ use super::overlay::{
     CONTAINER_OVERLAY_CLASS, ContainerOverlay, container_wnd_proc, raw_window_handle,
 };
 use super::taskbar::Taskbar;
-use super::window::{ManagedHwnd, ManagedWindow, Registry, WindowMode, WINDOW_OVERLAY_CLASS,
-    is_d3d_exclusive_fullscreen_active};
+use super::window::{
+    ManagedHwnd, ManagedWindow, Registry, WINDOW_OVERLAY_CLASS, WindowMode,
+    is_d3d_exclusive_fullscreen_active,
+};
 use crate::config::Config;
-use crate::core::{ContainerId, MonitorLayout, WindowId};
+use crate::core::{ContainerId, MonitorId, MonitorLayout, WindowId};
+
+/// If a monitor has an exclusive fullscreen windows, ignore all incoming stale events from Dome
+enum MonitorState {
+    Normal {
+        ids: Vec<WindowId>,
+        focused: Option<WindowId>,
+    },
+    Exclusive(WindowId),
+}
+
+impl MonitorState {
+    fn window_ids(&self) -> &[WindowId] {
+        match self {
+            MonitorState::Normal { ids, .. } => ids,
+            MonitorState::Exclusive(id) => std::slice::from_ref(id),
+        }
+    }
+}
 
 pub(super) struct App {
     hwnd: HWND,
@@ -34,9 +54,9 @@ pub(super) struct App {
     config: Config,
     registry: Registry,
     taskbar: Taskbar,
-    displayed_windows: HashSet<ManagedHwnd>,
     last_focused: Option<WindowId>,
     container_overlays: HashMap<ContainerId, Box<ContainerOverlay>>,
+    monitor_state: HashMap<MonitorId, MonitorState>,
 }
 
 impl App {
@@ -107,9 +127,9 @@ impl App {
             config,
             registry: Registry::new(),
             taskbar,
-            displayed_windows: HashSet::new(),
             last_focused: None,
             container_overlays: HashMap::new(),
+            monitor_state: HashMap::new(),
         });
 
         let ptr = &*app as *const _ as *mut App;
@@ -140,51 +160,95 @@ impl App {
         }
 
         for id in &frame.deletes {
+            for state in self.monitor_state.values_mut() {
+                if matches!(state, MonitorState::Exclusive(eid) if *eid == *id) {
+                    *state = MonitorState::Normal {
+                        ids: Vec::new(),
+                        focused: None,
+                    };
+                }
+            }
             self.registry.remove(*id);
         }
 
+        // Derive old displayed set from monitor_state before rebuilding.
+        // Global diff (not per-monitor) avoids hiding windows that moved between monitors,
+        // since hide() uses SWP_ASYNCWINDOWPOS and could race with the show() on the new monitor.
+        let old_displayed: HashSet<WindowId> = self
+            .monitor_state
+            .values()
+            .flat_map(|s| s.window_ids())
+            .copied()
+            .collect();
+
         let mut new_displayed = HashSet::new();
         let mut seen_windows = HashSet::new();
+        let mut new_monitor_state: HashMap<MonitorId, MonitorState> = HashMap::new();
         let border = self.config.border_size;
 
         for fm in &frame.monitors {
-            match &fm.layout {
-                MonitorLayout::Fullscreen(window_id) => {
-                    if let Some(mw) = self.registry.get_mut(*window_id) {
-                        new_displayed.insert(mw.managed_hwnd());
-                        mw.set_fullscreen(&fm.dimension);
-                    }
-                }
-                MonitorLayout::Normal { windows, .. } => {
-                    for wp in windows {
-                        if let Some(mw) = self.registry.get_mut(wp.id) {
-                            new_displayed.insert(mw.managed_hwnd());
-                            mw.show(wp, border, &self.config, frame.focused == Some(wp.id));
-                            seen_windows.insert(wp.id);
+            let layout_ids: Vec<WindowId> = match &fm.layout {
+                MonitorLayout::Fullscreen(id) => vec![*id],
+                MonitorLayout::Normal { windows, .. } => windows.iter().map(|wp| wp.id).collect(),
+            };
+            new_displayed.extend(&layout_ids);
+
+            let new_state = match self.monitor_state.remove(&fm.monitor_id) {
+                Some(MonitorState::Exclusive(id)) => MonitorState::Exclusive(id),
+                _ => {
+                    match &fm.layout {
+                        MonitorLayout::Fullscreen(window_id) => {
+                            if let Some(mw) = self.registry.get_mut(*window_id) {
+                                mw.set_fullscreen(&fm.dimension);
+                            }
+                        }
+                        MonitorLayout::Normal { windows, .. } => {
+                            for wp in windows {
+                                if let Some(mw) = self.registry.get_mut(wp.id) {
+                                    mw.show(wp, border, &self.config, frame.focused == Some(wp.id));
+                                    seen_windows.insert(wp.id);
+                                }
+                            }
                         }
                     }
+                    MonitorState::Normal {
+                        ids: layout_ids,
+                        focused: frame.focused.filter(|id| new_displayed.contains(id)),
+                    }
                 }
-            }
+            };
+            new_monitor_state.insert(fm.monitor_id, new_state);
         }
+        self.monitor_state = new_monitor_state;
 
-        for hwnd in new_displayed.difference(&self.displayed_windows) {
-            if let Some(mw) = self.registry.get_by_hwnd(*hwnd) {
+        for &id in new_displayed.difference(&old_displayed) {
+            if let Some(mw) = self.registry.get(id) {
                 self.taskbar.add_tab(mw.hwnd()).ok();
             }
         }
-        for hwnd in self.displayed_windows.difference(&new_displayed) {
-            if let Some(mw) = self.registry.get_by_hwnd_mut(*hwnd) {
+        for &id in old_displayed.difference(&new_displayed) {
+            if let Some(mw) = self.registry.get_mut(id) {
                 mw.hide();
                 self.taskbar.delete_tab(mw.hwnd()).ok();
             }
         }
-        self.displayed_windows = new_displayed;
 
-        if frame.focused != self.last_focused {
-            self.last_focused = frame.focused;
-            if let Some(id) = frame.focused {
-                if let Some(mw) = self.registry.get(id) {
-                    mw.focus();
+        // Turns out exclusive
+        let has_exclusive = self
+            .monitor_state
+            .values()
+            .any(|s| matches!(s, MonitorState::Exclusive(_)));
+        if !has_exclusive {
+            let focused = self.monitor_state.values().find_map(|s| match s {
+                MonitorState::Normal { focused, .. } => *focused,
+                MonitorState::Exclusive(_) => None,
+            });
+            if focused != self.last_focused {
+                self.last_focused = focused;
+                if let Some(id) = focused {
+                    if let Some(mw) = self.registry.get(id) {
+                        mw.focus();
+                    }
                 }
             }
         }
@@ -317,6 +381,15 @@ unsafe extern "system" fn wnd_proc(
                         tracing::info!(%id, "D3D exclusive fullscreen entered");
                         if let Some(mw) = app.registry.get_mut(id) {
                             mw.set_mode(WindowMode::FullscreenExclusive);
+                        }
+                        if let Some((&monitor_id, _)) =
+                            app.monitor_state.iter().find(|(_, state)| match state {
+                                MonitorState::Normal { ids, .. } => ids.contains(&id),
+                                MonitorState::Exclusive(eid) => *eid == id,
+                            })
+                        {
+                            app.monitor_state
+                                .insert(monitor_id, MonitorState::Exclusive(id));
                         }
                         app.send_event(HubEvent::SetFullscreen(id));
                     }

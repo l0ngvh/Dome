@@ -11,8 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, PostThreadMessageW, 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
-    Child, ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout,
-    WindowId,
+    Child, ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout, WindowId,
 };
 
 use super::ScreenInfo;
@@ -74,6 +73,7 @@ pub(super) struct LayoutFrame {
 }
 
 pub(super) struct FrameMonitor {
+    pub(super) monitor_id: MonitorId,
     pub(super) layout: MonitorLayout,
     pub(super) dimension: Dimension,
 }
@@ -106,6 +106,7 @@ enum ThrottleKind {
 pub(super) struct Dome {
     hub: Hub,
     window_map: HashMap<ManagedHwnd, WindowId>,
+    window_info: HashMap<WindowId, bool>,
     monitor_handles: HashMap<isize, MonitorId>,
     monitor_dimensions: HashMap<MonitorId, Dimension>,
     config: Config,
@@ -156,6 +157,7 @@ impl Dome {
         Self {
             hub,
             window_map: HashMap::new(),
+            window_info: HashMap::new(),
             monitor_handles,
             monitor_dimensions,
             config,
@@ -274,8 +276,11 @@ impl Dome {
                 self.hub.focus_tab_index(container_id, tab_idx);
             }
             HubEvent::SetFullscreen(id) => {
-                if !self.hub.get_window(id).is_fullscreen() {
-                    self.hub.set_fullscreen(id);
+                if let Some(exclusive) = self.window_info.get_mut(&id) {
+                    *exclusive = true;
+                    if !self.hub.get_window(id).is_fullscreen() {
+                        self.hub.set_fullscreen(id);
+                    }
                 }
             }
         }
@@ -325,6 +330,8 @@ impl Dome {
         self.set_constraints(id, hwnd);
 
         self.window_map.insert(managed, id);
+        self.window_info
+            .insert(id, matches!(mode, WindowMode::FullscreenExclusive));
         WindowCreate {
             hwnd,
             id,
@@ -336,6 +343,7 @@ impl Dome {
 
     fn remove_window(&mut self, h: ManagedHwnd) -> Option<WindowId> {
         if let Some(id) = self.window_map.remove(&h) {
+            self.window_info.remove(&id);
             recovery::untrack(h);
             self.hub.delete_window(id);
             return Some(id);
@@ -440,6 +448,9 @@ impl Dome {
         let Some(&id) = self.window_map.get(&h) else {
             return;
         };
+        if self.window_info.get(&id) == Some(&true) {
+            return;
+        }
         self.set_constraints(id, h.hwnd());
         self.check_fullscreen_state(h);
         self.apply_layout(Vec::new(), Vec::new());
@@ -536,6 +547,7 @@ impl Dome {
                     .copied()
                     .unwrap_or_default();
                 FrameMonitor {
+                    monitor_id: mp.monitor_id,
                     layout: mp.layout,
                     dimension,
                 }
@@ -636,6 +648,9 @@ impl Dome {
 
         let windows: Vec<_> = self.window_map.iter().map(|(&h, &id)| (h, id)).collect();
         for (managed, id) in windows {
+            if self.window_info.get(&id) == Some(&true) {
+                continue;
+            }
             self.set_constraints(id, managed.hwnd());
         }
     }
