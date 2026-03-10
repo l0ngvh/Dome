@@ -204,8 +204,7 @@ pub(crate) fn get_dimension(hwnd: HWND) -> Dimension {
     }
 }
 
-pub(crate) fn is_fullscreen(hwnd: HWND, monitor: &Dimension) -> bool {
-    let dim = get_dimension(hwnd);
+pub(crate) fn is_fullscreen(dim: &Dimension, monitor: &Dimension) -> bool {
     dim.x <= monitor.x
         && dim.y <= monitor.y
         && dim.x + dim.width >= monitor.x + monitor.width
@@ -213,7 +212,7 @@ pub(crate) fn is_fullscreen(hwnd: HWND, monitor: &Dimension) -> bool {
 }
 
 pub(crate) fn initial_display_mode(hwnd: HWND, monitor: Option<&Dimension>) -> DisplayMode {
-    if monitor.is_some_and(|m| is_fullscreen(hwnd, m)) {
+    if monitor.is_some_and(|m| is_fullscreen(&get_dimension(hwnd), m)) {
         return DisplayMode::Fullscreen;
     }
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;

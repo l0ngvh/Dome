@@ -24,7 +24,7 @@ impl Hub {
         let ws_mut = self.workspaces.get_mut(ws);
         ws_mut.focused = Some(Child::Window(window_id));
         ws_mut.viewport_offset = (0.0, 0.0);
-        tracing::info!("Fullscreen set");
+        tracing::info!(%window_id, "Fullscreen set");
     }
 
     #[tracing::instrument(skip(self))]
@@ -43,7 +43,7 @@ impl Hub {
         if let Some(&top) = self.workspaces.get(ws).fullscreen_windows.last() {
             self.workspaces.get_mut(ws).focused = Some(Child::Window(top));
         }
-        tracing::info!("Fullscreen unset");
+        tracing::info!(%window_id, "Fullscreen unset");
     }
 
     #[tracing::instrument(skip(self))]

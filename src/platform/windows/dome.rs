@@ -446,7 +446,11 @@ impl Dome {
         };
 
         let was_fs = self.hub.get_window(id).is_fullscreen();
-        let is_fs = is_fullscreen(h.hwnd(), &monitor_dim);
+        let window_dim = get_dimension(h.hwnd());
+        let is_fs = is_fullscreen(&window_dim, &monitor_dim);
+        if was_fs != is_fs {
+            tracing::debug!(hwnd = ?h.hwnd(), ?window_dim, ?monitor_dim, was_fs, is_fs, "Fullscreen state changed");
+        }
 
         match (was_fs, is_fs) {
             (false, true) => {
