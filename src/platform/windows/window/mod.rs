@@ -2,8 +2,9 @@ mod handle;
 mod overlay;
 
 pub(super) use handle::{
-    ManagedHwnd, enum_windows, get_dimension, get_process_name, get_size_constraints,
-    get_window_title, initial_display_mode, is_fullscreen, is_manageable,
+    ManagedHwnd, WindowMode, enum_windows, get_dimension, get_process_name, get_size_constraints,
+    get_window_title, initial_window_mode, is_d3d_exclusive_fullscreen_active, is_fullscreen,
+    is_manageable,
 };
 pub(super) use overlay::WINDOW_OVERLAY_CLASS;
 
@@ -19,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use self::handle::WindowHandle;
 use self::overlay::WindowOverlay;
 use crate::config::Config;
-use crate::core::{Child, DisplayMode, WindowId};
+use crate::core::{Child, WindowId};
 use crate::core::{Dimension, WindowPlacement};
 
 pub(super) struct ManagedWindow {
@@ -34,7 +35,7 @@ impl ManagedWindow {
         hwnd: HWND,
         title: Option<String>,
         process: String,
-        mode: DisplayMode,
+        mode: WindowMode,
     ) -> Self {
         let handle = WindowHandle::new_from_create(hwnd, title, process, mode);
         // Hide before first frame — window may end up offscreen due to
@@ -50,7 +51,7 @@ impl ManagedWindow {
         let mut mw = Self {
             handle,
             overlay,
-            is_float: mode == DisplayMode::Float,
+            is_float: mode == WindowMode::Float,
         };
         mw.sync_z_order();
         mw
@@ -62,6 +63,14 @@ impl ManagedWindow {
 
     pub(super) fn managed_hwnd(&self) -> ManagedHwnd {
         ManagedHwnd::new(self.handle.hwnd())
+    }
+
+    pub(super) fn mode(&self) -> WindowMode {
+        self.handle.mode()
+    }
+
+    pub(super) fn set_mode(&mut self, mode: WindowMode) {
+        self.handle.set_mode(mode);
     }
 
     pub(super) fn title(&self) -> Option<&str> {
@@ -221,6 +230,10 @@ impl Registry {
 
     pub(super) fn get_by_hwnd(&self, hwnd: ManagedHwnd) -> Option<&ManagedWindow> {
         self.windows.get(&hwnd).and_then(|id| self.reverse.get(id))
+    }
+
+    pub(super) fn get_id(&self, hwnd: ManagedHwnd) -> Option<WindowId> {
+        self.windows.get(&hwnd).copied()
     }
 
     pub(super) fn get_by_hwnd_mut(&mut self, hwnd: ManagedHwnd) -> Option<&mut ManagedWindow> {

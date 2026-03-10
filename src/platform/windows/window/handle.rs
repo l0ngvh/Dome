@@ -1,5 +1,4 @@
 use crate::core::Dimension;
-use crate::core::DisplayMode;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
@@ -10,6 +9,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
 };
+use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor,
     GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic,
@@ -36,6 +36,25 @@ impl ManagedHwnd {
 
 unsafe impl Send for ManagedHwnd {}
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowMode {
+    Tiling,
+    Float,
+    FullscreenBorderless,
+    FullscreenExclusive,
+}
+
+impl std::fmt::Display for WindowMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tiling => write!(f, "tiling"),
+            Self::Float => write!(f, "float"),
+            Self::FullscreenBorderless => write!(f, "fullscreen-borderless"),
+            Self::FullscreenExclusive => write!(f, "fullscreen-exclusive"),
+        }
+    }
+}
+
 // HWND is safe to send across threads, but doesn't implement Send
 // https://users.rust-lang.org/t/moving-window-hwnd-or-handle-from-one-thread-to-a-new-one/126341/2
 #[derive(Clone)]
@@ -43,7 +62,7 @@ pub(super) struct WindowHandle {
     hwnd: HWND,
     title: Option<String>,
     process: String,
-    mode: DisplayMode,
+    mode: WindowMode,
 }
 
 unsafe impl Send for WindowHandle {}
@@ -55,7 +74,7 @@ impl WindowHandle {
         hwnd: HWND,
         title: Option<String>,
         process: String,
-        mode: DisplayMode,
+        mode: WindowMode,
     ) -> Self {
         Self {
             hwnd,
@@ -77,8 +96,19 @@ impl WindowHandle {
         self.title = title;
     }
 
+    pub(super) fn mode(&self) -> WindowMode {
+        self.mode
+    }
+
+    pub(super) fn set_mode(&mut self, mode: WindowMode) {
+        self.mode = mode;
+    }
+
     pub(super) fn set_fullscreen(&mut self, dim: &Dimension) {
-        self.mode = DisplayMode::Fullscreen;
+        if self.mode == WindowMode::FullscreenExclusive {
+            return;
+        }
+        self.mode = WindowMode::FullscreenBorderless;
         set_position(self.hwnd, dim, None);
     }
 
@@ -89,38 +119,48 @@ impl WindowHandle {
         is_float: bool,
         z_after: Option<HWND>,
     ) {
+        if self.mode == WindowMode::FullscreenExclusive {
+            return;
+        }
         let content = apply_inset(*dim, border);
         set_position(self.hwnd, &content, z_after);
-        if is_float && self.mode != DisplayMode::Float {
+        if is_float && self.mode != WindowMode::Float {
             set_children_topmost(self.hwnd);
         }
         self.mode = if is_float {
-            DisplayMode::Float
+            WindowMode::Float
         } else {
-            DisplayMode::Tiling
+            WindowMode::Tiling
         };
     }
 
     pub(super) fn hide(&self) {
-        if self.mode == DisplayMode::Fullscreen {
-            let _was_visible = unsafe { ShowWindowAsync(self.hwnd, SW_MINIMIZE) };
-            return;
+        match self.mode {
+            WindowMode::FullscreenExclusive => {}
+            WindowMode::FullscreenBorderless => {
+                unsafe { ShowWindowAsync(self.hwnd, SW_MINIMIZE) };
+            }
+            _ => {
+                unsafe {
+                    SetWindowPos(
+                        self.hwnd,
+                        None,
+                        super::super::OFFSCREEN_POS as i32,
+                        super::super::OFFSCREEN_POS as i32,
+                        0,
+                        0,
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
+                    )
+                    .ok()
+                };
+            }
         }
-        unsafe {
-            SetWindowPos(
-                self.hwnd,
-                None,
-                super::super::OFFSCREEN_POS as i32,
-                super::super::OFFSCREEN_POS as i32,
-                0,
-                0,
-                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
-            )
-            .ok()
-        };
     }
 
     pub(super) fn focus(&self) {
+        if self.mode == WindowMode::FullscreenExclusive {
+            return;
+        }
         if unsafe { GetForegroundWindow() } == self.hwnd {
             return;
         }
@@ -211,31 +251,31 @@ pub(crate) fn is_fullscreen(dim: &Dimension, monitor: &Dimension) -> bool {
         && dim.y + dim.height >= monitor.y + monitor.height
 }
 
-pub(crate) fn initial_display_mode(hwnd: HWND, monitor: Option<&Dimension>) -> DisplayMode {
+pub(crate) fn initial_window_mode(hwnd: HWND, monitor: Option<&Dimension>) -> WindowMode {
     if monitor.is_some_and(|m| is_fullscreen(&get_dimension(hwnd), m)) {
-        return DisplayMode::Fullscreen;
+        return WindowMode::FullscreenBorderless;
     }
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
     let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
 
     if style & WS_POPUP.0 != 0 {
         tracing::debug!(?hwnd, "Window identified as float due to WS_POPUP style.");
-        return DisplayMode::Float;
+        return WindowMode::Float;
     }
     if style & WS_THICKFRAME.0 == 0 {
         tracing::debug!(?hwnd, "Window identified as float due to no WS_THICKFRAME.");
-        return DisplayMode::Float;
+        return WindowMode::Float;
     }
     if ex_style & WS_EX_TOPMOST.0 != 0 {
         tracing::debug!(?hwnd, "Window identified as float due to WS_EX_TOPMOST.");
-        return DisplayMode::Float;
+        return WindowMode::Float;
     }
     if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
         tracing::debug!(
             ?hwnd,
             "Window identified as float due to WS_EX_DLGMODALFRAME."
         );
-        return DisplayMode::Float;
+        return WindowMode::Float;
     }
     // WS_EX_LAYERED is not checked because apps like Steam use it for custom UI rendering.
     // WS_EX_TRANSPARENT catches actual overlay windows that should float.
@@ -244,10 +284,15 @@ pub(crate) fn initial_display_mode(hwnd: HWND, monitor: Option<&Dimension>) -> D
             ?hwnd,
             "Window identified as float due to WS_EX_TRANSPARENT."
         );
-        return DisplayMode::Float;
+        return WindowMode::Float;
     }
     tracing::debug!(?hwnd, "Window determined to be Tiling.");
-    DisplayMode::Tiling
+    WindowMode::Tiling
+}
+
+pub(crate) fn is_d3d_exclusive_fullscreen_active() -> bool {
+    unsafe { SHQueryUserNotificationState() }
+        .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN)
 }
 
 /// Returns (min_width, min_height, max_width, max_height) constraints

@@ -6,9 +6,9 @@ use raw_window_handle::{RawDisplayHandle, WindowsDisplayHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW,
-    HWND_TOP, PostMessageW, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SetWindowLongPtrW, SetWindowPos, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT, WNDCLASSW,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetForegroundWindow,
+    GetWindowLongPtrW, HWND_TOP, PostMessageW, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT, WNDCLASSW,
     WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::PCWSTR;
@@ -22,7 +22,8 @@ use super::overlay::{
     CONTAINER_OVERLAY_CLASS, ContainerOverlay, container_wnd_proc, raw_window_handle,
 };
 use super::taskbar::Taskbar;
-use super::window::{ManagedHwnd, ManagedWindow, Registry, WINDOW_OVERLAY_CLASS};
+use super::window::{ManagedHwnd, ManagedWindow, Registry, WindowMode, WINDOW_OVERLAY_CLASS,
+    is_d3d_exclusive_fullscreen_active};
 use crate::config::Config;
 use crate::core::{ContainerId, MonitorLayout, WindowId};
 
@@ -289,9 +290,36 @@ unsafe extern "system" fn wnd_proc(
         WM_DISPLAYCHANGE => {
             let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
             if !ptr.is_null() {
+                let app = unsafe { &mut *ptr };
                 match get_all_screens() {
-                    Ok(screens) => unsafe { (*ptr).send_event(HubEvent::ScreensChanged(screens)) },
+                    Ok(screens) => app.send_event(HubEvent::ScreensChanged(screens)),
                     Err(e) => tracing::warn!("Failed to enumerate screens: {e}"),
+                }
+
+                // If there is an active D3D context, immediately set the active window as
+                // exclusive fullscreen. We won't clear the exclusive fullscreen flag when D3D
+                // context got cleared due to 3 reasons:
+                // - Exclusive fullscreen is fragile, and can suddenly exit if:
+                //    - Another window got focus
+                //    - Fullscreen window got partially obscured by another window
+                //   All of which dome can accidentally cause. Dome tries its best to pause
+                //   everything when a window go fullscreen, so this shouldn't happen often, but
+                //   it might.
+                // - Some apps are really aggressive in trying to take fullscreen status back,
+                //   which can cause an infinite loop of dome accidentally takes control causing
+                //   fullscreen to ext, and app tries to take back fullscreen status.
+                // - Usually, game entering exclusive fullscreen only gives up exclusive
+                //   fullscreen on exit. We may have to say sorry to users toggling the in-app
+                //   fullscreen setting and tell them to relaunch the app as borderless.
+                if is_d3d_exclusive_fullscreen_active() {
+                    let fg = ManagedHwnd::new(unsafe { GetForegroundWindow() });
+                    if let Some(id) = app.registry.get_id(fg) {
+                        tracing::info!(%id, "D3D exclusive fullscreen entered");
+                        if let Some(mw) = app.registry.get_mut(id) {
+                            mw.set_mode(WindowMode::FullscreenExclusive);
+                        }
+                        app.send_event(HubEvent::SetFullscreen(id));
+                    }
                 }
             }
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }

@@ -11,7 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, PostThreadMessageW, 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
-    Child, ContainerId, ContainerPlacement, Dimension, DisplayMode, Hub, MonitorId, MonitorLayout,
+    Child, ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout,
     WindowId,
 };
 
@@ -19,8 +19,8 @@ use super::ScreenInfo;
 use super::recovery;
 use super::throttle::{Throttle, ThrottleResult};
 use super::window::{
-    ManagedHwnd, enum_windows, get_dimension, get_process_name, get_size_constraints,
-    get_window_title, initial_display_mode, is_fullscreen, is_manageable,
+    ManagedHwnd, WindowMode, enum_windows, get_dimension, get_process_name, get_size_constraints,
+    get_window_title, initial_window_mode, is_fullscreen, is_manageable,
 };
 
 pub(super) const WM_APP_LAYOUT: u32 = 0x8001;
@@ -46,6 +46,7 @@ pub(super) enum HubEvent {
     Action(Actions),
     ConfigChanged(Config),
     TabClicked(ContainerId, usize),
+    SetFullscreen(WindowId),
     Shutdown,
 }
 
@@ -80,7 +81,7 @@ pub(super) struct FrameMonitor {
 pub(super) struct WindowCreate {
     pub(super) hwnd: HWND,
     pub(super) id: WindowId,
-    pub(super) mode: DisplayMode,
+    pub(super) mode: WindowMode,
     pub(super) title: Option<String>,
     pub(super) process: String,
 }
@@ -272,6 +273,11 @@ impl Dome {
             HubEvent::TabClicked(container_id, tab_idx) => {
                 self.hub.focus_tab_index(container_id, tab_idx);
             }
+            HubEvent::SetFullscreen(id) => {
+                if !self.hub.get_window(id).is_fullscreen() {
+                    self.hub.set_fullscreen(id);
+                }
+            }
         }
 
         Some((creates, deletes))
@@ -308,11 +314,13 @@ impl Dome {
         let monitor = self.find_monitor_dimension(hwnd);
         recovery::track(hwnd, dim);
 
-        let mode = initial_display_mode(hwnd, monitor.as_ref());
+        let mode = initial_window_mode(hwnd, monitor.as_ref());
         let id = match mode {
-            DisplayMode::Fullscreen => self.hub.insert_fullscreen(),
-            DisplayMode::Tiling => self.hub.insert_tiling(),
-            DisplayMode::Float => self.hub.insert_float(dim),
+            WindowMode::FullscreenBorderless | WindowMode::FullscreenExclusive => {
+                self.hub.insert_fullscreen()
+            }
+            WindowMode::Float => self.hub.insert_float(dim),
+            WindowMode::Tiling => self.hub.insert_tiling(),
         };
         self.set_constraints(id, hwnd);
 
