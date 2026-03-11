@@ -41,17 +41,15 @@ impl ManagedWindow {
         let overlay = match WindowOverlay::new(display) {
             Ok(o) => Some(o),
             Err(e) => {
-                tracing::warn!("Failed to create window overlay: {e:#}");
+                tracing::debug!("Failed to create window overlay: {e:#}");
                 None
             }
         };
-        let mut mw = Self {
+        Self {
             handle,
             overlay,
             is_float: mode == WindowMode::Float,
-        };
-        mw.sync_z_order();
-        mw
+        }
     }
 
     pub(super) fn hwnd(&self) -> HWND {
@@ -158,39 +156,6 @@ impl ManagedWindow {
                 Ok(h) if Some(h) != overlay_hwnd => Some(h),
                 _ => Some(if is_float { HWND_TOPMOST } else { HWND_TOP }),
             }
-        }
-    }
-
-    // Position managed window behind border overlay
-    fn sync_z_order(&mut self) {
-        let Some(overlay) = &self.overlay else {
-            return;
-        };
-        if self.is_float {
-            unsafe {
-                SetWindowPos(
-                    overlay.hwnd(),
-                    Some(HWND_TOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                )
-                .ok();
-            }
-        }
-        unsafe {
-            SetWindowPos(
-                self.handle.hwnd(),
-                Some(overlay.hwnd()),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
-            )
-            .ok();
         }
     }
 }
