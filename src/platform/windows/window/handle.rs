@@ -41,6 +41,7 @@ pub(crate) enum WindowMode {
     Tiling,
     Float,
     FullscreenBorderless,
+    ManagedFullscreen,
     FullscreenExclusive,
 }
 
@@ -50,6 +51,7 @@ impl std::fmt::Display for WindowMode {
             Self::Tiling => write!(f, "tiling"),
             Self::Float => write!(f, "float"),
             Self::FullscreenBorderless => write!(f, "fullscreen-borderless"),
+            Self::ManagedFullscreen => write!(f, "managed-fullscreen"),
             Self::FullscreenExclusive => write!(f, "fullscreen-exclusive"),
         }
     }
@@ -105,10 +107,11 @@ impl WindowHandle {
     }
 
     pub(super) fn set_fullscreen(&mut self, dim: &Dimension) {
-        if self.mode == WindowMode::FullscreenExclusive {
-            return;
+        match self.mode {
+            WindowMode::FullscreenBorderless | WindowMode::FullscreenExclusive => return,
+            _ => {}
         }
-        self.mode = WindowMode::FullscreenBorderless;
+        self.mode = WindowMode::ManagedFullscreen;
         set_position(self.hwnd, dim, None);
     }
 

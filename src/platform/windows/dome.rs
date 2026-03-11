@@ -321,7 +321,9 @@ impl Dome {
 
         let mode = initial_window_mode(hwnd, monitor.as_ref());
         let id = match mode {
-            WindowMode::FullscreenBorderless | WindowMode::FullscreenExclusive => {
+            WindowMode::FullscreenBorderless
+            | WindowMode::ManagedFullscreen
+            | WindowMode::FullscreenExclusive => {
                 self.hub.insert_fullscreen()
             }
             WindowMode::Float => self.hub.insert_float(dim),
