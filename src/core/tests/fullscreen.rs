@@ -4,6 +4,58 @@ use crate::core::node::{Child, Dimension, DisplayMode};
 use insta::assert_snapshot;
 
 #[test]
+fn insert_fullscreen_sets_focus() {
+    let mut hub = setup();
+    let w1 = hub.insert_tiling();
+    hub.set_focus(w1);
+
+    let w2 = hub.insert_fullscreen();
+
+    let ws = hub.get_workspace(hub.current_workspace());
+    assert_eq!(ws.focused(), Some(Child::Window(w2)));
+    assert_eq!(ws.fullscreen_windows(), &[w2]);
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
+      )
+    )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                         W1                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ");
+}
+
+#[test]
 fn set_fullscreen_from_tiling() {
     let mut hub = setup();
     let w1 = hub.insert_tiling();

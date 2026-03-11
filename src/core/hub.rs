@@ -340,6 +340,7 @@ impl Hub {
         let current_ws = self.current_workspace();
         let window_id = self.windows.allocate(Window::fullscreen(current_ws));
         self.attach_fullscreen_to_workspace(current_ws, window_id);
+        self.set_focus(window_id);
         window_id
     }
 
