@@ -81,6 +81,7 @@ impl ManagedWindow {
         self.handle.title()
     }
 
+    #[tracing::instrument(skip_all)]
     pub(super) fn show(
         &mut self,
         wp: &WindowPlacement,
@@ -88,6 +89,11 @@ impl ManagedWindow {
         config: &Config,
         is_focused: bool,
     ) {
+        tracing::debug!(
+            "show {self} frame={:?} float={} focused={is_focused}",
+            wp.frame,
+            wp.is_float
+        );
         let float_changed = self.is_float != wp.is_float;
         if float_changed {
             self.is_float = wp.is_float;
@@ -113,12 +119,16 @@ impl ManagedWindow {
         self.handle.show(&wp.frame, border, wp.is_float, handle_z);
     }
 
+    #[tracing::instrument(skip_all)]
     pub(super) fn hide(&mut self) {
+        tracing::debug!("hide {self}");
         self.handle.hide();
         self.hide_overlay();
     }
 
+    #[tracing::instrument(skip_all)]
     pub(super) fn set_fullscreen(&mut self, dim: &Dimension) {
+        tracing::debug!("set_fullscreen {self} dim={dim:?}");
         self.handle.set_fullscreen(dim);
         self.hide_overlay();
     }
@@ -131,7 +141,7 @@ impl ManagedWindow {
         self.handle.set_title(title);
     }
 
-    pub(super) fn hide_overlay(&mut self) {
+    fn hide_overlay(&mut self) {
         if let Some(overlay) = &mut self.overlay {
             overlay.hide();
         }
@@ -252,10 +262,6 @@ impl Registry {
         {
             mw.set_title(title);
         }
-    }
-
-    pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = (WindowId, &mut ManagedWindow)> {
-        self.reverse.iter_mut().map(|(&id, mw)| (id, mw))
     }
 
     pub(super) fn resolve_tab_titles(&self, children: &[Child]) -> Vec<String> {

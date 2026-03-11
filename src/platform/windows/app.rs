@@ -182,7 +182,6 @@ impl App {
             .collect();
 
         let mut new_displayed = HashSet::new();
-        let mut seen_windows = HashSet::new();
         let mut new_monitor_state: HashMap<MonitorId, MonitorState> = HashMap::new();
         let border = self.config.border_size;
 
@@ -206,7 +205,6 @@ impl App {
                             for wp in windows {
                                 if let Some(mw) = self.registry.get_mut(wp.id) {
                                     mw.show(wp, border, &self.config, frame.focused == Some(wp.id));
-                                    seen_windows.insert(wp.id);
                                 }
                             }
                         }
@@ -250,12 +248,6 @@ impl App {
                         mw.focus();
                     }
                 }
-            }
-        }
-
-        for (id, mw) in self.registry.iter_mut() {
-            if !seen_windows.contains(&id) {
-                mw.hide_overlay();
             }
         }
 

@@ -323,9 +323,7 @@ impl Dome {
         let id = match mode {
             WindowMode::FullscreenBorderless
             | WindowMode::ManagedFullscreen
-            | WindowMode::FullscreenExclusive => {
-                self.hub.insert_fullscreen()
-            }
+            | WindowMode::FullscreenExclusive => self.hub.insert_fullscreen(),
             WindowMode::Float => self.hub.insert_float(dim),
             WindowMode::Tiling => self.hub.insert_tiling(),
         };
