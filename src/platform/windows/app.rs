@@ -149,13 +149,21 @@ impl App {
 
     fn apply_layout_frame(&mut self, frame: LayoutFrame) {
         for create in &frame.creates {
-            let mw = ManagedWindow::new(
+            let mut mw = ManagedWindow::new(
                 &self.display,
                 create.hwnd,
                 create.title.clone(),
                 create.process.clone(),
                 create.mode,
             );
+            // Hide before first frame — window may end up offscreen due to
+            // viewport scrolling. apply_layout will show the visible ones.
+            // Fullscreen windows are always inside the viewport, and hiding them
+            // interferes with D3D exclusive fullscreen transitions.
+            if !mw.mode().is_fullscreen() {
+                tracing::trace!("Hiding newly created windows");
+                mw.hide();
+            }
             self.registry.insert(mw, create.id);
         }
 
