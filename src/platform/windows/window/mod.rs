@@ -40,7 +40,11 @@ impl ManagedWindow {
         let handle = WindowHandle::new_from_create(hwnd, title, process, mode);
         // Hide before first frame — window may end up offscreen due to
         // viewport scrolling. apply_layout will show the visible ones.
-        handle.hide();
+        // Fullscreen windows are always inside the viewport, and hiding them
+        // interferes with D3D exclusive fullscreen transitions.
+        if !mode.is_fullscreen() {
+            handle.hide();
+        }
         let overlay = match WindowOverlay::new(display) {
             Ok(o) => Some(o),
             Err(e) => {

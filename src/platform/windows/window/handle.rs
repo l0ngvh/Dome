@@ -45,6 +45,15 @@ pub(crate) enum WindowMode {
     FullscreenExclusive,
 }
 
+impl WindowMode {
+    pub(crate) fn is_fullscreen(self) -> bool {
+        matches!(
+            self,
+            Self::FullscreenBorderless | Self::ManagedFullscreen | Self::FullscreenExclusive
+        )
+    }
+}
+
 impl std::fmt::Display for WindowMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
