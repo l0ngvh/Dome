@@ -212,7 +212,7 @@ impl App {
                         MonitorLayout::Normal { windows, .. } => {
                             for wp in windows {
                                 if let Some(mw) = self.registry.get_mut(wp.id) {
-                                    mw.show(wp, border, &self.config, frame.focused == Some(wp.id));
+                                    mw.show(wp, border, &self.config);
                                 }
                             }
                         }

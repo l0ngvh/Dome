@@ -12,10 +12,7 @@ use std::collections::HashMap;
 
 use glutin::display::Display;
 use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::WindowsAndMessaging::{
-    GW_HWNDPREV, GetWindow, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SWP_ASYNCWINDOWPOS,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
-};
+use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
 use self::handle::WindowHandle;
 use self::overlay::WindowOverlay;
@@ -26,7 +23,6 @@ use crate::core::{Dimension, WindowPlacement};
 pub(super) struct ManagedWindow {
     handle: WindowHandle,
     overlay: Option<WindowOverlay>,
-    is_float: bool,
 }
 
 impl ManagedWindow {
@@ -45,11 +41,7 @@ impl ManagedWindow {
                 None
             }
         };
-        Self {
-            handle,
-            overlay,
-            is_float: mode == WindowMode::Float,
-        }
+        Self { handle, overlay }
     }
 
     pub(super) fn hwnd(&self) -> HWND {
@@ -73,41 +65,34 @@ impl ManagedWindow {
     }
 
     #[tracing::instrument(skip_all)]
-    pub(super) fn show(
-        &mut self,
-        wp: &WindowPlacement,
-        border: f32,
-        config: &Config,
-        is_focused: bool,
-    ) {
-        tracing::debug!(
-            "show {self} frame={:?} float={} focused={is_focused}",
-            wp.frame,
-            wp.is_float
-        );
-        let float_changed = self.is_float != wp.is_float;
-        if float_changed {
-            self.is_float = wp.is_float;
-        }
+    pub(super) fn show(&mut self, wp: &WindowPlacement, border: f32, config: &Config) {
+        tracing::debug!("show {self} frame={:?} float={}", wp.frame, wp.is_float);
+        let float_changed = (self.mode() == WindowMode::Float) != wp.is_float;
 
-        let overlay_z = self.overlay_z(float_changed, wp.is_float, is_focused);
-        let handle_z = if float_changed {
-            match &self.overlay {
-                Some(o) => Some(o.hwnd()),
-                None => Some(if wp.is_float {
-                    HWND_TOPMOST
-                } else {
-                    HWND_NOTOPMOST
-                }),
-            }
+        let overlay_z = if float_changed {
+            Some(if wp.is_float {
+                HWND_TOPMOST
+            } else {
+                HWND_NOTOPMOST
+            })
         } else {
             None
+        };
+
+        let window_z = match &self.overlay {
+            Some(o) => Some(o.hwnd()),
+            None if float_changed => Some(if wp.is_float {
+                HWND_TOPMOST
+            } else {
+                HWND_NOTOPMOST
+            }),
+            None => None,
         };
 
         if let Some(overlay) = &mut self.overlay {
             overlay.update(wp, config, overlay_z);
         }
-        self.handle.show(&wp.frame, border, wp.is_float, handle_z);
+        self.handle.show(&wp.frame, border, wp.is_float, window_z);
     }
 
     #[tracing::instrument(skip_all)]
@@ -135,27 +120,6 @@ impl ManagedWindow {
     fn hide_overlay(&mut self) {
         if let Some(overlay) = &mut self.overlay {
             overlay.hide();
-        }
-    }
-
-    fn overlay_z(&self, float_changed: bool, is_float: bool, is_focused: bool) -> Option<HWND> {
-        if float_changed {
-            return Some(if is_float {
-                HWND_TOPMOST
-            } else {
-                HWND_NOTOPMOST
-            });
-        }
-        if !is_focused {
-            return None;
-        }
-        let overlay_hwnd = self.overlay.as_ref().map(|o| o.hwnd());
-        unsafe {
-            let above = GetWindow(self.handle.hwnd(), GW_HWNDPREV);
-            match above {
-                Ok(h) if Some(h) != overlay_hwnd => Some(h),
-                _ => Some(if is_float { HWND_TOPMOST } else { HWND_TOP }),
-            }
         }
     }
 }
