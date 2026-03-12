@@ -7,9 +7,8 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetForegroundWindow,
-    GetWindowLongPtrW, HWND_TOP, PostMessageW, RegisterClassW, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT, WNDCLASSW,
-    WS_EX_TOOLWINDOW, WS_POPUP,
+    GetWindowLongPtrW, HWND_NOTOPMOST, HWND_TOPMOST, PostMessageW, RegisterClassW,
+    SetWindowLongPtrW, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::PCWSTR;
 
@@ -27,7 +26,7 @@ use super::window::{
     is_d3d_exclusive_fullscreen_active,
 };
 use crate::config::Config;
-use crate::core::{ContainerId, MonitorId, MonitorLayout, WindowId};
+use crate::core::{ContainerId, MonitorId, MonitorLayout, WindowId, WindowPlacement};
 
 /// If a monitor has an exclusive fullscreen windows, ignore all incoming stale events from Dome
 enum MonitorState {
@@ -202,30 +201,16 @@ impl App {
 
             let new_state = match self.monitor_state.remove(&fm.monitor_id) {
                 Some(MonitorState::Exclusive(id)) => MonitorState::Exclusive(id),
-                _ => {
-                    match &fm.layout {
-                        MonitorLayout::Fullscreen(window_id) => {
-                            if let Some(mw) = self.registry.get_mut(*window_id) {
-                                mw.set_fullscreen(&fm.dimension);
-                            }
-                        }
-                        MonitorLayout::Normal { windows, .. } => {
-                            for wp in windows {
-                                if let Some(mw) = self.registry.get_mut(wp.id) {
-                                    mw.show(wp, border, &self.config);
-                                }
-                            }
-                        }
-                    }
-                    MonitorState::Normal {
-                        ids: layout_ids,
-                        focused: frame.focused.filter(|id| new_displayed.contains(id)),
-                    }
-                }
+                _ => MonitorState::Normal {
+                    ids: layout_ids,
+                    focused: frame.focused.filter(|id| new_displayed.contains(id)),
+                },
             };
             new_monitor_state.insert(fm.monitor_id, new_state);
         }
         self.monitor_state = new_monitor_state;
+
+        self.position_windows(&frame, border);
 
         for &id in new_displayed.difference(&old_displayed) {
             if let Some(mw) = self.registry.get(id) {
@@ -258,8 +243,6 @@ impl App {
                 }
             }
         }
-
-        self.update_container_overlays(&frame.container_overlays);
     }
 
     fn apply_title_update(&mut self, update: TitleUpdate) {
@@ -270,18 +253,40 @@ impl App {
         for data in &update.container_overlays {
             let titles = self.registry.resolve_tab_titles(&data.children);
             if let Some(overlay) = self.container_overlays.get_mut(&data.placement.id) {
-                overlay.update(data.placement, titles);
+                overlay.update(data.placement, titles, None);
             }
         }
     }
 
-    fn update_container_overlays(&mut self, container_data: &[ContainerOverlayData]) {
-        let frame_container_ids: HashSet<_> =
-            container_data.iter().map(|c| c.placement.id).collect();
+    /// Position all visible windows and container overlays.
+    ///
+    /// Fullscreen windows are positioned directly (outside the z-order bands).
+    /// Everything else is placed in two z-bands:
+    ///
+    /// ```text
+    /// ── topmost band ──────────────────
+    ///   newly active floats (HWND_TOPMOST) — newly converted or newly focused
+    ///   steady floats (chained by specific HWND, reverse id)
+    /// ── non-topmost band ──────────────
+    ///   focused container overlay OR focused tiling (HWND_NOTOPMOST)
+    ///   steady container overlays (chained, reverse id)
+    ///   steady tiling (chained, reverse id)
+    /// ```
+    ///
+    /// HWND_TOPMOST only on transitions. HWND_NOTOPMOST on the first non-topmost
+    /// item (documented no-op if already non-topmost). Steady-state uses specific-HWND
+    /// chaining — true no-op when already in position.
+    fn position_windows(&mut self, frame: &LayoutFrame, border: f32) {
+        // -- Container overlay lifecycle --
+        let frame_container_ids: HashSet<_> = frame
+            .container_overlays
+            .iter()
+            .map(|c| c.placement.id)
+            .collect();
         self.container_overlays
             .retain(|id, _| frame_container_ids.contains(id));
 
-        for data in container_data {
+        for data in &frame.container_overlays {
             let id = data.placement.id;
             if let std::collections::hash_map::Entry::Vacant(entry) =
                 self.container_overlays.entry(id)
@@ -296,26 +301,135 @@ impl App {
                     }
                     Err(e) => {
                         tracing::warn!(%id, "Failed to create container overlay: {e:#}");
-                        continue;
                     }
                 }
             }
-            let titles = self.registry.resolve_tab_titles(&data.children);
-            if let Some(overlay) = self.container_overlays.get_mut(&id) {
-                overlay.update(data.placement, titles);
-                overlay.show();
-                unsafe {
-                    SetWindowPos(
-                        overlay.hwnd(),
-                        Some(HWND_TOP),
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                    )
-                    .ok();
+        }
+
+        // -- Collect window placements across all monitors --
+        let mut all_windows: Vec<(WindowId, &WindowPlacement)> = Vec::new();
+        for fm in &frame.monitors {
+            match &fm.layout {
+                MonitorLayout::Fullscreen(window_id) => {
+                    if let Some(mw) = self.registry.get_mut(*window_id) {
+                        mw.set_fullscreen(&fm.dimension);
+                    }
                 }
+                MonitorLayout::Normal { windows, .. } => {
+                    for wp in windows {
+                        all_windows.push((wp.id, wp));
+                    }
+                }
+            }
+        }
+
+        // -- Classify into z-order groups --
+        let focus_changed = frame.focused != self.last_focused;
+        let mut newly_active_float: Vec<(WindowId, &WindowPlacement)> = Vec::new();
+        let mut steady_float: Vec<(WindowId, &WindowPlacement)> = Vec::new();
+        let mut focused_tiling: Option<(WindowId, &WindowPlacement)> = None;
+        let mut steady_tiling: Vec<(WindowId, &WindowPlacement)> = Vec::new();
+
+        for &(id, wp) in &all_windows {
+            let float_changed = self
+                .registry
+                .get(id)
+                .map(|mw| (mw.mode() == WindowMode::Float) != wp.is_float)
+                .unwrap_or(false);
+            let is_newly_focused_float = wp.is_float && focus_changed && frame.focused == Some(id);
+
+            if wp.is_float {
+                if float_changed || is_newly_focused_float {
+                    newly_active_float.push((id, wp));
+                } else {
+                    steady_float.push((id, wp));
+                }
+            } else if frame.focused == Some(id) {
+                focused_tiling = Some((id, wp));
+            } else {
+                steady_tiling.push((id, wp));
+            }
+        }
+
+        // Reverse-id sort (newest/highest first). Move focused to front of newly_active.
+        newly_active_float.sort_by(|a, b| b.0.cmp(&a.0));
+        if let Some(focused_id) = frame.focused {
+            if let Some(pos) = newly_active_float
+                .iter()
+                .position(|(id, _)| *id == focused_id)
+            {
+                let item = newly_active_float.remove(pos);
+                newly_active_float.insert(0, item);
+            }
+        }
+        steady_float.sort_by(|a, b| b.0.cmp(&a.0));
+        steady_tiling.sort_by(|a, b| b.0.cmp(&a.0));
+
+        let focused_container: Option<&ContainerOverlayData> = frame
+            .container_overlays
+            .iter()
+            .find(|c| c.placement.is_focused);
+        let mut steady_containers: Vec<&ContainerOverlayData> = frame
+            .container_overlays
+            .iter()
+            .filter(|c| !c.placement.is_focused)
+            .collect();
+        steady_containers.sort_by(|a, b| b.placement.id.cmp(&a.placement.id));
+
+        // -- Position in z-order --
+        let mut anchor: Option<HWND> = None;
+
+        // 1. Newly active floats (iterate in reverse so focused ends up highest)
+        for &(id, wp) in newly_active_float.iter().rev() {
+            if let Some(mw) = self.registry.get_mut(id) {
+                mw.show(wp, border, &self.config, Some(HWND_TOPMOST));
+                // Capture anchor from the first processed (bottom of chain)
+                if anchor.is_none() {
+                    anchor = Some(mw.hwnd());
+                }
+            }
+        }
+
+        // 2. Steady floats — chain below anchor
+        for &(id, wp) in &steady_float {
+            if let Some(mw) = self.registry.get_mut(id) {
+                mw.show(wp, border, &self.config, anchor);
+                anchor = Some(mw.hwnd());
+            }
+        }
+
+        // 3. Focused container or focused tiling (first non-topmost item)
+        if let Some(data) = focused_container {
+            let titles = self.registry.resolve_tab_titles(&data.children);
+            if let Some(overlay) = self.container_overlays.get_mut(&data.placement.id) {
+                overlay.update(data.placement, titles, Some(HWND_NOTOPMOST));
+                overlay.show();
+                anchor = Some(overlay.hwnd());
+            }
+        } else if let Some((id, wp)) = focused_tiling {
+            if let Some(mw) = self.registry.get_mut(id) {
+                mw.show(wp, border, &self.config, Some(HWND_NOTOPMOST));
+                anchor = Some(mw.hwnd());
+            }
+        } else {
+            anchor = None;
+        }
+
+        // 4. Steady containers — chain below anchor
+        for data in &steady_containers {
+            let titles = self.registry.resolve_tab_titles(&data.children);
+            if let Some(overlay) = self.container_overlays.get_mut(&data.placement.id) {
+                overlay.update(data.placement, titles, anchor);
+                overlay.show();
+                anchor = Some(overlay.hwnd());
+            }
+        }
+
+        // 5. Steady tiling — chain below anchor
+        for &(id, wp) in &steady_tiling {
+            if let Some(mw) = self.registry.get_mut(id) {
+                mw.show(wp, border, &self.config, anchor);
+                anchor = Some(mw.hwnd());
             }
         }
     }

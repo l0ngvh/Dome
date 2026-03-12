@@ -77,7 +77,14 @@ impl ContainerOverlay {
         Ok(boxed)
     }
 
-    pub(super) fn update(&mut self, placement: ContainerPlacement, tab_titles: Vec<String>) {
+    /// Update content and position. `z_after` is the caller-decided z-order:
+    /// `Some(hwnd)` places this overlay after that HWND, `None` uses SWP_NOZORDER.
+    pub(super) fn update(
+        &mut self,
+        placement: ContainerPlacement,
+        tab_titles: Vec<String>,
+        z_after: Option<HWND>,
+    ) {
         let vf = placement.visible_frame;
         let w = vf.width.max(1.0) as u32;
         let h = vf.height.max(1.0) as u32;
@@ -95,15 +102,19 @@ impl ContainerOverlay {
         self.tab_titles = tab_titles;
         self.rerender();
 
+        let mut flags = SWP_NOACTIVATE;
+        if z_after.is_none() {
+            flags |= SWP_NOZORDER;
+        }
         unsafe {
             SetWindowPos(
                 self.window.hwnd(),
-                None,
+                z_after,
                 vf.x as i32,
                 vf.y as i32,
                 w as i32,
                 h as i32,
-                SWP_NOZORDER | SWP_NOACTIVATE,
+                flags,
             )
             .ok();
         }

@@ -38,6 +38,8 @@ impl WindowOverlay {
         self.window.hwnd()
     }
 
+    /// Update border content and position. `z_after` is caller-decided:
+    /// `Some(hwnd)` places this overlay after that HWND, `None` uses `SWP_NOZORDER`.
     pub(super) fn update(
         &mut self,
         placement: &WindowPlacement,

@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use glutin::display::Display;
 use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
+use windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST;
 
 use self::handle::WindowHandle;
 use self::overlay::WindowOverlay;
@@ -64,35 +64,39 @@ impl ManagedWindow {
         self.handle.title()
     }
 
+    /// Position this window and its border overlay at the given placement.
+    ///
+    /// `z` is precomputed by the app-level z-order logic:
+    /// - `Some(HWND_TOPMOST)`: window first, overlay second — both get TOPMOST,
+    ///   call order ensures overlay ends up above window.
+    /// - All other values (`Some(HWND_NOTOPMOST)`, `Some(specific_hwnd)`, `None`):
+    ///   overlay first (`z`), window second (`overlay.hwnd()`). Placing a window
+    ///   below a non-topmost overlay implicitly strips WS_EX_TOPMOST, so
+    ///   HWND_NOTOPMOST needs no special path.
+    /// - `None` means overlay gets SWP_NOZORDER, but the window still anchors
+    ///   below the overlay via `overlay.hwnd()`.
     #[tracing::instrument(skip_all)]
-    pub(super) fn show(&mut self, wp: &WindowPlacement, border: f32, config: &Config) {
+    pub(super) fn show(
+        &mut self,
+        wp: &WindowPlacement,
+        border: f32,
+        config: &Config,
+        z: Option<HWND>,
+    ) {
         tracing::debug!("show {self} frame={:?} float={}", wp.frame, wp.is_float);
-        let float_changed = (self.mode() == WindowMode::Float) != wp.is_float;
 
-        let overlay_z = if float_changed {
-            Some(if wp.is_float {
-                HWND_TOPMOST
-            } else {
-                HWND_NOTOPMOST
-            })
+        if z == Some(HWND_TOPMOST) {
+            self.handle.show(&wp.frame, border, wp.is_float, z);
+            if let Some(overlay) = &mut self.overlay {
+                overlay.update(wp, config, z);
+            }
         } else {
-            None
-        };
-
-        let window_z = match &self.overlay {
-            Some(o) => Some(o.hwnd()),
-            None if float_changed => Some(if wp.is_float {
-                HWND_TOPMOST
-            } else {
-                HWND_NOTOPMOST
-            }),
-            None => None,
-        };
-
-        if let Some(overlay) = &mut self.overlay {
-            overlay.update(wp, config, overlay_z);
+            if let Some(overlay) = &mut self.overlay {
+                overlay.update(wp, config, z);
+            }
+            let window_z = self.overlay.as_ref().map(|o| o.hwnd());
+            self.handle.show(&wp.frame, border, wp.is_float, window_z);
         }
-        self.handle.show(&wp.frame, border, wp.is_float, window_z);
     }
 
     #[tracing::instrument(skip_all)]

@@ -491,6 +491,9 @@ fn for_each_owned<F: FnMut(HWND)>(hwnd: HWND, callback: F) {
     }
 }
 
+/// Position a window via `SetWindowPos`. `z_after` is the `hWndInsertAfter`
+/// parameter — the positioned window is placed below the supplied HWND.
+/// `None` adds `SWP_NOZORDER` (no z-order change).
 fn set_position(hwnd: HWND, dim: &Dimension, z_after: Option<HWND>) {
     if unsafe { IsIconic(hwnd) }.as_bool() {
         let _was_visible = unsafe { ShowWindowAsync(hwnd, SW_RESTORE) };
