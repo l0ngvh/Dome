@@ -485,28 +485,28 @@ fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HR
     unsafe {
         let region = CreateRectRgn(0, 0, 0, 0);
 
+        // Unfocused containers exclude border strips so the per-window overlay
+        // borders underneath remain visible (egui skips drawing them anyway).
         if placement.is_tabbed {
             let th = config.tab_bar_height as i32;
-            // Tab bar: (ox, oy) to (ox + fw, oy + th)
             let tab = clamped_rgn(ox, oy, ox + fw, oy + th);
             CombineRgn(Some(region), Some(region), Some(tab), RGN_OR);
             // DeleteObject only fails for invalid or DC-selected handles;
             // these regions are freshly created and never selected into a DC.
             DeleteObject(tab.into()).ok().ok();
-            // Left border below tab bar
-            let left = clamped_rgn(ox, oy + th, ox + b, oy + fh - b);
-            CombineRgn(Some(region), Some(region), Some(left), RGN_OR);
-            DeleteObject(left.into()).ok().ok();
-            // Right border below tab bar
-            let right = clamped_rgn(ox + fw - b, oy + th, ox + fw, oy + fh - b);
-            CombineRgn(Some(region), Some(region), Some(right), RGN_OR);
-            DeleteObject(right.into()).ok().ok();
-            // Bottom border
-            let bottom = clamped_rgn(ox, oy + fh - b, ox + fw, oy + fh);
-            CombineRgn(Some(region), Some(region), Some(bottom), RGN_OR);
-            DeleteObject(bottom.into()).ok().ok();
-        } else {
-            // Four border strips
+
+            if placement.is_focused {
+                let left = clamped_rgn(ox, oy + th, ox + b, oy + fh - b);
+                CombineRgn(Some(region), Some(region), Some(left), RGN_OR);
+                DeleteObject(left.into()).ok().ok();
+                let right = clamped_rgn(ox + fw - b, oy + th, ox + fw, oy + fh - b);
+                CombineRgn(Some(region), Some(region), Some(right), RGN_OR);
+                DeleteObject(right.into()).ok().ok();
+                let bottom = clamped_rgn(ox, oy + fh - b, ox + fw, oy + fh);
+                CombineRgn(Some(region), Some(region), Some(bottom), RGN_OR);
+                DeleteObject(bottom.into()).ok().ok();
+            }
+        } else if placement.is_focused {
             let top = clamped_rgn(ox, oy, ox + fw, oy + b);
             let bottom = clamped_rgn(ox, oy + fh - b, ox + fw, oy + fh);
             let left = clamped_rgn(ox, oy + b, ox + b, oy + fh - b);
