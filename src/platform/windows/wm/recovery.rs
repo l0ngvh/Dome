@@ -13,9 +13,9 @@ use windows::core::BOOL;
 
 use crate::core::Dimension;
 
-use super::OFFSCREEN_POS;
+use super::super::OFFSCREEN_POS;
+use super::super::handle::ManagedHwnd;
 use super::taskbar::Taskbar;
-use super::window::ManagedHwnd;
 
 const DEFAULT_WIDTH: f32 = 800.0;
 const DEFAULT_HEIGHT: f32 = 600.0;

@@ -13,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::dome::HubEvent;
-use super::window::ManagedHwnd;
+use super::handle::ManagedHwnd;
 
 thread_local! {
     static SENDER: OnceCell<Sender<HubEvent>> = const { OnceCell::new() };

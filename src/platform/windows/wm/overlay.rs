@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-use super::dome::HubEvent;
+use super::super::dome::HubEvent;
 use crate::config::Config;
 use crate::core::{ContainerPlacement, WindowPlacement};
 use crate::overlay;

@@ -1,3 +1,6 @@
+mod inspect;
+mod throttle;
+
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -15,13 +18,13 @@ use crate::core::{
     WindowPlacement,
 };
 
-use super::ScreenInfo;
-use super::recovery;
-use super::throttle::{Throttle, ThrottleResult};
-use super::window::{
-    ManagedHwnd, WindowMode, enum_windows, get_dimension, get_process_name, get_size_constraints,
-    get_window_title, initial_window_mode, is_fullscreen, is_manageable,
+use self::inspect::{
+    enum_windows, get_process_name, get_size_constraints, get_window_title, initial_window_mode,
+    is_fullscreen, is_manageable,
 };
+use self::throttle::{Throttle, ThrottleResult};
+use super::ScreenInfo;
+use super::handle::{ManagedHwnd, WindowMode, get_dimension};
 
 pub(super) const WM_APP_LAYOUT: u32 = 0x8001;
 pub(super) const WM_APP_CONFIG: u32 = 0x8002;
@@ -315,7 +318,6 @@ impl Dome {
         let managed = ManagedHwnd::new(hwnd);
         let dim = get_dimension(hwnd);
         let monitor = self.find_monitor_dimension(hwnd);
-        recovery::track(hwnd, dim);
 
         let mode = initial_window_mode(hwnd, monitor.as_ref());
         let id = match mode {
@@ -342,7 +344,6 @@ impl Dome {
     fn remove_window(&mut self, h: ManagedHwnd) {
         if let Some(id) = self.window_map.remove(&h) {
             self.window_info.remove(&id);
-            recovery::untrack(h);
             self.hub.delete_window(id);
         }
     }
@@ -742,12 +743,6 @@ impl Dome {
                 }
             }
         }
-    }
-}
-
-impl Drop for Dome {
-    fn drop(&mut self) {
-        recovery::restore_all();
     }
 }
 

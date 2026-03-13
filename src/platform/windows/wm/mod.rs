@@ -1,3 +1,8 @@
+mod overlay;
+mod recovery;
+mod taskbar;
+mod window;
+
 use std::collections::{HashMap, HashSet};
 
 use calloop::channel::Sender;
@@ -12,19 +17,19 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
+use self::overlay::{
+    CONTAINER_OVERLAY_CLASS, ContainerOverlay, container_wnd_proc, raw_window_handle,
+};
+use self::taskbar::Taskbar;
+use self::window::{
+    ManagedWindow, Registry, WINDOW_OVERLAY_CLASS, is_d3d_exclusive_fullscreen_active,
+};
 use super::dome::{
     AppHandle, ContainerRender, FrameLayout, HubEvent, LayoutFrame, TitleUpdate, WM_APP_CONFIG,
     WM_APP_LAYOUT, WM_APP_TITLE,
 };
 use super::get_all_screens;
-use super::overlay::{
-    CONTAINER_OVERLAY_CLASS, ContainerOverlay, container_wnd_proc, raw_window_handle,
-};
-use super::taskbar::Taskbar;
-use super::window::{
-    ManagedHwnd, ManagedWindow, Registry, WINDOW_OVERLAY_CLASS, WindowMode,
-    is_d3d_exclusive_fullscreen_active,
-};
+use super::handle::{ManagedHwnd, WindowMode, get_dimension};
 use crate::config::Config;
 use crate::core::{ContainerId, MonitorId, WindowId, WindowPlacement};
 
@@ -46,7 +51,7 @@ impl MonitorState {
     }
 }
 
-pub(super) struct App {
+pub(super) struct Wm {
     hwnd: HWND,
     display: Display,
     hub_sender: Sender<HubEvent>,
@@ -58,7 +63,7 @@ pub(super) struct App {
     monitor_state: HashMap<MonitorId, MonitorState>,
 }
 
-impl App {
+impl Wm {
     pub(super) fn new(
         hub_sender: Sender<HubEvent>,
         config: Config,
@@ -118,6 +123,7 @@ impl App {
                 .expect("failed to create GL display");
 
         let taskbar = Taskbar::new()?;
+        recovery::install_handlers();
 
         let app = Box::new(Self {
             hwnd,
@@ -131,7 +137,7 @@ impl App {
             monitor_state: HashMap::new(),
         });
 
-        let ptr = &*app as *const _ as *mut App;
+        let ptr = &*app as *const _ as *mut Wm;
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize) };
 
         app.send_event(HubEvent::AppInitialized(AppHandle::new(hwnd)));
@@ -148,6 +154,8 @@ impl App {
 
     fn apply_layout_frame(&mut self, frame: LayoutFrame) {
         for create in &frame.created_windows {
+            let dim = get_dimension(create.hwnd);
+            recovery::track(create.hwnd, dim);
             let mut mw = ManagedWindow::new(
                 &self.display,
                 create.hwnd,
@@ -174,6 +182,9 @@ impl App {
                         focused: None,
                     };
                 }
+            }
+            if let Some(mw) = self.registry.get(*id) {
+                recovery::untrack(mw.managed_hwnd());
             }
             self.registry.remove(*id);
         }
@@ -434,6 +445,12 @@ impl App {
     }
 }
 
+impl Drop for Wm {
+    fn drop(&mut self) {
+        recovery::restore_all();
+    }
+}
+
 unsafe extern "system" fn wnd_proc(
     hwnd: HWND,
     msg: u32,
@@ -442,19 +459,19 @@ unsafe extern "system" fn wnd_proc(
 ) -> LRESULT {
     match msg {
         WM_APP_LAYOUT => {
-            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
+            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut Wm;
             let frame = unsafe { *Box::from_raw(wparam.0 as *mut LayoutFrame) };
             unsafe { (*ptr).apply_layout_frame(frame) };
             LRESULT(0)
         }
         WM_APP_TITLE => {
-            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
+            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut Wm;
             let update = unsafe { *Box::from_raw(wparam.0 as *mut TitleUpdate) };
             unsafe { (*ptr).apply_title_update(update) };
             LRESULT(0)
         }
         WM_APP_CONFIG => {
-            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
+            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut Wm;
             let config = unsafe { *Box::from_raw(wparam.0 as *mut Config) };
             unsafe {
                 for overlay in (*ptr).container_overlays.values_mut() {
@@ -465,7 +482,7 @@ unsafe extern "system" fn wnd_proc(
             LRESULT(0)
         }
         WM_DISPLAYCHANGE => {
-            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut App;
+            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut Wm;
             if !ptr.is_null() {
                 let app = unsafe { &mut *ptr };
                 match get_all_screens() {

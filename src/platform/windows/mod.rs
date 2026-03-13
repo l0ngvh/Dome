@@ -1,12 +1,8 @@
-mod app;
 mod dome;
 mod event_listener;
+mod handle;
 mod keyboard;
-mod overlay;
-mod recovery;
-mod taskbar;
-mod throttle;
-mod window;
+mod wm;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -35,10 +31,10 @@ use windows::core::BOOL;
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
-use app::App;
 use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
+use wm::Wm;
 
 #[derive(Clone)]
 pub(super) struct ScreenInfo {
@@ -61,7 +57,6 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     });
 
     let logger = Logger::init(&config);
-    recovery::install_handlers();
 
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
@@ -86,7 +81,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
             .ok()
             .expect("COM init failed on UI thread");
         ui_tid.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
-        let _app = App::new(ui_sender, ui_config).expect("Failed to create App");
+        let _app = Wm::new(ui_sender, ui_config).expect("Failed to create Wm");
         let mut msg = MSG::default();
         unsafe {
             while GetMessageW(&mut msg, None, 0, 0).into() {
@@ -107,7 +102,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
             Dome::new(config_clone, screens, handle, signal, main_thread_id).run(rx, event_loop);
         }));
         if result.is_err() {
-            recovery::restore_all();
+            tracing::error!("Dome thread panicked");
         }
         unsafe { PostThreadMessageW(main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
     });
