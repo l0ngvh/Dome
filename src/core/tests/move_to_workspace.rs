@@ -69,9 +69,9 @@ fn move_window_to_workspace_with_windows() {
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(2), parent=ContainerId(1), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -432,9 +432,9 @@ fn move_to_empty_workspace_resets_spawn_mode_based_on_screen_size() {
         Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(2),
-        Container(id=ContainerId(0), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )

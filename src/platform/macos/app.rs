@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver};
@@ -8,26 +8,29 @@ use std::thread;
 
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate};
+use objc2_app_kit::{
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSNormalWindowLevel,
+};
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{
     CFDictionary, CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext, kCFBooleanTrue,
     kCFRunLoopDefaultMode,
 };
-use objc2_core_graphics::{
-    CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess, CGWindowID,
-};
-use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol};
+use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
+use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect};
 use objc2_metal::MTLCreateSystemDefaultDevice;
 
 use super::dome::{Dome, HubEvent, HubMessage, MessageSender};
 use super::keyboard::KeyboardListener;
 use super::listeners::EventListener;
 use super::monitor::get_all_screens;
-use super::overlay::{OverlayManager, OverlayWindow};
+use super::overlay::{
+    ContainerOverlayEntry, ContainerOverlayView, OverlayWindow, create_overlay_window,
+};
 use super::recovery;
 use super::renderer::MetalBackend;
 use crate::config::{Config, start_config_watcher};
+use crate::core::{ContainerId, WindowId};
 use crate::ipc;
 use crate::logging::Logger;
 
@@ -167,8 +170,8 @@ fn create_frame_source(delegate: &Retained<AppDelegate>) -> CFRetained<CFRunLoop
 struct AppDelegateIvars {
     hub_sender: calloop::channel::Sender<HubEvent>,
     frame_rx: Receiver<HubMessage>,
-    overlay_manager: RefCell<OverlayManager>,
-    overlay_windows: RefCell<HashMap<CGWindowID, OverlayWindow>>,
+    overlay_windows: RefCell<HashMap<WindowId, OverlayWindow>>,
+    container_overlays: RefCell<HashMap<ContainerId, ContainerOverlayEntry>>,
     event_listener: EventListener,
     backend: Rc<MetalBackend>,
     config: RefCell<Config>,
@@ -207,8 +210,8 @@ impl AppDelegate {
         let ivars = AppDelegateIvars {
             hub_sender: hub_sender.clone(),
             frame_rx,
-            overlay_manager: RefCell::new(OverlayManager::new(backend.clone(), config.clone())),
             overlay_windows: RefCell::new(HashMap::new()),
+            container_overlays: RefCell::new(HashMap::new()),
             event_listener,
             backend,
             config: RefCell::new(config),
@@ -231,81 +234,115 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     let mtm = delegate.mtm();
     while let Ok(msg) = delegate.ivars().frame_rx.try_recv() {
         match msg {
-            HubMessage::Overlays(overlays) => {
-                delegate.ivars().overlay_manager.borrow_mut().process(
-                    mtm,
-                    overlays,
-                    &delegate.ivars().hub_sender,
-                );
+            HubMessage::Frame(frame) => {
+                let mut overlays = delegate.ivars().overlay_windows.borrow_mut();
+                let mut containers = delegate.ivars().container_overlays.borrow_mut();
+
+                for wid in frame.deletes {
+                    overlays.remove(&wid);
+                }
+                for id in frame.deleted_containers {
+                    if let Some(entry) = containers.remove(&id) {
+                        entry.window.close();
+                    }
+                }
+
+                let config = delegate.ivars().config.borrow().clone();
+                let scale = objc2_app_kit::NSScreen::mainScreen(mtm)
+                    .map(|s| s.backingScaleFactor())
+                    .unwrap_or(2.0);
+
+                for create in frame.creates {
+                    let overlay = OverlayWindow::new(
+                        mtm,
+                        create.frame,
+                        create.window_id,
+                        delegate.ivars().hub_sender.clone(),
+                        delegate.ivars().backend.clone(),
+                        config.clone(),
+                    );
+                    overlays.insert(create.window_id, overlay);
+                }
+
+                for data in frame.container_creates {
+                    let id = data.placement.id;
+                    let window =
+                        create_overlay_window(mtm, data.cocoa_frame, NSNormalWindowLevel - 1);
+                    window.setIgnoresMouseEvents(false);
+                    window.setAcceptsMouseMovedEvents(true);
+                    let size = data.cocoa_frame.size;
+                    let view = ContainerOverlayView::new(
+                        mtm,
+                        NSRect::new(NSPoint::new(0.0, 0.0), size),
+                        delegate.ivars().backend.clone(),
+                        scale,
+                        size,
+                        data.placement,
+                        data.tab_titles,
+                        config.clone(),
+                        delegate.ivars().hub_sender.clone(),
+                    );
+                    window.setContentView(Some(&view));
+                    window.orderFront(None);
+                    containers.insert(id, ContainerOverlayEntry { window, view });
+                }
+
+                let shown: HashSet<WindowId> = frame.shows.iter().map(|s| s.window_id).collect();
+                for show in frame.shows {
+                    if let Some(overlay) = overlays.get_mut(&show.window_id) {
+                        overlay.render(
+                            &show.placement,
+                            show.cocoa_frame,
+                            show.scale,
+                            show.visible_content,
+                        );
+                    }
+                }
+                for (wid, overlay) in overlays.iter() {
+                    if !shown.contains(wid) {
+                        overlay.hide();
+                    }
+                }
+
+                for data in frame.containers {
+                    if let Some(entry) = containers.get(&data.placement.id) {
+                        entry.window.setFrame_display(data.cocoa_frame, true);
+                        entry.view.update(
+                            data.placement,
+                            data.tab_titles,
+                            scale,
+                            data.cocoa_frame.size,
+                        );
+                        entry.window.orderFront(None);
+                    }
+                }
             }
             HubMessage::RegisterObservers(apps) => {
                 for app in &apps {
                     delegate.ivars().event_listener.register_app(app);
                 }
             }
-            HubMessage::CaptureFrame { cg_id, surface } => {
+            HubMessage::CaptureFrame { window_id, surface } => {
                 if let Some(overlay) = delegate
                     .ivars()
                     .overlay_windows
                     .borrow_mut()
-                    .get_mut(&cg_id)
+                    .get_mut(&window_id)
                 {
                     overlay.apply_frame(&surface);
                 }
             }
-            HubMessage::CaptureFailed { cg_id } => {
-                tracing::debug!("Failed to screen capture for {cg_id}");
-            }
-            HubMessage::WindowCreate { cg_id, frame } => {
-                let config = delegate.ivars().config.borrow().clone();
-                let overlay = OverlayWindow::new(
-                    mtm,
-                    frame,
-                    cg_id,
-                    delegate.ivars().hub_sender.clone(),
-                    delegate.ivars().backend.clone(),
-                    config,
-                );
-                delegate
-                    .ivars()
-                    .overlay_windows
-                    .borrow_mut()
-                    .insert(cg_id, overlay);
-            }
-            HubMessage::WindowShow {
-                cg_id,
-                placement,
-                cocoa_frame,
-                scale,
-                visible_content,
-            } => {
-                if let Some(overlay) = delegate
-                    .ivars()
-                    .overlay_windows
-                    .borrow_mut()
-                    .get_mut(&cg_id)
-                {
-                    overlay.render(&placement, cocoa_frame, scale, visible_content);
-                }
-            }
-            HubMessage::WindowHide { cg_id } => {
-                if let Some(overlay) = delegate.ivars().overlay_windows.borrow().get(&cg_id) {
-                    overlay.hide();
-                }
-            }
-            HubMessage::WindowDelete { cg_id } => {
-                delegate.ivars().overlay_windows.borrow_mut().remove(&cg_id);
+            HubMessage::CaptureFailed { window_id } => {
+                tracing::debug!("Failed to screen capture for {window_id}");
             }
             HubMessage::ConfigChanged(new_config) => {
                 *delegate.ivars().config.borrow_mut() = new_config.clone();
                 for overlay in delegate.ivars().overlay_windows.borrow_mut().values_mut() {
                     overlay.set_config(new_config.clone());
                 }
-                delegate
-                    .ivars()
-                    .overlay_manager
-                    .borrow_mut()
-                    .set_config(new_config);
+                for entry in delegate.ivars().container_overlays.borrow().values() {
+                    entry.view.set_config(new_config.clone());
+                }
             }
             HubMessage::Shutdown => {
                 NSApplication::sharedApplication(mtm).terminate(None);

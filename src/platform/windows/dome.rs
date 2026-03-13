@@ -12,6 +12,7 @@ use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
     Child, ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout, WindowId,
+    WindowPlacement,
 };
 
 use super::ScreenInfo;
@@ -66,15 +67,24 @@ unsafe impl Send for AppHandle {}
 
 pub(super) struct LayoutFrame {
     pub(super) monitors: Vec<FrameMonitor>,
-    pub(super) creates: Vec<WindowCreate>,
-    pub(super) deletes: Vec<WindowId>,
+    pub(super) created_windows: Vec<WindowCreate>,
+    pub(super) deleted_windows: Vec<WindowId>,
     pub(super) focused: Option<WindowId>,
-    pub(super) container_overlays: Vec<ContainerOverlayData>,
+    pub(super) created_containers: Vec<ContainerId>,
+    pub(super) deleted_containers: Vec<ContainerId>,
+}
+
+pub(super) enum FrameLayout {
+    Normal {
+        windows: Vec<WindowPlacement>,
+        container_renders: Vec<ContainerRender>,
+    },
+    Fullscreen(WindowId, WindowMode),
 }
 
 pub(super) struct FrameMonitor {
     pub(super) monitor_id: MonitorId,
-    pub(super) layout: MonitorLayout,
+    pub(super) layout: FrameLayout,
     pub(super) dimension: Dimension,
 }
 
@@ -87,14 +97,14 @@ pub(super) struct WindowCreate {
 }
 
 #[derive(Clone)]
-pub(super) struct ContainerOverlayData {
+pub(super) struct ContainerRender {
     pub(super) placement: ContainerPlacement,
     pub(super) children: Vec<Child>,
 }
 
 pub(super) struct TitleUpdate {
     pub(super) titles: Vec<(ManagedHwnd, Option<String>)>,
-    pub(super) container_overlays: Vec<ContainerOverlayData>,
+    pub(super) container_renders: Vec<ContainerRender>,
 }
 
 #[derive(Clone, Copy)]
@@ -103,10 +113,17 @@ enum ThrottleKind {
     Resize,
 }
 
+struct WindowInfo {
+    hwnd: HWND,
+    mode: WindowMode,
+    title: Option<String>,
+    process: String,
+}
+
 pub(super) struct Dome {
     hub: Hub,
     window_map: HashMap<ManagedHwnd, WindowId>,
-    window_info: HashMap<WindowId, bool>,
+    window_info: HashMap<WindowId, WindowInfo>,
     monitor_handles: HashMap<isize, MonitorId>,
     monitor_dimensions: HashMap<MonitorId, Dimension>,
     config: Config,
@@ -154,6 +171,9 @@ impl Dome {
             }
         }
 
+        // Drain initial allocations from Hub::new() and add_monitor()
+        hub.drain_changes();
+
         Self {
             hub,
             window_map: HashMap::new(),
@@ -179,8 +199,8 @@ impl Dome {
             .handle()
             .insert_source(channel, |event, _, dome| match event {
                 ChannelEvent::Msg(hub_event) => {
-                    if let Some((creates, deletes)) = dome.handle_event(hub_event) {
-                        dome.apply_layout(creates, deletes);
+                    if dome.handle_event(hub_event) {
+                        dome.apply_layout();
                     }
                 }
                 ChannelEvent::Closed => dome.signal.stop(),
@@ -192,24 +212,19 @@ impl Dome {
             .expect("Event loop failed");
     }
 
-    fn handle_event(&mut self, event: HubEvent) -> Option<(Vec<WindowCreate>, Vec<WindowId>)> {
-        let mut creates = Vec::new();
-        let mut deletes = Vec::new();
-
+    fn handle_event(&mut self, event: HubEvent) -> bool {
         match event {
             HubEvent::AppInitialized(hwnd) => {
                 self.app_hwnd = Some(hwnd);
                 if let Err(e) = enum_windows(|hwnd| {
-                    if let Some(wc) = self.try_manage_window(hwnd) {
-                        creates.push(wc);
-                    }
+                    self.try_manage_window(hwnd);
                 }) {
                     tracing::warn!("Failed to enumerate windows: {e}");
                 }
             }
             HubEvent::Shutdown => {
                 self.signal.stop();
-                return None;
+                return false;
             }
             HubEvent::ConfigChanged(new_config) => {
                 self.hub.sync_config(new_config.clone().into());
@@ -221,17 +236,13 @@ impl Dome {
             }
             HubEvent::WindowCreated(h) => {
                 if self.window_map.contains_key(&h) {
-                    return Some((creates, deletes));
+                    return true;
                 }
-                if let Some(wc) = self.try_manage_window(h.hwnd()) {
-                    creates.push(wc);
-                }
+                self.try_manage_window(h.hwnd());
             }
             HubEvent::WindowDestroyed(h) => {
                 let _span = tracing::info_span!("window_destroyed").entered();
-                if let Some(id) = self.remove_window(h) {
-                    deletes.push(id);
-                }
+                self.remove_window(h);
             }
             HubEvent::WindowMinimized(h) => {
                 let _span = tracing::info_span!("window_minimized").entered();
@@ -241,29 +252,25 @@ impl Dome {
                     .map(|&id| self.hub.get_window(id).is_fullscreen())
                     .unwrap_or(false);
                 if !is_fullscreen {
-                    if let Some(id) = self.remove_window(h) {
-                        deletes.push(id);
-                    }
+                    self.remove_window(h);
                 }
             }
             HubEvent::WindowFocused(h) => {
                 self.submit_focus(h);
-                return Some((creates, deletes));
+                return true;
             }
             HubEvent::WindowMovedOrResized(h) => {
                 self.submit_resize(h);
-                return Some((creates, deletes));
+                return true;
             }
             HubEvent::WindowTitleChanged(h) => {
                 if self.window_map.contains_key(&h) {
                     let new_title = get_window_title(h.hwnd());
                     self.send_title_update(vec![(h, new_title)]);
-                    return Some((creates, deletes));
+                    return true;
                 }
                 // Some apps have a brief moment where their title is empty
-                if let Some(wc) = self.try_manage_window(h.hwnd()) {
-                    creates.push(wc);
-                }
+                self.try_manage_window(h.hwnd());
             }
             HubEvent::ScreensChanged(screens) => {
                 tracing::info!(count = screens.len(), "Screen parameters changed");
@@ -276,8 +283,8 @@ impl Dome {
                 self.hub.focus_tab_index(container_id, tab_idx);
             }
             HubEvent::SetFullscreen(id) => {
-                if let Some(exclusive) = self.window_info.get_mut(&id) {
-                    *exclusive = true;
+                if let Some(info) = self.window_info.get_mut(&id) {
+                    info.mode = WindowMode::FullscreenExclusive;
                     if !self.hub.get_window(id).is_fullscreen() {
                         self.hub.set_fullscreen(id);
                     }
@@ -285,35 +292,26 @@ impl Dome {
             }
         }
 
-        Some((creates, deletes))
+        true
     }
 
-    fn try_manage_window(&mut self, hwnd: HWND) -> Option<WindowCreate> {
+    fn try_manage_window(&mut self, hwnd: HWND) {
         if !is_manageable(hwnd) {
-            return None;
+            return;
         }
         let title = get_window_title(hwnd);
         let process = get_process_name(hwnd).unwrap_or_default();
         if should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
-            return None;
+            return;
         }
-        let wc = self.insert_window(hwnd, title, process);
-        if let Some(actions) = on_open_actions(
-            &wc.process,
-            wc.title.as_deref(),
-            &self.config.windows.on_open,
-        ) {
+        let actions = on_open_actions(&process, title.as_deref(), &self.config.windows.on_open);
+        self.insert_window(hwnd, title, process);
+        if let Some(actions) = actions {
             self.execute_actions(&actions);
         }
-        Some(wc)
     }
 
-    fn insert_window(
-        &mut self,
-        hwnd: HWND,
-        title: Option<String>,
-        process: String,
-    ) -> WindowCreate {
+    fn insert_window(&mut self, hwnd: HWND, title: Option<String>, process: String) {
         let managed = ManagedHwnd::new(hwnd);
         let dim = get_dimension(hwnd);
         let monitor = self.find_monitor_dimension(hwnd);
@@ -330,25 +328,23 @@ impl Dome {
         self.set_constraints(id, hwnd);
 
         self.window_map.insert(managed, id);
-        self.window_info
-            .insert(id, matches!(mode, WindowMode::FullscreenExclusive));
-        WindowCreate {
-            hwnd,
+        self.window_info.insert(
             id,
-            mode,
-            title,
-            process,
-        }
+            WindowInfo {
+                hwnd,
+                mode,
+                title,
+                process,
+            },
+        );
     }
 
-    fn remove_window(&mut self, h: ManagedHwnd) -> Option<WindowId> {
+    fn remove_window(&mut self, h: ManagedHwnd) {
         if let Some(id) = self.window_map.remove(&h) {
             self.window_info.remove(&id);
             recovery::untrack(h);
             self.hub.delete_window(id);
-            return Some(id);
         }
-        None
     }
 
     fn set_constraints(&mut self, id: WindowId, hwnd: HWND) {
@@ -440,7 +436,7 @@ impl Dome {
         if let Some(&id) = self.window_map.get(&h) {
             self.hub.set_focus(id);
             tracing::info!(hwnd = ?h.hwnd(), "Window focused");
-            self.apply_layout(Vec::new(), Vec::new());
+            self.apply_layout();
         }
     }
 
@@ -448,12 +444,16 @@ impl Dome {
         let Some(&id) = self.window_map.get(&h) else {
             return;
         };
-        if self.window_info.get(&id) == Some(&true) {
+        if self
+            .window_info
+            .get(&id)
+            .is_some_and(|i| i.mode == WindowMode::FullscreenExclusive)
+        {
             return;
         }
         self.set_constraints(id, h.hwnd());
         self.check_fullscreen_state(h);
-        self.apply_layout(Vec::new(), Vec::new());
+        self.apply_layout();
     }
 
     fn check_fullscreen_state(&mut self, h: ManagedHwnd) {
@@ -530,7 +530,24 @@ impl Dome {
         }
     }
 
-    fn apply_layout(&mut self, creates: Vec<WindowCreate>, deletes: Vec<WindowId>) {
+    fn apply_layout(&mut self) {
+        let changes = self.hub.drain_changes();
+
+        let created_windows: Vec<WindowCreate> = changes
+            .created_windows
+            .iter()
+            .filter_map(|&id| {
+                let info = self.window_info.get(&id)?;
+                Some(WindowCreate {
+                    hwnd: info.hwnd,
+                    id,
+                    mode: info.mode,
+                    title: info.title.clone(),
+                    process: info.process.clone(),
+                })
+            })
+            .collect();
+
         let focused = self
             .hub
             .get_workspace(self.hub.current_workspace())
@@ -546,43 +563,54 @@ impl Dome {
                     .get(&mp.monitor_id)
                     .copied()
                     .unwrap_or_default();
+                let layout = match mp.layout {
+                    MonitorLayout::Normal {
+                        windows,
+                        containers,
+                    } => {
+                        let container_renders = containers
+                            .iter()
+                            .filter(|cp| cp.is_tabbed || cp.is_focused)
+                            .map(|cp| {
+                                let children = if cp.is_tabbed {
+                                    self.hub.get_container(cp.id).children().to_vec()
+                                } else {
+                                    vec![]
+                                };
+                                ContainerRender {
+                                    placement: *cp,
+                                    children,
+                                }
+                            })
+                            .collect();
+                        FrameLayout::Normal {
+                            windows,
+                            container_renders,
+                        }
+                    }
+                    MonitorLayout::Fullscreen(id) => {
+                        let mode = self.window_info[&id].mode;
+                        FrameLayout::Fullscreen(id, mode)
+                    }
+                };
                 FrameMonitor {
                     monitor_id: mp.monitor_id,
-                    layout: mp.layout,
+                    layout,
                     dimension,
                 }
             })
             .collect();
 
-        let mut container_overlays = Vec::new();
-        for fm in &monitors {
-            if let MonitorLayout::Normal { containers, .. } = &fm.layout {
-                for cp in containers {
-                    if !cp.is_tabbed && !cp.is_focused {
-                        continue;
-                    }
-                    let children = if cp.is_tabbed {
-                        self.hub.get_container(cp.id).children().to_vec()
-                    } else {
-                        vec![]
-                    };
-                    container_overlays.push(ContainerOverlayData {
-                        placement: *cp,
-                        children,
-                    });
-                }
-            }
-        }
-
         let frame = LayoutFrame {
             monitors,
-            creates,
-            deletes,
+            created_windows,
+            deleted_windows: changes.deleted_windows,
             focused: match focused {
                 Some(Child::Window(id)) => Some(id),
                 _ => None,
             },
-            container_overlays,
+            created_containers: changes.created_containers,
+            deleted_containers: changes.deleted_containers,
         };
 
         if let Some(app_hwnd) = self.app_hwnd {
@@ -599,22 +627,22 @@ impl Dome {
             .iter()
             .filter_map(|(h, _)| self.window_map.get(h).copied())
             .collect();
-        let container_overlays = self.build_container_overlays_for(&affected_ids);
+        let container_renders = self.build_container_renders_for(&affected_ids);
 
         let update = TitleUpdate {
             titles,
-            container_overlays,
+            container_renders,
         };
         let boxed = Box::new(update);
         let ptr = Box::into_raw(boxed) as usize;
         unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_TITLE, WPARAM(ptr), LPARAM(0)).ok() };
     }
 
-    fn build_container_overlays_for(
+    fn build_container_renders_for(
         &self,
         affected_ids: &HashSet<WindowId>,
-    ) -> Vec<ContainerOverlayData> {
-        let mut overlays = Vec::new();
+    ) -> Vec<ContainerRender> {
+        let mut renders = Vec::new();
         for mp in self.hub.get_visible_placements() {
             if let MonitorLayout::Normal { containers, .. } = &mp.layout {
                 for cp in containers {
@@ -628,7 +656,7 @@ impl Dome {
                         .any(|c| matches!(c, Child::Window(wid) if affected_ids.contains(wid)));
                     if has_affected {
                         let children = container.children().to_vec();
-                        overlays.push(ContainerOverlayData {
+                        renders.push(ContainerRender {
                             placement: *cp,
                             children,
                         });
@@ -636,7 +664,7 @@ impl Dome {
                 }
             }
         }
-        overlays
+        renders
     }
 
     fn update_screens(&mut self, screens: Vec<ScreenInfo>) {
@@ -648,7 +676,11 @@ impl Dome {
 
         let windows: Vec<_> = self.window_map.iter().map(|(&h, &id)| (h, id)).collect();
         for (managed, id) in windows {
-            if self.window_info.get(&id) == Some(&true) {
+            if self
+                .window_info
+                .get(&id)
+                .is_some_and(|i| i.mode == WindowMode::FullscreenExclusive)
+            {
                 continue;
             }
             self.set_constraints(id, managed.hwnd());

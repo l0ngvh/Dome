@@ -299,9 +299,9 @@ fn move_left_from_vertical_container_replaces_new_root_container() {
     insta::assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(0), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(0), parent=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -405,9 +405,9 @@ fn move_right_from_vertical_container_replaces_new_root_container() {
     insta::assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), parent=ContainerId(1), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -509,9 +509,9 @@ fn move_up_from_horizontal_container_replaces_new_root_container() {
     insta::assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=15.00, w=150.00, h=15.00)
+        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=0.00, w=150.00, h=15.00)
+          Window(id=WindowId(0), parent=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00)
         )
       )
     )
@@ -613,9 +613,9 @@ fn move_down_from_horizontal_container_replaces_new_root_container() {
     insta::assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=15.00, w=150.00, h=15.00)
+        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), parent=ContainerId(1), x=0.00, y=0.00, w=150.00, h=15.00)
+          Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00)
         )
       )
     )

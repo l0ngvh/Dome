@@ -879,11 +879,11 @@ fn delete_window_keeps_workspace_with_tiling() {
     hub.delete_window(f0);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
+    Hub(focused=WorkspaceId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(0),
         Window(id=WindowId(0), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
+      Workspace(id=WorkspaceId(2), name=0)
     )
     ");
 }
@@ -913,11 +913,11 @@ fn delete_window_keeps_workspace_with_other_floats() {
     hub.delete_window(f0);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
+    Hub(focused=WorkspaceId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
         Float(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=20.00)
       )
+      Workspace(id=WorkspaceId(2), name=0)
     )
     ");
 }
@@ -941,8 +941,8 @@ fn delete_window_removes_empty_non_current_workspace() {
     hub.delete_window(f0);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
+    Hub(focused=WorkspaceId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(2), name=0)
     )
     ");
 }

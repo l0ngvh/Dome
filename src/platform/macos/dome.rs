@@ -17,23 +17,19 @@ use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
-use crate::core::{Child, Dimension, Hub};
-use crate::core::{ContainerId, WindowPlacement};
+use crate::core::{ContainerId, WindowId, WindowPlacement};
+use crate::core::{Dimension, Hub};
 use crate::platform::macos::accessibility::AXWindow;
 
 use super::mirror::{WindowCapture, create_captures_async};
 use super::monitor::{MonitorInfo, MonitorRegistry};
 use super::objc2_wrapper::kCGWindowNumber;
-use super::overlay::ContainerOverlayData;
+use super::overlay::{ContainerOverlayData, to_ns_rect};
 use super::recovery;
 use super::registry::Registry;
 use super::running_application::RunningApp;
 use super::window::{FullscreenState, FullscreenTransition, MacWindow};
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "Config is only sent once every blue moon, so maybe we need to do something here"
-)]
 pub(super) enum HubEvent {
     /// Visible windows changed for an app (window created/destroyed/minimized/shown/hidden).
     VisibleWindowsChanged {
@@ -64,10 +60,10 @@ pub(super) enum HubEvent {
     /// we receive plenty of focus events, so missing them isn't a concern.
     Sync,
     ScreensChanged(Vec<MonitorInfo>),
-    MirrorClicked(CGWindowID),
+    MirrorClicked(WindowId),
     TabClicked(ContainerId, usize),
     CaptureReady {
-        cg_id: CGWindowID,
+        window_id: WindowId,
         capture: WindowCapture,
     },
     AppVisibleWindowsReconciled(VisibleWindowsReconciled),
@@ -98,11 +94,13 @@ impl fmt::Display for HubEvent {
             Self::ScreensChanged(monitors) => {
                 write!(f, "ScreensChanged(count={})", monitors.len())
             }
-            Self::MirrorClicked(cg_id) => write!(f, "MirrorClicked(cg_id={cg_id})"),
+            Self::MirrorClicked(window_id) => write!(f, "MirrorClicked({window_id})"),
             Self::TabClicked(container_id, tab_idx) => {
                 write!(f, "TabClicked({container_id}, tab_idx={tab_idx})")
             }
-            Self::CaptureReady { cg_id, .. } => write!(f, "CaptureReady(cg_id={cg_id})"),
+            Self::CaptureReady { window_id, .. } => {
+                write!(f, "CaptureReady({window_id})")
+            }
             Self::AppVisibleWindowsReconciled(r) => {
                 write!(f, "AppVisibleWindowsReconciled(pid={})", r.pid)
             }
@@ -116,34 +114,39 @@ impl fmt::Display for HubEvent {
 }
 
 pub(super) enum HubMessage {
-    Overlays(Vec<ContainerOverlayData>),
+    Frame(RenderFrame),
     RegisterObservers(Vec<RunningApp>),
     CaptureFrame {
-        cg_id: CGWindowID,
+        window_id: WindowId,
         surface: Retained<IOSurface>,
     },
     CaptureFailed {
-        cg_id: CGWindowID,
-    },
-    WindowShow {
-        cg_id: CGWindowID,
-        placement: WindowPlacement,
-        cocoa_frame: NSRect,
-        scale: f64,
-        visible_content: Option<Dimension>,
-    },
-    WindowHide {
-        cg_id: CGWindowID,
-    },
-    WindowCreate {
-        cg_id: CGWindowID,
-        frame: NSRect,
-    },
-    WindowDelete {
-        cg_id: CGWindowID,
+        window_id: WindowId,
     },
     ConfigChanged(Config),
     Shutdown,
+}
+
+pub(super) struct RenderFrame {
+    pub(super) creates: Vec<OverlayCreate>,
+    pub(super) deletes: Vec<WindowId>,
+    pub(super) shows: Vec<OverlayShow>,
+    pub(super) container_creates: Vec<ContainerOverlayData>,
+    pub(super) containers: Vec<ContainerOverlayData>,
+    pub(super) deleted_containers: Vec<ContainerId>,
+}
+
+pub(super) struct OverlayCreate {
+    pub(super) window_id: WindowId,
+    pub(super) frame: NSRect,
+}
+
+pub(super) struct OverlayShow {
+    pub(super) window_id: WindowId,
+    pub(super) placement: WindowPlacement,
+    pub(super) cocoa_frame: NSRect,
+    pub(super) scale: f64,
+    pub(super) visible_content: Option<Dimension>,
 }
 
 #[derive(Clone)]
@@ -204,9 +207,12 @@ impl Dome {
             }
         }
 
+        // Drain initial allocations from Hub::new() and add_monitor()
+        hub.drain_changes();
+
         Self {
             hub,
-            registry: Registry::new(monitor_registry.all_screens(), sender.clone()),
+            registry: Registry::new(monitor_registry.all_screens()),
             monitor_registry,
             config,
             primary_screen: primary.dimension,
@@ -310,19 +316,19 @@ impl Dome {
                     tracing::info!(count = screens.len(), "Screens changed");
                     self.update_screens(screens);
                 }
-                HubEvent::MirrorClicked(cg_id) => {
-                    if let Some(window) = self.registry.get(cg_id) {
+                HubEvent::MirrorClicked(window_id) => {
+                    if let Some(window) = self.registry.by_id(window_id) {
                         if let Err(e) = window.focus() {
                             tracing::debug!("Failed to focus window: {e:#}");
                         }
-                        self.hub.set_focus(window.window_id());
+                        self.hub.set_focus(window_id);
                     }
                 }
                 HubEvent::TabClicked(container_id, tab_idx) => {
                     self.hub.focus_tab_index(container_id, tab_idx);
                 }
-                HubEvent::CaptureReady { cg_id, capture } => {
-                    if let Some(w) = self.registry.get_mut(cg_id) {
+                HubEvent::CaptureReady { window_id, capture } => {
+                    if let Some(w) = self.registry.by_id_mut(window_id) {
                         w.set_capture(capture);
                     }
                 }
@@ -353,9 +359,37 @@ impl Dome {
                 }
             }
 
-            let overlays = self.apply_layout();
+            let (shows, containers) = self.apply_layout();
+            let changes = self.hub.drain_changes();
 
-            self.sender.send(HubMessage::Overlays(overlays));
+            let creates = changes
+                .created_windows
+                .iter()
+                .filter_map(|&wid| {
+                    if changes.deleted_windows.contains(&wid) {
+                        return None;
+                    }
+                    let dim = self.hub.get_window(wid).dimension();
+                    Some(OverlayCreate {
+                        window_id: wid,
+                        frame: to_ns_rect(self.primary_full_height, dim),
+                    })
+                })
+                .collect();
+
+            let created_containers: HashSet<_> = changes.created_containers.into_iter().collect();
+            let (container_creates, containers) = containers
+                .into_iter()
+                .partition(|c| created_containers.contains(&c.placement.id));
+
+            self.sender.send(HubMessage::Frame(RenderFrame {
+                creates,
+                deletes: changes.deleted_windows,
+                shows,
+                container_creates,
+                containers,
+                deleted_containers: changes.deleted_containers,
+            }));
         });
     }
 
@@ -396,8 +430,7 @@ impl Dome {
         } else if is_native_fs {
             tracing::info!(%ax, "New native fullscreen window");
             let window_id = self.hub.insert_fullscreen();
-            self.registry
-                .insert(ax, window_id, self.hub.get_window(window_id));
+            self.registry.insert(ax, window_id);
             self.registry
                 .get_mut(cg_id)
                 .unwrap()
@@ -534,12 +567,13 @@ impl Dome {
     }
 
     #[tracing::instrument(skip_all)]
-    fn apply_layout(&mut self) -> Vec<ContainerOverlayData> {
-        let mut overlays = Vec::new();
+    fn apply_layout(&mut self) -> (Vec<OverlayShow>, Vec<ContainerOverlayData>) {
+        let mut shows = Vec::new();
+        let mut containers = Vec::new();
         let focused_monitor = self.hub.focused_monitor();
         for mp in self.hub.get_visible_placements() {
             let entry = self.monitor_registry.get_entry_mut(mp.monitor_id).unwrap();
-            let o = entry.apply_placements(
+            let (s, c) = entry.apply_placements(
                 &mp,
                 mp.monitor_id == focused_monitor,
                 &self.hub,
@@ -547,9 +581,10 @@ impl Dome {
                 &self.config,
                 self.primary_full_height,
             );
-            overlays.extend(o);
+            shows.extend(s);
+            containers.extend(c);
         }
-        overlays
+        (shows, containers)
     }
 
     fn apply_visible_windows_change(&mut self, result: VisibleWindowsReconciled) {
@@ -571,8 +606,8 @@ impl Dome {
 
         let mut new_cg_ids = Vec::new();
         for ax in result.to_add {
-            if let Some(cg_id) = self.add_window(ax) {
-                new_cg_ids.push(cg_id);
+            if let Some(ids) = self.add_window(ax) {
+                new_cg_ids.push(ids);
             }
         }
 
@@ -586,7 +621,7 @@ impl Dome {
         }
     }
 
-    fn add_window(&mut self, ax: AXWindow) -> Option<CGWindowID> {
+    fn add_window(&mut self, ax: AXWindow) -> Option<(CGWindowID, WindowId)> {
         if self.registry.contains(ax.cg_id()) {
             return None;
         }
@@ -606,9 +641,8 @@ impl Dome {
         };
 
         recovery::track(ax.clone(), self.primary_screen);
-        let hub_window = self.hub.get_window(window_id);
         let cg_id = ax.cg_id();
-        self.registry.insert(ax, window_id, hub_window);
+        self.registry.insert(ax, window_id);
 
         // Hide immediately - window may spawn outside viewport due to scrolling
         if let Some(window) = self.registry.get_mut(cg_id) {
@@ -622,7 +656,7 @@ impl Dome {
             self.execute_actions(&actions);
         }
 
-        Some(cg_id)
+        Some((cg_id, window_id))
     }
 }
 

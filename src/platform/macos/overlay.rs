@@ -1,5 +1,4 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use calloop::channel::Sender as CalloopSender;
@@ -9,8 +8,6 @@ use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder,
     NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
-use objc2_core_foundation::CGFloat;
-use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
 use objc2_quartz_core::CAMetalLayer;
@@ -18,7 +15,7 @@ use objc2_quartz_core::CAMetalLayer;
 use super::dome::HubEvent;
 use super::renderer::{ContainerRenderer, MetalBackend, WindowRenderer};
 use crate::config::Config;
-use crate::core::{ContainerId, ContainerPlacement, Dimension, WindowPlacement};
+use crate::core::{ContainerId, ContainerPlacement, Dimension, WindowId, WindowPlacement};
 use crate::overlay;
 
 pub(super) struct OverlayWindow {
@@ -34,7 +31,7 @@ impl OverlayWindow {
     pub(super) fn new(
         mtm: MainThreadMarker,
         frame: NSRect,
-        source_cg_id: CGWindowID,
+        window_id: WindowId,
         hub_sender: CalloopSender<HubEvent>,
         backend: Rc<MetalBackend>,
         config: Config,
@@ -67,8 +64,8 @@ impl OverlayWindow {
             NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
             renderer.layer(),
             hub_sender,
+            window_id,
         );
-        view.ivars().cg_id.set(source_cg_id);
         window.setContentView(Some(&view));
 
         Self {
@@ -155,101 +152,22 @@ impl Drop for OverlayWindow {
     }
 }
 
-pub(super) struct OverlayManager {
-    backend: Rc<MetalBackend>,
-    config: Config,
-    containers: HashMap<ContainerId, ContainerOverlayEntry>,
-}
-
-impl OverlayManager {
-    pub(super) fn new(backend: Rc<MetalBackend>, config: Config) -> Self {
-        Self {
-            backend,
-            config,
-            containers: HashMap::new(),
-        }
-    }
-
-    pub(super) fn set_config(&mut self, config: Config) {
-        self.config = config.clone();
-        for entry in self.containers.values() {
-            entry.view.set_config(config.clone());
-        }
-    }
-
-    pub(super) fn process(
-        &mut self,
-        mtm: MainThreadMarker,
-        overlays: Vec<ContainerOverlayData>,
-        hub_sender: &CalloopSender<HubEvent>,
-    ) {
-        let new_ids: std::collections::HashSet<_> =
-            overlays.iter().map(|o| o.placement.id).collect();
-        self.containers.retain(|k, entry| {
-            let keep = new_ids.contains(k);
-            if !keep {
-                entry.window.close();
-            }
-            keep
-        });
-
-        for data in overlays {
-            let id = data.placement.id;
-            let scale = self.backing_scale(mtm);
-
-            if let Some(entry) = self.containers.get(&id) {
-                entry.window.setFrame_display(data.cocoa_frame, true);
-                entry.view.update(
-                    data.placement,
-                    data.tab_titles,
-                    scale,
-                    data.cocoa_frame.size,
-                );
-            } else {
-                let window = create_overlay_window(mtm, data.cocoa_frame, NSNormalWindowLevel - 1);
-                window.setIgnoresMouseEvents(false);
-                window.setAcceptsMouseMovedEvents(true);
-
-                let size = data.cocoa_frame.size;
-                let view = ContainerOverlayView::new(
-                    mtm,
-                    NSRect::new(NSPoint::new(0.0, 0.0), size),
-                    self.backend.clone(),
-                    scale,
-                    size,
-                    data.placement,
-                    data.tab_titles,
-                    self.config.clone(),
-                    hub_sender.clone(),
-                );
-                window.setContentView(Some(&view));
-                window.orderFront(None);
-
-                self.containers
-                    .insert(id, ContainerOverlayEntry { window, view });
-            }
-        }
-    }
-
-    fn backing_scale(&self, mtm: MainThreadMarker) -> CGFloat {
-        objc2_app_kit::NSScreen::mainScreen(mtm)
-            .map(|s| s.backingScaleFactor())
-            .unwrap_or(2.0)
-    }
-}
-
 pub(super) struct ContainerOverlayData {
     pub(super) placement: ContainerPlacement,
     pub(super) tab_titles: Vec<String>,
     pub(super) cocoa_frame: NSRect,
 }
 
-struct ContainerOverlayEntry {
-    window: Retained<NSWindow>,
-    view: Retained<ContainerOverlayView>,
+pub(super) struct ContainerOverlayEntry {
+    pub(super) window: Retained<NSWindow>,
+    pub(super) view: Retained<ContainerOverlayView>,
 }
 
-fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> Retained<NSWindow> {
+pub(super) fn create_overlay_window(
+    mtm: MainThreadMarker,
+    frame: NSRect,
+    level: isize,
+) -> Retained<NSWindow> {
     let window = unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
             NSWindow::alloc(mtm),
@@ -272,7 +190,7 @@ fn create_overlay_window(mtm: MainThreadMarker, frame: NSRect, level: isize) -> 
 pub(super) struct MetalOverlayViewIvars {
     layer: Retained<CAMetalLayer>,
     hub_sender: CalloopSender<HubEvent>,
-    pub(super) cg_id: Cell<u32>,
+    pub(super) window_id: Cell<WindowId>,
 }
 
 define_class!(
@@ -305,7 +223,7 @@ define_class!(
         fn mouse_down(&self, _event: &NSEvent) {
             self.ivars()
                 .hub_sender
-                .send(HubEvent::MirrorClicked(self.ivars().cg_id.get()))
+                .send(HubEvent::MirrorClicked(self.ivars().window_id.get()))
                 .ok();
         }
 
@@ -322,18 +240,19 @@ impl MetalOverlayView {
         frame: NSRect,
         layer: Retained<CAMetalLayer>,
         hub_sender: CalloopSender<HubEvent>,
+        window_id: WindowId,
     ) -> Retained<Self> {
         let ivars = MetalOverlayViewIvars {
             layer,
             hub_sender,
-            cg_id: Cell::new(0),
+            window_id: Cell::new(window_id),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 }
 
-struct ContainerOverlayViewIvars {
+pub(super) struct ContainerOverlayViewIvars {
     layer: Retained<CAMetalLayer>,
     events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<ContainerRenderer>,
@@ -349,7 +268,7 @@ define_class!(
     #[unsafe(super(NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[ivars = ContainerOverlayViewIvars]
-    struct ContainerOverlayView;
+    pub(super) struct ContainerOverlayView;
 
     unsafe impl NSObjectProtocol for ContainerOverlayView {}
 
@@ -412,7 +331,7 @@ define_class!(
 );
 
 impl ContainerOverlayView {
-    fn new(
+    pub(super) fn new(
         mtm: MainThreadMarker,
         frame: NSRect,
         backend: Rc<MetalBackend>,
@@ -444,7 +363,7 @@ impl ContainerOverlayView {
         view
     }
 
-    fn update(
+    pub(super) fn update(
         &self,
         placement: ContainerPlacement,
         tab_titles: Vec<String>,
@@ -463,7 +382,7 @@ impl ContainerOverlayView {
         self.render_now();
     }
 
-    fn set_config(&self, config: Config) {
+    pub(super) fn set_config(&self, config: Config) {
         *self.ivars().config.borrow_mut() = config;
         self.render_now();
     }

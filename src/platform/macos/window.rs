@@ -1,14 +1,11 @@
 use anyhow::Result;
-use objc2_core_graphics::CGWindowID;
 
-use super::dome::{HubMessage, MessageSender};
 use super::mirror::WindowCapture;
-use super::monitor::{MonitorInfo, primary_full_height_from};
+use super::monitor::MonitorInfo;
 use crate::config::Config;
 use crate::core::WindowPlacement;
 use crate::core::{Dimension, Window, WindowId};
 use crate::platform::macos::accessibility::AXWindow;
-use crate::platform::macos::overlay::to_ns_rect;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FullscreenState {
@@ -28,7 +25,6 @@ pub(super) struct MacWindow {
     ax: AXWindow,
     window_id: WindowId,
     capture: Option<WindowCapture>,
-    sender: MessageSender,
     focused: bool,
     target_placement: Option<RoundedDimension>,
     actual_placement: Option<RoundedDimension>,
@@ -39,24 +35,11 @@ pub(super) struct MacWindow {
 }
 
 impl MacWindow {
-    pub(super) fn new(
-        ax: AXWindow,
-        window_id: WindowId,
-        hub_window: &Window,
-        sender: MessageSender,
-        monitors: Vec<MonitorInfo>,
-    ) -> Self {
-        let primary_full_height = primary_full_height_from(&monitors);
-        let frame = to_ns_rect(primary_full_height, hub_window.dimension());
-        sender.send(HubMessage::WindowCreate {
-            cg_id: ax.cg_id(),
-            frame,
-        });
+    pub(super) fn new(ax: AXWindow, window_id: WindowId, monitors: Vec<MonitorInfo>) -> Self {
         Self {
             ax,
             window_id,
             capture: None,
-            sender,
             focused: false,
             target_placement: None,
             actual_placement: None,
@@ -65,10 +48,6 @@ impl MacWindow {
             monitors,
             fullscreen: FullscreenState::None,
         }
-    }
-
-    pub(super) fn cg_id(&self) -> CGWindowID {
-        self.ax.cg_id()
     }
 
     pub(super) fn pid(&self) -> i32 {
@@ -87,27 +66,12 @@ impl MacWindow {
         self.fullscreen = FullscreenState::None;
         let content_dim = apply_inset(wp.frame, config.border_size);
         let scale = self.hidden_monitor().scale;
-        let primary_full_height = primary_full_height_from(&self.monitors);
-        let cocoa_frame = to_ns_rect(primary_full_height, wp.visible_frame);
-        let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
-        self.sender.send(HubMessage::WindowShow {
-            cg_id: self.ax.cg_id(),
-            placement: *wp,
-            cocoa_frame,
-            scale,
-            visible_content,
-        });
 
         if wp.is_float && !wp.is_focused {
             if let Some(capture) = &mut self.capture {
+                let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
                 if let Some(visible_content) = visible_content {
-                    capture.start(
-                        self.ax.cg_id(),
-                        content_dim,
-                        visible_content,
-                        scale,
-                        self.sender.clone(),
-                    );
+                    capture.start(self.window_id, content_dim, visible_content, scale);
                 } else {
                     capture.stop();
                 }
@@ -137,9 +101,6 @@ impl MacWindow {
         if let Some(capture) = &mut self.capture {
             capture.stop();
         }
-        self.sender.send(HubMessage::WindowHide {
-            cg_id: self.ax.cg_id(),
-        });
         self.focused = false;
         // Minimize mock fullscreen windows instead of moving offscreen:
         // 1. User-zoomed windows maintain their fullscreen state, so moving them is futile
@@ -378,10 +339,6 @@ impl MacWindow {
 
     pub(super) fn set_fullscreen(&mut self, dim: Dimension) {
         self.fullscreen = FullscreenState::Borderless;
-        // Hide the border overlay for fullscreen windows
-        self.sender.send(HubMessage::WindowHide {
-            cg_id: self.ax.cg_id(),
-        });
         if let Err(e) = self.ax.unminimize() {
             tracing::debug!("Failed to unminimize window: {e:#}");
         }
@@ -397,6 +354,10 @@ impl MacWindow {
 
     pub(super) fn ax(&self) -> &AXWindow {
         &self.ax
+    }
+
+    pub(super) fn mirror_source_scale(&self) -> f64 {
+        self.hidden_monitor().scale
     }
 
     pub(super) fn on_monitor_change(&mut self, monitors: Vec<MonitorInfo>) {
@@ -429,15 +390,7 @@ impl std::fmt::Display for MacWindow {
     }
 }
 
-impl Drop for MacWindow {
-    fn drop(&mut self) {
-        self.sender.send(HubMessage::WindowDelete {
-            cg_id: self.ax.cg_id(),
-        });
-    }
-}
-
-fn apply_inset(dim: Dimension, border: f32) -> Dimension {
+pub(super) fn apply_inset(dim: Dimension, border: f32) -> Dimension {
     Dimension {
         x: dim.x + border,
         y: dim.y + border,
@@ -467,7 +420,7 @@ fn round_dim(dim: Dimension) -> RoundedDimension {
 }
 
 /// Clip rect to bounds. Returns None if fully outside.
-fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimension> {
+pub(super) fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimension> {
     if rect.x >= bounds.x + bounds.width
         || rect.y >= bounds.y + bounds.height
         || rect.x + rect.width <= bounds.x

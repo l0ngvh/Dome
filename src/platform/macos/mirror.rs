@@ -16,11 +16,12 @@ use objc2_screen_capture_kit::{
 };
 
 use super::dome::{HubEvent, HubMessage, MessageSender};
-use crate::core::Dimension;
+use crate::core::{Dimension, WindowId};
 
 pub(super) struct WindowCapture {
     stream: Retained<SCStream>,
     handler: Retained<StreamOutputHandler>,
+    app_tx: MessageSender,
     running: bool,
 }
 
@@ -34,11 +35,10 @@ impl WindowCapture {
     /// `scale` is passed separately because the original window may be hidden on a different monitor.
     pub(super) fn start(
         &mut self,
-        cg_id: CGWindowID,
+        window_id: WindowId,
         content_dim: Dimension,
         visible_content: Dimension,
         scale: f64,
-        app_tx: MessageSender,
     ) {
         let source_rect = compute_source_rect(content_dim, visible_content);
         let width = (visible_content.width as f64 * scale) as usize;
@@ -59,7 +59,7 @@ impl WindowCapture {
             if !error.is_null() {
                 let error = unsafe { &*error };
                 tracing::warn!(
-                    cg_id,
+                    %window_id,
                     width,
                     height,
                     source_x = source_rect.origin.x,
@@ -76,11 +76,12 @@ impl WindowCapture {
                 .updateConfiguration_completionHandler(&config, Some(&block))
         };
         if !self.running {
+            let app_tx = self.app_tx.clone();
             let block = RcBlock::new(move |error: *mut NSError| {
                 if !error.is_null() {
                     let error = unsafe { &*error };
                     tracing::warn!(
-                        cg_id,
+                        %window_id,
                         width,
                         height,
                         source_x = source_rect.origin.x,
@@ -90,7 +91,7 @@ impl WindowCapture {
                         %error,
                         "capture start failed"
                     );
-                    app_tx.send(HubMessage::CaptureFailed { cg_id });
+                    app_tx.send(HubMessage::CaptureFailed { window_id });
                 }
             });
             unsafe { self.stream.startCaptureWithCompletionHandler(Some(&block)) };
@@ -135,7 +136,7 @@ impl Drop for WindowCapture {
 }
 
 pub(super) fn create_captures_async(
-    cg_ids: Vec<CGWindowID>,
+    windows: Vec<(CGWindowID, WindowId)>,
     hub_tx: CalloopSender<HubEvent>,
     app_tx: MessageSender,
     queue: DispatchRetained<DispatchQueue>,
@@ -149,8 +150,7 @@ pub(super) fn create_captures_async(
             let content = unsafe { Retained::retain(content).unwrap() };
             let sc_windows = unsafe { content.windows() };
 
-            for cg_id in &cg_ids {
-                let cg_id = *cg_id;
+            for &(cg_id, window_id) in &windows {
                 let Some(sc_window) = sc_windows.iter().find(|w| unsafe { w.windowID() } == cg_id)
                 else {
                     continue;
@@ -166,7 +166,7 @@ pub(super) fn create_captures_async(
                 let config = unsafe { SCStreamConfiguration::new() };
                 unsafe { config.setQueueDepth(3) };
 
-                let handler = StreamOutputHandler::new(cg_id, app_tx.clone());
+                let handler = StreamOutputHandler::new(window_id, app_tx.clone());
 
                 let stream = unsafe {
                     SCStream::initWithFilter_configuration_delegate(
@@ -192,9 +192,12 @@ pub(super) fn create_captures_async(
                 let capture = WindowCapture {
                     stream,
                     handler,
+                    app_tx: app_tx.clone(),
                     running: false,
                 };
-                hub_tx.send(HubEvent::CaptureReady { cg_id, capture }).ok();
+                hub_tx
+                    .send(HubEvent::CaptureReady { window_id, capture })
+                    .ok();
             }
         },
     );
@@ -202,7 +205,7 @@ pub(super) fn create_captures_async(
 }
 
 struct StreamOutputHandlerIvars {
-    cg_id: CGWindowID,
+    window_id: WindowId,
     app_tx: MessageSender,
 }
 
@@ -225,7 +228,7 @@ define_class!(
                 && let Some(surface) = extract_io_surface(buffer)
             {
                 self.ivars().app_tx.send(HubMessage::CaptureFrame {
-                    cg_id: self.ivars().cg_id,
+                    window_id: self.ivars().window_id,
                     surface,
                 });
             }
@@ -236,8 +239,8 @@ define_class!(
 use objc2::{DefinedClass, define_class, msg_send};
 
 impl StreamOutputHandler {
-    fn new(cg_id: CGWindowID, app_tx: MessageSender) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { cg_id, app_tx });
+    fn new(window_id: WindowId, app_tx: MessageSender) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { window_id, app_tx });
         unsafe { msg_send![super(this), init] }
     }
 }

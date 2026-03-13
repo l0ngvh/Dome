@@ -2,10 +2,9 @@ use std::collections::HashMap;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::core::{Window, WindowId};
+use crate::core::WindowId;
 
 use super::accessibility::AXWindow;
-use super::dome::MessageSender;
 use super::monitor::MonitorInfo;
 use super::window::MacWindow;
 
@@ -14,17 +13,15 @@ pub(super) struct Registry {
     id_to_cg: HashMap<WindowId, CGWindowID>,
     pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
     monitors: Vec<MonitorInfo>,
-    sender: MessageSender,
 }
 
 impl Registry {
-    pub(super) fn new(monitors: Vec<MonitorInfo>, sender: MessageSender) -> Self {
+    pub(super) fn new(monitors: Vec<MonitorInfo>) -> Self {
         Self {
             windows: HashMap::new(),
             id_to_cg: HashMap::new(),
             pid_to_cg: HashMap::new(),
             monitors,
-            sender,
         }
     }
 
@@ -94,7 +91,7 @@ impl Registry {
         self.windows.iter().map(|(&cg_id, w)| (cg_id, w))
     }
 
-    pub(super) fn insert(&mut self, ax: AXWindow, window_id: WindowId, hub_window: &Window) {
+    pub(super) fn insert(&mut self, ax: AXWindow, window_id: WindowId) {
         let cg_id = ax.cg_id();
         let pid = ax.pid();
         if pid as u32 == std::process::id() {
@@ -102,16 +99,8 @@ impl Registry {
         }
         self.id_to_cg.insert(window_id, cg_id);
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
-        self.windows.insert(
-            cg_id,
-            MacWindow::new(
-                ax,
-                window_id,
-                hub_window,
-                self.sender.clone(),
-                self.monitors.clone(),
-            ),
-        );
+        self.windows
+            .insert(cg_id, MacWindow::new(ax, window_id, self.monitors.clone()));
     }
 
     pub(super) fn set_monitors(&mut self, monitors: Vec<MonitorInfo>) {

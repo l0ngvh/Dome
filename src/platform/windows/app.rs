@@ -13,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::PCWSTR;
 
 use super::dome::{
-    AppHandle, ContainerOverlayData, HubEvent, LayoutFrame, TitleUpdate, WM_APP_CONFIG,
+    AppHandle, ContainerRender, FrameLayout, HubEvent, LayoutFrame, TitleUpdate, WM_APP_CONFIG,
     WM_APP_LAYOUT, WM_APP_TITLE,
 };
 use super::get_all_screens;
@@ -26,7 +26,7 @@ use super::window::{
     is_d3d_exclusive_fullscreen_active,
 };
 use crate::config::Config;
-use crate::core::{ContainerId, MonitorId, MonitorLayout, WindowId, WindowPlacement};
+use crate::core::{ContainerId, MonitorId, WindowId, WindowPlacement};
 
 /// If a monitor has an exclusive fullscreen windows, ignore all incoming stale events from Dome
 enum MonitorState {
@@ -147,7 +147,7 @@ impl App {
     }
 
     fn apply_layout_frame(&mut self, frame: LayoutFrame) {
-        for create in &frame.creates {
+        for create in &frame.created_windows {
             let mut mw = ManagedWindow::new(
                 &self.display,
                 create.hwnd,
@@ -166,7 +166,7 @@ impl App {
             self.registry.insert(mw, create.id);
         }
 
-        for id in &frame.deletes {
+        for id in &frame.deleted_windows {
             for state in self.monitor_state.values_mut() {
                 if matches!(state, MonitorState::Exclusive(eid) if *eid == *id) {
                     *state = MonitorState::Normal {
@@ -176,6 +176,22 @@ impl App {
                 }
             }
             self.registry.remove(*id);
+        }
+
+        for id in &frame.created_containers {
+            match ContainerOverlay::new(&self.display, self.config.clone(), self.hub_sender.clone())
+            {
+                Ok(overlay) => {
+                    self.container_overlays.insert(*id, overlay);
+                }
+                Err(e) => {
+                    tracing::warn!(%id, "Failed to create container overlay: {e:#}");
+                }
+            }
+        }
+
+        for id in &frame.deleted_containers {
+            self.container_overlays.remove(id);
         }
 
         // Derive old displayed set from monitor_state before rebuilding.
@@ -194,8 +210,8 @@ impl App {
 
         for fm in &frame.monitors {
             let layout_ids: Vec<WindowId> = match &fm.layout {
-                MonitorLayout::Fullscreen(id) => vec![*id],
-                MonitorLayout::Normal { windows, .. } => windows.iter().map(|wp| wp.id).collect(),
+                FrameLayout::Fullscreen(id, _) => vec![*id],
+                FrameLayout::Normal { windows, .. } => windows.iter().map(|wp| wp.id).collect(),
             };
             new_displayed.extend(&layout_ids);
 
@@ -250,7 +266,7 @@ impl App {
             self.registry.set_title(*hwnd, title.clone());
         }
 
-        for data in &update.container_overlays {
+        for data in &update.container_renders {
             let titles = self.registry.resolve_tab_titles(&data.children);
             if let Some(overlay) = self.container_overlays.get_mut(&data.placement.id) {
                 overlay.update(data.placement, titles, None);
@@ -277,48 +293,26 @@ impl App {
     /// item (documented no-op if already non-topmost). Steady-state uses specific-HWND
     /// chaining — true no-op when already in position.
     fn position_windows(&mut self, frame: &LayoutFrame, border: f32) {
-        // -- Container overlay lifecycle --
-        let frame_container_ids: HashSet<_> = frame
-            .container_overlays
-            .iter()
-            .map(|c| c.placement.id)
-            .collect();
-        self.container_overlays
-            .retain(|id, _| frame_container_ids.contains(id));
-
-        for data in &frame.container_overlays {
-            let id = data.placement.id;
-            if let std::collections::hash_map::Entry::Vacant(entry) =
-                self.container_overlays.entry(id)
-            {
-                match ContainerOverlay::new(
-                    &self.display,
-                    self.config.clone(),
-                    self.hub_sender.clone(),
-                ) {
-                    Ok(overlay) => {
-                        entry.insert(overlay);
-                    }
-                    Err(e) => {
-                        tracing::warn!(%id, "Failed to create container overlay: {e:#}");
-                    }
-                }
-            }
-        }
-
-        // -- Collect window placements across all monitors --
+        // -- Collect window and container placements across all monitors --
         let mut all_windows: Vec<(WindowId, &WindowPlacement)> = Vec::new();
+        let mut all_renders: Vec<&ContainerRender> = Vec::new();
         for fm in &frame.monitors {
             match &fm.layout {
-                MonitorLayout::Fullscreen(window_id) => {
-                    if let Some(mw) = self.registry.get_mut(*window_id) {
+                FrameLayout::Fullscreen(window_id, mode) => {
+                    if *mode == WindowMode::ManagedFullscreen
+                        && let Some(mw) = self.registry.get_mut(*window_id)
+                    {
                         mw.set_fullscreen(&fm.dimension);
                     }
                 }
-                MonitorLayout::Normal { windows, .. } => {
+                FrameLayout::Normal {
+                    windows,
+                    container_renders,
+                } => {
                     for wp in windows {
                         all_windows.push((wp.id, wp));
                     }
+                    all_renders.extend(container_renders);
                 }
             }
         }
@@ -365,13 +359,10 @@ impl App {
         steady_float.sort_by(|a, b| b.0.cmp(&a.0));
         steady_tiling.sort_by(|a, b| b.0.cmp(&a.0));
 
-        let focused_container: Option<&ContainerOverlayData> = frame
-            .container_overlays
+        let focused_container = all_renders.iter().copied().find(|c| c.placement.is_focused);
+        let mut steady_containers: Vec<&ContainerRender> = all_renders
             .iter()
-            .find(|c| c.placement.is_focused);
-        let mut steady_containers: Vec<&ContainerOverlayData> = frame
-            .container_overlays
-            .iter()
+            .copied()
             .filter(|c| !c.placement.is_focused)
             .collect();
         steady_containers.sort_by(|a, b| b.placement.id.cmp(&a.placement.id));
@@ -430,6 +421,14 @@ impl App {
             if let Some(mw) = self.registry.get_mut(id) {
                 mw.show(wp, border, &self.config, anchor);
                 anchor = Some(mw.hwnd());
+            }
+        }
+
+        // 6. Hide overlays not active this frame
+        let shown: HashSet<ContainerId> = all_renders.iter().map(|c| c.placement.id).collect();
+        for (id, overlay) in &mut self.container_overlays {
+            if !shown.contains(id) {
+                overlay.hide();
             }
         }
     }

@@ -124,6 +124,10 @@ impl ContainerOverlay {
         self.window.show();
     }
 
+    pub(super) fn hide(&mut self) {
+        self.window.hide();
+    }
+
     fn rerender(&mut self) {
         let Some(placement) = self.placement.as_ref() else {
             return;
