@@ -1,6 +1,13 @@
+mod mirror;
+mod monitor;
+mod recovery;
+mod registry;
+mod window;
+
+pub(super) use monitor::get_all_screens;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::mpsc::Sender;
 
 use calloop::channel::{Channel, Event as ChannelEvent, Sender as CalloopSender};
 use calloop::{EventLoop, LoopSignal};
@@ -8,27 +15,23 @@ use calloop::{EventLoop, LoopSignal};
 use dispatch2::{DispatchQoS, DispatchQueue, DispatchRetained, GlobalQueueIdentifier};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2_app_kit::NSWorkspace;
-use objc2_core_foundation::{
-    CFArray, CFDictionary, CFNumber, CFRetained, CFRunLoop, CFRunLoopSource, CFString, CFType,
-};
+use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFString, CFType};
 use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
-use objc2_foundation::NSRect;
+use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
-use crate::core::{ContainerId, WindowId, WindowPlacement};
-use crate::core::{Dimension, Hub};
+use crate::core::{ContainerId, ContainerPlacement, Dimension, Hub, WindowId, WindowPlacement};
 use crate::platform::macos::accessibility::AXWindow;
 
-use super::mirror::{WindowCapture, create_captures_async};
-use super::monitor::{MonitorInfo, MonitorRegistry};
 use super::objc2_wrapper::kCGWindowNumber;
-use super::overlay::{ContainerOverlayData, to_ns_rect};
-use super::recovery;
-use super::registry::Registry;
 use super::running_application::RunningApp;
-use super::window::{FullscreenState, FullscreenTransition, MacWindow};
+use super::ui::MessageSender;
+use mirror::{WindowCapture, create_captures_async};
+use monitor::{MonitorInfo, MonitorRegistry};
+use registry::Registry;
+use window::{FullscreenState, FullscreenTransition, MacWindow};
 
 pub(super) enum HubEvent {
     /// Visible windows changed for an app (window created/destroyed/minimized/shown/hidden).
@@ -149,25 +152,6 @@ pub(super) struct OverlayShow {
     pub(super) visible_content: Option<Dimension>,
 }
 
-#[derive(Clone)]
-pub(super) struct MessageSender {
-    pub(super) tx: Sender<HubMessage>,
-    pub(super) source: CFRetained<CFRunLoopSource>,
-    pub(super) run_loop: CFRetained<CFRunLoop>,
-}
-
-// Safety: CFRunLoopSource and CFRunLoop are thread-safe for signal/wake_up operations
-unsafe impl Send for MessageSender {}
-
-impl MessageSender {
-    pub(super) fn send(&self, msg: HubMessage) {
-        if self.tx.send(msg).is_ok() {
-            self.source.signal();
-            self.run_loop.wake_up();
-        }
-    }
-}
-
 pub(super) struct Dome {
     hub: Hub,
     registry: Registry,
@@ -193,6 +177,7 @@ impl Dome {
         sender: MessageSender,
         signal: LoopSignal,
     ) -> Self {
+        recovery::install_handlers();
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
@@ -667,7 +652,7 @@ impl Drop for Dome {
     }
 }
 
-struct VisibleWindowsReconciled {
+pub(in crate::platform::macos) struct VisibleWindowsReconciled {
     pid: i32,
     is_hidden: bool,
     to_remove: Vec<CGWindowID>,
@@ -883,4 +868,21 @@ fn list_cg_window_ids() -> HashSet<CGWindowID> {
         ids.insert(id as CGWindowID);
     }
     ids
+}
+
+pub(super) struct ContainerOverlayData {
+    pub(super) placement: ContainerPlacement,
+    pub(super) tab_titles: Vec<String>,
+    pub(super) cocoa_frame: NSRect,
+}
+
+// Quartz uses top-left origin, Cocoa uses bottom-left origin
+pub(super) fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
+    NSRect::new(
+        NSPoint::new(
+            dim.x as f64,
+            (primary_full_height - dim.y - dim.height) as f64,
+        ),
+        NSSize::new(dim.width as f64, dim.height as f64),
+    )
 }

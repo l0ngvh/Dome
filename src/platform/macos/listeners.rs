@@ -30,9 +30,8 @@ use objc2_foundation::{
 };
 use std::cell::RefCell;
 
-use super::app::send_hub_event;
 use super::dome::HubEvent;
-use super::monitor::get_all_screens;
+use super::dome::get_all_screens;
 use super::objc2_wrapper::{
     add_observer_notification, create_observer, get_cg_window_id, get_pid,
     kAXApplicationHiddenNotification, kAXApplicationShownNotification,
@@ -41,6 +40,7 @@ use super::objc2_wrapper::{
     kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification,
 };
 use super::running_application::RunningApp;
+use super::send_hub_event;
 use super::throttle::{Debounce, Throttle};
 
 const FRAME_THROTTLE: Duration = Duration::from_millis(16);

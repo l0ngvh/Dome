@@ -6,19 +6,23 @@ use objc2::rc::Retained;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder,
-    NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSView, NSWindow, NSWindowCollectionBehavior, NSWindowLevel, NSWindowStyleMask,
 };
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
 use objc2_quartz_core::CAMetalLayer;
 
-use super::dome::HubEvent;
+use super::super::dome::HubEvent;
 use super::renderer::{ContainerRenderer, MetalBackend, WindowRenderer};
 use crate::config::Config;
 use crate::core::{ContainerId, ContainerPlacement, Dimension, WindowId, WindowPlacement};
 use crate::overlay;
 
-pub(super) struct OverlayWindow {
+const TILING_WINDOW_OVERLAY_LEVEL: NSWindowLevel = NSNormalWindowLevel - 2;
+const CONTAINER_OVERLAY_LEVEL: NSWindowLevel = NSNormalWindowLevel - 1;
+const FLOAT_WINDOW_OVERLAY_LEVEL: NSWindowLevel = NSFloatingWindowLevel;
+
+pub(super) struct WindowOverlay {
     window: Retained<NSWindow>,
     renderer: WindowRenderer,
     placement: Option<WindowPlacement>,
@@ -27,7 +31,7 @@ pub(super) struct OverlayWindow {
     config: Config,
 }
 
-impl OverlayWindow {
+impl WindowOverlay {
     pub(super) fn new(
         mtm: MainThreadMarker,
         frame: NSRect,
@@ -93,9 +97,9 @@ impl OverlayWindow {
             .resize(cocoa_frame.size.width, cocoa_frame.size.height, scale);
 
         let level = if placement.is_float {
-            NSFloatingWindowLevel
+            FLOAT_WINDOW_OVERLAY_LEVEL
         } else {
-            NSNormalWindowLevel - 2
+            TILING_WINDOW_OVERLAY_LEVEL
         };
         self.window.setLevel(level);
 
@@ -146,45 +150,60 @@ impl OverlayWindow {
     }
 }
 
-impl Drop for OverlayWindow {
+impl Drop for WindowOverlay {
     fn drop(&mut self) {
         self.window.close();
     }
 }
 
-pub(super) struct ContainerOverlayData {
-    pub(super) placement: ContainerPlacement,
-    pub(super) tab_titles: Vec<String>,
-    pub(super) cocoa_frame: NSRect,
-}
-
-pub(super) struct ContainerOverlayEntry {
+pub(super) struct ContainerOverlay {
     pub(super) window: Retained<NSWindow>,
     pub(super) view: Retained<ContainerOverlayView>,
 }
 
-pub(super) fn create_overlay_window(
-    mtm: MainThreadMarker,
-    frame: NSRect,
-    level: isize,
-) -> Retained<NSWindow> {
-    let window = unsafe {
-        NSWindow::initWithContentRect_styleMask_backing_defer(
-            NSWindow::alloc(mtm),
-            frame,
-            NSWindowStyleMask::Borderless,
-            NSBackingStoreType::Buffered,
-            false,
-        )
-    };
-    window.setBackgroundColor(Some(&NSColor::clearColor()));
-    window.setOpaque(false);
-    window.setLevel(level);
-    window.setCollectionBehavior(
-        NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::Stationary,
-    );
-    unsafe { window.setReleasedWhenClosed(false) };
-    window
+impl ContainerOverlay {
+    pub(super) fn new(
+        mtm: MainThreadMarker,
+        backend: Rc<MetalBackend>,
+        frame: NSRect,
+        placement: ContainerPlacement,
+        tab_titles: Vec<String>,
+        config: Config,
+        hub_sender: CalloopSender<HubEvent>,
+    ) -> Self {
+        let window = unsafe {
+            NSWindow::initWithContentRect_styleMask_backing_defer(
+                NSWindow::alloc(mtm),
+                frame,
+                NSWindowStyleMask::Borderless,
+                NSBackingStoreType::Buffered,
+                false,
+            )
+        };
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+        window.setOpaque(false);
+        window.setLevel(CONTAINER_OVERLAY_LEVEL);
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::Stationary,
+        );
+        unsafe { window.setReleasedWhenClosed(false) };
+        window.setIgnoresMouseEvents(false);
+        window.setAcceptsMouseMovedEvents(true);
+        let size = frame.size;
+        let view = ContainerOverlayView::new(
+            mtm,
+            NSRect::new(NSPoint::new(0.0, 0.0), size),
+            backend.clone(),
+            size,
+            placement,
+            tab_titles,
+            config.clone(),
+            hub_sender.clone(),
+        );
+        window.setContentView(Some(&view));
+        window.orderFront(None);
+        Self { window, view }
+    }
 }
 
 pub(super) struct MetalOverlayViewIvars {
@@ -335,13 +354,16 @@ impl ContainerOverlayView {
         mtm: MainThreadMarker,
         frame: NSRect,
         backend: Rc<MetalBackend>,
-        scale: f64,
         size: NSSize,
         placement: ContainerPlacement,
         tab_titles: Vec<String>,
         config: Config,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Retained<Self> {
+        // TODO: Change scale when moved between monirors
+        let scale = objc2_app_kit::NSScreen::mainScreen(mtm)
+            .map(|s| s.backingScaleFactor())
+            .unwrap_or(2.0);
         let renderer = ContainerRenderer::new(backend, scale, size.width, size.height);
         let layer = renderer.layer();
         let ivars = ContainerOverlayViewIvars {
@@ -367,14 +389,13 @@ impl ContainerOverlayView {
         &self,
         placement: ContainerPlacement,
         tab_titles: Vec<String>,
-        scale: f64,
         size: NSSize,
     ) {
         let ivars = self.ivars();
         ivars.placement.set(placement);
         ivars.container_id.set(placement.id);
         *ivars.tab_titles.borrow_mut() = tab_titles;
-        ivars.scale.set(scale);
+        let scale = ivars.scale.get();
         ivars
             .renderer
             .borrow()
@@ -413,15 +434,4 @@ impl ContainerOverlayView {
         let view_loc = self.convertPoint_fromView(loc, None);
         egui::pos2(view_loc.x as f32, view_loc.y as f32)
     }
-}
-
-// Quartz uses top-left origin, Cocoa uses bottom-left origin
-pub(super) fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
-    NSRect::new(
-        NSPoint::new(
-            dim.x as f64,
-            (primary_full_height - dim.y - dim.height) as f64,
-        ),
-        NSSize::new(dim.width as f64, dim.height as f64),
-    )
 }

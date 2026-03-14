@@ -10,15 +10,15 @@ use crate::core::{
     Child, Container, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout,
     MonitorPlacements, WindowId, WindowPlacement,
 };
-use crate::platform::macos::overlay::to_ns_rect;
 
-use super::dome::OverlayShow;
-use super::overlay::ContainerOverlayData;
+use super::ContainerOverlayData;
+use super::OverlayShow;
 use super::registry::Registry;
+use super::to_ns_rect;
 use super::window::{FullscreenState, apply_inset, clip_to_bounds};
 
 #[derive(Clone, Debug)]
-pub(super) struct MonitorInfo {
+pub(in crate::platform::macos) struct MonitorInfo {
     pub(super) display_id: CGDirectDisplayID,
     pub(super) name: String,
     pub(super) dimension: Dimension,
@@ -326,7 +326,7 @@ fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
         .unwrap_or(0)
 }
 
-pub(super) fn get_all_screens(mtm: MainThreadMarker) -> Vec<MonitorInfo> {
+pub(in crate::platform::macos) fn get_all_screens(mtm: MainThreadMarker) -> Vec<MonitorInfo> {
     let primary_id = CGMainDisplayID();
 
     NSScreen::screens(mtm)

@@ -11,7 +11,7 @@ use objc2_io_surface::IOSurface;
 use objc2_metal::*;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
-pub(super) struct MetalBackend {
+pub(in crate::platform::macos) struct MetalBackend {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     command_queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
     egui_pipeline: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,

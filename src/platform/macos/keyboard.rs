@@ -14,8 +14,8 @@ use objc2_core_graphics::{
     CGEventTapPlacement, CGEventTapProxy, CGEventType,
 };
 
-use super::app::send_hub_event;
 use super::dome::HubEvent;
+use super::send_hub_event;
 use crate::action::Actions;
 use crate::config::{Keymap, Modifiers};
 

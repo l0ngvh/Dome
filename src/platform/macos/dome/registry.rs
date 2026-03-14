@@ -4,7 +4,7 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::core::WindowId;
 
-use super::accessibility::AXWindow;
+use super::super::accessibility::AXWindow;
 use super::monitor::MonitorInfo;
 use super::window::MacWindow;
 

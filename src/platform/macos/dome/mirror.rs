@@ -15,10 +15,11 @@ use objc2_screen_capture_kit::{
     SCStreamOutputType,
 };
 
-use super::dome::{HubEvent, HubMessage, MessageSender};
+use super::super::ui::MessageSender;
+use super::{HubEvent, HubMessage};
 use crate::core::{Dimension, WindowId};
 
-pub(super) struct WindowCapture {
+pub(in crate::platform::macos) struct WindowCapture {
     stream: Retained<SCStream>,
     handler: Retained<StreamOutputHandler>,
     app_tx: MessageSender,
