@@ -93,14 +93,11 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let event_listener = EventListener::new(event_tx.clone(), is_suspended.clone());
     let _keyboard_listener = KeyboardListener::new(keymaps, is_suspended, event_tx.clone())?;
 
-    let (ui, sender) = Ui::new(mtm, event_tx.clone(), event_listener, config.clone());
+    let (ui, sender) = Ui::new(mtm, event_tx, event_listener, config.clone());
 
-    let hub_tx = event_tx;
     let hub_thread = thread::spawn(move || {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let event_loop = calloop::EventLoop::try_new().expect("Failed to create event loop");
-            let signal = event_loop.get_signal();
-            Dome::new(hub_config, screens, hub_tx, sender, signal).run(event_rx, event_loop);
+            Dome::start(hub_config, screens, sender, event_rx);
         }))
         .ok();
     });

@@ -41,7 +41,7 @@ use super::objc2_wrapper::{
 };
 use super::running_application::RunningApp;
 use super::send_hub_event;
-use super::throttle::{Debounce, Throttle};
+use super::throttle::Throttle;
 
 const FRAME_THROTTLE: Duration = Duration::from_millis(16);
 const SYNC_INTERVAL: Duration = Duration::from_secs(5);
@@ -59,10 +59,6 @@ struct ListenerCtx {
     // feedback loop can't be formed.
     focus_throttle: FocusThrottle,
     title_throttle: TitleThrottle,
-    // Wait for all moving events to settle before checking placement, to prevent a window from
-    // being evaluated while being resize. This is especially necessary since we can't track
-    // resize/move finishing on a per window level.
-    resize_debounce: ResizeDebounce,
     hub_sender: CalloopSender<HubEvent>,
 }
 
@@ -77,18 +73,16 @@ pub(super) struct EventListener {
 type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;
 type FocusThrottle = Pin<Box<Throttle<i32>>>;
 type TitleThrottle = Pin<Box<Throttle<CGWindowID>>>;
-type ResizeDebounce = Pin<Box<Debounce<i32>>>;
 
 impl EventListener {
     pub(super) fn new(hub_sender: CalloopSender<HubEvent>, is_suspended: Rc<Cell<bool>>) -> Self {
-        let (focus_throttle, title_throttle, resize_debounce) = setup_throttles(hub_sender.clone());
+        let (focus_throttle, title_throttle) = setup_throttles(hub_sender.clone());
 
         let mut ctx = Box::new(ListenerCtx {
             is_suspended,
             observers: Rc::new(RefCell::new(HashMap::new())),
             focus_throttle,
             title_throttle,
-            resize_debounce,
             hub_sender,
         });
 
@@ -272,11 +266,8 @@ fn setup_screen_observer(ctx: &ListenerCtx) -> ScreenObserver {
     }
 }
 
-fn setup_throttles(
-    hub_sender: CalloopSender<HubEvent>,
-) -> (FocusThrottle, TitleThrottle, ResizeDebounce) {
+fn setup_throttles(hub_sender: CalloopSender<HubEvent>) -> (FocusThrottle, TitleThrottle) {
     let hub_sender2 = hub_sender.clone();
-    let hub_sender3 = hub_sender.clone();
 
     let focus_throttle = Throttle::new(Duration::from_millis(500), move |pid: i32| {
         send_hub_event(&hub_sender, HubEvent::SyncFocus { pid });
@@ -286,11 +277,7 @@ fn setup_throttles(
         send_hub_event(&hub_sender2, HubEvent::TitleChanged(cg_id));
     });
 
-    let resize_debounce = Debounce::new(Duration::from_millis(100), move |pid: i32| {
-        send_hub_event(&hub_sender3, HubEvent::WindowMovedOrResized { pid });
-    });
-
-    (focus_throttle, title_throttle, resize_debounce)
+    (focus_throttle, title_throttle)
 }
 
 fn schedule_sync_timer(ctx: &ListenerCtx) -> Option<CFRetained<CFRunLoopTimer>> {
@@ -474,7 +461,7 @@ unsafe extern "C-unwind" fn observer_callback(
         || CFEqual(Some(notification), Some(&*kAXResizedNotification()))
     {
         if let Ok(pid) = get_pid(&element) {
-            ctx.resize_debounce.submit(pid);
+            send_hub_event(&ctx.hub_sender, HubEvent::WindowMovedOrResized { pid });
         }
         return;
     }

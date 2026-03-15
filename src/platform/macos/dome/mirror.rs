@@ -16,7 +16,7 @@ use objc2_screen_capture_kit::{
 };
 
 use super::super::ui::MessageSender;
-use super::{HubEvent, HubMessage};
+use super::{AsyncResult, HubMessage};
 use crate::core::{Dimension, WindowId};
 
 pub(in crate::platform::macos) struct WindowCapture {
@@ -138,7 +138,7 @@ impl Drop for WindowCapture {
 
 pub(super) fn create_captures_async(
     windows: Vec<(CGWindowID, WindowId)>,
-    hub_tx: CalloopSender<HubEvent>,
+    async_tx: CalloopSender<AsyncResult>,
     app_tx: MessageSender,
     queue: DispatchRetained<DispatchQueue>,
 ) {
@@ -196,8 +196,8 @@ pub(super) fn create_captures_async(
                     app_tx: app_tx.clone(),
                     running: false,
                 };
-                hub_tx
-                    .send(HubEvent::CaptureReady { window_id, capture })
+                async_tx
+                    .send(AsyncResult::CaptureReady { window_id, capture })
                     .ok();
             }
         },

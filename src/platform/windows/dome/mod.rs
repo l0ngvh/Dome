@@ -1,4 +1,6 @@
 mod inspect;
+mod placement_tracker;
+mod registry;
 mod throttle;
 
 use std::collections::{HashMap, HashSet};
@@ -22,6 +24,8 @@ use self::inspect::{
     enum_windows, get_process_name, get_size_constraints, get_window_title, initial_window_mode,
     is_fullscreen, is_manageable,
 };
+use self::placement_tracker::PlacementTracker;
+use self::registry::{WindowEntry, WindowRegistry};
 use self::throttle::{Throttle, ThrottleResult};
 use super::ScreenInfo;
 use super::handle::{ManagedHwnd, WindowMode, get_dimension};
@@ -31,7 +35,6 @@ pub(super) const WM_APP_CONFIG: u32 = 0x8002;
 pub(super) const WM_APP_TITLE: u32 = 0x8003;
 
 const FOCUS_THROTTLE: Duration = Duration::from_millis(500);
-const RESIZE_THROTTLE: Duration = Duration::from_millis(16);
 
 #[expect(
     clippy::large_enum_variant,
@@ -44,7 +47,9 @@ pub(super) enum HubEvent {
     WindowMinimized(ManagedHwnd),
     WindowFocused(ManagedHwnd),
     WindowTitleChanged(ManagedHwnd),
-    WindowMovedOrResized(ManagedHwnd),
+    MoveSizeStart(ManagedHwnd),
+    MoveSizeEnd(ManagedHwnd),
+    LocationChanged(ManagedHwnd),
     ScreensChanged(Vec<ScreenInfo>),
     Action(Actions),
     ConfigChanged(Config),
@@ -72,7 +77,8 @@ unsafe impl Send for AppHandle {}
 ///
 /// `to_show` contains every window that Wm should position this frame.
 /// Windows not in `to_show` are ignored — this includes borderless
-/// fullscreen and exclusive fullscreen windows. Wm must not touch them.
+/// fullscreen, exclusive fullscreen, and windows currently being moved
+/// or resized. Wm must not touch them.
 ///
 /// `to_hide` contains windows that were visible last frame but are no longer.
 /// Wm hides the managed window, its overlay, and removes the taskbar tab.
@@ -132,25 +138,9 @@ pub(super) struct TitleUpdate {
     pub(super) container_renders: Vec<ContainerRender>,
 }
 
-#[derive(Clone, Copy)]
-enum ThrottleKind {
-    Focus,
-    Resize,
-}
-
-/// Per-window state maintained by Dome. Mode is synced from hub placements
-/// at the start of each `apply_layout` call, before building the frame.
-struct TrackedWindow {
-    hwnd: HWND,
-    mode: WindowMode,
-    title: Option<String>,
-    process: String,
-}
-
 pub(super) struct Dome {
     hub: Hub,
-    window_map: HashMap<ManagedHwnd, WindowId>,
-    tracked_windows: HashMap<WindowId, TrackedWindow>,
+    registry: WindowRegistry,
     monitor_handles: HashMap<isize, MonitorId>,
     monitor_dimensions: HashMap<MonitorId, Dimension>,
     displayed: HashMap<MonitorId, DisplayedMonitor>,
@@ -160,7 +150,7 @@ pub(super) struct Dome {
     signal: LoopSignal,
     handle: LoopHandle<'static, Self>,
     focus_throttle: Throttle<ManagedHwnd>,
-    resize_throttle: Throttle<ManagedHwnd>,
+    placement_tracker: PlacementTracker,
 }
 
 impl Dome {
@@ -204,8 +194,7 @@ impl Dome {
 
         Self {
             hub,
-            window_map: HashMap::new(),
-            tracked_windows: HashMap::new(),
+            registry: WindowRegistry::new(),
             monitor_handles,
             monitor_dimensions,
             displayed: HashMap::new(),
@@ -213,9 +202,9 @@ impl Dome {
             app_hwnd: None,
             main_thread_id,
             signal,
-            handle,
+            handle: handle.clone(),
             focus_throttle: Throttle::new(FOCUS_THROTTLE),
-            resize_throttle: Throttle::new(RESIZE_THROTTLE),
+            placement_tracker: PlacementTracker::new(handle),
         }
     }
 
@@ -264,7 +253,7 @@ impl Dome {
                 tracing::info!("Config reloaded");
             }
             HubEvent::WindowCreated(h) => {
-                if self.window_map.contains_key(&h) {
+                if self.registry.contains_hwnd(h) {
                     return true;
                 }
                 self.try_manage_window(h.hwnd());
@@ -276,10 +265,9 @@ impl Dome {
             HubEvent::WindowMinimized(h) => {
                 let _span = tracing::info_span!("window_minimized").entered();
                 let is_fullscreen = self
-                    .window_map
-                    .get(&h)
-                    .map(|&id| self.hub.get_window(id).is_fullscreen())
-                    .unwrap_or(false);
+                    .registry
+                    .get_id(h)
+                    .is_some_and(|id| self.hub.get_window(id).is_fullscreen());
                 if !is_fullscreen {
                     self.remove_window(h);
                 }
@@ -288,12 +276,21 @@ impl Dome {
                 self.submit_focus(h);
                 return true;
             }
-            HubEvent::WindowMovedOrResized(h) => {
-                self.submit_resize(h);
-                return true;
+            HubEvent::MoveSizeStart(h) => {
+                self.placement_tracker.drag_started(h);
+                return false;
+            }
+            HubEvent::MoveSizeEnd(h) => {
+                self.placement_tracker.drag_ended(h);
+                self.handle_resize(h);
+                return false;
+            }
+            HubEvent::LocationChanged(h) => {
+                self.placement_tracker.location_changed(h);
+                return false;
             }
             HubEvent::WindowTitleChanged(h) => {
-                if self.window_map.contains_key(&h) {
+                if self.registry.contains_hwnd(h) {
                     let new_title = get_window_title(h.hwnd());
                     self.send_title_update(vec![(h, new_title)]);
                     return true;
@@ -312,7 +309,7 @@ impl Dome {
                 self.hub.focus_tab_index(container_id, tab_idx);
             }
             HubEvent::SetFullscreen(id) => {
-                if let Some(info) = self.tracked_windows.get_mut(&id) {
+                if let Some(info) = self.registry.get_mut(id) {
                     info.mode = WindowMode::FullscreenExclusive;
                     if !self.hub.get_window(id).is_fullscreen() {
                         self.hub.set_fullscreen(id);
@@ -355,10 +352,10 @@ impl Dome {
         };
         self.set_constraints(id, hwnd);
 
-        self.window_map.insert(managed, id);
-        self.tracked_windows.insert(
+        self.registry.insert(
+            managed,
             id,
-            TrackedWindow {
+            WindowEntry {
                 hwnd,
                 mode,
                 title,
@@ -368,8 +365,8 @@ impl Dome {
     }
 
     fn remove_window(&mut self, h: ManagedHwnd) {
-        if let Some(id) = self.window_map.remove(&h) {
-            self.tracked_windows.remove(&id);
+        self.placement_tracker.clear(h);
+        if let Some(id) = self.registry.remove_by_hwnd(h) {
             self.hub.delete_window(id);
         }
     }
@@ -416,51 +413,26 @@ impl Dome {
             ThrottleResult::Send(h) => self.handle_focus(h),
             ThrottleResult::Pending => {}
             ThrottleResult::ScheduleFlush(delay) => {
-                self.schedule_throttle_timer(delay, ThrottleKind::Focus);
+                self.schedule_focus_timer(delay);
             }
         }
     }
 
-    fn submit_resize(&mut self, h: ManagedHwnd) {
-        match self.resize_throttle.submit(h) {
-            ThrottleResult::Send(h) => self.handle_resize(h),
-            ThrottleResult::Pending => {}
-            ThrottleResult::ScheduleFlush(delay) => {
-                self.schedule_throttle_timer(delay, ThrottleKind::Resize);
-            }
-        }
-    }
-
-    fn schedule_throttle_timer(&mut self, delay: Duration, kind: ThrottleKind) {
+    fn schedule_focus_timer(&mut self, delay: Duration) {
         let timer = Timer::from_duration(delay);
-        // Token is intentionally discarded: at most one timer exists at a time
-        // (guarded by has_pending_timer), and it always self-removes via TimeoutAction::Drop.
         self.handle
-            .insert_source(timer, move |_, _, dome| {
-                match kind {
-                    ThrottleKind::Focus => {
-                        if let Some(h) = dome.focus_throttle.flush() {
-                            dome.handle_focus(h);
-                        }
-                    }
-                    ThrottleKind::Resize => {
-                        if let Some(h) = dome.resize_throttle.flush() {
-                            dome.handle_resize(h);
-                        }
-                    }
+            .insert_source(timer, |_, _, dome| {
+                if let Some(h) = dome.focus_throttle.flush() {
+                    dome.handle_focus(h);
                 }
                 TimeoutAction::Drop
             })
             .expect("Failed to insert timer");
-
-        match kind {
-            ThrottleKind::Focus => self.focus_throttle.mark_timer_scheduled(),
-            ThrottleKind::Resize => self.resize_throttle.mark_timer_scheduled(),
-        }
+        self.focus_throttle.mark_timer_scheduled();
     }
 
     fn handle_focus(&mut self, h: ManagedHwnd) {
-        if let Some(&id) = self.window_map.get(&h) {
+        if let Some(id) = self.registry.get_id(h) {
             self.hub.set_focus(id);
             tracing::info!(hwnd = ?h.hwnd(), "Window focused");
             self.apply_layout();
@@ -468,12 +440,12 @@ impl Dome {
     }
 
     fn handle_resize(&mut self, h: ManagedHwnd) {
-        let Some(&id) = self.window_map.get(&h) else {
+        let Some(id) = self.registry.get_id(h) else {
             return;
         };
         if self
-            .tracked_windows
-            .get(&id)
+            .registry
+            .get(id)
             .is_some_and(|i| i.mode == WindowMode::FullscreenExclusive)
         {
             return;
@@ -484,7 +456,7 @@ impl Dome {
     }
 
     fn check_fullscreen_state(&mut self, h: ManagedHwnd) {
-        let Some(&id) = self.window_map.get(&h) else {
+        let Some(id) = self.registry.get_id(h) else {
             return;
         };
         let Some(monitor_dim) = self.find_monitor_dimension(h.hwnd()) else {
@@ -564,7 +536,7 @@ impl Dome {
             .created_windows
             .iter()
             .filter_map(|&id| {
-                let info = self.tracked_windows.get(&id)?;
+                let info = self.registry.get(id)?;
                 Some(WindowCreate {
                     hwnd: info.hwnd,
                     id,
@@ -603,7 +575,7 @@ impl Dome {
             match mp.layout {
                 MonitorLayout::Fullscreen(id) => {
                     window_ids.push(id);
-                    if let Some(info) = self.tracked_windows.get_mut(&id) {
+                    if let Some(info) = self.registry.get_mut(id) {
                         match info.mode {
                             WindowMode::FullscreenExclusive | WindowMode::FullscreenBorderless => {}
                             _ => {
@@ -626,12 +598,18 @@ impl Dome {
                 } => {
                     for wp in windows {
                         window_ids.push(wp.id);
-                        if let Some(info) = self.tracked_windows.get_mut(&wp.id) {
+                        if let Some(info) = self.registry.get_mut(wp.id) {
                             info.mode = if wp.is_float {
                                 WindowMode::Float
                             } else {
                                 WindowMode::Tiling
                             };
+                            if self
+                                .placement_tracker
+                                .is_moving(ManagedHwnd::new(info.hwnd))
+                            {
+                                continue;
+                            }
                         }
                         to_show.push(WindowShow {
                             id: wp.id,
@@ -734,7 +712,7 @@ impl Dome {
 
         let affected_ids: HashSet<WindowId> = titles
             .iter()
-            .filter_map(|(h, _)| self.window_map.get(h).copied())
+            .filter_map(|(h, _)| self.registry.get_id(*h))
             .collect();
         let container_renders = self.build_container_renders_for(&affected_ids);
 
@@ -783,11 +761,11 @@ impl Dome {
         }
         self.reconcile_monitors(screens);
 
-        let windows: Vec<_> = self.window_map.iter().map(|(&h, &id)| (h, id)).collect();
+        let windows: Vec<_> = self.registry.iter().collect();
         for (managed, id) in windows {
             if self
-                .tracked_windows
-                .get(&id)
+                .registry
+                .get(id)
                 .is_some_and(|i| i.mode == WindowMode::FullscreenExclusive)
             {
                 continue;

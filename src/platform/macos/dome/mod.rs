@@ -1,5 +1,6 @@
 mod mirror;
 mod monitor;
+mod placement_tracker;
 mod recovery;
 mod registry;
 mod window;
@@ -30,6 +31,7 @@ use super::running_application::RunningApp;
 use super::ui::MessageSender;
 use mirror::{WindowCapture, create_captures_async};
 use monitor::{MonitorInfo, MonitorRegistry};
+use placement_tracker::PlacementTracker;
 use registry::Registry;
 use window::{FullscreenState, FullscreenTransition, MacWindow};
 
@@ -65,16 +67,6 @@ pub(super) enum HubEvent {
     ScreensChanged(Vec<MonitorInfo>),
     MirrorClicked(WindowId),
     TabClicked(ContainerId, usize),
-    CaptureReady {
-        window_id: WindowId,
-        capture: WindowCapture,
-    },
-    AppVisibleWindowsReconciled(VisibleWindowsReconciled),
-    AllVisibleWindowsReconciled {
-        terminated_pids: Vec<i32>,
-        new_apps: Vec<RunningApp>,
-        apps: Vec<VisibleWindowsReconciled>,
-    },
     /// macOS Space changed. Used to detect native fullscreen enter/exit since
     /// native fullscreen moves windows to a separate Space.
     SpaceChanged,
@@ -101,19 +93,23 @@ impl fmt::Display for HubEvent {
             Self::TabClicked(container_id, tab_idx) => {
                 write!(f, "TabClicked({container_id}, tab_idx={tab_idx})")
             }
-            Self::CaptureReady { window_id, .. } => {
-                write!(f, "CaptureReady({window_id})")
-            }
-            Self::AppVisibleWindowsReconciled(r) => {
-                write!(f, "AppVisibleWindowsReconciled(pid={})", r.pid)
-            }
-            Self::AllVisibleWindowsReconciled { apps, .. } => {
-                write!(f, "AllVisibleWindowsReconciled(apps={})", apps.len())
-            }
             Self::SpaceChanged => write!(f, "SpaceChanged"),
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }
+}
+
+enum AsyncResult {
+    AppVisibleWindows(VisibleWindowsReconciled),
+    AllVisibleWindows {
+        terminated_pids: Vec<i32>,
+        new_apps: Vec<RunningApp>,
+        apps: Vec<VisibleWindowsReconciled>,
+    },
+    CaptureReady {
+        window_id: WindowId,
+        capture: WindowCapture,
+    },
 }
 
 pub(super) enum HubMessage {
@@ -164,20 +160,27 @@ pub(super) struct Dome {
     primary_full_height: f32,
     observed_pids: HashSet<i32>,
     sender: MessageSender,
-    hub_tx: CalloopSender<HubEvent>,
+    async_tx: CalloopSender<AsyncResult>,
     capture_queue: DispatchRetained<DispatchQueue>,
     signal: LoopSignal,
+    placement_tracker: PlacementTracker,
 }
 
 impl Dome {
-    pub(super) fn new(
+    pub(super) fn start(
         config: Config,
         screens: Vec<MonitorInfo>,
-        hub_tx: CalloopSender<HubEvent>,
         sender: MessageSender,
-        signal: LoopSignal,
-    ) -> Self {
+        channel: Channel<HubEvent>,
+    ) {
         recovery::install_handlers();
+        let mut event_loop =
+            EventLoop::<'static, Self>::try_new().expect("Failed to create event loop");
+        let handle = event_loop.handle();
+        let signal = event_loop.get_signal();
+
+        let (async_tx, async_rx) = calloop::channel::channel();
+
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
@@ -195,7 +198,7 @@ impl Dome {
         // Drain initial allocations from Hub::new() and add_monitor()
         hub.drain_changes();
 
-        Self {
+        let mut dome = Self {
             hub,
             registry: Registry::new(monitor_registry.all_screens()),
             monitor_registry,
@@ -204,36 +207,37 @@ impl Dome {
             primary_full_height: primary.full_height,
             observed_pids: HashSet::new(),
             sender,
-            hub_tx,
+            async_tx,
             capture_queue: DispatchQueue::main().into(),
             signal,
-        }
-    }
+            placement_tracker: PlacementTracker::new(handle.clone()),
+        };
 
-    pub(super) fn run(
-        mut self,
-        channel: Channel<HubEvent>,
-        mut event_loop: EventLoop<'static, Self>,
-    ) {
-        event_loop
-            .handle()
+        handle
             .insert_source(channel, |event, _, dome| match event {
                 ChannelEvent::Msg(hub_event) => dome.handle_event(hub_event),
                 ChannelEvent::Closed => dome.signal.stop(),
             })
             .expect("Failed to insert channel source");
 
+        handle
+            .insert_source(async_rx, |event, _, dome| match event {
+                ChannelEvent::Msg(result) => dome.handle_async_result(result),
+                ChannelEvent::Closed => {}
+            })
+            .expect("Failed to insert async channel source");
+
         dispatch_reconcile_all_windows(
-            self.observed_pids.clone(),
-            self.registry
+            dome.observed_pids.clone(),
+            dome.registry
                 .iter()
                 .map(|(id, w)| (id, (w.ax().clone(), w.fullscreen())))
                 .collect(),
-            self.config.macos.ignore.clone(),
-            self.hub_tx.clone(),
+            dome.config.macos.ignore.clone(),
+            dome.async_tx.clone(),
         );
         event_loop
-            .run(None, &mut self, |_| {})
+            .run(None, &mut dome, |_| {})
             .expect("Event loop failed");
     }
 
@@ -261,7 +265,7 @@ impl Dome {
                             .map(|(id, w)| (id, (w.ax().clone(), w.fullscreen())))
                             .collect(),
                         self.config.macos.ignore.clone(),
-                        self.hub_tx.clone(),
+                        self.async_tx.clone(),
                     );
                 }
                 HubEvent::SyncFocus { pid } => {
@@ -280,7 +284,8 @@ impl Dome {
                     }
                 }
                 HubEvent::WindowMovedOrResized { pid } => {
-                    self.handle_window_moved(pid);
+                    self.placement_tracker.window_moved(pid);
+                    return;
                 }
                 HubEvent::Action(actions) => {
                     tracing::debug!(%actions, "Executing actions");
@@ -294,7 +299,7 @@ impl Dome {
                             .map(|(id, w)| (id, (w.ax().clone(), w.fullscreen())))
                             .collect(),
                         self.config.macos.ignore.clone(),
-                        self.hub_tx.clone(),
+                        self.async_tx.clone(),
                     );
                 }
                 HubEvent::ScreensChanged(screens) => {
@@ -312,15 +317,22 @@ impl Dome {
                 HubEvent::TabClicked(container_id, tab_idx) => {
                     self.hub.focus_tab_index(container_id, tab_idx);
                 }
-                HubEvent::CaptureReady { window_id, capture } => {
-                    if let Some(w) = self.registry.by_id_mut(window_id) {
-                        w.set_capture(capture);
-                    }
+                HubEvent::SpaceChanged => {
+                    self.handle_space_changed();
                 }
-                HubEvent::AppVisibleWindowsReconciled(result) => {
-                    self.apply_visible_windows_change(result);
+            }
+
+            self.flush_layout();
+        });
+    }
+
+    fn handle_async_result(&mut self, result: AsyncResult) {
+        autoreleasepool(|_| {
+            match result {
+                AsyncResult::AppVisibleWindows(r) => {
+                    self.apply_visible_windows_change(r);
                 }
-                HubEvent::AllVisibleWindowsReconciled {
+                AsyncResult::AllVisibleWindows {
                     terminated_pids,
                     new_apps,
                     apps,
@@ -329,8 +341,8 @@ impl Dome {
                         self.observed_pids.remove(&pid);
                         self.remove_app_windows(pid);
                     }
-                    for result in apps {
-                        self.apply_visible_windows_change(result);
+                    for r in apps {
+                        self.apply_visible_windows_change(r);
                     }
                     if !new_apps.is_empty() {
                         for app in &new_apps {
@@ -339,43 +351,48 @@ impl Dome {
                         self.sender.send(HubMessage::RegisterObservers(new_apps));
                     }
                 }
-                HubEvent::SpaceChanged => {
-                    self.handle_space_changed();
+                AsyncResult::CaptureReady { window_id, capture } => {
+                    if let Some(w) = self.registry.by_id_mut(window_id) {
+                        w.set_capture(capture);
+                    }
                 }
             }
-
-            let (shows, containers) = self.apply_layout();
-            let changes = self.hub.drain_changes();
-
-            let creates = changes
-                .created_windows
-                .iter()
-                .filter_map(|&wid| {
-                    if changes.deleted_windows.contains(&wid) {
-                        return None;
-                    }
-                    let dim = self.hub.get_window(wid).dimension();
-                    Some(OverlayCreate {
-                        window_id: wid,
-                        frame: to_ns_rect(self.primary_full_height, dim),
-                    })
-                })
-                .collect();
-
-            let created_containers: HashSet<_> = changes.created_containers.into_iter().collect();
-            let (container_creates, containers) = containers
-                .into_iter()
-                .partition(|c| created_containers.contains(&c.placement.id));
-
-            self.sender.send(HubMessage::Frame(RenderFrame {
-                creates,
-                deletes: changes.deleted_windows,
-                shows,
-                container_creates,
-                containers,
-                deleted_containers: changes.deleted_containers,
-            }));
+            self.flush_layout();
         });
+    }
+
+    fn flush_layout(&mut self) {
+        let (shows, containers) = self.apply_layout();
+        let changes = self.hub.drain_changes();
+
+        let creates = changes
+            .created_windows
+            .iter()
+            .filter_map(|&wid| {
+                if changes.deleted_windows.contains(&wid) {
+                    return None;
+                }
+                let dim = self.hub.get_window(wid).dimension();
+                Some(OverlayCreate {
+                    window_id: wid,
+                    frame: to_ns_rect(self.primary_full_height, dim),
+                })
+            })
+            .collect();
+
+        let created_containers: HashSet<_> = changes.created_containers.into_iter().collect();
+        let (container_creates, containers) = containers
+            .into_iter()
+            .partition(|c| created_containers.contains(&c.placement.id));
+
+        self.sender.send(HubMessage::Frame(RenderFrame {
+            creates,
+            deletes: changes.deleted_windows,
+            shows,
+            container_creates,
+            containers,
+            deleted_containers: changes.deleted_containers,
+        }));
     }
 
     #[tracing::instrument(skip_all, fields(pid = app.pid()))]
@@ -424,6 +441,7 @@ impl Dome {
     }
 
     fn remove_app_windows(&mut self, pid: i32) {
+        self.placement_tracker.cancel(pid);
         for (cg_id, window_id) in self.registry.remove_by_pid(pid) {
             recovery::untrack(cg_id);
             self.hub.delete_window(window_id);
@@ -565,6 +583,7 @@ impl Dome {
                 &mut self.registry,
                 &self.config,
                 self.primary_full_height,
+                &self.placement_tracker,
             );
             shows.extend(s);
             containers.extend(c);
@@ -599,7 +618,7 @@ impl Dome {
         if !new_cg_ids.is_empty() {
             create_captures_async(
                 new_cg_ids,
-                self.hub_tx.clone(),
+                self.async_tx.clone(),
                 self.sender.clone(),
                 self.capture_queue.clone(),
             );
@@ -663,7 +682,7 @@ fn dispatch_refresh_app_windows(
     pid: i32,
     tracked: HashMap<CGWindowID, (AXWindow, FullscreenState)>,
     ignore_rules: Vec<MacosWindow>,
-    hub_tx: CalloopSender<HubEvent>,
+    async_tx: CalloopSender<AsyncResult>,
 ) {
     let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
         DispatchQoS::UserInitiated,
@@ -674,9 +693,7 @@ fn dispatch_refresh_app_windows(
                 return;
             };
             let result = compute_app_visible_windows(&app, &tracked, &ignore_rules);
-            hub_tx
-                .send(HubEvent::AppVisibleWindowsReconciled(result))
-                .ok();
+            async_tx.send(AsyncResult::AppVisibleWindows(result)).ok();
         });
     });
 }
@@ -685,7 +702,7 @@ fn dispatch_reconcile_all_windows(
     observed_pids: HashSet<i32>,
     tracked: HashMap<CGWindowID, (AXWindow, FullscreenState)>,
     ignore_rules: Vec<MacosWindow>,
-    hub_tx: CalloopSender<HubEvent>,
+    async_tx: CalloopSender<AsyncResult>,
 ) {
     let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
         DispatchQoS::UserInitiated,
@@ -712,8 +729,8 @@ fn dispatch_reconcile_all_windows(
                 .map(|app| compute_app_visible_windows(app, &tracked, &ignore_rules))
                 .collect();
 
-            hub_tx
-                .send(HubEvent::AllVisibleWindowsReconciled {
+            async_tx
+                .send(AsyncResult::AllVisibleWindows {
                     terminated_pids,
                     new_apps,
                     apps,

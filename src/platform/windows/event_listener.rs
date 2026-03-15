@@ -8,8 +8,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EVENT_OBJECT_CLOAKED, EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE,
     EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW,
     EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND,
-    EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND, GetForegroundWindow, OBJID_WINDOW,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART,
+    GetForegroundWindow, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
 use super::dome::HubEvent;
@@ -115,10 +115,18 @@ unsafe extern "system" fn event_hook_proc(
                 }
                 sender.send(HubEvent::WindowFocused(managed)).ok();
             }
-            // MOVESIZEEND fires after user drag/resize. LOCATIONCHANGE catches programmatic
-            // resizes (e.g. maximize, restore) which don't trigger the move/size cycle.
-            EVENT_SYSTEM_MOVESIZEEND | EVENT_OBJECT_LOCATIONCHANGE => {
-                sender.send(HubEvent::WindowMovedOrResized(managed)).ok();
+            // MOVESIZESTART fires when user begins a drag/resize.
+            // MOVESIZEEND fires after user drag/resize completes.
+            // LOCATIONCHANGE catches programmatic resizes (e.g. maximize, restore)
+            // which don't trigger the move/size cycle.
+            EVENT_SYSTEM_MOVESIZESTART => {
+                sender.send(HubEvent::MoveSizeStart(managed)).ok();
+            }
+            EVENT_SYSTEM_MOVESIZEEND => {
+                sender.send(HubEvent::MoveSizeEnd(managed)).ok();
+            }
+            EVENT_OBJECT_LOCATIONCHANGE => {
+                sender.send(HubEvent::LocationChanged(managed)).ok();
             }
             _ => {}
         }

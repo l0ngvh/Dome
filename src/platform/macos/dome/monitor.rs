@@ -13,6 +13,7 @@ use crate::core::{
 
 use super::ContainerOverlayData;
 use super::OverlayShow;
+use super::placement_tracker::PlacementTracker;
 use super::registry::Registry;
 use super::to_ns_rect;
 use super::window::{FullscreenState, apply_inset, clip_to_bounds};
@@ -54,6 +55,7 @@ impl MonitorEntry {
         registry: &mut Registry,
         config: &Config,
         primary_full_height: f32,
+        placement_tracker: &PlacementTracker,
     ) -> (Vec<OverlayShow>, Vec<ContainerOverlayData>) {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
@@ -70,6 +72,7 @@ impl MonitorEntry {
                 registry,
                 config,
                 primary_full_height,
+                placement_tracker,
             ),
         }
     }
@@ -114,6 +117,7 @@ impl MonitorEntry {
         registry: &mut Registry,
         config: &Config,
         primary_full_height: f32,
+        placement_tracker: &PlacementTracker,
     ) -> (Vec<OverlayShow>, Vec<ContainerOverlayData>) {
         let new_windows: HashSet<WindowId> = windows
             .iter()
@@ -141,6 +145,9 @@ impl MonitorEntry {
                 continue;
             };
             if w.fullscreen() == FullscreenState::Native {
+                continue;
+            }
+            if placement_tracker.is_moving(w.pid()) {
                 continue;
             }
             if let Err(e) = w.show(wp, config) {
