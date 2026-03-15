@@ -14,8 +14,8 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, PostThreadMessageW, 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
-    Child, ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout, WindowId,
-    WindowPlacement,
+    Child, ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout, SpawnMode,
+    WindowId,
 };
 
 use self::inspect::{
@@ -68,27 +68,49 @@ impl AppHandle {
 
 unsafe impl Send for AppHandle {}
 
+/// A frame of work for Wm to execute.
+///
+/// `to_show` contains every window that Wm should position this frame.
+/// Windows not in `to_show` are ignored — this includes borderless
+/// fullscreen and exclusive fullscreen windows. Wm must not touch them.
+///
+/// `to_hide` contains windows that were visible last frame but are no longer.
+/// Wm hides the managed window, its overlay, and removes the taskbar tab.
+/// Exclusive fullscreen windows are skipped entirely.
+///
+/// `tabs_to_add` contains windows that became visible this frame and need
+/// a taskbar tab. Unlike `to_show`, this includes borderless and exclusive
+/// fullscreen windows — all windows on the current workspace get tabs.
 pub(super) struct LayoutFrame {
-    pub(super) monitors: Vec<FrameMonitor>,
+    pub(super) to_show: Vec<WindowShow>,
+    pub(super) to_hide: Vec<WindowId>,
+    pub(super) containers_to_show: Vec<ContainerRender>,
+    pub(super) containers_to_hide: Vec<ContainerId>,
     pub(super) created_windows: Vec<WindowCreate>,
     pub(super) deleted_windows: Vec<WindowId>,
-    pub(super) focused: Option<WindowId>,
     pub(super) created_containers: Vec<ContainerId>,
     pub(super) deleted_containers: Vec<ContainerId>,
+    pub(super) tabs_to_add: Vec<WindowId>,
+    pub(super) focused: Option<WindowId>,
 }
 
-pub(super) enum FrameLayout {
-    Normal {
-        windows: Vec<WindowPlacement>,
-        container_renders: Vec<ContainerRender>,
-    },
-    Fullscreen(WindowId, WindowMode),
+// Windows-specific — only the fields Wm actually consumes.
+// Does NOT wrap core::WindowPlacement; Dome translates at the boundary.
+// No is_focused — Wm derives it from LayoutFrame::focused.
+pub(super) struct WindowShow {
+    pub(super) id: WindowId,
+    pub(super) frame: Dimension,
+    pub(super) visible_frame: Dimension,
+    pub(super) is_float: bool,
+    pub(super) spawn_mode: SpawnMode,
+    // Some(monitor_dim) → call set_fullscreen; None → call show with border inset
+    pub(super) fullscreen_dim: Option<Dimension>,
 }
 
-pub(super) struct FrameMonitor {
-    pub(super) monitor_id: MonitorId,
-    pub(super) layout: FrameLayout,
-    pub(super) dimension: Dimension,
+// Per-monitor displayed state, tracked by Dome across frames
+struct DisplayedMonitor {
+    window_ids: Vec<WindowId>,
+    container_ids: Vec<ContainerId>,
 }
 
 pub(super) struct WindowCreate {
@@ -116,7 +138,9 @@ enum ThrottleKind {
     Resize,
 }
 
-struct WindowInfo {
+/// Per-window state maintained by Dome. Mode is synced from hub placements
+/// at the start of each `apply_layout` call, before building the frame.
+struct TrackedWindow {
     hwnd: HWND,
     mode: WindowMode,
     title: Option<String>,
@@ -126,9 +150,10 @@ struct WindowInfo {
 pub(super) struct Dome {
     hub: Hub,
     window_map: HashMap<ManagedHwnd, WindowId>,
-    window_info: HashMap<WindowId, WindowInfo>,
+    tracked_windows: HashMap<WindowId, TrackedWindow>,
     monitor_handles: HashMap<isize, MonitorId>,
     monitor_dimensions: HashMap<MonitorId, Dimension>,
+    displayed: HashMap<MonitorId, DisplayedMonitor>,
     config: Config,
     app_hwnd: Option<AppHandle>,
     main_thread_id: u32,
@@ -180,9 +205,10 @@ impl Dome {
         Self {
             hub,
             window_map: HashMap::new(),
-            window_info: HashMap::new(),
+            tracked_windows: HashMap::new(),
             monitor_handles,
             monitor_dimensions,
+            displayed: HashMap::new(),
             config,
             app_hwnd: None,
             main_thread_id,
@@ -286,7 +312,7 @@ impl Dome {
                 self.hub.focus_tab_index(container_id, tab_idx);
             }
             HubEvent::SetFullscreen(id) => {
-                if let Some(info) = self.window_info.get_mut(&id) {
+                if let Some(info) = self.tracked_windows.get_mut(&id) {
                     info.mode = WindowMode::FullscreenExclusive;
                     if !self.hub.get_window(id).is_fullscreen() {
                         self.hub.set_fullscreen(id);
@@ -330,9 +356,9 @@ impl Dome {
         self.set_constraints(id, hwnd);
 
         self.window_map.insert(managed, id);
-        self.window_info.insert(
+        self.tracked_windows.insert(
             id,
-            WindowInfo {
+            TrackedWindow {
                 hwnd,
                 mode,
                 title,
@@ -343,7 +369,7 @@ impl Dome {
 
     fn remove_window(&mut self, h: ManagedHwnd) {
         if let Some(id) = self.window_map.remove(&h) {
-            self.window_info.remove(&id);
+            self.tracked_windows.remove(&id);
             self.hub.delete_window(id);
         }
     }
@@ -446,7 +472,7 @@ impl Dome {
             return;
         };
         if self
-            .window_info
+            .tracked_windows
             .get(&id)
             .is_some_and(|i| i.mode == WindowMode::FullscreenExclusive)
         {
@@ -538,7 +564,7 @@ impl Dome {
             .created_windows
             .iter()
             .filter_map(|&id| {
-                let info = self.window_info.get(&id)?;
+                let info = self.tracked_windows.get(&id)?;
                 Some(WindowCreate {
                     hwnd: info.hwnd,
                     id,
@@ -549,69 +575,151 @@ impl Dome {
             })
             .collect();
 
-        let focused = self
+        let focused = match self
             .hub
             .get_workspace(self.hub.current_workspace())
-            .focused();
+            .focused()
+        {
+            Some(Child::Window(id)) => Some(id),
+            _ => None,
+        };
 
         let placements = self.hub.get_visible_placements();
 
-        let monitors: Vec<FrameMonitor> = placements
-            .into_iter()
-            .map(|mp| {
-                let dimension = self
-                    .monitor_dimensions
-                    .get(&mp.monitor_id)
-                    .copied()
-                    .unwrap_or_default();
-                let layout = match mp.layout {
-                    MonitorLayout::Normal {
-                        windows,
-                        containers,
-                    } => {
-                        let container_renders = containers
-                            .iter()
-                            .filter(|cp| cp.is_tabbed || cp.is_focused)
-                            .map(|cp| {
-                                let children = if cp.is_tabbed {
-                                    self.hub.get_container(cp.id).children().to_vec()
-                                } else {
-                                    vec![]
-                                };
-                                ContainerRender {
-                                    placement: *cp,
-                                    children,
-                                }
-                            })
-                            .collect();
-                        FrameLayout::Normal {
-                            windows,
-                            container_renders,
+        let mut to_show = Vec::new();
+        let mut containers_to_show = Vec::new();
+        let mut new_displayed: HashMap<MonitorId, DisplayedMonitor> = HashMap::new();
+
+        for mp in placements {
+            let dimension = self
+                .monitor_dimensions
+                .get(&mp.monitor_id)
+                .copied()
+                .unwrap_or_default();
+
+            let mut window_ids = Vec::new();
+            let mut container_ids = Vec::new();
+
+            match mp.layout {
+                MonitorLayout::Fullscreen(id) => {
+                    window_ids.push(id);
+                    if let Some(info) = self.tracked_windows.get_mut(&id) {
+                        match info.mode {
+                            WindowMode::FullscreenExclusive | WindowMode::FullscreenBorderless => {}
+                            _ => {
+                                info.mode = WindowMode::ManagedFullscreen;
+                                to_show.push(WindowShow {
+                                    id,
+                                    frame: dimension,
+                                    visible_frame: dimension,
+                                    is_float: false,
+                                    spawn_mode: self.hub.get_window(id).spawn_mode(),
+                                    fullscreen_dim: Some(dimension),
+                                });
+                            }
                         }
                     }
-                    MonitorLayout::Fullscreen(id) => {
-                        let mode = self.window_info[&id].mode;
-                        FrameLayout::Fullscreen(id, mode)
-                    }
-                };
-                FrameMonitor {
-                    monitor_id: mp.monitor_id,
-                    layout,
-                    dimension,
                 }
-            })
+                MonitorLayout::Normal {
+                    windows,
+                    containers,
+                } => {
+                    for wp in windows {
+                        window_ids.push(wp.id);
+                        if let Some(info) = self.tracked_windows.get_mut(&wp.id) {
+                            info.mode = if wp.is_float {
+                                WindowMode::Float
+                            } else {
+                                WindowMode::Tiling
+                            };
+                        }
+                        to_show.push(WindowShow {
+                            id: wp.id,
+                            frame: wp.frame,
+                            visible_frame: wp.visible_frame,
+                            is_float: wp.is_float,
+                            spawn_mode: wp.spawn_mode,
+                            fullscreen_dim: None,
+                        });
+                    }
+                    for cp in &containers {
+                        if !cp.is_tabbed && !cp.is_focused {
+                            continue;
+                        }
+                        container_ids.push(cp.id);
+                        let children = if cp.is_tabbed {
+                            self.hub.get_container(cp.id).children().to_vec()
+                        } else {
+                            vec![]
+                        };
+                        containers_to_show.push(ContainerRender {
+                            placement: *cp,
+                            children,
+                        });
+                    }
+                }
+            }
+
+            new_displayed.insert(
+                mp.monitor_id,
+                DisplayedMonitor {
+                    window_ids,
+                    container_ids,
+                },
+            );
+        }
+
+        // Global diff (not per-monitor) avoids hiding windows that moved between monitors,
+        // since hide() uses SWP_ASYNCWINDOWPOS and could race with the show() on the new monitor.
+        let old_window_ids: HashSet<WindowId> = self
+            .displayed
+            .values()
+            .flat_map(|m| &m.window_ids)
+            .copied()
+            .collect();
+        let new_window_ids: HashSet<WindowId> = new_displayed
+            .values()
+            .flat_map(|m| &m.window_ids)
+            .copied()
+            .collect();
+        let to_hide: Vec<WindowId> = old_window_ids
+            .difference(&new_window_ids)
+            .copied()
+            .collect();
+        let tabs_to_add: Vec<WindowId> = new_window_ids
+            .difference(&old_window_ids)
+            .copied()
             .collect();
 
+        let old_container_ids: HashSet<ContainerId> = self
+            .displayed
+            .values()
+            .flat_map(|m| &m.container_ids)
+            .copied()
+            .collect();
+        let new_container_ids: HashSet<ContainerId> = new_displayed
+            .values()
+            .flat_map(|m| &m.container_ids)
+            .copied()
+            .collect();
+        let containers_to_hide: Vec<ContainerId> = old_container_ids
+            .difference(&new_container_ids)
+            .copied()
+            .collect();
+
+        self.displayed = new_displayed;
+
         let frame = LayoutFrame {
-            monitors,
+            to_show,
+            to_hide,
+            containers_to_show,
+            containers_to_hide,
             created_windows,
             deleted_windows: changes.deleted_windows,
-            focused: match focused {
-                Some(Child::Window(id)) => Some(id),
-                _ => None,
-            },
             created_containers: changes.created_containers,
             deleted_containers: changes.deleted_containers,
+            tabs_to_add,
+            focused,
         };
 
         if let Some(app_hwnd) = self.app_hwnd {
@@ -678,7 +786,7 @@ impl Dome {
         let windows: Vec<_> = self.window_map.iter().map(|(&h, &id)| (h, id)).collect();
         for (managed, id) in windows {
             if self
-                .window_info
+                .tracked_windows
                 .get(&id)
                 .is_some_and(|i| i.mode == WindowMode::FullscreenExclusive)
             {

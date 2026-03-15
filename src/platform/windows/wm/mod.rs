@@ -25,31 +25,13 @@ use self::window::{
     ManagedWindow, Registry, WINDOW_OVERLAY_CLASS, is_d3d_exclusive_fullscreen_active,
 };
 use super::dome::{
-    AppHandle, ContainerRender, FrameLayout, HubEvent, LayoutFrame, TitleUpdate, WM_APP_CONFIG,
-    WM_APP_LAYOUT, WM_APP_TITLE,
+    AppHandle, ContainerRender, HubEvent, LayoutFrame, TitleUpdate, WM_APP_CONFIG, WM_APP_LAYOUT,
+    WM_APP_TITLE, WindowShow,
 };
 use super::get_all_screens;
 use super::handle::{ManagedHwnd, WindowMode, get_dimension};
 use crate::config::Config;
-use crate::core::{ContainerId, MonitorId, WindowId, WindowPlacement};
-
-/// If a monitor has an exclusive fullscreen windows, ignore all incoming stale events from Dome
-enum MonitorState {
-    Normal {
-        ids: Vec<WindowId>,
-        focused: Option<WindowId>,
-    },
-    Exclusive(WindowId),
-}
-
-impl MonitorState {
-    fn window_ids(&self) -> &[WindowId] {
-        match self {
-            MonitorState::Normal { ids, .. } => ids,
-            MonitorState::Exclusive(id) => std::slice::from_ref(id),
-        }
-    }
-}
+use crate::core::{ContainerId, WindowId};
 
 pub(super) struct Wm {
     hwnd: HWND,
@@ -60,7 +42,7 @@ pub(super) struct Wm {
     taskbar: Taskbar,
     last_focused: Option<WindowId>,
     container_overlays: HashMap<ContainerId, Box<ContainerOverlay>>,
-    monitor_state: HashMap<MonitorId, MonitorState>,
+    exclusive_fullscreen: HashSet<WindowId>,
 }
 
 impl Wm {
@@ -134,7 +116,7 @@ impl Wm {
             taskbar,
             last_focused: None,
             container_overlays: HashMap::new(),
-            monitor_state: HashMap::new(),
+            exclusive_fullscreen: HashSet::new(),
         });
 
         let ptr = &*app as *const _ as *mut Wm;
@@ -153,6 +135,7 @@ impl Wm {
     }
 
     fn apply_layout_frame(&mut self, frame: LayoutFrame) {
+        // --- Lifecycle ---
         for create in &frame.created_windows {
             let dim = get_dimension(create.hwnd);
             recovery::track(create.hwnd, dim);
@@ -168,32 +151,25 @@ impl Wm {
             // Fullscreen windows are always inside the viewport, and hiding them
             // interferes with D3D exclusive fullscreen transitions.
             if !mw.mode().is_fullscreen() {
-                tracing::trace!("Hiding newly created windows");
                 mw.hide();
             }
             self.registry.insert(mw, create.id);
         }
 
-        for id in &frame.deleted_windows {
-            for state in self.monitor_state.values_mut() {
-                if matches!(state, MonitorState::Exclusive(eid) if *eid == *id) {
-                    *state = MonitorState::Normal {
-                        ids: Vec::new(),
-                        focused: None,
-                    };
-                }
-            }
-            if let Some(mw) = self.registry.get(*id) {
+        for &id in &frame.deleted_windows {
+            self.exclusive_fullscreen.remove(&id);
+            if let Some(mw) = self.registry.get(id) {
+                self.taskbar.delete_tab(mw.hwnd()).ok();
                 recovery::untrack(mw.managed_hwnd());
             }
-            self.registry.remove(*id);
+            self.registry.remove(id);
         }
 
-        for id in &frame.created_containers {
+        for &id in &frame.created_containers {
             match ContainerOverlay::new(&self.display, self.config.clone(), self.hub_sender.clone())
             {
                 Ok(overlay) => {
-                    self.container_overlays.insert(*id, overlay);
+                    self.container_overlays.insert(id, overlay);
                 }
                 Err(e) => {
                     tracing::warn!(%id, "Failed to create container overlay: {e:#}");
@@ -201,72 +177,46 @@ impl Wm {
             }
         }
 
-        for id in &frame.deleted_containers {
-            self.container_overlays.remove(id);
+        for &id in &frame.deleted_containers {
+            self.container_overlays.remove(&id);
         }
 
-        // Derive old displayed set from monitor_state before rebuilding.
-        // Global diff (not per-monitor) avoids hiding windows that moved between monitors,
-        // since hide() uses SWP_ASYNCWINDOWPOS and could race with the show() on the new monitor.
-        let old_displayed: HashSet<WindowId> = self
-            .monitor_state
-            .values()
-            .flat_map(|s| s.window_ids())
-            .copied()
-            .collect();
-
-        let mut new_displayed = HashSet::new();
-        let mut new_monitor_state: HashMap<MonitorId, MonitorState> = HashMap::new();
-        let border = self.config.border_size;
-
-        for fm in &frame.monitors {
-            let layout_ids: Vec<WindowId> = match &fm.layout {
-                FrameLayout::Fullscreen(id, _) => vec![*id],
-                FrameLayout::Normal { windows, .. } => windows.iter().map(|wp| wp.id).collect(),
-            };
-            new_displayed.extend(&layout_ids);
-
-            let new_state = match self.monitor_state.remove(&fm.monitor_id) {
-                Some(MonitorState::Exclusive(id)) => MonitorState::Exclusive(id),
-                _ => MonitorState::Normal {
-                    ids: layout_ids,
-                    focused: frame.focused.filter(|id| new_displayed.contains(id)),
-                },
-            };
-            new_monitor_state.insert(fm.monitor_id, new_state);
-        }
-        self.monitor_state = new_monitor_state;
-
-        self.position_windows(&frame, border);
-
-        for &id in new_displayed.difference(&old_displayed) {
-            if let Some(mw) = self.registry.get(id) {
-                self.taskbar.add_tab(mw.hwnd()).ok();
+        // --- Hide phase ---
+        for &id in &frame.to_hide {
+            if self.exclusive_fullscreen.contains(&id) {
+                continue;
             }
-        }
-        for &id in old_displayed.difference(&new_displayed) {
             if let Some(mw) = self.registry.get_mut(id) {
                 mw.hide();
                 self.taskbar.delete_tab(mw.hwnd()).ok();
             }
         }
 
-        // Turns out exclusive
-        let has_exclusive = self
-            .monitor_state
-            .values()
-            .any(|s| matches!(s, MonitorState::Exclusive(_)));
-        if !has_exclusive {
-            let focused = self.monitor_state.values().find_map(|s| match s {
-                MonitorState::Normal { focused, .. } => *focused,
-                MonitorState::Exclusive(_) => None,
-            });
-            if focused != self.last_focused {
-                self.last_focused = focused;
-                if let Some(id) = focused {
-                    if let Some(mw) = self.registry.get(id) {
-                        mw.focus();
-                    }
+        for &id in &frame.containers_to_hide {
+            if let Some(overlay) = self.container_overlays.get_mut(&id) {
+                overlay.hide();
+            }
+        }
+
+        // --- Position phase ---
+        self.position_windows(&frame);
+
+        // --- Taskbar ---
+        for &id in &frame.tabs_to_add {
+            if let Some(mw) = self.registry.get(id) {
+                self.taskbar.add_tab(mw.hwnd()).ok();
+            }
+        }
+
+        // --- Focus ---
+        if !self.exclusive_fullscreen.is_empty() {
+            return;
+        }
+        if frame.focused != self.last_focused {
+            self.last_focused = frame.focused;
+            if let Some(id) = frame.focused {
+                if let Some(mw) = self.registry.get(id) {
+                    mw.focus();
                 }
             }
         }
@@ -303,89 +253,83 @@ impl Wm {
     /// HWND_TOPMOST only on transitions. HWND_NOTOPMOST on the first non-topmost
     /// item (documented no-op if already non-topmost). Steady-state uses specific-HWND
     /// chaining — true no-op when already in position.
-    fn position_windows(&mut self, frame: &LayoutFrame, border: f32) {
-        // -- Collect window and container placements across all monitors --
-        let mut all_windows: Vec<(WindowId, &WindowPlacement)> = Vec::new();
-        let mut all_renders: Vec<&ContainerRender> = Vec::new();
-        for fm in &frame.monitors {
-            match &fm.layout {
-                FrameLayout::Fullscreen(window_id, mode) => {
-                    if *mode == WindowMode::ManagedFullscreen
-                        && let Some(mw) = self.registry.get_mut(*window_id)
-                    {
-                        mw.set_fullscreen(&fm.dimension);
-                    }
+    fn position_windows(&mut self, frame: &LayoutFrame) {
+        let border = self.config.border_size;
+        let focus_changed = frame.focused != self.last_focused;
+
+        // Separate fullscreen from normal windows
+        let mut normal_windows: Vec<&WindowShow> = Vec::new();
+        for ws in &frame.to_show {
+            if self.exclusive_fullscreen.contains(&ws.id) {
+                continue;
+            }
+            if let Some(dim) = &ws.fullscreen_dim {
+                if let Some(mw) = self.registry.get_mut(ws.id) {
+                    mw.set_fullscreen(dim);
                 }
-                FrameLayout::Normal {
-                    windows,
-                    container_renders,
-                } => {
-                    for wp in windows {
-                        all_windows.push((wp.id, wp));
-                    }
-                    all_renders.extend(container_renders);
-                }
+            } else {
+                normal_windows.push(ws);
             }
         }
 
-        // -- Classify into z-order groups --
-        let focus_changed = frame.focused != self.last_focused;
-        let mut newly_active_float: Vec<(WindowId, &WindowPlacement)> = Vec::new();
-        let mut steady_float: Vec<(WindowId, &WindowPlacement)> = Vec::new();
-        let mut focused_tiling: Option<(WindowId, &WindowPlacement)> = None;
-        let mut steady_tiling: Vec<(WindowId, &WindowPlacement)> = Vec::new();
+        // Classify into z-order groups
+        let mut newly_active_float: Vec<&WindowShow> = Vec::new();
+        let mut steady_float: Vec<&WindowShow> = Vec::new();
+        let mut focused_tiling: Option<&WindowShow> = None;
+        let mut steady_tiling: Vec<&WindowShow> = Vec::new();
 
-        for &(id, wp) in &all_windows {
+        for ws in &normal_windows {
             let float_changed = self
                 .registry
-                .get(id)
-                .map(|mw| (mw.mode() == WindowMode::Float) != wp.is_float)
+                .get(ws.id)
+                .map(|mw| (mw.mode() == WindowMode::Float) != ws.is_float)
                 .unwrap_or(false);
-            let is_newly_focused_float = wp.is_float && focus_changed && frame.focused == Some(id);
+            let is_newly_focused_float =
+                ws.is_float && focus_changed && frame.focused == Some(ws.id);
 
-            if wp.is_float {
+            if ws.is_float {
                 if float_changed || is_newly_focused_float {
-                    newly_active_float.push((id, wp));
+                    newly_active_float.push(ws);
                 } else {
-                    steady_float.push((id, wp));
+                    steady_float.push(ws);
                 }
-            } else if frame.focused == Some(id) {
-                focused_tiling = Some((id, wp));
+            } else if frame.focused == Some(ws.id) {
+                focused_tiling = Some(ws);
             } else {
-                steady_tiling.push((id, wp));
+                steady_tiling.push(ws);
             }
         }
 
         // Reverse-id sort (newest/highest first). Move focused to front of newly_active.
-        newly_active_float.sort_by(|a, b| b.0.cmp(&a.0));
+        newly_active_float.sort_by(|a, b| b.id.cmp(&a.id));
         if let Some(focused_id) = frame.focused {
-            if let Some(pos) = newly_active_float
-                .iter()
-                .position(|(id, _)| *id == focused_id)
-            {
+            if let Some(pos) = newly_active_float.iter().position(|ws| ws.id == focused_id) {
                 let item = newly_active_float.remove(pos);
                 newly_active_float.insert(0, item);
             }
         }
-        steady_float.sort_by(|a, b| b.0.cmp(&a.0));
-        steady_tiling.sort_by(|a, b| b.0.cmp(&a.0));
+        steady_float.sort_by(|a, b| b.id.cmp(&a.id));
+        steady_tiling.sort_by(|a, b| b.id.cmp(&a.id));
 
-        let focused_container = all_renders.iter().copied().find(|c| c.placement.is_focused);
-        let mut steady_containers: Vec<&ContainerRender> = all_renders
+        let focused_container = frame
+            .containers_to_show
             .iter()
-            .copied()
+            .find(|c| c.placement.is_focused);
+        let mut steady_containers: Vec<&ContainerRender> = frame
+            .containers_to_show
+            .iter()
             .filter(|c| !c.placement.is_focused)
             .collect();
         steady_containers.sort_by(|a, b| b.placement.id.cmp(&a.placement.id));
 
-        // -- Position in z-order --
+        // Position in z-order
         let mut anchor: Option<HWND> = None;
 
         // 1. Newly active floats (iterate in reverse so focused ends up highest)
-        for &(id, wp) in newly_active_float.iter().rev() {
-            if let Some(mw) = self.registry.get_mut(id) {
-                mw.show(wp, border, &self.config, Some(HWND_TOPMOST));
-                // Capture anchor from the first processed (bottom of chain)
+        for ws in newly_active_float.iter().rev() {
+            let is_focused = frame.focused == Some(ws.id);
+            if let Some(mw) = self.registry.get_mut(ws.id) {
+                mw.show(ws, is_focused, border, &self.config, Some(HWND_TOPMOST));
                 if anchor.is_none() {
                     anchor = Some(mw.hwnd());
                 }
@@ -393,9 +337,10 @@ impl Wm {
         }
 
         // 2. Steady floats — chain below anchor
-        for &(id, wp) in &steady_float {
-            if let Some(mw) = self.registry.get_mut(id) {
-                mw.show(wp, border, &self.config, anchor);
+        for ws in &steady_float {
+            let is_focused = frame.focused == Some(ws.id);
+            if let Some(mw) = self.registry.get_mut(ws.id) {
+                mw.show(ws, is_focused, border, &self.config, anchor);
                 anchor = Some(mw.hwnd());
             }
         }
@@ -408,9 +353,9 @@ impl Wm {
                 overlay.show();
                 anchor = Some(overlay.hwnd());
             }
-        } else if let Some((id, wp)) = focused_tiling {
-            if let Some(mw) = self.registry.get_mut(id) {
-                mw.show(wp, border, &self.config, Some(HWND_NOTOPMOST));
+        } else if let Some(ws) = focused_tiling {
+            if let Some(mw) = self.registry.get_mut(ws.id) {
+                mw.show(ws, true, border, &self.config, Some(HWND_NOTOPMOST));
                 anchor = Some(mw.hwnd());
             }
         } else {
@@ -428,18 +373,10 @@ impl Wm {
         }
 
         // 5. Steady tiling — chain below anchor
-        for &(id, wp) in &steady_tiling {
-            if let Some(mw) = self.registry.get_mut(id) {
-                mw.show(wp, border, &self.config, anchor);
+        for ws in &steady_tiling {
+            if let Some(mw) = self.registry.get_mut(ws.id) {
+                mw.show(ws, false, border, &self.config, anchor);
                 anchor = Some(mw.hwnd());
-            }
-        }
-
-        // 6. Hide overlays not active this frame
-        let shown: HashSet<ContainerId> = all_renders.iter().map(|c| c.placement.id).collect();
-        for (id, overlay) in &mut self.container_overlays {
-            if !shown.contains(id) {
-                overlay.hide();
             }
         }
     }
@@ -512,15 +449,7 @@ unsafe extern "system" fn wnd_proc(
                         if let Some(mw) = app.registry.get_mut(id) {
                             mw.set_mode(WindowMode::FullscreenExclusive);
                         }
-                        if let Some((&monitor_id, _)) =
-                            app.monitor_state.iter().find(|(_, state)| match state {
-                                MonitorState::Normal { ids, .. } => ids.contains(&id),
-                                MonitorState::Exclusive(eid) => *eid == id,
-                            })
-                        {
-                            app.monitor_state
-                                .insert(monitor_id, MonitorState::Exclusive(id));
-                        }
+                        app.exclusive_fullscreen.insert(id);
                         app.send_event(HubEvent::SetFullscreen(id));
                     }
                 }

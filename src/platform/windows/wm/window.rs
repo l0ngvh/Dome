@@ -16,6 +16,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PCWSTR};
 
 use super::super::OFFSCREEN_POS;
+use super::super::dome::WindowShow;
 use super::super::handle::{ManagedHwnd, WindowMode, get_dimension, get_invisible_border};
 use super::overlay::{OverlayRenderer, OwnedHwnd, build_window_border_region};
 use crate::config::Config;
@@ -80,24 +81,25 @@ impl ManagedWindow {
     #[tracing::instrument(skip_all)]
     pub(super) fn show(
         &mut self,
-        wp: &WindowPlacement,
+        ws: &WindowShow,
+        is_focused: bool,
         border: f32,
         config: &Config,
         z: Option<HWND>,
     ) {
-        tracing::debug!("show {self} frame={:?} float={}", wp.frame, wp.is_float);
+        tracing::debug!("show {self} frame={:?} float={}", ws.frame, ws.is_float);
 
         if z == Some(HWND_TOPMOST) {
-            self.handle.show(&wp.frame, border, wp.is_float, z);
+            self.handle.show(&ws.frame, border, ws.is_float, z);
             if let Some(overlay) = &mut self.overlay {
-                overlay.update(wp, config, z);
+                overlay.update(ws, is_focused, config, z);
             }
         } else {
             if let Some(overlay) = &mut self.overlay {
-                overlay.update(wp, config, z);
+                overlay.update(ws, is_focused, config, z);
             }
             let window_z = self.overlay.as_ref().map(|o| o.hwnd());
-            self.handle.show(&wp.frame, border, wp.is_float, window_z);
+            self.handle.show(&ws.frame, border, ws.is_float, window_z);
         }
     }
 
@@ -386,8 +388,14 @@ impl WindowOverlay {
 
     /// Update border content and position. `z_after` is caller-decided:
     /// `Some(hwnd)` places this overlay after that HWND, `None` uses `SWP_NOZORDER`.
-    fn update(&mut self, placement: &WindowPlacement, config: &Config, z_after: Option<HWND>) {
-        let vf = placement.visible_frame;
+    fn update(
+        &mut self,
+        ws: &WindowShow,
+        is_focused: bool,
+        config: &Config,
+        z_after: Option<HWND>,
+    ) {
+        let vf = ws.visible_frame;
         let w = vf.width.max(1.0) as u32;
         let h = vf.height.max(1.0) as u32;
 
@@ -397,11 +405,20 @@ impl WindowOverlay {
             self.height = h;
         }
 
+        let placement = WindowPlacement {
+            id: ws.id,
+            frame: ws.frame,
+            visible_frame: ws.visible_frame,
+            is_float: ws.is_float,
+            is_focused,
+            spawn_mode: ws.spawn_mode,
+        };
+
         self.renderer.render(w, h, 1.0, vec![], |ui| {
-            overlay::paint_window_border(ui.painter(), placement, config);
+            overlay::paint_window_border(ui.painter(), &placement, config);
         });
 
-        let region = build_window_border_region(placement, config);
+        let region = build_window_border_region(&placement, config);
         unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
 
         let mut flags = SWP_NOACTIVATE;
