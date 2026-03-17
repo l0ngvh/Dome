@@ -466,10 +466,10 @@ unsafe extern "C-unwind" fn observer_callback(
         return;
     }
 
-    if CFEqual(Some(notification), Some(&*kAXTitleChangedNotification()))
-        && let Some(cg_id) = get_cg_window_id(&element)
-    {
-        ctx.title_throttle.submit(cg_id);
+    if CFEqual(Some(notification), Some(&*kAXTitleChangedNotification())) {
+        if let Some(cg_id) = get_cg_window_id(&element) {
+            ctx.title_throttle.submit(cg_id);
+        }
         return;
     }
 

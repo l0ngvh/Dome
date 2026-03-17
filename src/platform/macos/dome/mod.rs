@@ -1,3 +1,4 @@
+mod inspect;
 mod mirror;
 mod monitor;
 mod placement_tracker;
@@ -7,33 +8,34 @@ mod window;
 
 pub(super) use monitor::get_all_screens;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 use calloop::channel::{Channel, Event as ChannelEvent, Sender as CalloopSender};
 use calloop::{EventLoop, LoopSignal};
 
-use dispatch2::{DispatchQoS, DispatchQueue, DispatchRetained, GlobalQueueIdentifier};
+use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2_app_kit::NSWorkspace;
-use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFString, CFType};
-use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
+use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
-use crate::config::{Config, MacosOnOpenRule, MacosWindow};
+use crate::config::{Config, MacosOnOpenRule};
 use crate::core::{ContainerId, ContainerPlacement, Dimension, Hub, WindowId, WindowPlacement};
-use crate::platform::macos::accessibility::AXWindow;
 
-use super::objc2_wrapper::kCGWindowNumber;
 use super::running_application::RunningApp;
 use super::ui::MessageSender;
+use inspect::{
+    ExistingWindow, NewAxWindow, VisibleWindowsReconciled, dispatch_reconcile_all_windows,
+    dispatch_refresh_app_windows,
+};
 use mirror::{WindowCapture, create_captures_async};
 use monitor::{MonitorInfo, MonitorRegistry};
 use placement_tracker::PlacementTracker;
 use registry::Registry;
-use window::{FullscreenState, FullscreenTransition, MacWindow};
+use window::{MacWindow, RoundedDimension};
 
 pub(super) enum HubEvent {
     /// Visible windows changed for an app (window created/destroyed/minimized/shown/hidden).
@@ -416,6 +418,8 @@ impl Dome {
             return;
         };
         let cg_id = ax.cg_id();
+        // Should be synchronous here, as we should pause everything until we know whether we are
+        // dealing with native fullscreen or not.
         let is_native_fs = ax.is_native_fullscreen();
 
         if let Some(mac_window) = self.registry.get_mut(cg_id) {
@@ -427,16 +431,20 @@ impl Dome {
                 self.hub.set_fullscreen(window_id);
             } else if !is_native_fs && was_fs {
                 tracing::info!(%mac_window, "Exited native fullscreen");
+                let pos = ax.get_position().unwrap_or((0, 0));
+                let size = ax.get_size().unwrap_or((0, 0));
+                mac_window.unset_fullscreen(RoundedDimension {
+                    x: pos.0,
+                    y: pos.1,
+                    width: size.0,
+                    height: size.1,
+                });
                 self.hub.unset_fullscreen(window_id);
             }
         } else if is_native_fs {
             tracing::info!(%ax, "New native fullscreen window");
             let window_id = self.hub.insert_fullscreen();
-            self.registry.insert(ax, window_id);
-            self.registry
-                .get_mut(cg_id)
-                .unwrap()
-                .set_native_fullscreen();
+            self.registry.insert_native_fullscreen(ax, window_id);
         }
     }
 
@@ -455,56 +463,16 @@ impl Dome {
         }
     }
 
-    #[tracing::instrument(skip(self))]
-    fn handle_window_moved(&mut self, pid: i32) {
-        let border = self.config.border_size;
-        let cg_ids: Vec<_> = self.registry.for_pid(pid).map(|(id, _)| id).collect();
-        for cg_id in cg_ids {
-            let _span = tracing::trace_span!("check_placement", %cg_id).entered();
-            let Some(mac_window) = self.registry.get_mut(cg_id) else {
-                continue;
-            };
-            let window_id = mac_window.window_id();
-            let Ok((x, y)) = mac_window.ax().get_position() else {
-                continue;
-            };
-            let Some(monitor) = self.monitor_registry.find_monitor_at(x as f32, y as f32) else {
-                continue;
-            };
-            match mac_window.sync_fullscreen(&monitor.dimension) {
-                FullscreenTransition::Entered(state) => {
-                    tracing::info!(%mac_window, ?state, "Entered fullscreen");
-                    self.hub.set_fullscreen(window_id);
-                    continue;
-                }
-                FullscreenTransition::Exited => {
-                    tracing::info!(%mac_window, "Exited fullscreen");
-                    self.hub.unset_fullscreen(window_id);
-                    continue;
-                }
-                FullscreenTransition::Unchanged => {}
-            }
-
-            let hub_window = self.hub.get_window(window_id);
-            if hub_window.is_fullscreen() {
-                continue;
-            }
-            let Some((min_w, min_h, max_w, max_h)) = mac_window.check_placement(hub_window) else {
-                continue;
-            };
-            // Convert actual window size back to frame size by adding border back.
-            // Frame dimensions have border inset applied. If in the original frame,
-            // window width is smaller than sum of borders, then we will request a size
-            // that can accommodate the borders here.
-            let remove_inset = |v: f32| v + 2.0 * border;
-            self.hub.set_window_constraint(
-                window_id,
-                min_w.map(remove_inset),
-                min_h.map(remove_inset),
-                max_w.map(remove_inset),
-                max_h.map(remove_inset),
-            );
-        }
+    fn dispatch_refresh_windows(&self, pid: i32) {
+        dispatch_refresh_app_windows(
+            pid,
+            self.registry
+                .for_pid(pid)
+                .map(|(id, w)| (id, (w.ax().clone(), w.fullscreen())))
+                .collect(),
+            self.config.macos.ignore.clone(),
+            self.async_tx.clone(),
+        );
     }
 
     fn update_screens(&mut self, screens: Vec<MonitorInfo>) {
@@ -608,6 +576,11 @@ impl Dome {
             self.remove_window(cg_id);
         }
 
+        let border = self.config.border_size;
+        for existing in result.existing {
+            self.process_existing_window(existing, border);
+        }
+
         let mut new_cg_ids = Vec::new();
         for ax in result.to_add {
             if let Some(ids) = self.add_window(ax) {
@@ -625,28 +598,83 @@ impl Dome {
         }
     }
 
-    fn add_window(&mut self, ax: AXWindow) -> Option<(CGWindowID, WindowId)> {
+    fn process_existing_window(&mut self, existing: ExistingWindow, border: f32) {
+        let Some(mac_window) = self.registry.get_mut(existing.cg_id) else {
+            return;
+        };
+        let window_id = mac_window.window_id();
+        let dim = &existing.dimension;
+
+        let monitor = self
+            .monitor_registry
+            .find_monitor_at(dim.x as f32, dim.y as f32);
+
+        if existing.is_native_fullscreen {
+            mac_window.set_native_fullscreen();
+            self.hub.set_fullscreen(window_id);
+            return;
+        }
+
+        let is_borderless = monitor.is_some_and(|m| {
+            let mon = &m.dimension;
+            let tolerance = 2;
+            (dim.x - mon.x as i32).abs() <= tolerance
+                && (dim.y - mon.y as i32).abs() <= tolerance
+                && (dim.width - mon.width as i32).abs() <= tolerance
+                && (dim.height - mon.height as i32).abs() <= tolerance
+        });
+        if is_borderless {
+            mac_window.set_borderless_fullscreen(monitor.unwrap().dimension);
+            self.hub.set_fullscreen(window_id);
+            return;
+        }
+        mac_window.unset_fullscreen(existing.dimension);
+        self.hub.unset_fullscreen(window_id);
+
+        let hub_window = self.hub.get_window(window_id);
+        if hub_window.is_fullscreen() {
+            return;
+        }
+        let Some((min_w, min_h, max_w, max_h)) =
+            mac_window.check_placement(hub_window, existing.dimension)
+        else {
+            return;
+        };
+        // Convert actual window size back to frame size by adding border back.
+        // Frame dimensions have border inset applied. If in the original frame,
+        // window width is smaller than sum of borders, then we will request a size
+        // that can accommodate the borders here.
+        let remove_inset = |v: f32| v + 2.0 * border;
+        self.hub.set_window_constraint(
+            window_id,
+            min_w.map(remove_inset),
+            min_h.map(remove_inset),
+            max_w.map(remove_inset),
+            max_h.map(remove_inset),
+        );
+    }
+
+    fn add_window(&mut self, new: NewAxWindow) -> Option<(CGWindowID, WindowId)> {
+        let ax = new.ax;
+        let dim = new.dimension;
         if self.registry.contains(ax.cg_id()) {
             return None;
         }
-
-        let (x, y) = ax.get_position().ok()?;
-        let (width, height) = ax.get_size().ok()?;
 
         let window_id = if ax.should_tile() {
             self.hub.insert_tiling()
         } else {
             self.hub.insert_float(Dimension {
-                x: x as f32,
-                y: y as f32,
-                width: width as f32,
-                height: height as f32,
+                x: dim.x as f32,
+                y: dim.y as f32,
+                width: dim.width as f32,
+                height: dim.height as f32,
             })
         };
 
         recovery::track(ax.clone(), self.primary_screen);
         let cg_id = ax.cg_id();
-        self.registry.insert(ax, window_id);
+        self.registry.insert(ax, window_id, dim);
 
         // Hide immediately - window may spawn outside viewport due to scrolling
         if let Some(window) = self.registry.get_mut(cg_id) {
@@ -671,128 +699,6 @@ impl Drop for Dome {
     }
 }
 
-pub(in crate::platform::macos) struct VisibleWindowsReconciled {
-    pid: i32,
-    is_hidden: bool,
-    to_remove: Vec<CGWindowID>,
-    to_add: Vec<AXWindow>,
-}
-
-fn dispatch_refresh_app_windows(
-    pid: i32,
-    tracked: HashMap<CGWindowID, (AXWindow, FullscreenState)>,
-    ignore_rules: Vec<MacosWindow>,
-    async_tx: CalloopSender<AsyncResult>,
-) {
-    let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
-        DispatchQoS::UserInitiated,
-    ));
-    queue.exec_async(move || {
-        autoreleasepool(|_| {
-            let Some(app) = RunningApp::new(pid) else {
-                return;
-            };
-            let result = compute_app_visible_windows(&app, &tracked, &ignore_rules);
-            async_tx.send(AsyncResult::AppVisibleWindows(result)).ok();
-        });
-    });
-}
-
-fn dispatch_reconcile_all_windows(
-    observed_pids: HashSet<i32>,
-    tracked: HashMap<CGWindowID, (AXWindow, FullscreenState)>,
-    ignore_rules: Vec<MacosWindow>,
-    async_tx: CalloopSender<AsyncResult>,
-) {
-    let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
-        DispatchQoS::UserInitiated,
-    ));
-    queue.exec_async(move || {
-        autoreleasepool(|_| {
-            let running: Vec<_> = RunningApp::all().collect();
-            let running_pids: HashSet<_> = running.iter().map(|app| app.pid()).collect();
-
-            let terminated_pids: Vec<_> = observed_pids
-                .iter()
-                .filter(|pid| !running_pids.contains(pid))
-                .copied()
-                .collect();
-
-            let new_apps: Vec<_> = running
-                .iter()
-                .filter(|app| !observed_pids.contains(&app.pid()))
-                .cloned()
-                .collect();
-
-            let apps: Vec<_> = running
-                .iter()
-                .map(|app| compute_app_visible_windows(app, &tracked, &ignore_rules))
-                .collect();
-
-            async_tx
-                .send(AsyncResult::AllVisibleWindows {
-                    terminated_pids,
-                    new_apps,
-                    apps,
-                })
-                .ok();
-        });
-    });
-}
-
-fn compute_app_visible_windows(
-    app: &RunningApp,
-    tracked: &HashMap<CGWindowID, (AXWindow, FullscreenState)>,
-    ignore_rules: &[MacosWindow],
-) -> VisibleWindowsReconciled {
-    let pid = app.pid();
-    let is_hidden = app.is_hidden();
-
-    if is_hidden {
-        return VisibleWindowsReconciled {
-            pid,
-            is_hidden,
-            to_remove: Vec::new(),
-            to_add: Vec::new(),
-        };
-    }
-
-    let cg_window_ids = list_cg_window_ids();
-
-    let mut to_remove = Vec::new();
-    for (&cg_id, (ax, fs)) in tracked.iter().filter(|(_, (ax, _))| ax.pid() == pid) {
-        if !cg_window_ids.contains(&cg_id) || !ax.is_valid() {
-            to_remove.push(cg_id);
-            continue;
-        }
-        // Skip minimized check for mock fullscreen - we minimize them ourselves
-        if *fs != FullscreenState::Borderless && ax.is_minimized() {
-            to_remove.push(cg_id);
-        }
-    }
-
-    let mut to_add = Vec::new();
-    for ax in app.ax_windows() {
-        if tracked.contains_key(&ax.cg_id()) {
-            continue;
-        }
-        if !ax.is_manageable() {
-            continue;
-        }
-        if should_ignore(&ax, ignore_rules) {
-            continue;
-        }
-        to_add.push(ax);
-    }
-
-    VisibleWindowsReconciled {
-        pid,
-        is_hidden,
-        to_remove,
-        to_add,
-    }
-}
-
 fn on_open_actions(window: &MacWindow, rules: &[MacosOnOpenRule]) -> Option<Actions> {
     let rule = rules.iter().find(|r| {
         r.window
@@ -800,21 +706,6 @@ fn on_open_actions(window: &MacWindow, rules: &[MacosOnOpenRule]) -> Option<Acti
     })?;
     tracing::debug!(%window, actions = %rule.run, "Running on_open actions");
     Some(rule.run.clone())
-}
-
-fn should_ignore(ax_window: &AXWindow, rules: &[MacosWindow]) -> bool {
-    let matched = rules
-        .iter()
-        .find(|r| r.matches(ax_window.title(), ax_window.bundle_id(), ax_window.title()));
-    if let Some(rule) = matched {
-        tracing::debug!(
-            %ax_window,
-            ?rule,
-            "Window ignored by rule"
-        );
-        return true;
-    }
-    false
 }
 
 fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[MonitorInfo]) {
@@ -860,31 +751,6 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
             hub.update_monitor_dimension(monitor_id, screen.dimension);
         }
     }
-}
-
-fn list_cg_window_ids() -> HashSet<CGWindowID> {
-    let Some(window_list) = CGWindowListCopyWindowInfo(CGWindowListOption::OptionAll, 0) else {
-        tracing::warn!("CGWindowListCopyWindowInfo returned None");
-        return HashSet::new();
-    };
-    let window_list: &CFArray<CFDictionary<CFString, CFType>> =
-        unsafe { window_list.cast_unchecked() };
-
-    let mut ids = HashSet::new();
-    let key = kCGWindowNumber();
-    for dict in window_list {
-        // window id is a required attribute
-        // https://developer.apple.com/documentation/coregraphics/kcgwindownumber?language=objc
-        let id = dict
-            .get(&key)
-            .unwrap()
-            .downcast::<CFNumber>()
-            .unwrap()
-            .as_i64()
-            .unwrap();
-        ids.insert(id as CGWindowID);
-    }
-    ids
 }
 
 pub(super) struct ContainerOverlayData {

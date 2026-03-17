@@ -100,12 +100,9 @@ impl MonitorEntry {
         let Some(w) = registry.by_id_mut(window_id) else {
             return;
         };
-        if w.fullscreen() == FullscreenState::Native {
-            if is_focused_monitor {
-                w.focus().ok();
-            }
-        } else {
-            w.set_fullscreen(self.screen.dimension);
+        w.set_borderless_fullscreen(self.screen.dimension);
+        if is_focused_monitor {
+            w.focus().ok();
         }
     }
 
@@ -150,8 +147,13 @@ impl MonitorEntry {
             if placement_tracker.is_moving(w.pid()) {
                 continue;
             }
-            if let Err(e) = w.show(wp, config) {
+            if let Err(e) = w.position(*wp, config.border_size) {
                 tracing::trace!("Failed to set position for window: {e:#}");
+            }
+            if wp.is_focused {
+                if let Err(e) = w.focus() {
+                    tracing::trace!("Failed to focus window: {e:#}");
+                }
             }
 
             let content_dim = apply_inset(wp.frame, config.border_size);

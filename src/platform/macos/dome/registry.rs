@@ -6,7 +6,7 @@ use crate::core::WindowId;
 
 use super::super::accessibility::AXWindow;
 use super::monitor::MonitorInfo;
-use super::window::MacWindow;
+use super::window::{MacWindow, RoundedDimension};
 
 pub(super) struct Registry {
     windows: HashMap<CGWindowID, MacWindow>,
@@ -91,7 +91,12 @@ impl Registry {
         self.windows.iter().map(|(&cg_id, w)| (cg_id, w))
     }
 
-    pub(super) fn insert(&mut self, ax: AXWindow, window_id: WindowId) {
+    pub(super) fn insert(
+        &mut self,
+        ax: AXWindow,
+        window_id: WindowId,
+        dimension: RoundedDimension,
+    ) {
         let cg_id = ax.cg_id();
         let pid = ax.pid();
         if pid as u32 == std::process::id() {
@@ -99,8 +104,24 @@ impl Registry {
         }
         self.id_to_cg.insert(window_id, cg_id);
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
-        self.windows
-            .insert(cg_id, MacWindow::new(ax, window_id, self.monitors.clone()));
+        self.windows.insert(
+            cg_id,
+            MacWindow::new(ax, window_id, self.monitors.clone(), dimension),
+        );
+    }
+
+    pub(super) fn insert_native_fullscreen(&mut self, ax: AXWindow, window_id: WindowId) {
+        let cg_id = ax.cg_id();
+        let pid = ax.pid();
+        if pid as u32 == std::process::id() {
+            return;
+        }
+        self.id_to_cg.insert(window_id, cg_id);
+        self.pid_to_cg.entry(pid).or_default().push(cg_id);
+        self.windows.insert(
+            cg_id,
+            MacWindow::new_native_fullscreen(ax, window_id, self.monitors.clone()),
+        );
     }
 
     pub(super) fn set_monitors(&mut self, monitors: Vec<MonitorInfo>) {
