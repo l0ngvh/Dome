@@ -577,8 +577,9 @@ impl Dome {
         }
 
         let border = self.config.border_size;
+        let observed_at = result.observed_at;
         for existing in result.existing {
-            self.process_existing_window(existing, border);
+            self.process_existing_window(existing, border, observed_at);
         }
 
         let mut new_cg_ids = Vec::new();
@@ -598,7 +599,12 @@ impl Dome {
         }
     }
 
-    fn process_existing_window(&mut self, existing: ExistingWindow, border: f32) {
+    fn process_existing_window(
+        &mut self,
+        existing: ExistingWindow,
+        border: f32,
+        observed_at: std::time::Instant,
+    ) {
         let Some(mac_window) = self.registry.get_mut(existing.cg_id) else {
             return;
         };
@@ -636,7 +642,7 @@ impl Dome {
             return;
         }
         let Some((min_w, min_h, max_w, max_h)) =
-            mac_window.check_placement(hub_window, existing.dimension)
+            mac_window.check_placement(hub_window, existing.dimension, observed_at)
         else {
             return;
         };

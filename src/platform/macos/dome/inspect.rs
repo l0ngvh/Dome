@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use calloop::channel::Sender as CalloopSender;
 use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
@@ -21,6 +22,7 @@ pub(super) struct VisibleWindowsReconciled {
     pub(super) to_remove: Vec<CGWindowID>,
     pub(super) to_add: Vec<NewAxWindow>,
     pub(super) existing: Vec<ExistingWindow>,
+    pub(super) observed_at: Instant,
 }
 
 pub(super) struct NewAxWindow {
@@ -111,6 +113,7 @@ fn compute_app_visible_windows(
             to_remove: Vec::new(),
             to_add: Vec::new(),
             existing: Vec::new(),
+            observed_at: Instant::now(),
         };
     }
 
@@ -180,6 +183,7 @@ fn compute_app_visible_windows(
         to_remove,
         to_add,
         existing,
+        observed_at: Instant::now(),
     }
 }
 

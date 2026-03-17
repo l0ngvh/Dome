@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use anyhow::Result;
 
 use super::mirror::WindowCapture;
@@ -131,6 +133,7 @@ impl MacWindow {
             let target = round_dim(target);
             p.target = Some(target);
             if actual != target {
+                p.placed_at = Instant::now();
                 if let Err(e) = self
                     .ax
                     .set_frame(target.x, target.y, target.width, target.height)
@@ -175,6 +178,7 @@ impl MacWindow {
         &mut self,
         window: &Window,
         new_placement: RoundedDimension,
+        observed_at: Instant,
     ) -> Option<RawConstraint> {
         let p = match &mut self.state {
             WindowState::Placed(p) => p,
@@ -246,6 +250,16 @@ impl MacWindow {
         }
 
         p.actual = new_placement;
+
+        if p.placed_at > observed_at {
+            tracing::trace!(
+                window = %self.ax,
+                ?target,
+                ?new_placement,
+                "stale observation, ignoring"
+            );
+            return None;
+        }
 
         let min_w = (new_placement.width > target.width).then_some(new_placement.width as f32);
         let min_h = (new_placement.height > target.height).then_some(new_placement.height as f32);
@@ -338,6 +352,7 @@ struct Placement {
     target: Option<RoundedDimension>,
     actual: RoundedDimension,
     retries: u8,
+    placed_at: Instant,
 }
 
 impl Placement {
@@ -346,6 +361,7 @@ impl Placement {
             target: None,
             actual,
             retries: 0,
+            placed_at: Instant::now(),
         }
     }
 }
