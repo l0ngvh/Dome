@@ -26,17 +26,17 @@ block2 = "0.6.2"
 dispatch2 = "0.3"
 libc = "0.2.179"
 objc2 = "0.6.3"
-objc2-app-kit = "0.3.2"
-objc2-application-services = "0.3.2"
-objc2-core-foundation = "0.3.2"
-objc2-core-graphics = "0.3.2"
-objc2-core-media = "0.3.2"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "libc", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSWindow", "NSWindowScripting", "NSView", "NSColor", "NSEvent", "NSScreen", "NSResponder", "NSGraphics", "objc2-core-foundation", "objc2-core-graphics", "objc2-quartz-core"] }
+objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "objc2", "libc", "HIServices", "AXUIElement", "AXValue", "AXError", "Accessibility", "AXNotificationConstants"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFDictionary", "CFNumber", "CFString", "CFRunLoop", "CFMachPort", "CFCGTypes", "CFDate"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGWindow", "CGColorSpace", "CGSession", "CGDirectDisplay", "CGEvent", "CGEventTypes"] }
+objc2-core-media = { version = "0.3.2", default-features = false, features = ["std", "CMSampleBuffer", "objc2-core-video"] }
 objc2-core-video = { version = "0.3.2", features = ["CVPixelBufferIOSurface", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "objc2-io-surface"] }
-objc2-foundation = "0.3.2"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSObject", "NSString", "NSValue", "NSNotification", "NSDistributedNotificationCenter", "NSOperation", "NSGeometry", "NSError", "NSObjCRuntime", "NSArray", "NSDictionary"] }
 objc2-io-surface = { version = "0.3.2", features = ["IOSurfaceRef"] }
 objc2-quartz-core = { version = "0.3.2", features = ["CAMetalLayer"] }
 objc2-metal = { version = "0.3.2", features = ["MTLDevice", "MTLCommandQueue", "MTLRenderPipeline", "MTLTexture", "MTLBuffer", "MTLRenderCommandEncoder", "MTLCommandBuffer", "MTLRenderPass", "MTLLibrary", "MTLSampler", "MTLAllocation", "MTLResource", "objc2-io-surface"] }
-objc2-screen-capture-kit = "0.3.2"
+objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "dispatch2", "SCShareableContent", "SCStream", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-media"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO", "Win32_UI_HiDpi", "Win32_System_Console"] }
