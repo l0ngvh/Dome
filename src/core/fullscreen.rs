@@ -21,9 +21,7 @@ impl Hub {
 
         self.windows.get_mut(window_id).mode = DisplayMode::Fullscreen;
         self.attach_fullscreen_to_workspace(ws, window_id);
-        let ws_mut = self.workspaces.get_mut(ws);
-        ws_mut.focused = Some(Child::Window(window_id));
-        ws_mut.viewport_offset = (0.0, 0.0);
+        self.workspaces.get_mut(ws).viewport_offset = (0.0, 0.0);
         tracing::info!(%window_id, "Fullscreen set");
     }
 
