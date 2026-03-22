@@ -31,7 +31,7 @@ impl PlacementTracker {
                 Timer::from_duration(DEBOUNCE_INTERVAL),
                 move |_, _, dome: &mut Dome| {
                     dome.placement_tracker.timers.remove(&pid);
-                    dome.dispatch_refresh_windows(pid);
+                    dome.dispatch_check_positions(pid);
                     TimeoutAction::Drop
                 },
             )

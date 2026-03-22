@@ -96,10 +96,6 @@ impl AXWindow {
             .ok();
     }
 
-    pub(super) fn should_tile(&self) -> bool {
-        !self.is_native_fullscreen()
-    }
-
     pub(super) fn is_native_fullscreen(&self) -> bool {
         get_attribute::<CFBoolean>(&self.element, &kAXFullScreenAttribute())
             .map(|b| b.as_bool())

@@ -5,31 +5,55 @@ use objc2_core_graphics::CGWindowID;
 use crate::core::WindowId;
 
 use super::super::accessibility::AXWindow;
-use super::monitor::MonitorInfo;
-use super::window::{MacWindow, RoundedDimension};
+use super::window::WindowState;
+
+#[derive(Clone)]
+pub(super) struct WindowEntry {
+    pub(super) ax: AXWindow,
+    pub(super) window_id: WindowId,
+    pub(super) state: WindowState,
+}
+
+impl std::fmt::Display for WindowEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}|{}:{}] {}",
+            self.window_id,
+            self.ax.pid(),
+            self.ax.cg_id(),
+            self.ax.app_name().unwrap_or("Unknown")
+        )?;
+        if let Some(bundle_id) = self.ax.bundle_id() {
+            write!(f, " ({bundle_id})")?;
+        }
+        if let Some(title) = self.ax.title() {
+            write!(f, " - {title}")?;
+        }
+        Ok(())
+    }
+}
 
 pub(super) struct Registry {
-    windows: HashMap<CGWindowID, MacWindow>,
+    windows: HashMap<CGWindowID, WindowEntry>,
     id_to_cg: HashMap<WindowId, CGWindowID>,
     pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
-    monitors: Vec<MonitorInfo>,
 }
 
 impl Registry {
-    pub(super) fn new(monitors: Vec<MonitorInfo>) -> Self {
+    pub(super) fn new() -> Self {
         Self {
             windows: HashMap::new(),
             id_to_cg: HashMap::new(),
             pid_to_cg: HashMap::new(),
-            monitors,
         }
     }
 
-    pub(super) fn get(&self, cg_id: CGWindowID) -> Option<&MacWindow> {
+    pub(super) fn get(&self, cg_id: CGWindowID) -> Option<&WindowEntry> {
         self.windows.get(&cg_id)
     }
 
-    pub(super) fn get_mut(&mut self, cg_id: CGWindowID) -> Option<&mut MacWindow> {
+    pub(super) fn get_mut(&mut self, cg_id: CGWindowID) -> Option<&mut WindowEntry> {
         self.windows.get_mut(&cg_id)
     }
 
@@ -38,33 +62,35 @@ impl Registry {
     }
 
     pub(super) fn remove(&mut self, cg_id: CGWindowID) -> Option<WindowId> {
-        let window = self.windows.remove(&cg_id)?;
-        let pid = window.pid();
-        self.id_to_cg.remove(&window.window_id());
+        let entry = self.windows.remove(&cg_id)?;
+        let pid = entry.ax.pid();
+        self.id_to_cg.remove(&entry.window_id);
         if let Some(ids) = self.pid_to_cg.get_mut(&pid) {
             ids.retain(|&id| id != cg_id);
             if ids.is_empty() {
                 self.pid_to_cg.remove(&pid);
             }
         }
-        tracing::info!(%window, window_id = %window.window_id(), "Window removed");
-        Some(window.window_id())
+        tracing::info!(%entry, window_id = %entry.window_id, "Window removed");
+        Some(entry.window_id)
     }
 
-    pub(super) fn by_id(&self, window_id: WindowId) -> Option<&MacWindow> {
+    pub(super) fn by_id(&self, window_id: WindowId) -> &WindowEntry {
         self.id_to_cg
             .get(&window_id)
             .and_then(|&cg_id| self.windows.get(&cg_id))
+            .unwrap()
     }
 
-    pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> Option<&mut MacWindow> {
+    pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> &mut WindowEntry {
         self.id_to_cg
             .get(&window_id)
             .copied()
             .and_then(|cg_id| self.windows.get_mut(&cg_id))
+            .unwrap()
     }
 
-    pub(super) fn for_pid(&self, pid: i32) -> impl Iterator<Item = (CGWindowID, &MacWindow)> {
+    pub(super) fn for_pid(&self, pid: i32) -> impl Iterator<Item = (CGWindowID, &WindowEntry)> {
         self.pid_to_cg
             .get(&pid)
             .into_iter()
@@ -78,25 +104,20 @@ impl Registry {
         };
         let mut removed = Vec::new();
         for cg_id in cg_ids {
-            if let Some(window) = self.windows.remove(&cg_id) {
-                self.id_to_cg.remove(&window.window_id());
-                tracing::info!(%window, window_id = %window.window_id(), "Window removed");
-                removed.push((cg_id, window.window_id()));
+            if let Some(entry) = self.windows.remove(&cg_id) {
+                self.id_to_cg.remove(&entry.window_id);
+                tracing::info!(%entry, window_id = %entry.window_id, "Window removed");
+                removed.push((cg_id, entry.window_id));
             }
         }
         removed
     }
 
-    pub(super) fn iter(&self) -> impl Iterator<Item = (CGWindowID, &MacWindow)> {
+    pub(super) fn iter(&self) -> impl Iterator<Item = (CGWindowID, &WindowEntry)> {
         self.windows.iter().map(|(&cg_id, w)| (cg_id, w))
     }
 
-    pub(super) fn insert(
-        &mut self,
-        ax: AXWindow,
-        window_id: WindowId,
-        dimension: RoundedDimension,
-    ) {
+    pub(super) fn insert(&mut self, ax: AXWindow, window_id: WindowId, state: WindowState) {
         let cg_id = ax.cg_id();
         let pid = ax.pid();
         if pid as u32 == std::process::id() {
@@ -106,28 +127,11 @@ impl Registry {
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
         self.windows.insert(
             cg_id,
-            MacWindow::new(ax, window_id, self.monitors.clone(), dimension),
+            WindowEntry {
+                ax,
+                window_id,
+                state,
+            },
         );
-    }
-
-    pub(super) fn insert_native_fullscreen(&mut self, ax: AXWindow, window_id: WindowId) {
-        let cg_id = ax.cg_id();
-        let pid = ax.pid();
-        if pid as u32 == std::process::id() {
-            return;
-        }
-        self.id_to_cg.insert(window_id, cg_id);
-        self.pid_to_cg.entry(pid).or_default().push(cg_id);
-        self.windows.insert(
-            cg_id,
-            MacWindow::new_native_fullscreen(ax, window_id, self.monitors.clone()),
-        );
-    }
-
-    pub(super) fn set_monitors(&mut self, monitors: Vec<MonitorInfo>) {
-        self.monitors = monitors.clone();
-        for window in self.windows.values_mut() {
-            window.on_monitor_change(monitors.clone());
-        }
     }
 }

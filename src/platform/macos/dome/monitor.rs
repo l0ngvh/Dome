@@ -5,18 +5,7 @@ use objc2_app_kit::NSScreen;
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::config::Config;
-use crate::core::{
-    Child, Container, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout,
-    MonitorPlacements, WindowId, WindowPlacement,
-};
-
-use super::ContainerOverlayData;
-use super::OverlayShow;
-use super::placement_tracker::PlacementTracker;
-use super::registry::Registry;
-use super::to_ns_rect;
-use super::window::{FullscreenState, apply_inset, clip_to_bounds};
+use crate::core::{Dimension, MonitorId, WindowId};
 
 #[derive(Clone, Debug)]
 pub(in crate::platform::macos) struct MonitorInfo {
@@ -44,170 +33,6 @@ pub(super) struct MonitorEntry {
     pub(super) id: MonitorId,
     pub(super) screen: MonitorInfo,
     pub(super) displayed_windows: HashSet<WindowId>,
-}
-
-impl MonitorEntry {
-    pub(super) fn apply_placements(
-        &mut self,
-        mp: &MonitorPlacements,
-        is_focused_monitor: bool,
-        hub: &Hub,
-        registry: &mut Registry,
-        config: &Config,
-        primary_full_height: f32,
-        placement_tracker: &PlacementTracker,
-    ) -> (Vec<OverlayShow>, Vec<ContainerOverlayData>) {
-        match &mp.layout {
-            MonitorLayout::Fullscreen(window_id) => {
-                self.apply_fullscreen(*window_id, is_focused_monitor, registry);
-                (Vec::new(), Vec::new())
-            }
-            MonitorLayout::Normal {
-                windows,
-                containers,
-            } => self.apply_normal(
-                windows,
-                containers,
-                hub,
-                registry,
-                config,
-                primary_full_height,
-                placement_tracker,
-            ),
-        }
-    }
-
-    fn apply_fullscreen(
-        &mut self,
-        window_id: crate::core::WindowId,
-        is_focused_monitor: bool,
-        registry: &mut Registry,
-    ) {
-        let new_windows: HashSet<WindowId> = Some(window_id)
-            .filter(|&wid| registry.by_id(wid).is_some())
-            .into_iter()
-            .collect();
-
-        for &wid in self.displayed_windows.difference(&new_windows) {
-            if let Some(w) = registry.by_id_mut(wid)
-                && let Err(e) = w.hide()
-            {
-                tracing::trace!("Failed to hide window: {e:#}");
-            }
-        }
-        self.displayed_windows = new_windows;
-
-        let Some(w) = registry.by_id_mut(window_id) else {
-            return;
-        };
-        w.set_borderless_fullscreen(self.screen.dimension);
-        if is_focused_monitor {
-            w.focus().ok();
-        }
-    }
-
-    fn apply_normal(
-        &mut self,
-        windows: &[WindowPlacement],
-        containers: &[ContainerPlacement],
-        hub: &Hub,
-        registry: &mut Registry,
-        config: &Config,
-        primary_full_height: f32,
-        placement_tracker: &PlacementTracker,
-    ) -> (Vec<OverlayShow>, Vec<ContainerOverlayData>) {
-        let new_windows: HashSet<WindowId> = windows
-            .iter()
-            .filter_map(|p| registry.by_id(p.id).map(|_| p.id))
-            .collect();
-
-        let leaving_native_fs = self.displayed_windows.difference(&new_windows).any(|&wid| {
-            registry
-                .by_id(wid)
-                .is_some_and(|w| w.fullscreen() == FullscreenState::Native)
-        });
-
-        for &wid in self.displayed_windows.difference(&new_windows) {
-            if let Some(w) = registry.by_id_mut(wid)
-                && let Err(e) = w.hide()
-            {
-                tracing::trace!("Failed to hide window: {e:#}");
-            }
-        }
-        self.displayed_windows = new_windows;
-
-        let mut shows = Vec::new();
-        for wp in windows {
-            let Some(w) = registry.by_id_mut(wp.id) else {
-                continue;
-            };
-            if w.fullscreen() == FullscreenState::Native {
-                continue;
-            }
-            if placement_tracker.is_moving(w.pid()) {
-                continue;
-            }
-            if let Err(e) = w.position(*wp, config.border_size) {
-                tracing::trace!("Failed to set position for window: {e:#}");
-            }
-            if wp.is_focused {
-                if let Err(e) = w.focus() {
-                    tracing::trace!("Failed to focus window: {e:#}");
-                }
-            }
-
-            let content_dim = apply_inset(wp.frame, config.border_size);
-            shows.push(OverlayShow {
-                window_id: wp.id,
-                placement: *wp,
-                cocoa_frame: to_ns_rect(primary_full_height, wp.visible_frame),
-                scale: w.mirror_source_scale(),
-                visible_content: clip_to_bounds(content_dim, wp.visible_frame),
-            });
-        }
-
-        if leaving_native_fs && !windows.iter().any(|wp| wp.is_focused) {
-            std::process::Command::new("osascript")
-                .arg("-e")
-                .arg("tell application \"System Events\" to key code 111 using {command down, control down, shift down, option down}")
-                .spawn()
-                .ok();
-        }
-
-        let mut container_overlays = Vec::new();
-
-        for cp in containers {
-            let cocoa_frame = to_ns_rect(primary_full_height, cp.visible_frame);
-            let tab_titles = if cp.is_tabbed {
-                let container = hub.get_container(cp.id);
-                collect_tab_titles(container, registry)
-            } else {
-                Vec::new()
-            };
-            container_overlays.push(ContainerOverlayData {
-                placement: cp.clone(),
-                tab_titles,
-                cocoa_frame,
-            });
-        }
-
-        (shows, container_overlays)
-    }
-}
-
-fn collect_tab_titles(container: &Container, registry: &Registry) -> Vec<String> {
-    container
-        .children()
-        .iter()
-        .map(|c| match c {
-            Child::Window(wid) => registry
-                .by_id(*wid)
-                .and_then(|w| w.title())
-                .unwrap_or("Unknown")
-                .to_owned(),
-            Child::Container(_) => "Container".to_owned(),
-        })
-        .collect()
 }
 
 pub(super) struct MonitorRegistry {
@@ -244,10 +69,18 @@ impl MonitorRegistry {
         self.map.get(&display_id).map(|e| e.id)
     }
 
-    pub(super) fn get_entry_mut(&mut self, monitor_id: MonitorId) -> Option<&mut MonitorEntry> {
+    pub(super) fn get_entry(&self, monitor_id: MonitorId) -> &MonitorEntry {
+        self.reverse
+            .get(&monitor_id)
+            .and_then(|d| self.map.get(d))
+            .unwrap()
+    }
+
+    pub(super) fn get_entry_mut(&mut self, monitor_id: MonitorId) -> &mut MonitorEntry {
         self.reverse
             .get(&monitor_id)
             .and_then(|d| self.map.get_mut(d))
+            .unwrap()
     }
 
     pub(super) fn primary_monitor_id(&self) -> MonitorId {

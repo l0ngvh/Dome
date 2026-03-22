@@ -16,7 +16,8 @@ use objc2_screen_capture_kit::{
 };
 
 use super::super::ui::MessageSender;
-use super::{AsyncResult, HubMessage};
+use super::HubMessage;
+use super::inspect::AsyncResult;
 use crate::core::{Dimension, WindowId};
 
 pub(in crate::platform::macos) struct WindowCapture {

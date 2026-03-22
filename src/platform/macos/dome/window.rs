@@ -2,374 +2,459 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use super::mirror::WindowCapture;
 use super::monitor::MonitorInfo;
-use crate::core::WindowPlacement;
-use crate::core::{Dimension, Window, WindowId};
+use crate::core::{Dimension, MonitorId, WindowId};
+use crate::platform::macos::Dome;
 use crate::platform::macos::accessibility::AXWindow;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum FullscreenState {
-    None,
-    Native,
-    Borderless,
-}
+const MAX_DRIFT_RETRIES: u8 = 5;
 
-pub(super) struct MacWindow {
-    ax: AXWindow,
-    window_id: WindowId,
-    capture: Option<WindowCapture>,
-    monitors: Vec<MonitorInfo>,
-    state: WindowState,
-}
-
-impl MacWindow {
-    pub(super) fn new(
-        ax: AXWindow,
-        window_id: WindowId,
-        monitors: Vec<MonitorInfo>,
-        current_placement: RoundedDimension,
-    ) -> Self {
-        Self {
-            ax,
-            window_id,
-            capture: None,
-            monitors,
-            state: WindowState::Placed(Placement::new(current_placement)),
+impl Dome {
+    pub(super) fn add_window(&mut self, ax: AXWindow, dim: RoundedDimension) -> WindowId {
+        let monitor = self
+            .monitor_registry
+            .find_monitor_at(dim.x as f32, dim.y as f32);
+        let is_borderless_fullscreen = monitor.is_some_and(|m| {
+            let mon = &m.dimension;
+            let tolerance = 2;
+            (dim.x - mon.x as i32).abs() <= tolerance
+                && (dim.y - mon.y as i32).abs() <= tolerance
+                && (dim.width - mon.width as i32).abs() <= tolerance
+                && (dim.height - mon.height as i32).abs() <= tolerance
+        });
+        if is_borderless_fullscreen {
+            let window_id = self.hub.insert_fullscreen();
+            self.registry
+                .insert(ax.clone(), window_id, WindowState::BorderlessFullscreen);
+            tracing::info!(%window_id, "New borderless fullscreen window");
+            window_id
+        } else {
+            let window_id = self.hub.insert_tiling();
+            self.registry.insert(
+                ax.clone(),
+                window_id,
+                WindowState::Positioned(PositionedState::Offscreen { actual: dim }),
+            );
+            tracing::info!(%window_id, "New tiling window");
+            window_id
         }
     }
 
-    pub(super) fn new_native_fullscreen(
-        ax: AXWindow,
-        window_id: WindowId,
-        monitors: Vec<MonitorInfo>,
-    ) -> Self {
-        Self {
-            ax,
-            window_id,
-            capture: None,
-            monitors,
-            state: WindowState::NativeFullscreen,
-        }
+    pub(super) fn add_native_fullscreen_window(&mut self, ax: AXWindow) -> WindowId {
+        let window_id = self.hub.insert_fullscreen();
+        self.registry
+            .insert(ax, window_id, WindowState::NativeFullscreen);
+        tracing::info!(%window_id, "New native fullscreen window");
+        window_id
     }
 
-    pub(super) fn pid(&self) -> i32 {
-        self.ax.pid()
-    }
-
-    pub(super) fn window_id(&self) -> WindowId {
-        self.window_id
-    }
-
-    pub(super) fn set_capture(&mut self, capture: WindowCapture) {
-        self.capture = Some(capture);
-    }
-
-    pub(super) fn set_borderless_fullscreen(&mut self, dim: Dimension) {
-        // macOS zoom button aggressively maintains fullscreen position — repeated set_frame
-        // calls cause a fight loop. Only set frame on the initial transition.
-        if matches!(self.state, WindowState::BorderlessFullscreen) {
+    #[tracing::instrument(skip(self))]
+    pub(super) fn place_window(&mut self, window_id: WindowId, dim: Dimension) {
+        let window = self.registry.by_id_mut(window_id);
+        if self.placement_tracker.is_moving(window.ax.pid()) {
             return;
         }
-        self.state = WindowState::BorderlessFullscreen;
-
-        if let Err(e) = self.ax.unminimize() {
-            tracing::debug!("Failed to unminimize window: {e:#}");
-        }
-        if let Err(e) = self.ax.set_frame(
-            dim.x as i32,
-            dim.y as i32,
-            dim.width as i32,
-            dim.height as i32,
-        ) {
-            tracing::trace!("Failed to set fullscreen frame: {e:#}");
-        }
-    }
-
-    pub(super) fn unset_fullscreen(&mut self, actual: RoundedDimension) {
-        match self.state {
-            WindowState::BorderlessFullscreen | WindowState::NativeFullscreen => {
-                self.state = WindowState::Placed(Placement::new(actual));
-            }
-            WindowState::Placed(_) => {}
-        }
-    }
-
-    pub(super) fn position(&mut self, wp: WindowPlacement, border_size: f32) -> anyhow::Result<()> {
-        let WindowState::Placed(p) = &mut self.state else {
-            debug_assert!(false, "position() called on fullscreen window {}", self.ax);
-            return Ok(());
+        let WindowState::Positioned(positioned_state) = window.state else {
+            debug_assert!(
+                false,
+                "We can only position windows in Positioned state, it seems core's state and platform's state differ"
+            );
+            return;
         };
-        let actual = p.actual;
-        let content_dim = apply_inset(wp.frame, border_size);
 
-        if wp.is_float && !wp.is_focused {
-            let scale = hidden_monitor(&self.monitors).scale;
-            if let Some(capture) = &mut self.capture {
-                let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
-                if let Some(visible_content) = visible_content {
-                    capture.start(self.window_id, content_dim, visible_content, scale);
-                } else {
-                    capture.stop();
-                }
+        let target = round_dim(dim);
+        match positioned_state {
+            PositionedState::InView(mut p) => {
+                if p.set_target(target)
+                    && let Err(e) =
+                        window
+                            .ax
+                            .set_frame(target.x, target.y, target.width, target.height)
+                {
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                };
             }
-            p.target = None;
-            move_offscreen(&self.monitors, &p.actual, &self.ax)?;
-        } else {
-            // Clip to visible_frame bounds — macOS doesn't reliably allow
-            // placing windows partially off-screen (especially above menu bar)
-            let Some(target) = clip_to_bounds(content_dim, wp.visible_frame) else {
-                tracing::trace!(
-                    "Window {} is offscreen (dim={:?}, bounds={:?}), hiding",
-                    self.ax,
-                    content_dim,
-                    wp.visible_frame,
-                );
-                p.target = None;
-                move_offscreen(&self.monitors, &p.actual, &self.ax)?;
-                return Ok(());
-            };
-
-            let target = round_dim(target);
-            p.target = Some(target);
-            if actual != target {
-                p.placed_at = Instant::now();
-                if let Err(e) = self
+            PositionedState::Offscreen { actual } => {
+                window.state = WindowState::Positioned(PositionedState::InView(Placement::new(
+                    actual, target,
+                )));
+                if let Err(e) = window
                     .ax
                     .set_frame(target.x, target.y, target.width, target.height)
                 {
-                    tracing::trace!("Window {} set_frame failed: {e}", self);
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
+        };
+    }
 
-            if let Some(capture) = &mut self.capture {
-                capture.stop();
+    #[tracing::instrument(skip(self))]
+    pub(super) fn place_fullscreen_window(&mut self, window_id: WindowId, monitor_id: MonitorId) {
+        let window = self.registry.by_id_mut(window_id);
+        let monitor = self.monitor_registry.get_entry_mut(monitor_id);
+        let screen_dim = monitor.screen.dimension;
+        match window.state {
+            WindowState::Minimized => {
+                if let Err(err) = window.ax.unminimize() {
+                    tracing::trace!("Failed to unminimize window: {err:#}");
+                }
+                window.state = WindowState::BorderlessFullscreen
+            }
+            WindowState::Positioned(PositionedState::Offscreen { actual }) => {
+                let target = round_dim(screen_dim);
+                window.state = WindowState::Positioned(PositionedState::InView(Placement::new(
+                    actual, target,
+                )));
+                if let Err(err) =
+                    window
+                        .ax
+                        .set_frame(target.x, target.y, target.width, target.height)
+                {
+                    tracing::trace!("Failed to set fullscreen frame: {err:#}");
+                }
+            }
+            WindowState::Positioned(PositionedState::InView(mut p)) => {
+                let target = round_dim(screen_dim);
+                if p.set_target(target)
+                    && let Err(err) =
+                        window
+                            .ax
+                            .set_frame(target.x, target.y, target.width, target.height)
+                {
+                    tracing::trace!("Failed to set fullscreen frame: {err:#}");
+                }
+            }
+            // We don't touch OS managed fullscreen windows
+            _ => {}
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub(super) fn window_entered_native_fullscreen(&mut self, window_id: WindowId) {
+        let window = self.registry.by_id_mut(window_id);
+
+        window.state = WindowState::NativeFullscreen;
+        self.hub.set_fullscreen(window.window_id);
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub(super) fn window_moved(
+        &mut self,
+        window_id: WindowId,
+        new_placement: RoundedDimension,
+        observed_at: std::time::Instant,
+    ) {
+        let monitors = self.monitor_registry.all_screens();
+        let window = self.registry.by_id_mut(window_id);
+        let monitor = self
+            .monitor_registry
+            .find_monitor_at(new_placement.x as f32, new_placement.y as f32);
+        let is_borderless_fullscreen = monitor.is_some_and(|m| {
+            let mon = &m.dimension;
+            let tolerance = 2;
+            (new_placement.x - mon.x as i32).abs() <= tolerance
+                && (new_placement.y - mon.y as i32).abs() <= tolerance
+                && (new_placement.width - mon.width as i32).abs() <= tolerance
+                && (new_placement.height - mon.height as i32).abs() <= tolerance
+        });
+
+        match &mut window.state {
+            WindowState::Positioned(PositionedState::Offscreen { actual }) => {
+                if is_borderless_fullscreen {
+                    // Window turned fullscreen, but not visible, so we hide them again
+                    self.hub.set_fullscreen(window_id);
+                    window.state = WindowState::Minimized;
+                    if let Err(e) = window.ax.minimize() {
+                        tracing::trace!("Failed to minimize window: {e:#}");
+                    }
+                } else {
+                    *actual = new_placement;
+                    if let Err(e) = move_offscreen(&monitors, actual, &window.ax) {
+                        tracing::trace!("re-hide failed: {e}");
+                    }
+                }
+            }
+            WindowState::Positioned(PositionedState::InView(p)) => {
+                if p.placed_at > observed_at {
+                    tracing::trace!(?new_placement, "stale observation, ignoring");
+                    return;
+                }
+
+                if new_placement == p.target {
+                    p.actual = new_placement;
+                    return;
+                }
+
+                if is_borderless_fullscreen {
+                    window.state = WindowState::BorderlessFullscreen;
+                    self.hub.set_fullscreen(window_id);
+                    return;
+                }
+                let hub_window = self.hub.get_window(window_id);
+                // Float can only be moved when focused (otherwise it's the mirror), and focused
+                // floats are always inside viewport
+                if hub_window.is_float() {
+                    p.actual = new_placement;
+                    // TODO: update float dimension
+                    return;
+                }
+
+                if p.record_drift(new_placement) {
+                    let target = p.target;
+                    let should_retry = p.should_retry();
+                    let just_gave_up = p.just_gave_up();
+                    if should_retry {
+                        tracing::trace!(?target, ?new_placement, "window drifted, correcting");
+                        if let Err(e) =
+                            window
+                                .ax
+                                .set_frame(target.x, target.y, target.width, target.height)
+                        {
+                            tracing::trace!("Window {} set_frame failed: {e}", window);
+                        }
+                    } else if just_gave_up {
+                        tracing::debug!(
+                            "Window {} can't be moved to {:?} (actual: {:?})",
+                            window,
+                            target,
+                            new_placement
+                        );
+                    }
+                    return;
+                }
+
+                p.actual = new_placement;
+                let Some(c) = p.detect_constraint() else {
+                    return;
+                };
+                // Convert actual window size back to frame size by adding border back.
+                // Frame dimensions have border inset applied. If in the original frame,
+                // window width is smaller than sum of borders, then we will request a size
+                // that can accommodate the borders here.
+                let remove_inset = |v: f32| v + 2.0 * self.config.border_size;
+                self.hub.set_window_constraint(
+                    window_id,
+                    c.min_width.map(remove_inset),
+                    c.min_height.map(remove_inset),
+                    c.max_width.map(remove_inset),
+                    c.max_height.map(remove_inset),
+                );
+            }
+            WindowState::Minimized => {
+                // Window somehow got brought back to screen, maybe through window focused but the
+                // notification was not fired
+                tracing::trace!(
+                    "Previously minimized borderless fullscreen window reappeared at {new_placement:?}"
+                );
+                if is_borderless_fullscreen && let Err(e) = window.ax.minimize() {
+                    tracing::trace!("Failed to minimize window: {e:#}");
+                }
+                // No longer fullscreen borderless, so bring them back and put in offscreen
+                else {
+                    if let Err(e) = window.ax.unminimize() {
+                        tracing::debug!("Failed to unminimize window: {e:#}");
+                    }
+                    if let Err(e) = move_offscreen(&monitors, &new_placement, &window.ax) {
+                        tracing::trace!("hide after unminimize failed: {e}");
+                    }
+                    window.state = WindowState::Positioned(PositionedState::Offscreen {
+                        actual: new_placement,
+                    });
+                    self.hub.unset_fullscreen(window_id);
+                }
+            }
+            WindowState::BorderlessFullscreen => {
+                // No longer border borderless fullscreen. Move to offscreen position as these
+                // windows might now be inserted offscreen, which will be put back into view later
+                // if it's in view
+                if !is_borderless_fullscreen {
+                    window.state = WindowState::Positioned(PositionedState::Offscreen {
+                        actual: new_placement,
+                    });
+                    self.hub.unset_fullscreen(window_id);
+                }
+            }
+            WindowState::NativeFullscreen => {
+                // No longer native fullscreen
+                if is_borderless_fullscreen {
+                    window.state = WindowState::BorderlessFullscreen;
+                } else {
+                    window.state = WindowState::Positioned(PositionedState::Offscreen {
+                        actual: new_placement,
+                    });
+                    self.hub.unset_fullscreen(window_id);
+                }
             }
         }
-        Ok(())
     }
 
-    pub(super) fn set_native_fullscreen(&mut self) {
-        self.state = WindowState::NativeFullscreen;
-    }
-
-    pub(super) fn hide(&mut self) -> anyhow::Result<()> {
-        if let Some(capture) = &mut self.capture {
+    #[tracing::instrument(skip(self))]
+    pub(super) fn hide_window(&mut self, window_id: WindowId) {
+        let monitors = self.monitor_registry.all_screens();
+        let window = self.registry.by_id_mut(window_id);
+        if let Some(capture) = self.captures.get_mut(&window_id) {
             capture.stop();
         }
         // Minimize borderless fullscreen windows instead of moving offscreen:
         // 1. User-zoomed windows maintain their fullscreen state, so moving them is futile
         // 2. Moving offscreen triggers handle_window_moved which detects fullscreen exit
         // Native fullscreen windows are on a separate Space and don't need hiding.
-        match &mut self.state {
-            WindowState::BorderlessFullscreen => self.ax.minimize(),
-            WindowState::NativeFullscreen => Ok(()),
-            WindowState::Placed(p) => {
-                p.target = None;
-                move_offscreen(&self.monitors, &p.actual, &self.ax)
+        let result = match &window.state {
+            WindowState::BorderlessFullscreen => {
+                window.state = WindowState::Minimized;
+                window.ax.minimize()
             }
-        }
-    }
-
-    /// Check if window settled at expected position and detect constraints.
-    /// If position doesn't align, attempts to move window back.
-    /// Had to make sure to only call this function once this window has finished moving/resizing
-    pub(super) fn check_placement(
-        &mut self,
-        window: &Window,
-        new_placement: RoundedDimension,
-        observed_at: Instant,
-    ) -> Option<RawConstraint> {
-        let p = match &mut self.state {
-            WindowState::Placed(p) => p,
-            _ => return None,
+            WindowState::NativeFullscreen | WindowState::Minimized => Ok(()),
+            WindowState::Positioned(positioned_state) => match positioned_state {
+                PositionedState::InView(placement) => {
+                    let actual = placement.actual;
+                    window.state = WindowState::Positioned(PositionedState::Offscreen { actual });
+                    move_offscreen(&monitors, &actual, &window.ax)
+                }
+                PositionedState::Offscreen { actual } => {
+                    move_offscreen(&monitors, actual, &window.ax)
+                }
+            },
         };
-
-        let (hidden_x, hidden_y) = hidden_position(&self.monitors);
-        if new_placement.x == hidden_x || new_placement.y == hidden_y {
-            p.actual = new_placement;
-            return None;
+        if let Err(e) = result {
+            tracing::trace!("Failed to hide window: {e:#}");
         }
+    }
 
-        let target = match p.target {
-            Some(t) => t,
-            None => {
-                p.actual = new_placement;
-                if let Err(e) = move_offscreen(&self.monitors, &p.actual, &self.ax) {
-                    tracing::trace!("Window {} hide failed: {e}", self.ax);
-                }
-                return None;
-            }
+    #[tracing::instrument(skip(self))]
+    pub(super) fn move_offscreen(&mut self, window_id: WindowId) {
+        let window = self.registry.by_id_mut(window_id);
+        let WindowState::Positioned(positioned_state) = window.state else {
+            debug_assert!(
+                false,
+                "Can only move windows which dome control the positions offscreen"
+            );
+            return;
         };
-
-        // Float can only be moved when focused (otherwise it's the mirror), and focused
-        // floats are always inside viewport
-        if window.is_float() {
-            p.actual = new_placement;
-            return None;
-        }
-
-        // FIXME: Change this to if new placement encompass the old placement
-        // At least one edge must match on each axis - user resize moves both edges on one axis
-        let left = new_placement.x == target.x;
-        let right = new_placement.x + new_placement.width == target.x + target.width;
-        let top = new_placement.y == target.y;
-        let bottom = new_placement.y + new_placement.height == target.y + target.height;
-
-        if !((left || right) && (top || bottom)) {
-            if p.target == Some(target) && p.actual == new_placement {
-                p.retries = p.retries.saturating_add(1);
-            } else {
-                p.retries = 0;
+        let monitors = self.monitor_registry.all_screens();
+        match positioned_state {
+            PositionedState::InView(placement) => {
+                let actual = placement.actual;
+                move_offscreen(&monitors, &actual, &window.ax);
+                window.state = WindowState::Positioned(PositionedState::Offscreen { actual })
             }
-            let retries = p.retries;
-            p.target = Some(target);
-            p.actual = new_placement;
-            if retries <= 5 {
-                tracing::trace!(
-                    window = %self.ax,
-                    ?target,
-                    ?new_placement,
-                    "window drifted, correcting"
-                );
-                if let Err(e) = self
-                    .ax
-                    .set_frame(target.x, target.y, target.width, target.height)
-                {
-                    tracing::trace!("Window {} set_frame failed: {e}", self.ax);
-                }
-            } else if retries == 6 {
-                tracing::debug!(
-                    "Window {} can't be moved to {:?} (actual: {:?})",
-                    self,
-                    target,
-                    new_placement
-                );
-            }
-            return None;
-        }
-
-        p.actual = new_placement;
-
-        if p.placed_at > observed_at {
-            tracing::trace!(
-                window = %self.ax,
-                ?target,
-                ?new_placement,
-                "stale observation, ignoring"
-            );
-            return None;
-        }
-
-        let min_w = (new_placement.width > target.width).then_some(new_placement.width as f32);
-        let min_h = (new_placement.height > target.height).then_some(new_placement.height as f32);
-        let max_w = (new_placement.width < target.width).then_some(new_placement.width as f32);
-        let max_h = (new_placement.height < target.height).then_some(new_placement.height as f32);
-        if min_w.is_some() || min_h.is_some() || max_w.is_some() || max_h.is_some() {
-            tracing::trace!(
-                window = %self,
-                ?target,
-                ?new_placement,
-                ?min_w, ?min_h, ?max_w, ?max_h,
-                "window constrained"
-            );
-            Some((min_w, min_h, max_w, max_h))
-        } else {
-            None
-        }
-    }
-
-    pub(super) fn update_title(&mut self) {
-        self.ax.update_title();
-    }
-
-    pub(super) fn title(&self) -> Option<&str> {
-        self.ax.title()
-    }
-
-    pub(super) fn app_name(&self) -> Option<&str> {
-        self.ax.app_name()
-    }
-
-    pub(super) fn bundle_id(&self) -> Option<&str> {
-        self.ax.bundle_id()
-    }
-
-    pub(super) fn focus(&self) -> Result<()> {
-        self.ax.focus()
-    }
-
-    pub(super) fn fullscreen(&self) -> FullscreenState {
-        match &self.state {
-            WindowState::NativeFullscreen => FullscreenState::Native,
-            WindowState::BorderlessFullscreen => FullscreenState::Borderless,
-            WindowState::Placed(_) => FullscreenState::None,
-        }
-    }
-
-    pub(super) fn ax(&self) -> &AXWindow {
-        &self.ax
-    }
-
-    pub(super) fn mirror_source_scale(&self) -> f64 {
-        hidden_monitor(&self.monitors).scale
-    }
-
-    pub(super) fn on_monitor_change(&mut self, monitors: Vec<MonitorInfo>) {
-        self.monitors = monitors;
-        if let WindowState::Placed(p) = &self.state {
-            if p.target.is_none() {
-                if let Err(e) = move_offscreen(&self.monitors, &p.actual, &self.ax) {
-                    tracing::trace!("Failed to re-hide window: {e:#}");
-                }
+            PositionedState::Offscreen { actual } => {
+                move_offscreen(&monitors, &actual, &window.ax);
             }
         }
     }
 }
 
-impl std::fmt::Display for MacWindow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[{}|{}:{}] {}",
-            self.window_id,
-            self.ax.pid(),
-            self.ax.cg_id(),
-            self.ax.app_name().unwrap_or("Unknown")
-        )?;
-        if let Some(bundle_id) = self.ax.bundle_id() {
-            write!(f, " ({bundle_id})")?;
-        }
-        if let Some(title) = self.ax.title() {
-            write!(f, " - {title}")?;
-        }
-        Ok(())
-    }
+#[derive(Clone, Copy)]
+pub(super) enum WindowState {
+    Positioned(PositionedState),
+    /// Window is in a macOS native fullscreen Space.
+    NativeFullscreen,
+    /// Window was zoomed to fill the screen via the zoom button or similar.
+    /// Distinct from native fullscreen — no separate Space is created.
+    BorderlessFullscreen,
+    /// Window is minimized by Dome because it can't be moved offscreen
+    /// (e.g. borderless fullscreen windows). Windows minimized by users are
+    /// untracked and removed from Dome.
+    Minimized,
 }
 
-struct Placement {
-    /// The desired placement. None if it should be hidden
-    target: Option<RoundedDimension>,
-    actual: RoundedDimension,
-    retries: u8,
-    placed_at: Instant,
+#[derive(Clone, Copy)]
+pub(super) enum PositionedState {
+    /// Window is moved offscreen by Dome. `actual` is the last observed position, may differ from
+    /// the current hidden coordinates if monitors changed since the window was hidden.
+    Offscreen { actual: RoundedDimension },
+    /// Window is tiled or floating with an active placement target.
+    InView(Placement),
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Placement {
+    pub(super) target: RoundedDimension,
+    pub(super) actual: RoundedDimension,
+    pub(super) retries: u8,
+    pub(super) placed_at: Instant,
 }
 
 impl Placement {
-    fn new(actual: RoundedDimension) -> Self {
+    pub(super) fn new(actual: RoundedDimension, target: RoundedDimension) -> Self {
         Self {
-            target: None,
+            target,
             actual,
             retries: 0,
             placed_at: Instant::now(),
         }
     }
-}
 
-enum WindowState {
-    Placed(Placement),
-    BorderlessFullscreen,
-    NativeFullscreen,
+    /// Record a new target. Returns true if set_frame is needed.
+    pub(super) fn set_target(&mut self, target: RoundedDimension) -> bool {
+        let target_changed = self.target != target;
+        self.target = target;
+        if target_changed {
+            self.retries = 0;
+            self.placed_at = Instant::now();
+        }
+        target_changed
+    }
+
+    // FIXME: Change this to if new placement encompass the old placement
+    //
+    /// Check edge alignment and track retries. Returns true if this was a
+    /// drift (edges not aligned). Caller should check `should_retry()` to
+    /// decide whether to issue set_frame.
+    pub(super) fn record_drift(&mut self, new_actual: RoundedDimension) -> bool {
+        let target = self.target;
+        let left = new_actual.x == target.x;
+        let right = new_actual.x + new_actual.width == target.x + target.width;
+        let top = new_actual.y == target.y;
+        let bottom = new_actual.y + new_actual.height == target.y + target.height;
+
+        if (left || right) && (top || bottom) {
+            return false;
+        }
+
+        self.retries = self.retries.saturating_add(1);
+        self.actual = new_actual;
+        true
+    }
+
+    /// Whether drift retries are not yet exhausted.
+    pub(super) fn should_retry(&self) -> bool {
+        self.retries <= MAX_DRIFT_RETRIES
+    }
+
+    /// Whether we just crossed the retry limit (for one-time logging).
+    pub(super) fn just_gave_up(&self) -> bool {
+        self.retries == MAX_DRIFT_RETRIES + 1
+    }
+
+    /// Compare actual vs target, return constraint if size mismatched.
+    pub(super) fn detect_constraint(&self) -> Option<RawConstraint> {
+        let (actual, target) = (self.actual, self.target);
+        let min_w = (actual.width > target.width).then_some(actual.width as f32);
+        let min_h = (actual.height > target.height).then_some(actual.height as f32);
+        let max_w = (actual.width < target.width).then_some(actual.width as f32);
+        let max_h = (actual.height < target.height).then_some(actual.height as f32);
+        if min_w.is_some() || min_h.is_some() || max_w.is_some() || max_h.is_some() {
+            tracing::trace!(
+                ?target,
+                ?actual,
+                ?min_w,
+                ?min_h,
+                ?max_w,
+                ?max_h,
+                "window constrained"
+            );
+            Some(RawConstraint {
+                min_width: min_w,
+                min_height: min_h,
+                max_width: max_w,
+                max_height: max_h,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 pub(super) fn apply_inset(dim: Dimension, border: f32) -> Dimension {
@@ -381,8 +466,12 @@ pub(super) fn apply_inset(dim: Dimension, border: f32) -> Dimension {
     }
 }
 
-/// Constraint on raw window size (min_w, min_h, max_w, max_h).
-pub(super) type RawConstraint = (Option<f32>, Option<f32>, Option<f32>, Option<f32>);
+pub(super) struct RawConstraint {
+    pub(super) min_width: Option<f32>,
+    pub(super) min_height: Option<f32>,
+    pub(super) max_width: Option<f32>,
+    pub(super) max_height: Option<f32>,
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(super) struct RoundedDimension {
@@ -392,7 +481,7 @@ pub(super) struct RoundedDimension {
     pub(super) height: i32,
 }
 
-fn round_dim(dim: Dimension) -> RoundedDimension {
+pub(super) fn round_dim(dim: Dimension) -> RoundedDimension {
     RoundedDimension {
         x: dim.x.round() as i32,
         y: dim.y.round() as i32,
@@ -422,7 +511,7 @@ pub(super) fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimen
     })
 }
 
-fn move_offscreen(
+pub(super) fn move_offscreen(
     monitors: &[MonitorInfo],
     actual: &RoundedDimension,
     ax: &AXWindow,
@@ -443,7 +532,7 @@ fn move_offscreen(
 /// We pick the monitor whose bottom-right corner is furthest from origin,
 /// ensuring hidden windows are placed at a valid screen position that is
 /// not visible on any other screen.
-fn hidden_monitor(monitors: &[MonitorInfo]) -> &MonitorInfo {
+pub(super) fn hidden_monitor(monitors: &[MonitorInfo]) -> &MonitorInfo {
     monitors
         .iter()
         .max_by_key(|m| {
