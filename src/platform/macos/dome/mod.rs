@@ -1,6 +1,5 @@
 mod events;
 mod inspect;
-mod mirror;
 mod monitor;
 mod placement_tracker;
 mod recovery;
@@ -19,34 +18,30 @@ use calloop::LoopSignal;
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, MacosOnOpenRule};
-use crate::core::{
-    Child, Container, Dimension, Hub, MonitorId, MonitorLayout, MonitorPlacements, WindowId,
-    WindowPlacement,
-};
+use crate::core::{Child, Container, Dimension, Hub, MonitorLayout, MonitorPlacements, WindowId};
 use crate::platform::macos::accessibility::AXWindow;
-use crate::platform::macos::dome::inspect::{ExistingWindow, GcdDispatcher, NewAxWindow};
+use crate::platform::macos::dome::inspect::{GcdDispatcher, NewAxWindow};
 use crate::platform::macos::dome::window::PositionedState;
-use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use super::running_application::RunningApp;
-use super::ui::MessageSender;
-use mirror::{WindowCapture, create_captures_async};
 use monitor::{MonitorInfo, MonitorRegistry};
 use placement_tracker::PlacementTracker;
 use registry::Registry;
 use window::{
-    Placement, RoundedDimension, WindowState, apply_inset, clip_to_bounds, hidden_monitor,
-    move_offscreen, round_dim,
+    RoundedDimension, WindowState, apply_inset, clip_to_bounds, hidden_monitor, move_offscreen,
 };
+
+pub(in crate::platform::macos) trait FrameSender: Send {
+    fn send(&self, msg: HubMessage);
+}
 
 pub(super) struct Dome {
     hub: Hub,
     registry: Registry,
     monitor_registry: MonitorRegistry,
-    captures: HashMap<WindowId, WindowCapture>,
     config: Config,
     /// Work area of the primary monitor, used for crash recovery positioning.
     primary_screen: Dimension,
@@ -54,9 +49,8 @@ pub(super) struct Dome {
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
     observed_pids: HashSet<i32>,
-    sender: MessageSender,
+    sender: Box<dyn FrameSender>,
     dispatcher: GcdDispatcher,
-    capture_queue: DispatchRetained<DispatchQueue>,
     signal: LoopSignal,
     placement_tracker: PlacementTracker,
     last_focused: Option<WindowId>,
@@ -138,8 +132,10 @@ impl Dome {
                     return None;
                 }
                 let dim = self.hub.get_window(wid).dimension();
+                let cg_id = self.registry.by_id(wid).ax.cg_id();
                 Some(OverlayCreate {
                     window_id: wid,
+                    cg_id,
                     frame: to_ns_rect(self.primary_full_height, dim),
                 })
             })
@@ -236,7 +232,6 @@ impl Dome {
         self.placement_tracker.cancel(pid);
         for (cg_id, window_id) in self.registry.remove_by_pid(pid) {
             recovery::untrack(cg_id);
-            self.captures.remove(&window_id);
             self.hub.delete_window(window_id);
         }
     }
@@ -244,7 +239,6 @@ impl Dome {
     fn remove_window(&mut self, cg_id: CGWindowID) {
         if let Some(window_id) = self.registry.remove(cg_id) {
             recovery::untrack(cg_id);
-            self.captures.remove(&window_id);
             self.hub.delete_window(window_id);
         }
     }
@@ -319,16 +313,11 @@ impl Dome {
         }
     }
 
-    pub(super) fn apply_windows_reconciled(
-        &mut self,
-        to_remove: Vec<CGWindowID>,
-        to_add: Vec<NewAxWindow>,
-    ) {
+    fn apply_windows_reconciled(&mut self, to_remove: Vec<CGWindowID>, to_add: Vec<NewAxWindow>) {
         for cg_id in to_remove {
             self.remove_window(cg_id);
         }
 
-        let mut new_cg_ids = Vec::new();
         for new in to_add {
             if self.registry.contains(new.ax.cg_id()) {
                 continue;
@@ -340,23 +329,12 @@ impl Dome {
             };
 
             recovery::track(new.ax.clone(), self.primary_screen);
-            let cg_id = new.ax.cg_id();
 
             let entry = self.registry.by_id(window_id);
 
             if let Some(actions) = on_open_actions(&entry.ax, &self.config.macos.on_open) {
                 self.execute_actions(&actions);
             }
-            new_cg_ids.push((cg_id, window_id));
-        }
-
-        if !new_cg_ids.is_empty() {
-            create_captures_async(
-                new_cg_ids,
-                self.dispatcher.sender(),
-                self.sender.clone(),
-                self.capture_queue.clone(),
-            );
         }
     }
 
@@ -384,15 +362,6 @@ impl Dome {
                     let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
 
                     if wp.is_float && !wp.is_focused {
-                        let scale = hidden_monitor(&monitors).scale;
-                        if let Some(capture) = self.captures.get_mut(&wp.id) {
-                            if let Some(visible_content) = visible_content {
-                                capture.start(wp.id, content_dim, visible_content, scale);
-                            } else {
-                                capture.stop();
-                            }
-                        }
-
                         self.move_offscreen(wp.id);
                     } else {
                         let Some(target) = visible_content else {
@@ -402,9 +371,6 @@ impl Dome {
                         };
 
                         self.place_window(wp.id, target);
-                        if let Some(capture) = self.captures.get_mut(&wp.id) {
-                            capture.stop();
-                        }
                     }
 
                     shows.push(OverlayShow {
@@ -412,6 +378,7 @@ impl Dome {
                         placement: *wp,
                         cocoa_frame: to_ns_rect(self.primary_full_height, wp.visible_frame),
                         scale: hidden_monitor(&monitors).scale,
+                        content_dim,
                         visible_content,
                     });
                 }

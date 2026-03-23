@@ -1,9 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use calloop::EventLoop;
 use calloop::channel::{Channel, Event as ChannelEvent};
 
-use dispatch2::DispatchQueue;
 use objc2::rc::autoreleasepool;
 
 use crate::config::Config;
@@ -55,14 +54,12 @@ impl Dome {
             hub,
             registry: Registry::new(),
             monitor_registry,
-            captures: HashMap::new(),
             config,
             primary_screen: primary.dimension,
             primary_full_height: primary.full_height,
             observed_pids: HashSet::new(),
-            sender,
+            sender: Box::new(sender),
             dispatcher,
-            capture_queue: DispatchQueue::main().into(),
             signal,
             placement_tracker: PlacementTracker::new(handle.clone()),
             last_focused: None,
@@ -211,9 +208,6 @@ impl Dome {
                     }
                 }
                 self.flush_layout();
-            }
-            AsyncResult::CaptureReady { window_id, capture } => {
-                self.captures.insert(window_id, capture);
             }
         });
     }

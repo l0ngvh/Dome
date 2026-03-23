@@ -176,7 +176,7 @@ impl Dome {
             }
             WindowState::Positioned(PositionedState::InView(p)) => {
                 if p.placed_at > observed_at {
-                    tracing::trace!(?new_placement, "stale observation, ignoring");
+                    tracing::trace!(placed_at = ?p.placed_at, "stale observation, ignoring");
                     return;
                 }
 
@@ -204,7 +204,7 @@ impl Dome {
                     let should_retry = p.should_retry();
                     let just_gave_up = p.just_gave_up();
                     if should_retry {
-                        tracing::trace!(?target, ?new_placement, "window drifted, correcting");
+                        tracing::trace!(?target, "window {window} drifted, correcting");
                         if let Err(e) =
                             window
                                 .ax
@@ -213,12 +213,7 @@ impl Dome {
                             tracing::trace!("Window {} set_frame failed: {e}", window);
                         }
                     } else if just_gave_up {
-                        tracing::debug!(
-                            "Window {} can't be moved to {:?} (actual: {:?})",
-                            window,
-                            target,
-                            new_placement
-                        );
+                        tracing::debug!("Window {} can't be moved to {:?}", window, target,);
                     }
                     return;
                 }
@@ -243,9 +238,7 @@ impl Dome {
             WindowState::Minimized => {
                 // Window somehow got brought back to screen, maybe through window focused but the
                 // notification was not fired
-                tracing::trace!(
-                    "Previously minimized borderless fullscreen window reappeared at {new_placement:?}"
-                );
+                tracing::trace!("Previously minimized borderless fullscreen window reappeared");
                 if is_borderless_fullscreen && let Err(e) = window.ax.minimize() {
                     tracing::trace!("Failed to minimize window: {e:#}");
                 }
@@ -292,9 +285,6 @@ impl Dome {
     pub(super) fn hide_window(&mut self, window_id: WindowId) {
         let monitors = self.monitor_registry.all_screens();
         let window = self.registry.by_id_mut(window_id);
-        if let Some(capture) = self.captures.get_mut(&window_id) {
-            capture.stop();
-        }
         // Minimize borderless fullscreen windows instead of moving offscreen:
         // 1. User-zoomed windows maintain their fullscreen state, so moving them is futile
         // 2. Moving offscreen triggers handle_window_moved which detects fullscreen exit

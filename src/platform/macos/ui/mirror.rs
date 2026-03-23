@@ -1,29 +1,25 @@
-use calloop::channel::Sender as CalloopSender;
-
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
-use objc2::AnyThread;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
+use objc2::{AnyThread, DefinedClass, define_class, msg_send};
+use objc2_app_kit::NSApplication;
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGWindowID, kCGColorSpaceSRGB};
 use objc2_core_media::CMSampleBuffer;
-use objc2_foundation::{NSError, NSObject, NSObjectProtocol};
+use objc2_foundation::{MainThreadMarker, NSError, NSObject, NSObjectProtocol};
 use objc2_io_surface::IOSurface;
 use objc2_screen_capture_kit::{
     SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
     SCStreamOutputType,
 };
 
-use super::super::ui::MessageSender;
-use super::HubMessage;
-use super::inspect::AsyncResult;
+use super::AppDelegate;
 use crate::core::{Dimension, WindowId};
 
-pub(in crate::platform::macos) struct WindowCapture {
+pub(super) struct WindowCapture {
     stream: Retained<SCStream>,
     handler: Retained<StreamOutputHandler>,
-    app_tx: MessageSender,
     running: bool,
 }
 
@@ -78,7 +74,6 @@ impl WindowCapture {
                 .updateConfiguration_completionHandler(&config, Some(&block))
         };
         if !self.running {
-            let app_tx = self.app_tx.clone();
             let block = RcBlock::new(move |error: *mut NSError| {
                 if !error.is_null() {
                     let error = unsafe { &*error };
@@ -93,7 +88,6 @@ impl WindowCapture {
                         %error,
                         "capture start failed"
                     );
-                    app_tx.send(HubMessage::CaptureFailed { window_id });
                 }
             });
             unsafe { self.stream.startCaptureWithCompletionHandler(Some(&block)) };
@@ -107,19 +101,6 @@ impl WindowCapture {
             unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&block)) };
             self.running = false;
         }
-    }
-}
-
-fn compute_source_rect(original: Dimension, clipped: Dimension) -> CGRect {
-    CGRect {
-        origin: CGPoint {
-            x: (clipped.x - original.x) as f64,
-            y: (clipped.y - original.y) as f64,
-        },
-        size: CGSize {
-            width: clipped.width as f64,
-            height: clipped.height as f64,
-        },
     }
 }
 
@@ -139,8 +120,6 @@ impl Drop for WindowCapture {
 
 pub(super) fn create_captures_async(
     windows: Vec<(CGWindowID, WindowId)>,
-    async_tx: CalloopSender<AsyncResult>,
-    app_tx: MessageSender,
     queue: DispatchRetained<DispatchQueue>,
 ) {
     let block = RcBlock::new(
@@ -168,7 +147,7 @@ pub(super) fn create_captures_async(
                 let config = unsafe { SCStreamConfiguration::new() };
                 unsafe { config.setQueueDepth(3) };
 
-                let handler = StreamOutputHandler::new(window_id, app_tx.clone());
+                let handler = StreamOutputHandler::new(window_id);
 
                 let stream = unsafe {
                     SCStream::initWithFilter_configuration_delegate(
@@ -194,12 +173,16 @@ pub(super) fn create_captures_async(
                 let capture = WindowCapture {
                     stream,
                     handler,
-                    app_tx: app_tx.clone(),
                     running: false,
                 };
-                async_tx
-                    .send(AsyncResult::CaptureReady { window_id, capture })
-                    .ok();
+                DispatchQueue::main().exec_async(move || {
+                    let delegate = app_delegate();
+                    delegate
+                        .ivars()
+                        .captures
+                        .borrow_mut()
+                        .insert(window_id, capture);
+                });
             }
         },
     );
@@ -208,7 +191,6 @@ pub(super) fn create_captures_async(
 
 struct StreamOutputHandlerIvars {
     window_id: WindowId,
-    app_tx: MessageSender,
 }
 
 define_class!(
@@ -229,21 +211,51 @@ define_class!(
             if output_type == SCStreamOutputType::Screen
                 && let Some(surface) = extract_io_surface(buffer)
             {
-                self.ivars().app_tx.send(HubMessage::CaptureFrame {
-                    window_id: self.ivars().window_id,
-                    surface,
+                let window_id = self.ivars().window_id;
+                DispatchQueue::main().exec_async(move || {
+                    let delegate = app_delegate();
+                    if let Some(overlay) = delegate
+                        .ivars()
+                        .overlay_windows
+                        .borrow_mut()
+                        .get_mut(&window_id)
+                    {
+                        overlay.apply_frame(&surface);
+                    }
                 });
             }
         }
     }
 );
 
-use objc2::{DefinedClass, define_class, msg_send};
-
 impl StreamOutputHandler {
-    fn new(window_id: WindowId, app_tx: MessageSender) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { window_id, app_tx });
+    fn new(window_id: WindowId) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { window_id });
         unsafe { msg_send![super(this), init] }
+    }
+}
+
+fn app_delegate() -> &'static AppDelegate {
+    // Safety: we are on the main thread (dispatched via DispatchQueue::main),
+    // and the app delegate is always our AppDelegate
+    unsafe {
+        let mtm = MainThreadMarker::new_unchecked();
+        let app = NSApplication::sharedApplication(mtm);
+        let delegate = app.delegate().unwrap();
+        &*(Retained::as_ptr(&delegate) as *const AppDelegate)
+    }
+}
+
+fn compute_source_rect(original: Dimension, clipped: Dimension) -> CGRect {
+    CGRect {
+        origin: CGPoint {
+            x: (clipped.x - original.x) as f64,
+            y: (clipped.y - original.y) as f64,
+        },
+        size: CGSize {
+            width: clipped.width as f64,
+            height: clipped.height as f64,
+        },
     }
 }
 

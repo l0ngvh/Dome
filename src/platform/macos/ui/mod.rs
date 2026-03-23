@@ -1,3 +1,4 @@
+mod mirror;
 mod overlay;
 mod renderer;
 
@@ -5,8 +6,9 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::rc::Rc;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc;
 
+use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate};
@@ -16,16 +18,17 @@ use objc2_core_foundation::{
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol};
 use objc2_metal::MTLCreateSystemDefaultDevice;
 
-use super::dome::{HubEvent, HubMessage};
+use super::dome::{FrameSender, HubEvent, HubMessage};
 use super::listeners::EventListener;
 use crate::config::Config;
 use crate::core::{ContainerId, WindowId};
+use mirror::{WindowCapture, create_captures_async};
 use overlay::{ContainerOverlay, WindowOverlay};
 use renderer::MetalBackend;
 
 #[derive(Clone)]
 pub(crate) struct MessageSender {
-    tx: Sender<HubMessage>,
+    tx: mpsc::Sender<HubMessage>,
     source: CFRetained<CFRunLoopSource>,
     run_loop: CFRetained<CFRunLoop>,
 }
@@ -34,11 +37,21 @@ pub(crate) struct MessageSender {
 unsafe impl Send for MessageSender {}
 
 impl MessageSender {
-    pub(crate) fn send(&self, msg: HubMessage) {
+    pub(super) fn send(&self, msg: HubMessage) {
         if self.tx.send(msg).is_ok() {
-            self.source.signal();
-            self.run_loop.wake_up();
+            self.signal();
         }
+    }
+
+    fn signal(&self) {
+        self.source.signal();
+        self.run_loop.wake_up();
+    }
+}
+
+impl FrameSender for MessageSender {
+    fn send(&self, msg: HubMessage) {
+        MessageSender::send(self, msg);
     }
 }
 
@@ -119,8 +132,10 @@ fn create_frame_source(delegate: &Retained<AppDelegate>) -> CFRetained<CFRunLoop
 
 struct AppDelegateIvars {
     hub_sender: calloop::channel::Sender<HubEvent>,
-    frame_rx: std::sync::mpsc::Receiver<HubMessage>,
+    frame_rx: mpsc::Receiver<HubMessage>,
+    capture_queue: DispatchRetained<DispatchQueue>,
     overlay_windows: RefCell<HashMap<WindowId, WindowOverlay>>,
+    captures: RefCell<HashMap<WindowId, WindowCapture>>,
     container_overlays: RefCell<HashMap<ContainerId, ContainerOverlay>>,
     event_listener: EventListener,
     backend: Rc<MetalBackend>,
@@ -152,7 +167,7 @@ impl AppDelegate {
     fn new(
         mtm: MainThreadMarker,
         hub_sender: calloop::channel::Sender<HubEvent>,
-        frame_rx: std::sync::mpsc::Receiver<HubMessage>,
+        frame_rx: mpsc::Receiver<HubMessage>,
         event_listener: EventListener,
         backend: Rc<MetalBackend>,
         config: Config,
@@ -160,7 +175,11 @@ impl AppDelegate {
         let ivars = AppDelegateIvars {
             hub_sender: hub_sender.clone(),
             frame_rx,
+            // Serial background queue for SCStream output handlers — keeps IOSurface extraction
+            // off the main thread while preserving frame ordering
+            capture_queue: DispatchQueue::new("dome.capture", None),
             overlay_windows: RefCell::new(HashMap::new()),
+            captures: RefCell::new(HashMap::new()),
             container_overlays: RefCell::new(HashMap::new()),
             event_listener,
             backend,
@@ -179,9 +198,11 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
             HubMessage::Frame(frame) => {
                 let mut overlays = delegate.ivars().overlay_windows.borrow_mut();
                 let mut containers = delegate.ivars().container_overlays.borrow_mut();
+                let mut captures = delegate.ivars().captures.borrow_mut();
 
-                for wid in frame.deletes {
-                    overlays.remove(&wid);
+                for wid in &frame.deletes {
+                    overlays.remove(wid);
+                    captures.remove(wid);
                 }
                 for id in frame.deleted_containers {
                     if let Some(entry) = containers.remove(&id) {
@@ -192,6 +213,12 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 let config = delegate.ivars().config.borrow().clone();
                 let backend = delegate.ivars().backend.clone();
                 let hub_sender = delegate.ivars().hub_sender.clone();
+
+                let capture_pairs: Vec<_> = frame
+                    .creates
+                    .iter()
+                    .map(|c| (c.cg_id, c.window_id))
+                    .collect();
 
                 for create in frame.creates {
                     let overlay = WindowOverlay::new(
@@ -222,7 +249,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 }
 
                 let shown: HashSet<WindowId> = frame.shows.iter().map(|s| s.window_id).collect();
-                for show in frame.shows {
+                for show in &frame.shows {
                     if let Some(overlay) = overlays.get_mut(&show.window_id) {
                         overlay.render(
                             &show.placement,
@@ -238,6 +265,24 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     }
                 }
 
+                for show in &frame.shows {
+                    if let Some(capture) = captures.get_mut(&show.window_id) {
+                        if show.placement.is_float
+                            && !show.placement.is_focused
+                            && let Some(visible_content) = show.visible_content
+                        {
+                            capture.start(
+                                show.window_id,
+                                show.content_dim,
+                                visible_content,
+                                show.scale,
+                            );
+                        } else {
+                            capture.stop();
+                        }
+                    }
+                }
+
                 for data in frame.containers {
                     if let Some(entry) = containers.get(&data.placement.id) {
                         entry.window.setFrame_display(data.cocoa_frame, true);
@@ -247,24 +292,15 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         entry.window.orderFront(None);
                     }
                 }
+
+                if !capture_pairs.is_empty() {
+                    create_captures_async(capture_pairs, delegate.ivars().capture_queue.clone());
+                }
             }
             HubMessage::RegisterObservers(apps) => {
                 for app in &apps {
                     delegate.ivars().event_listener.register_app(app);
                 }
-            }
-            HubMessage::CaptureFrame { window_id, surface } => {
-                if let Some(overlay) = delegate
-                    .ivars()
-                    .overlay_windows
-                    .borrow_mut()
-                    .get_mut(&window_id)
-                {
-                    overlay.apply_frame(&surface);
-                }
-            }
-            HubMessage::CaptureFailed { window_id } => {
-                tracing::debug!("Failed to screen capture for {window_id}");
             }
             HubMessage::ConfigChanged(new_config) => {
                 *delegate.ivars().config.borrow_mut() = new_config.clone();

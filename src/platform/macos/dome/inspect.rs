@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use calloop::channel::Sender as CalloopSender;
 use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
-use objc2::rc::autoreleasepool;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFString, CFType};
 use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
 
@@ -15,7 +15,6 @@ use crate::platform::macos::dome::window::RoundedDimension;
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 
 use super::super::running_application::RunningApp;
-use super::mirror::WindowCapture;
 use super::registry::WindowEntry;
 use super::window::WindowState;
 
@@ -31,10 +30,6 @@ pub(super) enum AsyncResult {
         hidden_pids: Vec<i32>,
         to_remove: Vec<CGWindowID>,
         to_add: Vec<NewAxWindow>,
-    },
-    CaptureReady {
-        window_id: WindowId,
-        capture: WindowCapture,
     },
 }
 

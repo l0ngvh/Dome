@@ -1,9 +1,7 @@
 use std::fmt;
 
-use objc2::rc::Retained;
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::NSRect;
-use objc2_io_surface::IOSurface;
 
 use crate::action::Actions;
 use crate::config::Config;
@@ -79,13 +77,6 @@ impl fmt::Display for HubEvent {
 pub(in crate::platform::macos) enum HubMessage {
     Frame(RenderFrame),
     RegisterObservers(Vec<RunningApp>),
-    CaptureFrame {
-        window_id: WindowId,
-        surface: Retained<IOSurface>,
-    },
-    CaptureFailed {
-        window_id: WindowId,
-    },
     ConfigChanged(Config),
     Shutdown,
 }
@@ -101,6 +92,7 @@ pub(in crate::platform::macos) struct RenderFrame {
 
 pub(in crate::platform::macos) struct OverlayCreate {
     pub(in crate::platform::macos) window_id: WindowId,
+    pub(in crate::platform::macos) cg_id: CGWindowID,
     pub(in crate::platform::macos) frame: NSRect,
 }
 
@@ -109,6 +101,7 @@ pub(in crate::platform::macos) struct OverlayShow {
     pub(in crate::platform::macos) placement: WindowPlacement,
     pub(in crate::platform::macos) cocoa_frame: NSRect,
     pub(in crate::platform::macos) scale: f64,
+    pub(in crate::platform::macos) content_dim: Dimension,
     pub(in crate::platform::macos) visible_content: Option<Dimension>,
 }
 
