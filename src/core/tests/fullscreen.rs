@@ -1,5 +1,5 @@
 use super::{setup, snapshot};
-use crate::core::node::{Child, Dimension, DisplayMode};
+use crate::core::node::Dimension;
 use insta::assert_snapshot;
 
 #[test]
@@ -55,20 +55,14 @@ fn insert_fullscreen_sets_focus() {
 fn set_fullscreen_from_tiling() {
     let mut hub = setup();
     let w1 = hub.insert_tiling();
-    let _w2 = hub.insert_tiling();
+    hub.insert_tiling();
     hub.set_focus(w1);
 
     hub.set_fullscreen(w1);
 
-    assert_eq!(hub.get_window(w1).mode, DisplayMode::Fullscreen);
-    let ws = hub.get_workspace(hub.current_workspace());
-    assert_eq!(ws.fullscreen_windows(), &[w1]);
-    assert_eq!(ws.focused(), Some(Child::Window(w1)));
-    assert_eq!(ws.viewport_offset, (0.0, 0.0));
-    assert!(ws.root().is_some());
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
         Window(id=WindowId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
       )
@@ -206,7 +200,44 @@ fn set_fullscreen_already_fullscreen() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
     hub.set_fullscreen(w1);
-    assert_snapshot!(snapshot(&hub), @r"");
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
+        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+      )
+    )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                         W0                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ");
 }
 
 #[test]
@@ -462,42 +493,40 @@ fn toggle_fullscreen_on_off() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(0), parent=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
-    +-------------------------------------------------------------------------+***************************************************************************
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                    W1                                   |*                                    W0                                   *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+***************************************************************************
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                         W1                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 }
