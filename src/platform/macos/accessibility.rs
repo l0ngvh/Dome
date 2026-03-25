@@ -31,6 +31,7 @@ pub(super) struct AXWindow {
 // Safety: AXUIElement operations are IPC calls to the accessibility server,
 // safe to use from any thread for manipulating other applications' windows.
 unsafe impl Send for AXWindow {}
+unsafe impl Sync for AXWindow {}
 
 impl std::fmt::Display for AXWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -332,4 +333,68 @@ fn is_screen_locked() -> bool {
     }
 
     false
+}
+
+pub(super) trait AXWindowApi: Send + Sync + std::fmt::Display {
+    fn cg_id(&self) -> CGWindowID;
+    fn pid(&self) -> i32;
+    fn is_native_fullscreen(&self) -> bool;
+    fn get_position(&self) -> Result<(i32, i32)>;
+    fn get_size(&self) -> Result<(i32, i32)>;
+    fn set_frame(&self, x: i32, y: i32, width: i32, height: i32) -> Result<()>;
+    fn focus(&self) -> Result<()>;
+    fn hide_at(&self, x: i32, y: i32) -> Result<()>;
+    fn minimize(&self) -> Result<()>;
+    fn unminimize(&self) -> Result<()>;
+    fn is_valid(&self) -> bool;
+    fn is_minimized(&self) -> bool;
+    fn is_manageable(&self) -> bool;
+    fn read_title(&self) -> Option<String>;
+}
+
+impl AXWindowApi for AXWindow {
+    fn cg_id(&self) -> CGWindowID {
+        self.cg_id()
+    }
+    fn pid(&self) -> i32 {
+        self.pid()
+    }
+    fn is_native_fullscreen(&self) -> bool {
+        self.is_native_fullscreen()
+    }
+    fn get_position(&self) -> Result<(i32, i32)> {
+        self.get_position()
+    }
+    fn get_size(&self) -> Result<(i32, i32)> {
+        self.get_size()
+    }
+    fn set_frame(&self, x: i32, y: i32, w: i32, h: i32) -> Result<()> {
+        self.set_frame(x, y, w, h)
+    }
+    fn focus(&self) -> Result<()> {
+        self.focus()
+    }
+    fn hide_at(&self, x: i32, y: i32) -> Result<()> {
+        self.hide_at(x, y)
+    }
+    fn minimize(&self) -> Result<()> {
+        self.minimize()
+    }
+    fn unminimize(&self) -> Result<()> {
+        self.unminimize()
+    }
+    fn is_valid(&self) -> bool {
+        self.is_valid()
+    }
+    fn is_minimized(&self) -> bool {
+        self.is_minimized()
+    }
+    fn is_manageable(&self) -> bool {
+        self.is_manageable()
+    }
+    fn read_title(&self) -> Option<String> {
+        get_attribute::<CFString>(&self.element, &kAXTitleAttribute())
+            .map(|t| t.to_string())
+            .ok()
+    }
 }

@@ -31,7 +31,7 @@ use objc2_foundation::{
 use std::cell::RefCell;
 
 use super::dome::HubEvent;
-use super::dome::get_all_screens;
+use super::get_all_screens;
 use super::objc2_wrapper::{
     add_observer_notification, create_observer, get_cg_window_id, get_pid,
     kAXApplicationHiddenNotification, kAXApplicationShownNotification,

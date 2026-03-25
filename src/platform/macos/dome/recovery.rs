@@ -1,14 +1,14 @@
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use objc2_core_graphics::CGWindowID;
 
 use crate::core::Dimension;
 
-use super::super::accessibility::AXWindow;
+use super::super::accessibility::AXWindowApi;
 
 struct WindowState {
-    window: AXWindow,
+    window: Arc<dyn AXWindowApi>,
     original_dim: Dimension,
 }
 
@@ -20,7 +20,7 @@ static RECOVERY_STATE: LazyLock<Mutex<HashMap<CGWindowID, WindowState>>> =
 // multiple monitors can make the exact placement of where we hide windows fuzzy
 // This has the side effect of moving all windows from different monitor on exit/crash, but that is
 // acceptable
-pub(super) fn track(window: AXWindow, screen: Dimension) {
+pub(super) fn track(window: Arc<dyn AXWindowApi>, screen: Dimension) {
     let Ok((width, height)) = window.get_size() else {
         return;
     };

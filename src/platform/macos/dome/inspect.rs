@@ -1,198 +1,47 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Instant;
 
-use calloop::channel::Sender as CalloopSender;
-use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
-use objc2::rc::{Retained, autoreleasepool};
 use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFString, CFType};
 use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
 
 use crate::config::MacosWindow;
 use crate::core::WindowId;
-use crate::platform::macos::Dome;
-use crate::platform::macos::accessibility::AXWindow;
-use crate::platform::macos::dome::window::RoundedDimension;
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 
 use super::super::running_application::RunningApp;
+use super::NewWindow;
 use super::registry::WindowEntry;
 use super::window::WindowState;
-
-pub(super) enum AsyncResult {
-    AppWindowsReconciled {
-        to_remove: Vec<CGWindowID>,
-        to_add: Vec<NewAxWindow>,
-    },
-    AppWindowPositions(WindowPositions),
-    AllWindowsReconciled {
-        terminated_pids: Vec<i32>,
-        new_apps: Vec<RunningApp>,
-        hidden_pids: Vec<i32>,
-        to_remove: Vec<CGWindowID>,
-        to_add: Vec<NewAxWindow>,
-    },
-}
-
-pub(super) struct GcdDispatcher {
-    tx: CalloopSender<AsyncResult>,
-}
-
-impl GcdDispatcher {
-    pub(super) fn new(tx: CalloopSender<AsyncResult>) -> Self {
-        Self { tx }
-    }
-
-    pub(super) fn sender(&self) -> CalloopSender<AsyncResult> {
-        self.tx.clone()
-    }
-
-    pub(super) fn refresh_windows(
-        &self,
-        pid: i32,
-        tracked: HashMap<CGWindowID, WindowEntry>,
-        ignore_rules: Vec<MacosWindow>,
-    ) {
-        let tx = self.tx.clone();
-        Self::dispatch(move || {
-            let Some(app) = RunningApp::new(pid) else {
-                return;
-            };
-            let (to_remove, to_add) = compute_reconciliation(&app, &tracked, &ignore_rules);
-            tx.send(AsyncResult::AppWindowsReconciled { to_remove, to_add })
-                .ok();
-        });
-    }
-
-    pub(super) fn check_positions(&self, pid: i32, tracked: HashMap<CGWindowID, WindowEntry>) {
-        let tx = self.tx.clone();
-        Self::dispatch(move || {
-            let Some(app) = RunningApp::new(pid) else {
-                return;
-            };
-            let result = compute_window_positions(&app, &tracked);
-            tx.send(AsyncResult::AppWindowPositions(result)).ok();
-        });
-    }
-
-    pub(super) fn reconcile_all(
-        &self,
-        observed_pids: HashSet<i32>,
-        tracked: HashMap<CGWindowID, WindowEntry>,
-        ignore_rules: Vec<MacosWindow>,
-    ) {
-        let tx = self.tx.clone();
-        Self::dispatch(move || {
-            let running: Vec<_> = RunningApp::all().collect();
-            let running_pids: HashSet<_> = running.iter().map(|app| app.pid()).collect();
-
-            let terminated_pids: Vec<_> = observed_pids
-                .iter()
-                .filter(|pid| !running_pids.contains(pid))
-                .copied()
-                .collect();
-
-            let new_apps: Vec<_> = running
-                .iter()
-                .filter(|app| !observed_pids.contains(&app.pid()))
-                .cloned()
-                .collect();
-
-            let mut hidden_pids = Vec::new();
-            let mut to_remove = Vec::new();
-            let mut to_add = Vec::new();
-            for app in &running {
-                if app.is_hidden() {
-                    hidden_pids.push(app.pid());
-                } else {
-                    let (removed, added) = compute_reconciliation(app, &tracked, &ignore_rules);
-                    to_remove.extend(removed);
-                    to_add.extend(added);
-                }
-            }
-
-            tx.send(AsyncResult::AllWindowsReconciled {
-                terminated_pids,
-                new_apps,
-                hidden_pids,
-                to_remove,
-                to_add,
-            })
-            .ok();
-        });
-    }
-
-    fn dispatch(work: impl FnOnce() + Send + 'static) {
-        let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
-            DispatchQoS::UserInitiated,
-        ));
-        queue.exec_async(move || autoreleasepool(|_| work()));
-    }
-}
-
-impl Dome {
-    pub(super) fn dispatch_refresh_windows(&self, pid: i32) {
-        self.dispatcher.refresh_windows(
-            pid,
-            self.registry
-                .for_pid(pid)
-                .map(|(id, e)| (id, e.clone()))
-                .collect(),
-            self.config.macos.ignore.clone(),
-        );
-    }
-
-    pub(super) fn dispatch_check_positions(&self, pid: i32) {
-        self.dispatcher.check_positions(
-            pid,
-            self.registry
-                .for_pid(pid)
-                .map(|(id, e)| (id, e.clone()))
-                .collect(),
-        );
-    }
-
-    pub(super) fn apply_window_positions(&mut self, positions: WindowPositions) {
-        let observed_at = positions.observed_at;
-        for existing in positions.existing {
-            if existing.is_native_fullscreen {
-                self.window_entered_native_fullscreen(existing.id);
-            } else {
-                self.window_moved(existing.id, existing.dimension, observed_at);
-            }
-        }
-    }
-}
-
-/// Can't only return a list of windows and reconcile at Dome as Dome won't have any method to know
-/// whether a window moved to other space, or minimized without querying ax api
-pub(super) struct WindowsReconciled {
-    pub(super) to_remove: Vec<CGWindowID>,
-    pub(super) to_add: Vec<NewAxWindow>,
-}
 
 pub(super) struct WindowPositions {
     pub(super) existing: Vec<ExistingWindow>,
     pub(super) observed_at: Instant,
 }
 
-pub(super) struct NewAxWindow {
-    pub(super) ax: AXWindow,
-    pub(super) dimension: RoundedDimension,
-    pub(super) is_native_fullscreen: bool,
-}
-
 /// A still in display window (unminimized, in current space, returned by AXWindowsAttribute)
 pub(super) struct ExistingWindow {
     pub(super) id: WindowId,
-    pub(super) dimension: RoundedDimension,
+    pub(super) x: i32,
+    pub(super) y: i32,
+    pub(super) w: i32,
+    pub(super) h: i32,
     pub(super) is_native_fullscreen: bool,
 }
 
-fn compute_reconciliation(
+pub(super) struct ReconcileAllResult {
+    pub(super) terminated_pids: Vec<i32>,
+    pub(super) new_apps: Vec<RunningApp>,
+    pub(super) hidden_pids: Vec<i32>,
+    pub(super) to_remove: Vec<CGWindowID>,
+    pub(super) to_add: Vec<NewWindow>,
+}
+
+pub(super) fn compute_reconciliation(
     app: &RunningApp,
     tracked: &HashMap<CGWindowID, WindowEntry>,
     ignore_rules: &[MacosWindow],
-) -> (Vec<CGWindowID>, Vec<NewAxWindow>) {
+) -> (Vec<CGWindowID>, Vec<NewWindow>) {
     let pid = app.pid();
     let cg_window_ids = list_cg_window_ids();
 
@@ -215,7 +64,15 @@ fn compute_reconciliation(
         if !ax.is_manageable() {
             continue;
         }
-        if should_ignore(&ax, ignore_rules) {
+        let app_name = ax.app_name().map(str::to_owned);
+        let bundle_id = ax.bundle_id().map(str::to_owned);
+        let title = ax.title().map(str::to_owned);
+        if should_ignore(
+            app_name.as_deref(),
+            bundle_id.as_deref(),
+            title.as_deref(),
+            ignore_rules,
+        ) {
             continue;
         }
         let Ok((x, y)) = ax.get_position() else {
@@ -224,22 +81,23 @@ fn compute_reconciliation(
         let Ok((w, h)) = ax.get_size() else {
             continue;
         };
-        to_add.push(NewAxWindow {
-            dimension: RoundedDimension {
-                width: w,
-                height: h,
-                x,
-                y,
-            },
+        to_add.push(NewWindow {
+            x,
+            y,
+            w,
+            h,
             is_native_fullscreen: ax.is_native_fullscreen(),
-            ax,
+            app_name,
+            bundle_id,
+            title,
+            ax: Arc::new(ax),
         });
     }
 
     (to_remove, to_add)
 }
 
-fn compute_window_positions(
+pub(super) fn compute_window_positions(
     app: &RunningApp,
     tracked: &HashMap<CGWindowID, WindowEntry>,
 ) -> WindowPositions {
@@ -256,12 +114,10 @@ fn compute_window_positions(
         };
         existing.push(ExistingWindow {
             id: window.window_id,
-            dimension: RoundedDimension {
-                width: w,
-                height: h,
-                x,
-                y,
-            },
+            x,
+            y,
+            w,
+            h,
             is_native_fullscreen: window.ax.is_native_fullscreen(),
         });
     }
@@ -271,16 +127,57 @@ fn compute_window_positions(
     }
 }
 
-fn should_ignore(ax_window: &AXWindow, rules: &[MacosWindow]) -> bool {
-    let matched = rules
+pub(super) fn compute_reconcile_all(
+    observed_pids: HashSet<i32>,
+    tracked: HashMap<CGWindowID, WindowEntry>,
+    ignore_rules: Vec<MacosWindow>,
+) -> ReconcileAllResult {
+    let running: Vec<_> = RunningApp::all().collect();
+    let running_pids: HashSet<_> = running.iter().map(|app| app.pid()).collect();
+
+    let terminated_pids: Vec<_> = observed_pids
         .iter()
-        .find(|r| r.matches(ax_window.title(), ax_window.bundle_id(), ax_window.title()));
+        .filter(|pid| !running_pids.contains(pid))
+        .copied()
+        .collect();
+
+    let new_apps: Vec<_> = running
+        .iter()
+        .filter(|app| !observed_pids.contains(&app.pid()))
+        .cloned()
+        .collect();
+
+    let mut hidden_pids = Vec::new();
+    let mut to_remove = Vec::new();
+    let mut to_add = Vec::new();
+    for app in &running {
+        if app.is_hidden() {
+            hidden_pids.push(app.pid());
+        } else {
+            let (removed, added) = compute_reconciliation(app, &tracked, &ignore_rules);
+            to_remove.extend(removed);
+            to_add.extend(added);
+        }
+    }
+
+    ReconcileAllResult {
+        terminated_pids,
+        new_apps,
+        hidden_pids,
+        to_remove,
+        to_add,
+    }
+}
+
+fn should_ignore(
+    app_name: Option<&str>,
+    bundle_id: Option<&str>,
+    title: Option<&str>,
+    rules: &[MacosWindow],
+) -> bool {
+    let matched = rules.iter().find(|r| r.matches(app_name, bundle_id, title));
     if let Some(rule) = matched {
-        tracing::debug!(
-            %ax_window,
-            ?rule,
-            "Window ignored by rule"
-        );
+        tracing::debug!(?app_name, ?title, ?rule, "Window ignored by rule");
         return true;
     }
     false

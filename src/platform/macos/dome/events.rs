@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::core::{ContainerId, ContainerPlacement, Dimension, WindowId, WindowPlacement};
 use crate::platform::macos::running_application::RunningApp;
 
-use super::monitor::MonitorInfo;
+use super::super::MonitorInfo;
 
 pub(in crate::platform::macos) enum HubEvent {
     /// Visible windows changed for an app (window created/destroyed/minimized/shown/hidden).
