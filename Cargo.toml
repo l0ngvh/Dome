@@ -19,11 +19,12 @@ regex = "1.12.2"
 interprocess = "2.2.3"
 notify = "8.2.0"
 egui = "0.31"
-calloop = "0.14"
+calloop = { version = "0.14", features = ["executor"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
 dispatch2 = "0.3"
+futures-channel = "0.3"
 libc = "0.2.179"
 objc2 = "0.6.3"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "libc", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSWindow", "NSWindowScripting", "NSView", "NSColor", "NSEvent", "NSScreen", "NSResponder", "NSGraphics", "objc2-core-foundation", "objc2-core-graphics", "objc2-quartz-core"] }
