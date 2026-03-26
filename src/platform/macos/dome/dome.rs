@@ -18,7 +18,7 @@ use crate::platform::macos::running_application::RunningApp;
 
 use super::events::{ContainerOverlayData, HubMessage, OverlayCreate, OverlayShow, RenderFrame};
 use super::monitor::MonitorRegistry;
-use super::recovery;
+use super::recovery::Recovery;
 use super::registry::{Registry, WindowEntry};
 use super::window::{
     Placement, PositionedState, RoundedDimension, WindowState, apply_inset, clip_to_bounds,
@@ -65,6 +65,7 @@ pub(in crate::platform::macos) struct Dome {
     sender: Box<dyn FrameSender>,
     signal: LoopSignal,
     last_focused: Option<WindowId>,
+    recovery: Recovery,
 }
 
 impl Dome {
@@ -95,6 +96,7 @@ impl Dome {
             sender,
             signal,
             last_focused: None,
+            recovery: Recovery::new(),
         }
     }
 
@@ -141,7 +143,7 @@ impl Dome {
                     title.clone(),
                 )
             };
-            recovery::track(ax, self.primary_screen);
+            self.recovery.track(ax, self.primary_screen);
             let actions = {
                 let entry = self.registry.by_id(window_id);
                 on_open_actions(entry, &self.config.macos.on_open)
@@ -449,14 +451,14 @@ impl Dome {
 
     fn remove_app_windows(&mut self, pid: i32) {
         for (cg_id, window_id) in self.registry.remove_by_pid(pid) {
-            recovery::untrack(cg_id);
+            self.recovery.untrack(cg_id);
             self.hub.delete_window(window_id);
         }
     }
 
     fn remove_window(&mut self, cg_id: CGWindowID) {
         if let Some(window_id) = self.registry.remove(cg_id) {
-            recovery::untrack(cg_id);
+            self.recovery.untrack(cg_id);
             self.hub.delete_window(window_id);
         }
     }
@@ -966,7 +968,7 @@ impl Dome {
 
 impl Drop for Dome {
     fn drop(&mut self) {
-        recovery::restore_all();
+        self.recovery.restore_all();
         self.sender.send(HubMessage::Shutdown);
     }
 }

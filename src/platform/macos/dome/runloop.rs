@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use calloop::channel::{Channel, Event as ChannelEvent};
@@ -16,7 +17,6 @@ use super::dispatcher::GcdDispatcher;
 use super::dome::{Dome, WindowMove};
 use super::events::{HubEvent, HubMessage};
 use super::inspect::{compute_reconcile_all, compute_reconciliation, compute_window_positions};
-use super::recovery;
 
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -33,7 +33,7 @@ pub(in crate::platform::macos) fn start(
     sender: MessageSender,
     channel: Channel<HubEvent>,
 ) {
-    recovery::install_handlers();
+    install_signal_handlers();
     let mut event_loop =
         EventLoop::<'static, State>::try_new().expect("Failed to create event loop");
     let handle = event_loop.handle();
@@ -69,7 +69,11 @@ pub(in crate::platform::macos) fn start(
 
     dispatch_reconcile_all(&mut state);
     event_loop
-        .run(None, &mut state, |_| {})
+        .run(None, &mut state, |state| {
+            if SIGNAL_RECEIVED.load(Ordering::Relaxed) {
+                state.dome.stop();
+            }
+        })
         .expect("Event loop failed");
 }
 
@@ -234,4 +238,18 @@ fn dispatch_reconcile_all(state: &mut State) {
             }
         },
     );
+}
+
+static SIGNAL_RECEIVED: AtomicBool = AtomicBool::new(false);
+
+fn install_signal_handlers() {
+    unsafe {
+        libc::signal(libc::SIGINT, signal_handler as usize);
+        libc::signal(libc::SIGTERM, signal_handler as usize);
+        libc::signal(libc::SIGHUP, signal_handler as usize);
+    }
+}
+
+extern "C" fn signal_handler(_sig: libc::c_int) {
+    SIGNAL_RECEIVED.store(true, Ordering::Relaxed);
 }
