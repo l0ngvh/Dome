@@ -559,6 +559,13 @@ fn validate_fullscreens(hub: &Hub, workspace_id: WorkspaceId, workspace: &Worksp
             "Window {fid} in fullscreen_windows but mode is not Fullscreen"
         );
     }
+    if let Some(&top) = workspace.fullscreen_windows().last() {
+        assert_eq!(
+            workspace.focused(),
+            Some(Child::Window(top)),
+            "Workspace {workspace_id} has fullscreen windows but focus is not on topmost fullscreen window {top}"
+        );
+    }
 }
 
 fn validate_tree(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {

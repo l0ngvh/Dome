@@ -76,7 +76,25 @@ impl Hub {
                     current = Child::Container(cid);
                 }
                 Parent::Workspace(ws) => {
-                    self.workspaces.get_mut(ws).focused = Some(child);
+                    let focused = if let Child::Window(wid) = child {
+                        let fs = &mut self.workspaces.get_mut(ws).fullscreen_windows;
+                        if let Some(pos) = fs.iter().position(|&w| w == wid) {
+                            fs.remove(pos);
+                            fs.push(wid);
+                            Some(child)
+                        } else if let Some(&top) = fs.last() {
+                            Some(Child::Window(top))
+                        } else {
+                            Some(child)
+                        }
+                    } else if let Some(&top) =
+                        self.workspaces.get(ws).fullscreen_windows.last()
+                    {
+                        Some(Child::Window(top))
+                    } else {
+                        Some(child)
+                    };
+                    self.workspaces.get_mut(ws).focused = focused;
                     self.scroll_into_view(ws);
                     break;
                 }

@@ -591,6 +591,7 @@ impl Hub {
             Child::Window(id) if self.windows.get(id).mode == DisplayMode::Fullscreen => {
                 self.detach_fullscreen_from_workspace(id);
                 self.attach_fullscreen_to_workspace(target_ws, id);
+                self.workspaces.get_mut(target_ws).focused = Some(Child::Window(id));
             }
             Child::Window(id) if self.windows.get(id).is_float() => {
                 self.detach_float_from_workspace(id);

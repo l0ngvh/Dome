@@ -158,7 +158,7 @@ impl Hub {
         let Some(insert_anchor) = insert_anchor else {
             self.workspaces.get_mut(workspace_id).root = Some(child);
             self.set_parent(child, Parent::Workspace(workspace_id));
-            self.workspaces.get_mut(workspace_id).focused = Some(child);
+            self.set_workspace_focus(child);
             self.adjust_workspace(workspace_id);
             return;
         };
