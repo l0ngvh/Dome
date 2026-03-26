@@ -380,10 +380,12 @@ impl Dome {
             })
             .collect();
 
-        let created_containers: HashSet<_> = changes.created_containers.into_iter().collect();
-        let (container_creates, containers) = containers
-            .into_iter()
-            .partition(|c| created_containers.contains(&c.placement.id));
+        let container_creates: Vec<_> = changes
+            .created_containers
+            .iter()
+            .copied()
+            .filter(|id| !changes.deleted_containers.contains(id))
+            .collect();
 
         self.sender.send(HubMessage::Frame(RenderFrame {
             creates,

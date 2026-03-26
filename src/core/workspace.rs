@@ -87,9 +87,7 @@ impl Hub {
                         } else {
                             Some(child)
                         }
-                    } else if let Some(&top) =
-                        self.workspaces.get(ws).fullscreen_windows.last()
-                    {
+                    } else if let Some(&top) = self.workspaces.get(ws).fullscreen_windows.last() {
                         Some(Child::Window(top))
                     } else {
                         Some(child)

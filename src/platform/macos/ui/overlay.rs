@@ -164,13 +164,12 @@ pub(super) struct ContainerOverlay {
 impl ContainerOverlay {
     pub(super) fn new(
         mtm: MainThreadMarker,
+        id: ContainerId,
         backend: Rc<MetalBackend>,
-        frame: NSRect,
-        placement: ContainerPlacement,
-        tab_titles: Vec<String>,
         config: Config,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Self {
+        let frame = NSRect::ZERO;
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
                 NSWindow::alloc(mtm),
@@ -184,25 +183,35 @@ impl ContainerOverlay {
         window.setOpaque(false);
         window.setLevel(CONTAINER_OVERLAY_LEVEL);
         window.setCollectionBehavior(
-            NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::Stationary,
+            NSWindowCollectionBehavior::Auxiliary
+                | NSWindowCollectionBehavior::Default
+                | NSWindowCollectionBehavior::Transient
+                | NSWindowCollectionBehavior::FullScreenNone
+                | NSWindowCollectionBehavior::FullScreenDisallowsTiling
+                | NSWindowCollectionBehavior::IgnoresCycle,
         );
         unsafe { window.setReleasedWhenClosed(false) };
         window.setIgnoresMouseEvents(false);
         window.setAcceptsMouseMovedEvents(true);
-        let size = frame.size;
-        let view = ContainerOverlayView::new(
-            mtm,
-            NSRect::new(NSPoint::new(0.0, 0.0), size),
-            backend.clone(),
-            size,
-            placement,
-            tab_titles,
-            config.clone(),
-            hub_sender.clone(),
-        );
+        let view = ContainerOverlayView::new(mtm, id, backend, config, hub_sender);
         window.setContentView(Some(&view));
-        window.orderFront(None);
         Self { window, view }
+    }
+
+    pub(super) fn show(
+        &self,
+        placement: ContainerPlacement,
+        tab_titles: Vec<String>,
+        cocoa_frame: NSRect,
+    ) {
+        self.window.setFrame_display(cocoa_frame, true);
+        self.view.update(placement, tab_titles, cocoa_frame.size);
+        self.window.orderFront(None);
+    }
+
+    pub(super) fn hide(&self) {
+        self.view.clear();
+        self.window.orderOut(None);
     }
 }
 
@@ -275,7 +284,7 @@ pub(super) struct ContainerOverlayViewIvars {
     layer: Retained<CAMetalLayer>,
     events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<ContainerRenderer>,
-    placement: Cell<ContainerPlacement>,
+    placement: Cell<Option<ContainerPlacement>>,
     tab_titles: RefCell<Vec<String>>,
     config: RefCell<Config>,
     scale: Cell<f64>,
@@ -350,13 +359,10 @@ define_class!(
 );
 
 impl ContainerOverlayView {
-    pub(super) fn new(
+    fn new(
         mtm: MainThreadMarker,
-        frame: NSRect,
+        id: ContainerId,
         backend: Rc<MetalBackend>,
-        size: NSSize,
-        placement: ContainerPlacement,
-        tab_titles: Vec<String>,
         config: Config,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Retained<Self> {
@@ -364,24 +370,24 @@ impl ContainerOverlayView {
         let scale = objc2_app_kit::NSScreen::mainScreen(mtm)
             .map(|s| s.backingScaleFactor())
             .unwrap_or(2.0);
-        let renderer = ContainerRenderer::new(backend, scale, size.width, size.height);
+        let frame = NSRect::ZERO;
+        let renderer = ContainerRenderer::new(backend, scale, 0.0, 0.0);
         let layer = renderer.layer();
         let ivars = ContainerOverlayViewIvars {
             layer: layer.clone(),
             events: RefCell::new(Vec::new()),
             renderer: RefCell::new(renderer),
-            placement: Cell::new(placement),
-            tab_titles: RefCell::new(tab_titles),
+            placement: Cell::new(None),
+            tab_titles: RefCell::new(Vec::new()),
             config: RefCell::new(config),
             scale: Cell::new(scale),
-            container_id: Cell::new(placement.id),
+            container_id: Cell::new(id),
             hub_sender,
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         view.setLayer(Some(&layer));
         view.setWantsLayer(true);
-        view.render_now();
         view
     }
 
@@ -392,7 +398,7 @@ impl ContainerOverlayView {
         size: NSSize,
     ) {
         let ivars = self.ivars();
-        ivars.placement.set(placement);
+        ivars.placement.set(Some(placement));
         ivars.container_id.set(placement.id);
         *ivars.tab_titles.borrow_mut() = tab_titles;
         let scale = ivars.scale.get();
@@ -403,6 +409,12 @@ impl ContainerOverlayView {
         self.render_now();
     }
 
+    pub(super) fn clear(&self) {
+        let ivars = self.ivars();
+        ivars.placement.set(None);
+        ivars.tab_titles.borrow_mut().clear();
+    }
+
     pub(super) fn set_config(&self, config: Config) {
         *self.ivars().config.borrow_mut() = config;
         self.render_now();
@@ -410,8 +422,10 @@ impl ContainerOverlayView {
 
     fn render_now(&self) {
         let ivars = self.ivars();
+        let Some(placement) = ivars.placement.get() else {
+            return;
+        };
         let scale = ivars.scale.get();
-        let placement = ivars.placement.get();
         let tab_titles = ivars.tab_titles.borrow();
         let config = ivars.config.borrow();
         let events = std::mem::take(&mut *ivars.events.borrow_mut());

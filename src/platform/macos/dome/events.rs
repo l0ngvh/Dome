@@ -87,7 +87,7 @@ pub(in crate::platform::macos) struct RenderFrame {
     pub(in crate::platform::macos) creates: Vec<OverlayCreate>,
     pub(in crate::platform::macos) deletes: Vec<WindowId>,
     pub(in crate::platform::macos) shows: Vec<OverlayShow>,
-    pub(in crate::platform::macos) container_creates: Vec<ContainerOverlayData>,
+    pub(in crate::platform::macos) container_creates: Vec<ContainerId>,
     pub(in crate::platform::macos) containers: Vec<ContainerOverlayData>,
     pub(in crate::platform::macos) deleted_containers: Vec<ContainerId>,
 }

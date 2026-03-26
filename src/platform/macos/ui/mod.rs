@@ -232,16 +232,13 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     overlays.insert(create.window_id, overlay);
                 }
 
-                for data in frame.container_creates {
-                    let id = data.placement.id;
+                for id in frame.container_creates {
                     containers.insert(
                         id,
                         ContainerOverlay::new(
                             mtm,
+                            id,
                             backend.clone(),
-                            data.cocoa_frame,
-                            data.placement,
-                            data.tab_titles,
                             config.clone(),
                             hub_sender.clone(),
                         ),
@@ -283,13 +280,16 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     }
                 }
 
+                let shown_containers: HashSet<ContainerId> =
+                    frame.containers.iter().map(|d| d.placement.id).collect();
                 for data in frame.containers {
                     if let Some(entry) = containers.get(&data.placement.id) {
-                        entry.window.setFrame_display(data.cocoa_frame, true);
-                        entry
-                            .view
-                            .update(data.placement, data.tab_titles, data.cocoa_frame.size);
-                        entry.window.orderFront(None);
+                        entry.show(data.placement, data.tab_titles, data.cocoa_frame);
+                    }
+                }
+                for (id, entry) in containers.iter() {
+                    if !shown_containers.contains(id) {
+                        entry.hide();
                     }
                 }
 
