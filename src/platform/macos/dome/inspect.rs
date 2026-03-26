@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
 
 use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFString, CFType};
 use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
@@ -13,11 +12,6 @@ use super::super::running_application::RunningApp;
 use super::NewWindow;
 use super::registry::WindowEntry;
 use super::window::WindowState;
-
-pub(super) struct WindowPositions {
-    pub(super) existing: Vec<ExistingWindow>,
-    pub(super) observed_at: Instant,
-}
 
 /// A still in display window (unminimized, in current space, returned by AXWindowsAttribute)
 pub(super) struct ExistingWindow {
@@ -100,7 +94,7 @@ pub(super) fn compute_reconciliation(
 pub(super) fn compute_window_positions(
     app: &RunningApp,
     tracked: &HashMap<CGWindowID, WindowEntry>,
-) -> WindowPositions {
+) -> Vec<ExistingWindow> {
     let mut existing = Vec::new();
     for ax in app.ax_windows() {
         let Some(window) = tracked.get(&ax.cg_id()) else {
@@ -121,10 +115,7 @@ pub(super) fn compute_window_positions(
             is_native_fullscreen: window.ax.is_native_fullscreen(),
         });
     }
-    WindowPositions {
-        existing,
-        observed_at: Instant::now(),
-    }
+    existing
 }
 
 pub(super) fn compute_reconcile_all(

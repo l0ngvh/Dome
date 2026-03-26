@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Instant;
 
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::NSRect;
@@ -32,6 +33,7 @@ pub(in crate::platform::macos) enum HubEvent {
     /// moving/resizing and send this notification, but other windows are not finish yet.
     WindowMovedOrResized {
         pid: i32,
+        observed_at: Instant,
     },
     Action(Actions),
     ConfigChanged(Config),
@@ -55,7 +57,7 @@ impl fmt::Display for HubEvent {
             Self::SyncFocus { pid } => write!(f, "SyncFocus(pid={pid})"),
             Self::AppTerminated { pid } => write!(f, "AppTerminated(pid={pid})"),
             Self::TitleChanged(cg_id) => write!(f, "TitleChanged(cg_id={cg_id})"),
-            Self::WindowMovedOrResized { pid } => {
+            Self::WindowMovedOrResized { pid, .. } => {
                 write!(f, "WindowMovedOrResized(pid={pid})")
             }
             Self::Action(actions) => write!(f, "Action({actions})"),

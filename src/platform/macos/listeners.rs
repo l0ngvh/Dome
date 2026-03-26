@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use calloop::channel::Sender as CalloopSender;
 
@@ -461,7 +461,13 @@ unsafe extern "C-unwind" fn observer_callback(
         || CFEqual(Some(notification), Some(&*kAXResizedNotification()))
     {
         if let Ok(pid) = get_pid(&element) {
-            send_hub_event(&ctx.hub_sender, HubEvent::WindowMovedOrResized { pid });
+            send_hub_event(
+                &ctx.hub_sender,
+                HubEvent::WindowMovedOrResized {
+                    pid,
+                    observed_at: Instant::now(),
+                },
+            );
         }
         return;
     }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use calloop::channel::{Channel, Event as ChannelEvent};
 use calloop::timer::{TimeoutAction, Timer};
@@ -79,8 +79,8 @@ pub(in crate::platform::macos) fn start(
 
 fn handle_event(state: &mut State, event: HubEvent) {
     autoreleasepool(|_| match event {
-        HubEvent::WindowMovedOrResized { pid } => {
-            start_move_timer(state, pid);
+        HubEvent::WindowMovedOrResized { pid, observed_at } => {
+            start_move_timer(state, pid, observed_at);
         }
         HubEvent::VisibleWindowsChanged { pid } => {
             dispatch_refresh_windows(state, pid);
@@ -126,7 +126,7 @@ fn handle_event(state: &mut State, event: HubEvent) {
     });
 }
 
-fn start_move_timer(state: &mut State, pid: i32) {
+fn start_move_timer(state: &mut State, pid: i32, observed_at: Instant) {
     cancel_move_timer(state, pid);
     state.dome.set_pid_moving(pid, true);
     let token = state
@@ -136,7 +136,7 @@ fn start_move_timer(state: &mut State, pid: i32) {
             move |_, _, state: &mut State| {
                 state.move_timers.remove(&pid);
                 state.dome.set_pid_moving(pid, false);
-                dispatch_check_positions(state, pid);
+                dispatch_check_positions(state, pid, observed_at);
                 TimeoutAction::Drop
             },
         )
@@ -166,18 +166,16 @@ fn dispatch_refresh_windows(state: &mut State, pid: i32) {
     );
 }
 
-fn dispatch_check_positions(state: &mut State, pid: i32) {
+fn dispatch_check_positions(state: &mut State, pid: i32, observed_at: Instant) {
     let tracked = state.dome.tracked_for_pid(pid);
     state.dispatcher.dispatch(
         move || {
             let app = RunningApp::new(pid)?;
             Some(compute_window_positions(&app, &tracked))
         },
-        |result, state| {
-            if let Some(positions) = result {
-                let observed_at = positions.observed_at;
-                let moves = positions
-                    .existing
+        move |result, state| {
+            if let Some(existing) = result {
+                let moves = existing
                     .into_iter()
                     .map(|e| WindowMove {
                         window_id: e.id,
@@ -234,7 +232,7 @@ fn dispatch_reconcile_all(state: &mut State) {
                 })
                 .collect();
             for pid in pids_to_check {
-                start_move_timer(state, pid);
+                start_move_timer(state, pid, Instant::now());
             }
         },
     );
