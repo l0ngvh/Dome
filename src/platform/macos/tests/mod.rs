@@ -370,13 +370,7 @@ fn setup_dome() -> Dome {
 
 fn setup_dome_with_config(config: Config) -> Dome {
     let screen = default_screen();
-    let event_loop = calloop::EventLoop::<()>::try_new().unwrap();
-    Dome::new(
-        &[screen],
-        config,
-        Box::new(NoopSender),
-        event_loop.get_signal(),
-    )
+    Dome::new(&[screen], config, Box::new(NoopSender))
 }
 
 fn new_window(macos: &MacOS, cg_id: CGWindowID) -> NewWindow {

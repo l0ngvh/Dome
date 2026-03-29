@@ -14,24 +14,24 @@ use super::registry::WindowEntry;
 use super::window::WindowState;
 
 /// A still in display window (unminimized, in current space, returned by AXWindowsAttribute)
-pub(super) struct ExistingWindow {
-    pub(super) id: WindowId,
-    pub(super) x: i32,
-    pub(super) y: i32,
-    pub(super) w: i32,
-    pub(super) h: i32,
-    pub(super) is_native_fullscreen: bool,
+pub(in crate::platform::macos) struct ExistingWindow {
+    pub(in crate::platform::macos) id: WindowId,
+    pub(in crate::platform::macos) x: i32,
+    pub(in crate::platform::macos) y: i32,
+    pub(in crate::platform::macos) w: i32,
+    pub(in crate::platform::macos) h: i32,
+    pub(in crate::platform::macos) is_native_fullscreen: bool,
 }
 
-pub(super) struct ReconcileAllResult {
-    pub(super) terminated_pids: Vec<i32>,
-    pub(super) new_apps: Vec<RunningApp>,
-    pub(super) hidden_pids: Vec<i32>,
-    pub(super) to_remove: Vec<CGWindowID>,
-    pub(super) to_add: Vec<NewWindow>,
+pub(in crate::platform::macos) struct ReconcileAllResult {
+    pub(in crate::platform::macos) terminated_pids: Vec<i32>,
+    pub(in crate::platform::macos) new_apps: Vec<RunningApp>,
+    pub(in crate::platform::macos) hidden_pids: Vec<i32>,
+    pub(in crate::platform::macos) to_remove: Vec<CGWindowID>,
+    pub(in crate::platform::macos) to_add: Vec<NewWindow>,
 }
 
-pub(super) fn compute_reconciliation(
+pub(in crate::platform::macos) fn compute_reconciliation(
     app: &RunningApp,
     tracked: &HashMap<CGWindowID, WindowEntry>,
     ignore_rules: &[MacosWindow],
@@ -91,7 +91,7 @@ pub(super) fn compute_reconciliation(
     (to_remove, to_add)
 }
 
-pub(super) fn compute_window_positions(
+pub(in crate::platform::macos) fn compute_window_positions(
     app: &RunningApp,
     tracked: &HashMap<CGWindowID, WindowEntry>,
 ) -> Vec<ExistingWindow> {
@@ -118,7 +118,7 @@ pub(super) fn compute_window_positions(
     existing
 }
 
-pub(super) fn compute_reconcile_all(
+pub(in crate::platform::macos) fn compute_reconcile_all(
     observed_pids: HashSet<i32>,
     tracked: HashMap<CGWindowID, WindowEntry>,
     ignore_rules: Vec<MacosWindow>,

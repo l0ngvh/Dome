@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use calloop::LoopSignal;
 use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
@@ -63,7 +62,7 @@ pub(in crate::platform::macos) struct Dome {
     primary_full_height: f32,
     observed_pids: HashSet<i32>,
     sender: Box<dyn FrameSender>,
-    signal: LoopSignal,
+    stopped: bool,
     last_focused: Option<WindowId>,
     recovery: Recovery,
 }
@@ -73,7 +72,6 @@ impl Dome {
         screens: &[MonitorInfo],
         config: Config,
         sender: Box<dyn FrameSender>,
-        signal: LoopSignal,
     ) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
@@ -94,7 +92,7 @@ impl Dome {
             primary_full_height: primary.full_height,
             observed_pids: HashSet::new(),
             sender,
-            signal,
+            stopped: false,
             last_focused: None,
             recovery: Recovery::new(),
         }
@@ -196,11 +194,15 @@ impl Dome {
         self.registry.get(cg_id).map(|e| e.window_id)
     }
 
-    pub(super) fn stop(&mut self) {
-        self.signal.stop();
+    pub(in crate::platform::macos) fn stop(&mut self) {
+        self.stopped = true;
     }
 
-    pub(super) fn config_changed(&mut self, new_config: Config) {
+    pub(in crate::platform::macos) fn is_stopped(&self) -> bool {
+        self.stopped
+    }
+
+    pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
         self.hub.sync_config(new_config.clone().into());
         self.sender
             .send(HubMessage::ConfigChanged(new_config.clone()));
@@ -209,14 +211,14 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(super) fn sync_focus(&mut self, pid: i32) {
+    pub(in crate::platform::macos) fn sync_focus(&mut self, pid: i32) {
         if let Some(app) = RunningApp::new(pid) {
             self.sync_app_focus(&app);
         }
         self.flush_layout();
     }
 
-    pub(super) fn title_changed(&mut self, cg_id: CGWindowID) {
+    pub(in crate::platform::macos) fn title_changed(&mut self, cg_id: CGWindowID) {
         if let Some(entry) = self.registry.get_mut(cg_id) {
             entry.title = entry.ax.read_title();
             tracing::trace!(%entry, "Title changed");
@@ -238,35 +240,42 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(super) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
+    pub(in crate::platform::macos) fn tab_clicked(
+        &mut self,
+        container_id: ContainerId,
+        tab_idx: usize,
+    ) {
         self.hub.focus_tab_index(container_id, tab_idx);
         self.flush_layout();
     }
 
-    pub(super) fn space_changed(&mut self) {
+    pub(in crate::platform::macos) fn space_changed(&mut self) {
         self.handle_space_changed();
         self.flush_layout();
     }
 
-    pub(super) fn tracked_for_pid(&self, pid: i32) -> HashMap<CGWindowID, WindowEntry> {
+    pub(in crate::platform::macos) fn tracked_for_pid(
+        &self,
+        pid: i32,
+    ) -> HashMap<CGWindowID, WindowEntry> {
         self.registry
             .for_pid(pid)
             .map(|(id, e)| (id, e.clone()))
             .collect()
     }
 
-    pub(super) fn all_tracked(&self) -> HashMap<CGWindowID, WindowEntry> {
+    pub(in crate::platform::macos) fn all_tracked(&self) -> HashMap<CGWindowID, WindowEntry> {
         self.registry
             .iter()
             .map(|(id, e)| (id, e.clone()))
             .collect()
     }
 
-    pub(super) fn ignore_rules(&self) -> Vec<MacosWindow> {
+    pub(in crate::platform::macos) fn ignore_rules(&self) -> Vec<MacosWindow> {
         self.config.macos.ignore.clone()
     }
 
-    pub(super) fn observed_pids(&self) -> HashSet<i32> {
+    pub(in crate::platform::macos) fn observed_pids(&self) -> HashSet<i32> {
         self.observed_pids.clone()
     }
 
@@ -274,19 +283,19 @@ impl Dome {
         self.registry.set_pid_moving(pid, moving);
     }
 
-    pub(super) fn mark_pid_observed(&mut self, pid: i32) {
+    pub(in crate::platform::macos) fn mark_pid_observed(&mut self, pid: i32) {
         self.observed_pids.insert(pid);
     }
 
-    pub(super) fn unmark_pid_observed(&mut self, pid: i32) {
+    pub(in crate::platform::macos) fn unmark_pid_observed(&mut self, pid: i32) {
         self.observed_pids.remove(&pid);
     }
 
-    pub(super) fn remove_untracked_app(&mut self, pid: i32) {
+    pub(in crate::platform::macos) fn remove_untracked_app(&mut self, pid: i32) {
         self.remove_app_windows(pid);
     }
 
-    pub(super) fn register_observers(&mut self, apps: Vec<RunningApp>) {
+    pub(in crate::platform::macos) fn register_observers(&mut self, apps: Vec<RunningApp>) {
         self.sender.send(HubMessage::RegisterObservers(apps));
     }
 
@@ -529,7 +538,7 @@ impl Dome {
                 }
                 Action::Exit => {
                     tracing::debug!("Exiting hub thread");
-                    self.signal.stop();
+                    self.stopped = true;
                 }
             }
         }

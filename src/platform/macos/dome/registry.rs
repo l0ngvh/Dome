@@ -9,7 +9,7 @@ use super::super::accessibility::AXWindowApi;
 use super::window::WindowState;
 
 #[derive(Clone)]
-pub(super) struct WindowEntry {
+pub(in crate::platform::macos) struct WindowEntry {
     pub(super) ax: Arc<dyn AXWindowApi>,
     pub(super) window_id: WindowId,
     pub(super) app_name: Option<String>,
