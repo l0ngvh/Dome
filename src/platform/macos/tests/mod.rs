@@ -1,4 +1,7 @@
-mod window_state;
+mod lifecycle;
+mod placement;
+mod transitions;
+mod uncooperative;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -50,6 +53,13 @@ struct MockAXWindow {
     native_fullscreen: Rc<Cell<bool>>,
     min_size: Rc<Cell<Option<(i32, i32)>>>,
     max_size: Rc<Cell<Option<(i32, i32)>>>,
+    /// When set, `set_frame` and `hide_at` snap to this position/size instead
+    /// of the requested one, simulating a window that resists placement.
+    override_frame: Rc<Cell<Option<(i32, i32, i32, i32)>>>,
+    /// Number of times `minimize()` was called on this window.
+    minimize_count: Rc<Cell<u32>>,
+    /// Number of times `unminimize()` was called on this window.
+    unminimize_count: Rc<Cell<u32>>,
     moves: MoveLog,
 }
 
@@ -75,6 +85,9 @@ impl MockAXWindow {
             native_fullscreen: Rc::new(Cell::new(false)),
             min_size: Rc::new(Cell::new(None)),
             max_size: Rc::new(Cell::new(None)),
+            override_frame: Rc::new(Cell::new(None)),
+            minimize_count: Rc::new(Cell::new(0)),
+            unminimize_count: Rc::new(Cell::new(0)),
             moves,
         }
     }
@@ -109,15 +122,21 @@ impl AXWindowApi for MockAXWindow {
         Ok(self.size.get())
     }
     fn set_frame(&self, x: i32, y: i32, w: i32, h: i32) -> Result<()> {
-        let (mut w, mut h) = (w, h);
-        if let Some((min_w, min_h)) = self.min_size.get() {
-            w = w.max(min_w);
-            h = h.max(min_h);
-        }
-        if let Some((max_w, max_h)) = self.max_size.get() {
-            w = w.min(max_w);
-            h = h.min(max_h);
-        }
+        let (x, y, w, h) = if let Some(ovr) = self.override_frame.get() {
+            ovr
+        } else {
+            let mut w = w;
+            let mut h = h;
+            if let Some((min_w, min_h)) = self.min_size.get() {
+                w = w.max(min_w);
+                h = h.max(min_h);
+            }
+            if let Some((max_w, max_h)) = self.max_size.get() {
+                w = w.min(max_w);
+                h = h.min(max_h);
+            }
+            (x, y, w, h)
+        };
         self.position.set((x, y));
         self.size.set((w, h));
         self.moves.borrow_mut().push((self.cg_id, x, y, w, h));
@@ -127,15 +146,23 @@ impl AXWindowApi for MockAXWindow {
         Ok(())
     }
     fn hide_at(&self, x: i32, y: i32) -> Result<()> {
+        let (x, y, w, h) = if let Some(ovr) = self.override_frame.get() {
+            ovr
+        } else {
+            let (w, h) = self.size.get();
+            (x, y, w, h)
+        };
         self.position.set((x, y));
-        let (w, h) = self.size.get();
+        self.size.set((w, h));
         self.moves.borrow_mut().push((self.cg_id, x, y, w, h));
         Ok(())
     }
     fn minimize(&self) -> Result<()> {
+        self.minimize_count.set(self.minimize_count.get() + 1);
         Ok(())
     }
     fn unminimize(&self) -> Result<()> {
+        self.unminimize_count.set(self.unminimize_count.get() + 1);
         Ok(())
     }
     fn is_valid(&self) -> bool {
@@ -216,6 +243,22 @@ impl MacOS {
 
     fn set_max_size(&self, cg_id: CGWindowID, w: i32, h: i32) {
         self.window(cg_id).set_max_size(w, h);
+    }
+
+    /// Configure a window to resist `set_frame` and `hide_at` by snapping to a
+    /// fixed position. Pass `None` to stop resisting.
+    fn set_override_frame(&self, cg_id: CGWindowID, frame: Option<(i32, i32, i32, i32)>) {
+        self.window(cg_id).override_frame.set(frame);
+    }
+
+    /// How many times `minimize()` was called on this window.
+    fn minimize_count(&self, cg_id: CGWindowID) -> u32 {
+        self.window(cg_id).minimize_count.get()
+    }
+
+    /// How many times `unminimize()` was called on this window.
+    fn unminimize_count(&self, cg_id: CGWindowID) -> u32 {
+        self.window(cg_id).unminimize_count.get()
     }
 
     /// Simulate an external move (app/macOS moved the window) and feed it to Dome.
@@ -322,11 +365,15 @@ impl FrameSender for NoopSender {
 }
 
 fn setup_dome() -> Dome {
+    setup_dome_with_config(Config::default())
+}
+
+fn setup_dome_with_config(config: Config) -> Dome {
     let screen = default_screen();
     let event_loop = calloop::EventLoop::<()>::try_new().unwrap();
     Dome::new(
         &[screen],
-        Config::default(),
+        config,
         Box::new(NoopSender),
         event_loop.get_signal(),
     )

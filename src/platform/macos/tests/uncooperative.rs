@@ -5,7 +5,7 @@ use crate::platform::macos::dome::WindowMove;
 use super::*;
 
 #[test]
-fn single_window_placed_in_view() {
+fn drift_exhausts_retries_dome_gives_up() {
     let mut macos = MacOS::new();
     let mut dome = setup_dome();
 
@@ -13,54 +13,18 @@ fn single_window_placed_in_view() {
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
-    assert!(!macos.is_offscreen(cg1));
-    assert_eq!(macos.window_frame(cg1), (2, 2, 1916, 1076));
+    // Window resists placement — always snaps to (100, 100, 800, 600)
+    macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
+    macos.move_window(cg1, 100, 100, 800, 600);
+    macos.report_move(&mut dome, cg1);
+    macos.settle(&mut dome, 20);
+
+    // After MAX_DRIFT_RETRIES (5), Dome gives up — window stays at its chosen position
+    assert_eq!(macos.window_frame(cg1), (100, 100, 800, 600));
 }
 
 #[test]
-fn two_windows_split_horizontally() {
-    let mut macos = MacOS::new();
-    let mut dome = setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
-    macos.settle(&mut dome, 10);
-
-    let (x1, _, w1, _) = macos.window_frame(cg1);
-    let (x2, _, w2, _) = macos.window_frame(cg2);
-    assert!(x1 < x2);
-    assert!(w1 > 0 && w2 > 0);
-    assert!(!macos.is_offscreen(cg1));
-    assert!(!macos.is_offscreen(cg2));
-}
-
-#[test]
-fn workspace_switch_hides_and_restores() {
-    let mut macos = MacOS::new();
-    let mut dome = setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
-    macos.settle(&mut dome, 10);
-
-    let placed = macos.window_frame(cg1);
-
-    dome.run_actions(&actions("focus workspace 1"));
-    macos.settle(&mut dome, 10);
-    assert!(macos.is_offscreen(cg1));
-    assert!(macos.is_offscreen(cg2));
-
-    dome.run_actions(&actions("focus workspace 0"));
-    macos.settle(&mut dome, 10);
-    assert!(!macos.is_offscreen(cg1));
-    assert!(!macos.is_offscreen(cg2));
-    assert_eq!(macos.window_frame(cg1), placed);
-}
-
-#[test]
-fn zoom_button_triggers_borderless_fullscreen() {
+fn drift_retries_reset_on_new_target() {
     let mut macos = MacOS::new();
     let mut dome = setup_dome();
 
@@ -68,112 +32,98 @@ fn zoom_button_triggers_borderless_fullscreen() {
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
+    // Exhaust retries
+    macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
+    macos.move_window(cg1, 100, 100, 800, 600);
+    macos.report_move(&mut dome, cg1);
+    macos.settle(&mut dome, 20);
+    assert_eq!(macos.window_frame(cg1), (100, 100, 800, 600));
+
+    // Stop resisting and add a new window — target changes, retries reset
+    macos.set_override_frame(cg1, None);
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg2)]);
+    macos.settle(&mut dome, 10);
+
+    // cg1 should now be placed at its new (half-screen) target
+    assert!(!macos.is_offscreen(cg1));
+    let (_, _, w1, _) = macos.window_frame(cg1);
+    assert!(w1 < 1900, "cg1 should be half-screen, got width {w1}");
+}
+
+#[test]
+fn drift_to_fullscreen_triggers_borderless_detection() {
+    let mut macos = MacOS::new();
+    let mut dome = setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    macos.settle(&mut dome, 10);
+
+    // Window auto-zooms to fullscreen in response to set_frame
+    macos.set_override_frame(cg1, Some((0, 0, 1920, 1080)));
     macos.move_window(cg1, 0, 0, 1920, 1080);
     macos.report_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
+    // Should be detected as borderless fullscreen, not treated as drift
     assert_eq!(macos.window_frame(cg1), (0, 0, 1920, 1080));
 }
 
 #[test]
-fn borderless_fullscreen_exit_to_tiling() {
+fn offscreen_window_fights_hide() {
     let mut macos = MacOS::new();
     let mut dome = setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
     macos.settle(&mut dome, 10);
 
-    // Enter borderless fullscreen
-    macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    // Hide both
+    dome.run_actions(&actions("focus workspace 1"));
     macos.settle(&mut dome, 10);
+    assert!(macos.is_offscreen(cg1));
 
-    // Un-zoom
+    // Window fights back — keeps snapping to visible position
+    macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
     macos.move_window(cg1, 100, 100, 800, 600);
     macos.report_move(&mut dome, cg1);
-    macos.settle(&mut dome, 10);
 
-    assert!(!macos.is_offscreen(cg1));
+    // Dome should keep re-hiding each round (never gives up, unlike drift).
+    // Don't use settle() — it would panic on non-convergence.
+    for _ in 0..5 {
+        let pending = macos.moves.borrow().len();
+        assert!(pending > 0, "Dome should keep issuing hide_at");
+        macos.flush_moves(&mut dome);
+    }
 }
 
 #[test]
-fn native_fullscreen_enter() {
+fn constraint_changes_over_time() {
     let mut macos = MacOS::new();
     let mut dome = setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    let cg2 = macos.spawn_window(101, "Finder", "Home");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
     macos.settle(&mut dome, 10);
 
-    macos.enter_native_fullscreen(cg1);
-    macos.report_move(&mut dome, cg1);
+    // First constraint: cg2 reports min width 1000 (right-edge aligned)
+    let (x2, y2, _, h2) = macos.window_frame(cg2);
+    macos.move_window(cg2, x2, y2, 1000, h2);
+    macos.report_move(&mut dome, cg2);
     macos.settle(&mut dome, 10);
+    let (_, _, w2, _) = macos.window_frame(cg2);
+    assert!(w2 >= 1000, "First constraint: expected >= 1000, got {w2}");
 
-    // Hub treats fullscreen as taking the full monitor — sibling is hidden.
-    // In real macOS, space_changed would restore siblings on the original Space.
-    assert!(macos.is_offscreen(cg2));
-}
-
-#[test]
-fn native_fullscreen_exit() {
-    let mut macos = MacOS::new();
-    let mut dome = setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    // Second constraint: cg2 now reports even larger min width
+    let (x2, y2, _, h2) = macos.window_frame(cg2);
+    macos.move_window(cg2, x2, y2, 1200, h2);
+    macos.report_move(&mut dome, cg2);
     macos.settle(&mut dome, 10);
-
-    macos.enter_native_fullscreen(cg1);
-    macos.report_move(&mut dome, cg1);
-    macos.settle(&mut dome, 10);
-
-    macos.exit_native_fullscreen(cg1);
-    macos.move_window(cg1, 200, 200, 800, 600);
-    macos.report_move(&mut dome, cg1);
-    macos.settle(&mut dome, 10);
-
-    assert!(!macos.is_offscreen(cg1));
-    assert!(!macos.is_offscreen(cg2));
-}
-
-#[test]
-fn toggle_fullscreen_hides_siblings() {
-    let mut macos = MacOS::new();
-    let mut dome = setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
-    macos.settle(&mut dome, 10);
-
-    dome.run_actions(&actions("toggle fullscreen"));
-    macos.settle(&mut dome, 10);
-
-    assert_eq!(macos.window_frame(cg2), (0, 0, 1920, 1080));
-    assert!(macos.is_offscreen(cg1));
-}
-
-#[test]
-fn toggle_fullscreen_on_and_off() {
-    let mut macos = MacOS::new();
-    let mut dome = setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
-    macos.settle(&mut dome, 10);
-
-    dome.run_actions(&actions("toggle fullscreen"));
-    macos.settle(&mut dome, 10);
-
-    dome.run_actions(&actions("toggle fullscreen"));
-    macos.settle(&mut dome, 10);
-
-    // TODO: after toggling fullscreen off with move event feedback, windows
-    // don't restore correctly — separate bug from convergence
+    let (_, _, w2, _) = macos.window_frame(cg2);
+    assert!(w2 >= 1200, "Updated constraint: expected >= 1200, got {w2}");
 }
 
 #[test]
@@ -311,48 +261,6 @@ fn offscreen_move_events_keep_windows_hidden() {
     macos.settle(&mut dome, 10);
     assert!(!macos.is_offscreen(cg1));
     assert!(!macos.is_offscreen(cg2));
-}
-
-#[test]
-fn app_terminated_removes_windows() {
-    let mut macos = MacOS::new();
-    let mut dome = setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Tab 1");
-    let cg2 = macos.spawn_window(100, "Safari", "Tab 2");
-    let cg3 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        vec![
-            new_window(&macos, cg1),
-            new_window(&macos, cg2),
-            new_window(&macos, cg3),
-        ],
-    );
-    macos.settle(&mut dome, 10);
-
-    dome.app_terminated(100);
-    macos.settle(&mut dome, 10);
-
-    assert!(!macos.is_offscreen(cg3));
-    assert_eq!(macos.window_frame(cg3), (2, 2, 1916, 1076));
-}
-
-#[test]
-fn window_removed_fills_screen() {
-    let mut macos = MacOS::new();
-    let mut dome = setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
-    macos.settle(&mut dome, 10);
-
-    dome.reconcile_windows(&[cg1], vec![]);
-    macos.settle(&mut dome, 10);
-
-    assert!(!macos.is_offscreen(cg2));
-    assert_eq!(macos.window_frame(cg2), (2, 2, 1916, 1076));
 }
 
 #[test]

@@ -224,12 +224,12 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(super) fn screens_changed(&mut self, screens: Vec<MonitorInfo>) {
+    pub(in crate::platform::macos) fn screens_changed(&mut self, screens: Vec<MonitorInfo>) {
         self.update_screens(screens);
         self.flush_layout();
     }
 
-    pub(super) fn mirror_clicked(&mut self, window_id: WindowId) {
+    pub(in crate::platform::macos) fn mirror_clicked(&mut self, window_id: WindowId) {
         let entry = self.registry.by_id(window_id);
         if let Err(e) = entry.ax.focus() {
             tracing::debug!("Failed to focus window: {e:#}");
@@ -270,7 +270,7 @@ impl Dome {
         self.observed_pids.clone()
     }
 
-    pub(super) fn set_pid_moving(&mut self, pid: i32, moving: bool) {
+    pub(in crate::platform::macos) fn set_pid_moving(&mut self, pid: i32, moving: bool) {
         self.registry.set_pid_moving(pid, moving);
     }
 
