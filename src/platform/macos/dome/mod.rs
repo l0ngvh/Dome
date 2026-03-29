@@ -10,6 +10,7 @@ pub(super) use events::{HubEvent, HubMessage};
 pub(super) use inspect::{compute_reconcile_all, compute_reconciliation, compute_window_positions};
 
 use std::collections::{HashMap, HashSet};
+use std::os::unix::process::CommandExt;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -417,6 +418,7 @@ impl Dome {
                     if let Err(e) = std::process::Command::new("sh")
                         .arg("-c")
                         .arg(command)
+                        .process_group(0)
                         .spawn()
                     {
                         tracing::warn!(%command, "Failed to exec: {e}");
