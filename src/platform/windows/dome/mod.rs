@@ -6,9 +6,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, PostThreadMessageW, WM_QUIT};
+use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
-use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
+use crate::action::{Action, Actions, FocusTarget, HubAction, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
     Child, ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout, SpawnMode,
@@ -191,8 +191,6 @@ pub(in crate::platform::windows) struct Dome {
     displayed: HashMap<MonitorId, DisplayedMonitor>,
     config: Config,
     sender: Option<Box<dyn FrameSender>>,
-    main_thread_id: u32,
-    pub(in crate::platform::windows) stopped: bool,
     placement_tracker: PlacementTracker,
 }
 
@@ -201,7 +199,6 @@ impl Dome {
         config: Config,
         screens: Vec<ScreenInfo>,
         sender: Option<Box<dyn FrameSender>>,
-        main_thread_id: u32,
     ) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
         let mut hub = Hub::new(primary.dimension, config.clone().into());
@@ -242,8 +239,6 @@ impl Dome {
             displayed: HashMap::new(),
             config,
             sender,
-            main_thread_id,
-            stopped: false,
             placement_tracker: PlacementTracker::new(),
         }
     }
@@ -252,16 +247,16 @@ impl Dome {
         &mut self,
         app_hwnd: AppHandle,
         windows: Vec<Arc<dyn ManageExternalHwnd>>,
-    ) {
+    ) -> Vec<Actions> {
         self.sender = Some(Box::new(WmSender { app_hwnd }));
+        let mut on_open = Vec::new();
         for ext in windows {
-            self.try_manage_window(ext);
+            if let Some(actions) = self.try_manage_window(ext) {
+                on_open.push(actions);
+            }
         }
         self.apply_layout();
-    }
-
-    pub(in crate::platform::windows) fn stop(&mut self) {
-        self.stopped = true;
+        on_open
     }
 
     #[cfg(test)]
@@ -282,11 +277,14 @@ impl Dome {
     pub(in crate::platform::windows) fn window_created(
         &mut self,
         ext: Arc<dyn ManageExternalHwnd>,
-    ) {
-        if !self.registry.contains_hwnd(ext.id()) {
-            self.try_manage_window(ext);
-        }
+    ) -> Option<Actions> {
+        let actions = if !self.registry.contains_hwnd(ext.id()) {
+            self.try_manage_window(ext)
+        } else {
+            None
+        };
         self.apply_layout();
+        actions
     }
 
     pub(in crate::platform::windows) fn window_destroyed(
@@ -336,16 +334,21 @@ impl Dome {
         self.placement_tracker.location_changed(ext.id())
     }
 
-    pub(in crate::platform::windows) fn title_changed(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
+    pub(in crate::platform::windows) fn title_changed(
+        &mut self,
+        ext: Arc<dyn ManageExternalHwnd>,
+    ) -> Option<Actions> {
         let id_key = ext.id();
-        if self.registry.contains_hwnd(id_key) {
+        let actions = if self.registry.contains_hwnd(id_key) {
             let new_title = ext.get_window_title();
             self.send_title_update(vec![(id_key, new_title)]);
+            None
         } else {
             // Some apps have a brief moment where their title is empty
-            self.try_manage_window(ext);
-        }
+            self.try_manage_window(ext)
+        };
         self.apply_layout();
+        actions
     }
 
     pub(in crate::platform::windows) fn screens_changed(&mut self, screens: Vec<ScreenInfo>) {
@@ -354,8 +357,15 @@ impl Dome {
         self.apply_layout();
     }
 
-    pub(in crate::platform::windows) fn run_actions(&mut self, actions: &Actions) {
-        self.execute_actions(actions);
+    pub(in crate::platform::windows) fn run_hub_actions(&mut self, actions: &Actions) {
+        if actions.is_empty() {
+            return;
+        }
+        for action in actions {
+            if let Action::Hub(hub) = action {
+                self.execute_hub_action(hub);
+            }
+        }
         self.apply_layout();
     }
 
@@ -378,20 +388,18 @@ impl Dome {
         self.apply_layout();
     }
 
-    fn try_manage_window(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
+    fn try_manage_window(&mut self, ext: Arc<dyn ManageExternalHwnd>) -> Option<Actions> {
         if !ext.is_manageable() {
-            return;
+            return None;
         }
         let title = ext.get_window_title();
         let process = ext.get_process_name().unwrap_or_default();
         if should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
-            return;
+            return None;
         }
         let actions = on_open_actions(&process, title.as_deref(), &self.config.windows.on_open);
         self.insert_window(ext, title, process);
-        if let Some(actions) = actions {
-            self.execute_actions(&actions);
-        }
+        actions
     }
 
     fn insert_window(
@@ -531,51 +539,34 @@ impl Dome {
         }
     }
 
-    #[tracing::instrument(skip(self), fields(actions = %actions))]
-    fn execute_actions(&mut self, actions: &Actions) {
-        for action in actions {
-            match action {
-                Action::Focus { target } => match target {
-                    FocusTarget::Up => self.hub.focus_up(),
-                    FocusTarget::Down => self.hub.focus_down(),
-                    FocusTarget::Left => self.hub.focus_left(),
-                    FocusTarget::Right => self.hub.focus_right(),
-                    FocusTarget::Parent => self.hub.focus_parent(),
-                    FocusTarget::NextTab => self.hub.focus_next_tab(),
-                    FocusTarget::PrevTab => self.hub.focus_prev_tab(),
-                    FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
-                    FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
-                },
-                Action::Move { target } => match target {
-                    MoveTarget::Up => self.hub.move_up(),
-                    MoveTarget::Down => self.hub.move_down(),
-                    MoveTarget::Left => self.hub.move_left(),
-                    MoveTarget::Right => self.hub.move_right(),
-                    MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
-                    MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
-                },
-                Action::Toggle { target } => match target {
-                    ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),
-                    ToggleTarget::Direction => self.hub.toggle_direction(),
-                    ToggleTarget::Layout => self.hub.toggle_container_layout(),
-                    ToggleTarget::Float => self.hub.toggle_float(),
-                    ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
-                },
-                Action::Exec { command } => {
-                    if let Err(e) = std::process::Command::new("cmd")
-                        .args(["/C", command])
-                        .spawn()
-                    {
-                        tracing::warn!(%command, "Failed to exec: {e}");
-                    }
-                }
-                Action::Exit => {
-                    unsafe {
-                        PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
-                    };
-                    self.stopped = true;
-                }
-            }
+    fn execute_hub_action(&mut self, action: &HubAction) {
+        match action {
+            HubAction::Focus { target } => match target {
+                FocusTarget::Up => self.hub.focus_up(),
+                FocusTarget::Down => self.hub.focus_down(),
+                FocusTarget::Left => self.hub.focus_left(),
+                FocusTarget::Right => self.hub.focus_right(),
+                FocusTarget::Parent => self.hub.focus_parent(),
+                FocusTarget::NextTab => self.hub.focus_next_tab(),
+                FocusTarget::PrevTab => self.hub.focus_prev_tab(),
+                FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
+                FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
+            },
+            HubAction::Move { target } => match target {
+                MoveTarget::Up => self.hub.move_up(),
+                MoveTarget::Down => self.hub.move_down(),
+                MoveTarget::Left => self.hub.move_left(),
+                MoveTarget::Right => self.hub.move_right(),
+                MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
+                MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
+            },
+            HubAction::Toggle { target } => match target {
+                ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),
+                ToggleTarget::Direction => self.hub.toggle_direction(),
+                ToggleTarget::Layout => self.hub.toggle_container_layout(),
+                ToggleTarget::Float => self.hub.toggle_float(),
+                ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
+            },
         }
     }
 

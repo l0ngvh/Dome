@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::action::{Action, Actions, FocusTarget, MonitorTarget, MoveTarget, ToggleTarget};
+use crate::action::{
+    Action, Actions, FocusTarget, HubAction, MonitorTarget, MoveTarget, ToggleTarget,
+};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -54,22 +56,22 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
                 key: i.to_string(),
                 modifiers: Modifiers::CMD,
             },
-            Actions::new(vec![Action::Focus {
+            Actions::new(vec![Action::Hub(HubAction::Focus {
                 target: FocusTarget::Workspace {
                     name: i.to_string(),
                 },
-            }]),
+            })]),
         );
         keymaps.insert(
             Keymap {
                 key: i.to_string(),
                 modifiers: Modifiers::CMD | Modifiers::SHIFT,
             },
-            Actions::new(vec![Action::Move {
+            Actions::new(vec![Action::Hub(HubAction::Move {
                 target: MoveTarget::Workspace {
                     name: i.to_string(),
                 },
-            }]),
+            })]),
         );
     }
     keymaps.insert(
@@ -77,135 +79,135 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
             key: "e".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Toggle {
+        Actions::new(vec![Action::Hub(HubAction::Toggle {
             target: ToggleTarget::SpawnDirection,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "d".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Toggle {
+        Actions::new(vec![Action::Hub(HubAction::Toggle {
             target: ToggleTarget::Direction,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "b".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Toggle {
+        Actions::new(vec![Action::Hub(HubAction::Toggle {
             target: ToggleTarget::Layout,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "p".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Focus {
+        Actions::new(vec![Action::Hub(HubAction::Focus {
             target: FocusTarget::Parent,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "h".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Focus {
+        Actions::new(vec![Action::Hub(HubAction::Focus {
             target: FocusTarget::Left,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "j".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Focus {
+        Actions::new(vec![Action::Hub(HubAction::Focus {
             target: FocusTarget::Down,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "k".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Focus {
+        Actions::new(vec![Action::Hub(HubAction::Focus {
             target: FocusTarget::Up,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "l".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Focus {
+        Actions::new(vec![Action::Hub(HubAction::Focus {
             target: FocusTarget::Right,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "[".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Focus {
+        Actions::new(vec![Action::Hub(HubAction::Focus {
             target: FocusTarget::PrevTab,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "]".into(),
             modifiers: Modifiers::CMD,
         },
-        Actions::new(vec![Action::Focus {
+        Actions::new(vec![Action::Hub(HubAction::Focus {
             target: FocusTarget::NextTab,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "h".into(),
             modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Move {
+        Actions::new(vec![Action::Hub(HubAction::Move {
             target: MoveTarget::Left,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "j".into(),
             modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Move {
+        Actions::new(vec![Action::Hub(HubAction::Move {
             target: MoveTarget::Down,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "k".into(),
             modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Move {
+        Actions::new(vec![Action::Hub(HubAction::Move {
             target: MoveTarget::Up,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "l".into(),
             modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Move {
+        Actions::new(vec![Action::Hub(HubAction::Move {
             target: MoveTarget::Right,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
             key: "f".into(),
             modifiers: Modifiers::CMD | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Toggle {
+        Actions::new(vec![Action::Hub(HubAction::Toggle {
             target: ToggleTarget::Float,
-        }]),
+        })]),
     );
     keymaps.insert(
         Keymap {
@@ -226,20 +228,20 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
                 key: key.into(),
                 modifiers: Modifiers::CMD | Modifiers::ALT,
             },
-            Actions::new(vec![Action::Focus {
+            Actions::new(vec![Action::Hub(HubAction::Focus {
                 target: FocusTarget::Monitor {
                     target: target.clone(),
                 },
-            }]),
+            })]),
         );
         keymaps.insert(
             Keymap {
                 key: key.into(),
                 modifiers: Modifiers::CMD | Modifiers::ALT | Modifiers::SHIFT,
             },
-            Actions::new(vec![Action::Move {
+            Actions::new(vec![Action::Hub(HubAction::Move {
                 target: MoveTarget::Monitor { target },
-            }]),
+            })]),
         );
     }
     keymaps

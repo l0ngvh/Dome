@@ -5,7 +5,7 @@ use std::fmt;
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
-pub enum Action {
+pub enum HubAction {
     Focus {
         #[command(subcommand)]
         target: FocusTarget,
@@ -18,6 +18,12 @@ pub enum Action {
         #[command(subcommand)]
         target: ToggleTarget,
     },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum Action {
+    #[command(flatten)]
+    Hub(HubAction),
     Exec {
         command: String,
     },
@@ -33,12 +39,20 @@ pub enum MonitorTarget {
     Name(String),
 }
 
+impl fmt::Display for HubAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HubAction::Focus { target } => write!(f, "focus {target}"),
+            HubAction::Move { target } => write!(f, "move {target}"),
+            HubAction::Toggle { target } => write!(f, "toggle {target}"),
+        }
+    }
+}
+
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Action::Focus { target } => write!(f, "focus {target}"),
-            Action::Move { target } => write!(f, "move {target}"),
-            Action::Toggle { target } => write!(f, "toggle {target}"),
+            Action::Hub(hub) => hub.fmt(f),
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
         }
@@ -206,74 +220,74 @@ impl FromStr for Action {
 
         let parts: Vec<&str> = s.split_whitespace().collect();
         match parts.as_slice() {
-            ["focus", "up"] => Ok(Action::Focus {
+            ["focus", "up"] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::Up,
-            }),
-            ["focus", "down"] => Ok(Action::Focus {
+            })),
+            ["focus", "down"] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::Down,
-            }),
-            ["focus", "left"] => Ok(Action::Focus {
+            })),
+            ["focus", "left"] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::Left,
-            }),
-            ["focus", "right"] => Ok(Action::Focus {
+            })),
+            ["focus", "right"] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::Right,
-            }),
-            ["focus", "parent"] => Ok(Action::Focus {
+            })),
+            ["focus", "parent"] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::Parent,
-            }),
-            ["focus", "workspace", n] => Ok(Action::Focus {
+            })),
+            ["focus", "workspace", n] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::Workspace {
                     name: n.to_string(),
                 },
-            }),
-            ["focus", "next_tab"] => Ok(Action::Focus {
+            })),
+            ["focus", "next_tab"] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::NextTab,
-            }),
-            ["focus", "prev_tab"] => Ok(Action::Focus {
+            })),
+            ["focus", "prev_tab"] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::PrevTab,
-            }),
-            ["focus", "monitor", target] => Ok(Action::Focus {
+            })),
+            ["focus", "monitor", target] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::Monitor {
                     target: parse_monitor_target(target)?,
                 },
-            }),
-            ["move", "up"] => Ok(Action::Move {
+            })),
+            ["move", "up"] => Ok(Action::Hub(HubAction::Move {
                 target: MoveTarget::Up,
-            }),
-            ["move", "down"] => Ok(Action::Move {
+            })),
+            ["move", "down"] => Ok(Action::Hub(HubAction::Move {
                 target: MoveTarget::Down,
-            }),
-            ["move", "left"] => Ok(Action::Move {
+            })),
+            ["move", "left"] => Ok(Action::Hub(HubAction::Move {
                 target: MoveTarget::Left,
-            }),
-            ["move", "right"] => Ok(Action::Move {
+            })),
+            ["move", "right"] => Ok(Action::Hub(HubAction::Move {
                 target: MoveTarget::Right,
-            }),
-            ["move", "workspace", n] => Ok(Action::Move {
+            })),
+            ["move", "workspace", n] => Ok(Action::Hub(HubAction::Move {
                 target: MoveTarget::Workspace {
                     name: n.to_string(),
                 },
-            }),
-            ["move", "monitor", target] => Ok(Action::Move {
+            })),
+            ["move", "monitor", target] => Ok(Action::Hub(HubAction::Move {
                 target: MoveTarget::Monitor {
                     target: parse_monitor_target(target)?,
                 },
-            }),
-            ["toggle", "spawn_direction"] => Ok(Action::Toggle {
+            })),
+            ["toggle", "spawn_direction"] => Ok(Action::Hub(HubAction::Toggle {
                 target: ToggleTarget::SpawnDirection,
-            }),
-            ["toggle", "direction"] => Ok(Action::Toggle {
+            })),
+            ["toggle", "direction"] => Ok(Action::Hub(HubAction::Toggle {
                 target: ToggleTarget::Direction,
-            }),
-            ["toggle", "layout"] => Ok(Action::Toggle {
+            })),
+            ["toggle", "layout"] => Ok(Action::Hub(HubAction::Toggle {
                 target: ToggleTarget::Layout,
-            }),
-            ["toggle", "float"] => Ok(Action::Toggle {
+            })),
+            ["toggle", "float"] => Ok(Action::Hub(HubAction::Toggle {
                 target: ToggleTarget::Float,
-            }),
-            ["toggle", "fullscreen"] => Ok(Action::Toggle {
+            })),
+            ["toggle", "fullscreen"] => Ok(Action::Hub(HubAction::Toggle {
                 target: ToggleTarget::Fullscreen,
-            }),
+            })),
             ["exit"] => Ok(Action::Exit),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
@@ -292,5 +306,102 @@ fn parse_monitor_target(s: &str) -> Result<MonitorTarget> {
         "left" => Ok(MonitorTarget::Left),
         "right" => Ok(MonitorTarget::Right),
         name => Ok(MonitorTarget::Name(name.to_string())),
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+enum FlatAction {
+    Focus { target: FocusTarget },
+    Move { target: MoveTarget },
+    Toggle { target: ToggleTarget },
+    Exec { command: String },
+    Exit,
+}
+
+impl From<Action> for FlatAction {
+    fn from(a: Action) -> Self {
+        match a {
+            Action::Hub(HubAction::Focus { target }) => FlatAction::Focus { target },
+            Action::Hub(HubAction::Move { target }) => FlatAction::Move { target },
+            Action::Hub(HubAction::Toggle { target }) => FlatAction::Toggle { target },
+            Action::Exec { command } => FlatAction::Exec { command },
+            Action::Exit => FlatAction::Exit,
+        }
+    }
+}
+
+impl From<FlatAction> for Action {
+    fn from(a: FlatAction) -> Self {
+        match a {
+            FlatAction::Focus { target } => Action::Hub(HubAction::Focus { target }),
+            FlatAction::Move { target } => Action::Hub(HubAction::Move { target }),
+            FlatAction::Toggle { target } => Action::Hub(HubAction::Toggle { target }),
+            FlatAction::Exec { command } => Action::Exec { command },
+            FlatAction::Exit => Action::Exit,
+        }
+    }
+}
+
+impl Serialize for Action {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        FlatAction::from(self.clone()).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Action {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        FlatAction::deserialize(deserializer).map(Action::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_wire_format() {
+        let cases = vec![
+            (
+                Action::Hub(HubAction::Focus {
+                    target: FocusTarget::Up,
+                }),
+                r#"{"Focus":{"target":"Up"}}"#,
+            ),
+            (
+                Action::Hub(HubAction::Move {
+                    target: MoveTarget::Workspace { name: "1".into() },
+                }),
+                r#"{"Move":{"target":{"Workspace":{"name":"1"}}}}"#,
+            ),
+            (
+                Action::Hub(HubAction::Toggle {
+                    target: ToggleTarget::Float,
+                }),
+                r#"{"Toggle":{"target":"Float"}}"#,
+            ),
+            (
+                Action::Exec {
+                    command: "open -a Terminal".into(),
+                },
+                r#"{"Exec":{"command":"open -a Terminal"}}"#,
+            ),
+            (Action::Exit, r#""Exit""#),
+        ];
+        for (action, expected) in &cases {
+            let json = serde_json::to_string(action).unwrap();
+            assert_eq!(&json, expected, "serialize {action}");
+            let round_trip: Action = serde_json::from_str(expected).unwrap();
+            assert_eq!(
+                &serde_json::to_string(&round_trip).unwrap(),
+                expected,
+                "round-trip {action}"
+            );
+        }
     }
 }

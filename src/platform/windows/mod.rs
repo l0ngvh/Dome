@@ -38,6 +38,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::BOOL;
 
+use crate::action::{Action, Actions};
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
@@ -103,8 +104,8 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
                 .ok()
                 .expect("CoInitializeEx failed");
             let event_loop = calloop::EventLoop::try_new().expect("Failed to create event loop");
-            let dome = Dome::new(config_clone, screens, None, main_thread_id);
-            run_dome(dome, rx, event_loop);
+            let dome = Dome::new(config_clone, screens, None);
+            run_dome(dome, rx, event_loop, main_thread_id);
         }));
         if result.is_err() {
             tracing::error!("Dome thread panicked");
@@ -229,30 +230,45 @@ struct DomeRunner {
     /// (100ms), never both.
     timers: HashMap<HwndId, RegistrationToken>,
     handle: calloop::LoopHandle<'static, Self>,
+    signal: calloop::LoopSignal,
+    main_thread_id: u32,
 }
 
 fn run_dome(
     dome: Dome,
     channel: Channel<HubEvent>,
     mut event_loop: calloop::EventLoop<'static, DomeRunner>,
+    main_thread_id: u32,
 ) {
     let handle = event_loop.handle();
+    let signal = event_loop.get_signal();
     let mut runner = DomeRunner {
         dome,
         focus_throttle: Throttle::new(FOCUS_THROTTLE_INTERVAL),
         timers: HashMap::new(),
         handle: handle.clone(),
+        signal,
+        main_thread_id,
     };
 
     handle
         .insert_source(channel, |event, _, runner| match event {
             ChannelEvent::Msg(hub_event) => match hub_event {
                 HubEvent::AppInitialized { app_hwnd, windows } => {
-                    runner.dome.app_initialized(app_hwnd, windows);
+                    let on_open = runner.dome.app_initialized(app_hwnd, windows);
+                    for actions in on_open {
+                        runner.dome.run_hub_actions(&actions);
+                        handle_system_actions(runner, &actions);
+                    }
                 }
-                HubEvent::Shutdown => runner.dome.stop(),
+                HubEvent::Shutdown => runner.signal.stop(),
                 HubEvent::ConfigChanged(c) => runner.dome.config_changed(c),
-                HubEvent::WindowCreated(ext) => runner.dome.window_created(ext),
+                HubEvent::WindowCreated(ext) => {
+                    if let Some(actions) = runner.dome.window_created(ext) {
+                        runner.dome.run_hub_actions(&actions);
+                        handle_system_actions(runner, &actions);
+                    }
+                }
                 HubEvent::WindowDestroyed(ext) => runner.dome.window_destroyed(ext),
                 HubEvent::WindowMinimized(ext) => runner.dome.window_minimized(ext),
                 HubEvent::WindowFocused(ext) => {
@@ -323,20 +339,44 @@ fn run_dome(
                         runner.timers.insert(id, token);
                     }
                 }
-                HubEvent::WindowTitleChanged(ext) => runner.dome.title_changed(ext),
+                HubEvent::WindowTitleChanged(ext) => {
+                    if let Some(actions) = runner.dome.title_changed(ext) {
+                        runner.dome.run_hub_actions(&actions);
+                        handle_system_actions(runner, &actions);
+                    }
+                }
                 HubEvent::ScreensChanged(s) => runner.dome.screens_changed(s),
-                HubEvent::Action(a) => runner.dome.run_actions(&a),
+                HubEvent::Action(a) => {
+                    runner.dome.run_hub_actions(&a);
+                    handle_system_actions(runner, &a);
+                }
                 HubEvent::TabClicked(id, idx) => runner.dome.tab_clicked(id, idx),
                 HubEvent::SetFullscreen(id) => runner.dome.set_fullscreen(id),
             },
-            ChannelEvent::Closed => runner.dome.stopped = true,
+            ChannelEvent::Closed => runner.signal.stop(),
         })
         .expect("Failed to insert channel source");
 
-    while !runner.dome.stopped {
-        event_loop
-            .dispatch(None, &mut runner)
-            .expect("Event loop dispatch failed");
+    event_loop
+        .run(None, &mut runner, |_| {})
+        .expect("Event loop failed");
+}
+
+fn handle_system_actions(runner: &mut DomeRunner, actions: &Actions) {
+    for action in actions {
+        if let Action::Exec { command } = action {
+            if let Err(e) = std::process::Command::new("cmd")
+                .args(["/C", command])
+                .spawn()
+            {
+                tracing::warn!(%command, "Failed to exec: {e}");
+            }
+        } else if let Action::Exit = action {
+            unsafe {
+                PostThreadMessageW(runner.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
+            };
+            runner.signal.stop();
+        }
     }
 }
 

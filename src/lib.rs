@@ -6,7 +6,7 @@ mod logging;
 mod overlay;
 mod platform;
 
-pub use action::{Action, FocusTarget, MoveTarget, ToggleTarget};
+pub use action::{Action, FocusTarget, HubAction, MoveTarget, ToggleTarget};
 pub use ipc::DomeClient;
 
 #[cfg(target_os = "macos")]

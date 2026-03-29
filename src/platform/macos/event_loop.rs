@@ -1,14 +1,16 @@
 use std::collections::HashMap;
+use std::os::unix::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use calloop::channel::{Channel, Event as ChannelEvent};
 use calloop::futures::Scheduler;
 use calloop::timer::{TimeoutAction, Timer};
-use calloop::{EventLoop, LoopHandle, RegistrationToken};
+use calloop::{EventLoop, LoopHandle, LoopSignal, RegistrationToken};
 use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
 use objc2::rc::autoreleasepool;
 
+use crate::action::{Action, Actions};
 use crate::platform::macos::dome::{
     Dome, HubEvent, WindowMove, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,
@@ -22,6 +24,7 @@ struct DomeRunner {
     dispatcher: GcdDispatcher,
     move_timers: HashMap<i32, RegistrationToken>,
     handle: LoopHandle<'static, DomeRunner>,
+    signal: LoopSignal,
 }
 
 pub(super) fn run_dome(dome: Dome, channel: Channel<HubEvent>) {
@@ -39,6 +42,7 @@ pub(super) fn run_dome(dome: Dome, channel: Channel<HubEvent>) {
         dispatcher,
         move_timers: HashMap::new(),
         handle: handle.clone(),
+        signal,
     };
 
     handle
@@ -47,27 +51,21 @@ pub(super) fn run_dome(dome: Dome, channel: Channel<HubEvent>) {
         })
         .expect("Failed to insert executor source");
 
-    let signal_clone = signal.clone();
     handle
-        .insert_source(channel, move |event, _, runner: &mut DomeRunner| {
-            match event {
+        .insert_source(
+            channel,
+            move |event, _, runner: &mut DomeRunner| match event {
                 ChannelEvent::Msg(hub_event) => handle_event(runner, hub_event),
-                ChannelEvent::Closed => runner.dome.stop(),
-            }
-            if runner.dome.is_stopped() {
-                signal_clone.stop();
-            }
-        })
+                ChannelEvent::Closed => runner.signal.stop(),
+            },
+        )
         .expect("Failed to insert channel source");
 
     dispatch_reconcile_all(&mut runner);
     event_loop
         .run(None, &mut runner, |runner| {
             if SIGNAL_RECEIVED.load(Ordering::Relaxed) {
-                runner.dome.stop();
-            }
-            if runner.dome.is_stopped() {
-                signal.stop();
+                runner.signal.stop();
             }
         })
         .expect("Event loop failed");
@@ -91,7 +89,7 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         }
         HubEvent::Shutdown => {
             tracing::info!("Shutdown requested");
-            runner.dome.stop();
+            runner.signal.stop();
         }
         HubEvent::ConfigChanged(new_config) => {
             runner.dome.config_changed(new_config);
@@ -104,7 +102,8 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         }
         HubEvent::Action(actions) => {
             tracing::debug!(%actions, "Executing actions");
-            runner.dome.run_actions(&actions);
+            runner.dome.run_hub_actions(&actions);
+            handle_system_actions(runner, &actions);
         }
         HubEvent::ScreensChanged(screens) => {
             tracing::info!(count = screens.len(), "Screens changed");
@@ -120,6 +119,24 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             runner.dome.space_changed();
         }
     });
+}
+
+fn handle_system_actions(runner: &mut DomeRunner, actions: &Actions) {
+    for action in actions {
+        if let Action::Exec { command } = action {
+            if let Err(e) = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(command)
+                .process_group(0)
+                .spawn()
+            {
+                tracing::warn!(%command, "Failed to exec: {e}");
+            }
+        } else if let Action::Exit = action {
+            tracing::debug!("Exit action received");
+            runner.signal.stop();
+        }
+    }
 }
 
 fn start_move_timer(runner: &mut DomeRunner, pid: i32, observed_at: Instant) {
@@ -156,7 +173,11 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
         },
         |result, runner| {
             if let Some((to_remove, to_add)) = result {
-                runner.dome.reconcile_windows(&to_remove, to_add);
+                let on_open = runner.dome.reconcile_windows(&to_remove, to_add);
+                for actions in on_open {
+                    runner.dome.run_hub_actions(&actions);
+                    handle_system_actions(runner, &actions);
+                }
             }
         },
     );
@@ -206,9 +227,13 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
                 cancel_move_timer(runner, pid);
                 runner.dome.remove_untracked_app(pid);
             }
-            runner
+            let on_open = runner
                 .dome
                 .reconcile_windows(&result.to_remove, result.to_add);
+            for actions in on_open {
+                runner.dome.run_hub_actions(&actions);
+                handle_system_actions(runner, &actions);
+            }
             if !result.new_apps.is_empty() {
                 for app in &result.new_apps {
                     runner.dome.mark_pid_observed(app.pid());

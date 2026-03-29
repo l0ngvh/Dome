@@ -51,7 +51,10 @@ fn on_open_moves_window_to_other_workspace() {
 
     // on_open rule moves Slack to workspace 3; hide_window called while Offscreen
     let cg2 = macos.spawn_window(200, "Slack", "General");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg2)]);
+    let on_open = dome.reconcile_windows(&[], vec![new_window(&macos, cg2)]);
+    for actions in on_open {
+        dome.run_hub_actions(&actions);
+    }
     macos.settle(&mut dome, 10);
 
     assert!(macos.is_offscreen(cg2));
@@ -101,7 +104,7 @@ fn monitor_change_rehides_offscreen_windows() {
     macos.settle(&mut dome, 10);
 
     // Hide window
-    dome.run_actions(&actions("focus workspace 1"));
+    dome.run_hub_actions(&actions("focus workspace 1"));
     macos.settle(&mut dome, 10);
     let offscreen_before = macos.window_frame(cg1);
     assert!(macos.is_offscreen(cg1));

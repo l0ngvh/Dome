@@ -81,7 +81,7 @@ fn offscreen_window_fights_hide() {
     macos.settle(&mut dome, 10);
 
     // Hide both
-    dome.run_actions(&actions("focus workspace 1"));
+    dome.run_hub_actions(&actions("focus workspace 1"));
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg1));
 
@@ -252,12 +252,12 @@ fn offscreen_move_events_keep_windows_hidden() {
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
     macos.settle(&mut dome, 10);
 
-    dome.run_actions(&actions("focus workspace 1"));
+    dome.run_hub_actions(&actions("focus workspace 1"));
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg1));
     assert!(macos.is_offscreen(cg2));
 
-    dome.run_actions(&actions("focus workspace 0"));
+    dome.run_hub_actions(&actions("focus workspace 0"));
     macos.settle(&mut dome, 10);
     assert!(!macos.is_offscreen(cg1));
     assert!(!macos.is_offscreen(cg2));

@@ -43,12 +43,12 @@ fn workspace_switch_hides_and_restores() {
 
     let placed = macos.window_frame(cg1);
 
-    dome.run_actions(&actions("focus workspace 1"));
+    dome.run_hub_actions(&actions("focus workspace 1"));
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg1));
     assert!(macos.is_offscreen(cg2));
 
-    dome.run_actions(&actions("focus workspace 0"));
+    dome.run_hub_actions(&actions("focus workspace 0"));
     macos.settle(&mut dome, 10);
     assert!(!macos.is_offscreen(cg1));
     assert!(!macos.is_offscreen(cg2));
@@ -66,7 +66,7 @@ fn float_window_moved_by_user() {
     macos.settle(&mut dome, 10);
 
     // Toggle cg2 (focused) to float
-    dome.run_actions(&actions("toggle float"));
+    dome.run_hub_actions(&actions("toggle float"));
     macos.settle(&mut dome, 10);
 
     // User drags the float to a new position

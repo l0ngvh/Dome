@@ -10,14 +10,13 @@ pub(super) use events::{HubEvent, HubMessage};
 pub(super) use inspect::{compute_reconcile_all, compute_reconciliation, compute_window_positions};
 
 use std::collections::{HashMap, HashSet};
-use std::os::unix::process::CommandExt;
 use std::sync::Arc;
 use std::time::Instant;
 
 use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
+use crate::action::{Action, Actions, FocusTarget, HubAction, MoveTarget, ToggleTarget};
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{ContainerId, Dimension, Hub, WindowId};
 use crate::platform::macos::MonitorInfo;
@@ -67,7 +66,6 @@ pub(in crate::platform::macos) struct Dome {
     primary_full_height: f32,
     observed_pids: HashSet<i32>,
     sender: Box<dyn FrameSender>,
-    stopped: bool,
     last_focused: Option<WindowId>,
     recovery: Recovery,
 }
@@ -97,7 +95,6 @@ impl Dome {
             primary_full_height: primary.full_height,
             observed_pids: HashSet::new(),
             sender,
-            stopped: false,
             last_focused: None,
             recovery: Recovery::new(),
         }
@@ -107,11 +104,11 @@ impl Dome {
         &mut self,
         removed: &[CGWindowID],
         added: Vec<NewWindow>,
-    ) -> Vec<WindowId> {
+    ) -> Vec<Actions> {
         for &cg_id in removed {
             self.remove_window(cg_id);
         }
-        let mut ids = Vec::with_capacity(added.len());
+        let mut on_open = Vec::new();
         for new in added {
             let NewWindow {
                 ax,
@@ -152,12 +149,11 @@ impl Dome {
                 on_open_actions(entry, &self.config.macos.on_open)
             };
             if let Some(actions) = actions {
-                self.execute_actions(&actions);
+                on_open.push(actions);
             }
-            ids.push(window_id);
         }
         self.flush_layout();
-        ids
+        on_open
     }
 
     pub(in crate::platform::macos) fn windows_moved(&mut self, moves: Vec<WindowMove>) {
@@ -176,8 +172,15 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn run_actions(&mut self, actions: &Actions) {
-        self.execute_actions(actions);
+    pub(in crate::platform::macos) fn run_hub_actions(&mut self, actions: &Actions) {
+        if actions.is_empty() {
+            return;
+        }
+        for action in actions {
+            if let Action::Hub(hub) = action {
+                self.execute_hub_action(hub);
+            }
+        }
         self.flush_layout();
     }
 
@@ -186,14 +189,6 @@ impl Dome {
         cg_id: CGWindowID,
     ) -> Option<WindowId> {
         self.registry.get(cg_id).map(|e| e.window_id)
-    }
-
-    pub(in crate::platform::macos) fn stop(&mut self) {
-        self.stopped = true;
-    }
-
-    pub(in crate::platform::macos) fn is_stopped(&self) -> bool {
-        self.stopped
     }
 
     pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
@@ -384,51 +379,34 @@ impl Dome {
         reconcile_monitors(&mut self.hub, &mut self.monitor_registry, &screens);
     }
 
-    #[tracing::instrument(skip(self))]
-    fn execute_actions(&mut self, actions: &Actions) {
-        for action in actions {
-            match action {
-                Action::Focus { target } => match target {
-                    FocusTarget::Up => self.hub.focus_up(),
-                    FocusTarget::Down => self.hub.focus_down(),
-                    FocusTarget::Left => self.hub.focus_left(),
-                    FocusTarget::Right => self.hub.focus_right(),
-                    FocusTarget::Parent => self.hub.focus_parent(),
-                    FocusTarget::NextTab => self.hub.focus_next_tab(),
-                    FocusTarget::PrevTab => self.hub.focus_prev_tab(),
-                    FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
-                    FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
-                },
-                Action::Move { target } => match target {
-                    MoveTarget::Up => self.hub.move_up(),
-                    MoveTarget::Down => self.hub.move_down(),
-                    MoveTarget::Left => self.hub.move_left(),
-                    MoveTarget::Right => self.hub.move_right(),
-                    MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
-                    MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
-                },
-                Action::Toggle { target } => match target {
-                    ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),
-                    ToggleTarget::Direction => self.hub.toggle_direction(),
-                    ToggleTarget::Layout => self.hub.toggle_container_layout(),
-                    ToggleTarget::Float => self.hub.toggle_float(),
-                    ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
-                },
-                Action::Exec { command } => {
-                    if let Err(e) = std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(command)
-                        .process_group(0)
-                        .spawn()
-                    {
-                        tracing::warn!(%command, "Failed to exec: {e}");
-                    }
-                }
-                Action::Exit => {
-                    tracing::debug!("Exiting hub thread");
-                    self.stopped = true;
-                }
-            }
+    fn execute_hub_action(&mut self, action: &HubAction) {
+        match action {
+            HubAction::Focus { target } => match target {
+                FocusTarget::Up => self.hub.focus_up(),
+                FocusTarget::Down => self.hub.focus_down(),
+                FocusTarget::Left => self.hub.focus_left(),
+                FocusTarget::Right => self.hub.focus_right(),
+                FocusTarget::Parent => self.hub.focus_parent(),
+                FocusTarget::NextTab => self.hub.focus_next_tab(),
+                FocusTarget::PrevTab => self.hub.focus_prev_tab(),
+                FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
+                FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
+            },
+            HubAction::Move { target } => match target {
+                MoveTarget::Up => self.hub.move_up(),
+                MoveTarget::Down => self.hub.move_down(),
+                MoveTarget::Left => self.hub.move_left(),
+                MoveTarget::Right => self.hub.move_right(),
+                MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
+                MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
+            },
+            HubAction::Toggle { target } => match target {
+                ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),
+                ToggleTarget::Direction => self.hub.toggle_direction(),
+                ToggleTarget::Layout => self.hub.toggle_container_layout(),
+                ToggleTarget::Float => self.hub.toggle_float(),
+                ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
+            },
         }
     }
 

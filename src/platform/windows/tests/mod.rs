@@ -162,7 +162,7 @@ impl TestEnv {
         let sender = Box::new(TestSender {
             frames: frames.clone(),
         });
-        let dome = Dome::new(config.clone(), vec![screen], Some(sender), 0);
+        let dome = Dome::new(config.clone(), vec![screen], Some(sender));
         let wm = Wm::new_for_test(config);
         Self { dome, wm, frames }
     }
@@ -182,7 +182,7 @@ impl TestEnv {
 
     fn run_actions(&mut self, s: &str) {
         let actions = Actions::new(vec![s.parse().unwrap()]);
-        self.dome.run_actions(&actions);
+        self.dome.run_hub_actions(&actions);
         self.settle();
     }
 }
