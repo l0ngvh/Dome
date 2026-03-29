@@ -1,12 +1,12 @@
 use std::time::{Duration, Instant};
 
-pub(super) enum ThrottleResult<T> {
+pub(in crate::platform::windows) enum ThrottleResult<T> {
     Send(T),
     Pending,
     ScheduleFlush(Duration),
 }
 
-pub(super) struct Throttle<T> {
+pub(in crate::platform::windows) struct Throttle<T> {
     interval: Duration,
     last_sent: Option<Instant>,
     pending: Option<T>,
@@ -14,7 +14,7 @@ pub(super) struct Throttle<T> {
 }
 
 impl<T> Throttle<T> {
-    pub(super) fn new(interval: Duration) -> Self {
+    pub(in crate::platform::windows) fn new(interval: Duration) -> Self {
         Self {
             interval,
             last_sent: None,
@@ -23,7 +23,7 @@ impl<T> Throttle<T> {
         }
     }
 
-    pub(super) fn submit(&mut self, value: T) -> ThrottleResult<T> {
+    pub(in crate::platform::windows) fn submit(&mut self, value: T) -> ThrottleResult<T> {
         let now = Instant::now();
         let remaining = self
             .last_sent
@@ -44,7 +44,7 @@ impl<T> Throttle<T> {
         }
     }
 
-    pub(super) fn flush(&mut self) -> Option<T> {
+    pub(in crate::platform::windows) fn flush(&mut self) -> Option<T> {
         self.has_pending_timer = false;
         if let Some(value) = self.pending.take() {
             self.last_sent = Some(Instant::now());
@@ -54,7 +54,7 @@ impl<T> Throttle<T> {
         }
     }
 
-    pub(super) fn mark_timer_scheduled(&mut self) {
+    pub(in crate::platform::windows) fn mark_timer_scheduled(&mut self) {
         self.has_pending_timer = true;
     }
 }

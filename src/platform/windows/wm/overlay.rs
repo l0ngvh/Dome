@@ -26,6 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::PCWSTR;
 
 use super::super::dome::HubEvent;
+use super::super::external::ZOrder;
 use crate::config::Config;
 use crate::core::{ContainerPlacement, WindowPlacement};
 use crate::overlay;
@@ -77,13 +78,12 @@ impl ContainerOverlay {
         Ok(boxed)
     }
 
-    /// Update content and position. `z_after` is the caller-decided z-order:
-    /// `Some(hwnd)` places this overlay after that HWND, `None` uses SWP_NOZORDER.
+    /// Update content and position. `z` is the caller-decided z-order.
     pub(super) fn update(
         &mut self,
         placement: ContainerPlacement,
         tab_titles: Vec<String>,
-        z_after: Option<HWND>,
+        z: ZOrder,
     ) {
         let vf = placement.visible_frame;
         let w = vf.width.max(1.0) as u32;
@@ -102,6 +102,7 @@ impl ContainerOverlay {
         self.tab_titles = tab_titles;
         self.rerender();
 
+        let z_after: Option<HWND> = z.into();
         let mut flags = SWP_NOACTIVATE;
         if z_after.is_none() {
             flags |= SWP_NOZORDER;

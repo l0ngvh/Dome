@@ -1,4 +1,5 @@
 use std::cell::OnceCell;
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use calloop::channel::Sender;
@@ -13,7 +14,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::dome::HubEvent;
-use super::handle::ManagedHwnd;
+use super::external::ManageExternalHwnd;
+use super::handle::ExternalHwnd;
 
 thread_local! {
     static SENDER: OnceCell<Sender<HubEvent>> = const { OnceCell::new() };
@@ -86,22 +88,22 @@ unsafe extern "system" fn event_hook_proc(
 
     SENDER.with(|s| {
         let Some(sender) = s.get() else { return };
-        let managed = ManagedHwnd::new(hwnd);
+        let ext: Arc<dyn ManageExternalHwnd> = Arc::new(ExternalHwnd::new(hwnd));
         match event {
             EVENT_OBJECT_CREATE
             | EVENT_OBJECT_SHOW
             | EVENT_SYSTEM_MINIMIZEEND
             | EVENT_OBJECT_UNCLOAKED => {
-                sender.send(HubEvent::WindowCreated(managed)).ok();
+                sender.send(HubEvent::WindowCreated(ext)).ok();
             }
             EVENT_OBJECT_NAMECHANGE => {
-                sender.send(HubEvent::WindowTitleChanged(managed)).ok();
+                sender.send(HubEvent::WindowTitleChanged(ext)).ok();
             }
             EVENT_OBJECT_DESTROY | EVENT_OBJECT_HIDE | EVENT_OBJECT_CLOAKED => {
-                sender.send(HubEvent::WindowDestroyed(managed)).ok();
+                sender.send(HubEvent::WindowDestroyed(ext)).ok();
             }
             EVENT_SYSTEM_MINIMIZESTART => {
-                sender.send(HubEvent::WindowMinimized(managed)).ok();
+                sender.send(HubEvent::WindowMinimized(ext)).ok();
             }
             EVENT_SYSTEM_FOREGROUND => {
                 // This can happen when Windows queue an event for an activated application, but by
@@ -113,20 +115,20 @@ unsafe extern "system" fn event_hook_proc(
                 if unsafe { GetForegroundWindow() } != hwnd {
                     return;
                 }
-                sender.send(HubEvent::WindowFocused(managed)).ok();
+                sender.send(HubEvent::WindowFocused(ext)).ok();
             }
             // MOVESIZESTART fires when user begins a drag/resize.
             // MOVESIZEEND fires after user drag/resize completes.
             // LOCATIONCHANGE catches programmatic resizes (e.g. maximize, restore)
             // which don't trigger the move/size cycle.
             EVENT_SYSTEM_MOVESIZESTART => {
-                sender.send(HubEvent::MoveSizeStart(managed)).ok();
+                sender.send(HubEvent::MoveSizeStart(ext)).ok();
             }
             EVENT_SYSTEM_MOVESIZEEND => {
-                sender.send(HubEvent::MoveSizeEnd(managed)).ok();
+                sender.send(HubEvent::MoveSizeEnd(ext)).ok();
             }
             EVENT_OBJECT_LOCATIONCHANGE => {
-                sender.send(HubEvent::LocationChanged(managed)).ok();
+                sender.send(HubEvent::LocationChanged(ext)).ok();
             }
             _ => {}
         }

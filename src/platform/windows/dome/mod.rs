@@ -1,16 +1,11 @@
-mod inspect;
 mod placement_tracker;
 mod registry;
-mod throttle;
+pub(super) mod throttle;
 
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::sync::Arc;
 
-use calloop::channel::{Channel, Event as ChannelEvent};
-use calloop::timer::{TimeoutAction, Timer};
-use calloop::{EventLoop, LoopHandle, LoopSignal};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, PostThreadMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions, FocusTarget, MoveTarget, ToggleTarget};
@@ -20,36 +15,31 @@ use crate::core::{
     WindowId,
 };
 
-use self::inspect::{
-    enum_windows, get_process_name, get_size_constraints, get_window_title, initial_window_mode,
-    is_fullscreen, is_manageable,
-};
 use self::placement_tracker::PlacementTracker;
 use self::registry::{WindowEntry, WindowRegistry};
-use self::throttle::{Throttle, ThrottleResult};
 use super::ScreenInfo;
-use super::handle::{ManagedHwnd, WindowMode, get_dimension};
+use super::external::{HwndId, ManageExternalHwnd};
+use super::handle::{WindowMode, is_fullscreen};
 
-pub(super) const WM_APP_LAYOUT: u32 = 0x8001;
-pub(super) const WM_APP_CONFIG: u32 = 0x8002;
-pub(super) const WM_APP_TITLE: u32 = 0x8003;
-
-const FOCUS_THROTTLE: Duration = Duration::from_millis(500);
+use super::{WM_APP_CONFIG, WM_APP_LAYOUT, WM_APP_TITLE};
 
 #[expect(
     clippy::large_enum_variant,
     reason = "These messages aren't bottleneck right now"
 )]
 pub(super) enum HubEvent {
-    AppInitialized(AppHandle),
-    WindowCreated(ManagedHwnd),
-    WindowDestroyed(ManagedHwnd),
-    WindowMinimized(ManagedHwnd),
-    WindowFocused(ManagedHwnd),
-    WindowTitleChanged(ManagedHwnd),
-    MoveSizeStart(ManagedHwnd),
-    MoveSizeEnd(ManagedHwnd),
-    LocationChanged(ManagedHwnd),
+    AppInitialized {
+        app_hwnd: AppHandle,
+        windows: Vec<Arc<dyn ManageExternalHwnd>>,
+    },
+    WindowCreated(Arc<dyn ManageExternalHwnd>),
+    WindowDestroyed(Arc<dyn ManageExternalHwnd>),
+    WindowMinimized(Arc<dyn ManageExternalHwnd>),
+    WindowFocused(Arc<dyn ManageExternalHwnd>),
+    WindowTitleChanged(Arc<dyn ManageExternalHwnd>),
+    MoveSizeStart(Arc<dyn ManageExternalHwnd>),
+    MoveSizeEnd(Arc<dyn ManageExternalHwnd>),
+    LocationChanged(Arc<dyn ManageExternalHwnd>),
     ScreensChanged(Vec<ScreenInfo>),
     Action(Actions),
     ConfigChanged(Config),
@@ -120,7 +110,7 @@ struct DisplayedMonitor {
 }
 
 pub(super) struct WindowCreate {
-    pub(super) hwnd: HWND,
+    pub(super) ext: Arc<dyn ManageExternalHwnd>,
     pub(super) id: WindowId,
     pub(super) mode: WindowMode,
     pub(super) title: Option<String>,
@@ -134,31 +124,83 @@ pub(super) struct ContainerRender {
 }
 
 pub(super) struct TitleUpdate {
-    pub(super) titles: Vec<(ManagedHwnd, Option<String>)>,
+    pub(super) titles: Vec<(HwndId, Option<String>)>,
     pub(super) container_renders: Vec<ContainerRender>,
 }
 
-pub(super) struct Dome {
+/// Abstraction for sending layout frames, title updates, and config changes
+/// from Dome to Wm. Production uses `WmSender` (PostMessageW). Tests use
+/// `TestSender` (collects frames into a Vec).
+pub(in crate::platform::windows) trait FrameSender: Send {
+    fn send_frame(&self, frame: LayoutFrame);
+    fn send_titles(&self, update: TitleUpdate);
+    fn send_config(&self, config: Config);
+}
+
+/// Production sender — delivers frames to the Wm thread via PostMessageW.
+struct WmSender {
+    app_hwnd: AppHandle,
+}
+
+impl FrameSender for WmSender {
+    fn send_frame(&self, frame: LayoutFrame) {
+        let ptr = Box::into_raw(Box::new(frame)) as usize;
+        unsafe {
+            PostMessageW(
+                Some(self.app_hwnd.hwnd()),
+                WM_APP_LAYOUT,
+                WPARAM(ptr),
+                LPARAM(0),
+            )
+            .ok()
+        };
+    }
+
+    fn send_titles(&self, update: TitleUpdate) {
+        let ptr = Box::into_raw(Box::new(update)) as usize;
+        unsafe {
+            PostMessageW(
+                Some(self.app_hwnd.hwnd()),
+                WM_APP_TITLE,
+                WPARAM(ptr),
+                LPARAM(0),
+            )
+            .ok()
+        };
+    }
+
+    fn send_config(&self, config: Config) {
+        let ptr = Box::into_raw(Box::new(config)) as usize;
+        unsafe {
+            PostMessageW(
+                Some(self.app_hwnd.hwnd()),
+                WM_APP_CONFIG,
+                WPARAM(ptr),
+                LPARAM(0),
+            )
+            .ok()
+        };
+    }
+}
+
+pub(in crate::platform::windows) struct Dome {
     hub: Hub,
     registry: WindowRegistry,
     monitor_handles: HashMap<isize, MonitorId>,
     monitor_dimensions: HashMap<MonitorId, Dimension>,
     displayed: HashMap<MonitorId, DisplayedMonitor>,
     config: Config,
-    app_hwnd: Option<AppHandle>,
+    sender: Option<Box<dyn FrameSender>>,
     main_thread_id: u32,
-    signal: LoopSignal,
-    handle: LoopHandle<'static, Self>,
-    focus_throttle: Throttle<ManagedHwnd>,
+    pub(in crate::platform::windows) stopped: bool,
     placement_tracker: PlacementTracker,
 }
 
 impl Dome {
-    pub(super) fn new(
+    pub(in crate::platform::windows) fn new(
         config: Config,
         screens: Vec<ScreenInfo>,
-        handle: LoopHandle<'static, Self>,
-        signal: LoopSignal,
+        sender: Option<Box<dyn FrameSender>>,
         main_thread_id: u32,
     ) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
@@ -199,150 +241,170 @@ impl Dome {
             monitor_dimensions,
             displayed: HashMap::new(),
             config,
-            app_hwnd: None,
+            sender,
             main_thread_id,
-            signal,
-            handle: handle.clone(),
-            focus_throttle: Throttle::new(FOCUS_THROTTLE),
-            placement_tracker: PlacementTracker::new(handle),
+            stopped: false,
+            placement_tracker: PlacementTracker::new(),
         }
     }
 
-    pub(super) fn run(
-        mut self,
-        channel: Channel<HubEvent>,
-        mut event_loop: EventLoop<'static, Self>,
+    pub(in crate::platform::windows) fn app_initialized(
+        &mut self,
+        app_hwnd: AppHandle,
+        windows: Vec<Arc<dyn ManageExternalHwnd>>,
     ) {
-        event_loop
-            .handle()
-            .insert_source(channel, |event, _, dome| match event {
-                ChannelEvent::Msg(hub_event) => {
-                    if dome.handle_event(hub_event) {
-                        dome.apply_layout();
-                    }
-                }
-                ChannelEvent::Closed => dome.signal.stop(),
-            })
-            .expect("Failed to insert channel source");
-
-        event_loop
-            .run(None, &mut self, |_| {})
-            .expect("Event loop failed");
+        self.sender = Some(Box::new(WmSender { app_hwnd }));
+        for ext in windows {
+            self.try_manage_window(ext);
+        }
+        self.apply_layout();
     }
 
-    fn handle_event(&mut self, event: HubEvent) -> bool {
-        match event {
-            HubEvent::AppInitialized(hwnd) => {
-                self.app_hwnd = Some(hwnd);
-                if let Err(e) = enum_windows(|hwnd| {
-                    self.try_manage_window(hwnd);
-                }) {
-                    tracing::warn!("Failed to enumerate windows: {e}");
-                }
-            }
-            HubEvent::Shutdown => {
-                self.signal.stop();
-                return false;
-            }
-            HubEvent::ConfigChanged(new_config) => {
-                self.hub.sync_config(new_config.clone().into());
-                if let Some(app_hwnd) = self.app_hwnd {
-                    send_config(new_config.clone(), app_hwnd);
-                }
-                self.config = new_config;
-                tracing::info!("Config reloaded");
-            }
-            HubEvent::WindowCreated(h) => {
-                if self.registry.contains_hwnd(h) {
-                    return true;
-                }
-                self.try_manage_window(h.hwnd());
-            }
-            HubEvent::WindowDestroyed(h) => {
-                let _span = tracing::info_span!("window_destroyed").entered();
-                self.remove_window(h);
-            }
-            HubEvent::WindowMinimized(h) => {
-                let _span = tracing::info_span!("window_minimized").entered();
-                let is_fullscreen = self
-                    .registry
-                    .get_id(h)
-                    .is_some_and(|id| self.hub.get_window(id).is_fullscreen());
-                if !is_fullscreen {
-                    self.remove_window(h);
-                }
-            }
-            HubEvent::WindowFocused(h) => {
-                self.submit_focus(h);
-                return true;
-            }
-            HubEvent::MoveSizeStart(h) => {
-                self.placement_tracker.drag_started(h);
-                return false;
-            }
-            HubEvent::MoveSizeEnd(h) => {
-                self.placement_tracker.drag_ended(h);
-                self.handle_resize(h);
-                return false;
-            }
-            HubEvent::LocationChanged(h) => {
-                self.placement_tracker.location_changed(h);
-                return false;
-            }
-            HubEvent::WindowTitleChanged(h) => {
-                if self.registry.contains_hwnd(h) {
-                    let new_title = get_window_title(h.hwnd());
-                    self.send_title_update(vec![(h, new_title)]);
-                    return true;
-                }
-                // Some apps have a brief moment where their title is empty
-                self.try_manage_window(h.hwnd());
-            }
-            HubEvent::ScreensChanged(screens) => {
-                tracing::info!(count = screens.len(), "Screen parameters changed");
-                self.update_screens(screens);
-            }
-            HubEvent::Action(actions) => {
-                self.execute_actions(&actions);
-            }
-            HubEvent::TabClicked(container_id, tab_idx) => {
-                self.hub.focus_tab_index(container_id, tab_idx);
-            }
-            HubEvent::SetFullscreen(id) => {
-                if let Some(info) = self.registry.get_mut(id) {
-                    info.mode = WindowMode::FullscreenExclusive;
-                    if !self.hub.get_window(id).is_fullscreen() {
-                        self.hub.set_fullscreen(id);
-                    }
-                }
+    pub(in crate::platform::windows) fn stop(&mut self) {
+        self.stopped = true;
+    }
+
+    #[cfg(test)]
+    pub(in crate::platform::windows) fn config(&self) -> &Config {
+        &self.config
+    }
+
+    pub(in crate::platform::windows) fn config_changed(&mut self, new_config: Config) {
+        self.hub.sync_config(new_config.clone().into());
+        if let Some(s) = &self.sender {
+            s.send_config(new_config.clone());
+        }
+        self.config = new_config;
+        tracing::info!("Config reloaded");
+        self.apply_layout();
+    }
+
+    pub(in crate::platform::windows) fn window_created(
+        &mut self,
+        ext: Arc<dyn ManageExternalHwnd>,
+    ) {
+        if !self.registry.contains_hwnd(ext.id()) {
+            self.try_manage_window(ext);
+        }
+        self.apply_layout();
+    }
+
+    pub(in crate::platform::windows) fn window_destroyed(
+        &mut self,
+        ext: Arc<dyn ManageExternalHwnd>,
+    ) {
+        let _span = tracing::info_span!("window_destroyed").entered();
+        self.remove_window(ext.id());
+        self.apply_layout();
+    }
+
+    pub(in crate::platform::windows) fn window_minimized(
+        &mut self,
+        ext: Arc<dyn ManageExternalHwnd>,
+    ) {
+        let _span = tracing::info_span!("window_minimized").entered();
+        let id_key = ext.id();
+        let is_fullscreen = self
+            .registry
+            .get_id(id_key)
+            .is_some_and(|id| self.hub.get_window(id).is_fullscreen());
+        if !is_fullscreen {
+            self.remove_window(id_key);
+        }
+        self.apply_layout();
+    }
+
+    pub(in crate::platform::windows) fn move_size_started(
+        &mut self,
+        ext: Arc<dyn ManageExternalHwnd>,
+    ) {
+        self.placement_tracker.drag_started(ext.id());
+    }
+
+    pub(in crate::platform::windows) fn move_size_ended(
+        &mut self,
+        ext: Arc<dyn ManageExternalHwnd>,
+    ) {
+        self.placement_tracker.drag_ended(ext.id());
+        self.handle_resize(ext.id());
+    }
+
+    pub(in crate::platform::windows) fn location_changed(
+        &mut self,
+        ext: Arc<dyn ManageExternalHwnd>,
+    ) -> bool {
+        self.placement_tracker.location_changed(ext.id())
+    }
+
+    pub(in crate::platform::windows) fn title_changed(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
+        let id_key = ext.id();
+        if self.registry.contains_hwnd(id_key) {
+            let new_title = ext.get_window_title();
+            self.send_title_update(vec![(id_key, new_title)]);
+        } else {
+            // Some apps have a brief moment where their title is empty
+            self.try_manage_window(ext);
+        }
+        self.apply_layout();
+    }
+
+    pub(in crate::platform::windows) fn screens_changed(&mut self, screens: Vec<ScreenInfo>) {
+        tracing::info!(count = screens.len(), "Screen parameters changed");
+        self.update_screens(screens);
+        self.apply_layout();
+    }
+
+    pub(in crate::platform::windows) fn run_actions(&mut self, actions: &Actions) {
+        self.execute_actions(actions);
+        self.apply_layout();
+    }
+
+    pub(in crate::platform::windows) fn tab_clicked(
+        &mut self,
+        container_id: ContainerId,
+        tab_idx: usize,
+    ) {
+        self.hub.focus_tab_index(container_id, tab_idx);
+        self.apply_layout();
+    }
+
+    pub(in crate::platform::windows) fn set_fullscreen(&mut self, id: WindowId) {
+        if let Some(info) = self.registry.get_mut(id) {
+            info.mode = WindowMode::FullscreenExclusive;
+            if !self.hub.get_window(id).is_fullscreen() {
+                self.hub.set_fullscreen(id);
             }
         }
-
-        true
+        self.apply_layout();
     }
 
-    fn try_manage_window(&mut self, hwnd: HWND) {
-        if !is_manageable(hwnd) {
+    fn try_manage_window(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
+        if !ext.is_manageable() {
             return;
         }
-        let title = get_window_title(hwnd);
-        let process = get_process_name(hwnd).unwrap_or_default();
+        let title = ext.get_window_title();
+        let process = ext.get_process_name().unwrap_or_default();
         if should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
             return;
         }
         let actions = on_open_actions(&process, title.as_deref(), &self.config.windows.on_open);
-        self.insert_window(hwnd, title, process);
+        self.insert_window(ext, title, process);
         if let Some(actions) = actions {
             self.execute_actions(&actions);
         }
     }
 
-    fn insert_window(&mut self, hwnd: HWND, title: Option<String>, process: String) {
-        let managed = ManagedHwnd::new(hwnd);
-        let dim = get_dimension(hwnd);
-        let monitor = self.find_monitor_dimension(hwnd);
+    fn insert_window(
+        &mut self,
+        ext: Arc<dyn ManageExternalHwnd>,
+        title: Option<String>,
+        process: String,
+    ) {
+        let id_key = ext.id();
+        let dim = ext.get_dimension();
+        let monitor = self.find_monitor_dimension_from_ext(&*ext);
 
-        let mode = initial_window_mode(hwnd, monitor.as_ref());
+        let mode = ext.initial_window_mode(monitor.as_ref());
         let id = match mode {
             WindowMode::FullscreenBorderless
             | WindowMode::ManagedFullscreen
@@ -350,13 +412,13 @@ impl Dome {
             WindowMode::Float => self.hub.insert_float(dim),
             WindowMode::Tiling => self.hub.insert_tiling(),
         };
-        self.set_constraints(id, hwnd);
+        self.set_constraints(id, &*ext);
 
         self.registry.insert(
-            managed,
+            id_key,
             id,
             WindowEntry {
-                hwnd,
+                ext,
                 mode,
                 title,
                 process,
@@ -364,16 +426,16 @@ impl Dome {
         );
     }
 
-    fn remove_window(&mut self, h: ManagedHwnd) {
-        self.placement_tracker.clear(h);
-        if let Some(id) = self.registry.remove_by_hwnd(h) {
+    fn remove_window(&mut self, id_key: HwndId) {
+        self.placement_tracker.clear(id_key);
+        if let Some(id) = self.registry.remove_by_hwnd(id_key) {
             self.hub.delete_window(id);
         }
     }
 
-    fn set_constraints(&mut self, id: WindowId, hwnd: HWND) {
+    fn set_constraints(&mut self, id: WindowId, ext: &dyn ManageExternalHwnd) {
         let border = self.config.border_size;
-        let (min_w, min_h, max_w, max_h) = get_size_constraints(hwnd);
+        let (min_w, min_h, max_w, max_h) = ext.get_size_constraints();
         if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
             let to_frame = |v: f32| {
                 if v > 0.0 {
@@ -402,72 +464,60 @@ impl Dome {
         }
     }
 
-    fn find_monitor_dimension(&self, hwnd: HWND) -> Option<Dimension> {
-        let hmonitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) };
-        let id = self.monitor_handles.get(&(hmonitor.0 as isize))?;
+    fn find_monitor_dimension_from_ext(&self, ext: &dyn ManageExternalHwnd) -> Option<Dimension> {
+        let handle = ext.get_monitor_handle()?;
+        let id = self.monitor_handles.get(&handle)?;
         self.monitor_dimensions.get(id).copied()
     }
 
-    fn submit_focus(&mut self, h: ManagedHwnd) {
-        match self.focus_throttle.submit(h) {
-            ThrottleResult::Send(h) => self.handle_focus(h),
-            ThrottleResult::Pending => {}
-            ThrottleResult::ScheduleFlush(delay) => {
-                self.schedule_focus_timer(delay);
-            }
-        }
-    }
-
-    fn schedule_focus_timer(&mut self, delay: Duration) {
-        let timer = Timer::from_duration(delay);
-        self.handle
-            .insert_source(timer, |_, _, dome| {
-                if let Some(h) = dome.focus_throttle.flush() {
-                    dome.handle_focus(h);
-                }
-                TimeoutAction::Drop
-            })
-            .expect("Failed to insert timer");
-        self.focus_throttle.mark_timer_scheduled();
-    }
-
-    fn handle_focus(&mut self, h: ManagedHwnd) {
-        if let Some(id) = self.registry.get_id(h) {
+    pub(in crate::platform::windows) fn handle_focus(&mut self, id_key: HwndId) {
+        if let Some(id) = self.registry.get_id(id_key) {
             self.hub.set_focus(id);
-            tracing::info!(hwnd = ?h.hwnd(), "Window focused");
+            tracing::info!(?id_key, "Window focused");
             self.apply_layout();
         }
     }
 
-    fn handle_resize(&mut self, h: ManagedHwnd) {
-        let Some(id) = self.registry.get_id(h) else {
+    /// Called by the run loop when a drag safety timeout or resize debounce
+    /// timer fires. Removes the window from the placement tracker and
+    /// re-evaluates its layout.
+    pub(in crate::platform::windows) fn placement_timeout(&mut self, id: HwndId) {
+        self.placement_tracker.clear(id);
+        self.handle_resize(id);
+    }
+
+    fn handle_resize(&mut self, id_key: HwndId) {
+        let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
-        if self
-            .registry
-            .get(id)
-            .is_some_and(|i| i.mode == WindowMode::FullscreenExclusive)
-        {
+        let Some(entry) = self.registry.get(id) else {
+            return;
+        };
+        if entry.mode == WindowMode::FullscreenExclusive {
             return;
         }
-        self.set_constraints(id, h.hwnd());
-        self.check_fullscreen_state(h);
+        let ext = entry.ext.clone();
+        self.set_constraints(id, &*ext);
+        self.check_fullscreen_state(id, &*ext);
         self.apply_layout();
     }
 
-    fn check_fullscreen_state(&mut self, h: ManagedHwnd) {
-        let Some(id) = self.registry.get_id(h) else {
-            return;
-        };
-        let Some(monitor_dim) = self.find_monitor_dimension(h.hwnd()) else {
+    fn check_fullscreen_state(&mut self, id: WindowId, ext: &dyn ManageExternalHwnd) {
+        let Some(monitor_dim) = self.find_monitor_dimension_from_ext(ext) else {
             return;
         };
 
         let was_fs = self.hub.get_window(id).is_fullscreen();
-        let window_dim = get_dimension(h.hwnd());
+        let window_dim = ext.get_dimension();
         let is_fs = is_fullscreen(&window_dim, &monitor_dim);
         if was_fs != is_fs {
-            tracing::debug!(hwnd = ?h.hwnd(), ?window_dim, ?monitor_dim, was_fs, is_fs, "Fullscreen state changed");
+            tracing::debug!(
+                ?window_dim,
+                ?monitor_dim,
+                was_fs,
+                is_fs,
+                "Fullscreen state changed"
+            );
         }
 
         match (was_fs, is_fs) {
@@ -523,7 +573,7 @@ impl Dome {
                     unsafe {
                         PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
                     };
-                    self.signal.stop();
+                    self.stopped = true;
                 }
             }
         }
@@ -538,7 +588,7 @@ impl Dome {
             .filter_map(|&id| {
                 let info = self.registry.get(id)?;
                 Some(WindowCreate {
-                    hwnd: info.hwnd,
+                    ext: info.ext.clone(),
                     id,
                     mode: info.mode,
                     title: info.title.clone(),
@@ -604,10 +654,7 @@ impl Dome {
                             } else {
                                 WindowMode::Tiling
                             };
-                            if self
-                                .placement_tracker
-                                .is_moving(ManagedHwnd::new(info.hwnd))
-                            {
+                            if self.placement_tracker.is_moving(info.ext.id()) {
                                 continue;
                             }
                         }
@@ -700,13 +747,13 @@ impl Dome {
             focused,
         };
 
-        if let Some(app_hwnd) = self.app_hwnd {
-            send_layout_frame(frame, app_hwnd);
+        if let Some(s) = &self.sender {
+            s.send_frame(frame);
         }
     }
 
-    fn send_title_update(&self, titles: Vec<(ManagedHwnd, Option<String>)>) {
-        let Some(app_hwnd) = self.app_hwnd else {
+    fn send_title_update(&self, titles: Vec<(HwndId, Option<String>)>) {
+        let Some(sender) = &self.sender else {
             return;
         };
 
@@ -720,9 +767,7 @@ impl Dome {
             titles,
             container_renders,
         };
-        let boxed = Box::new(update);
-        let ptr = Box::into_raw(boxed) as usize;
-        unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_TITLE, WPARAM(ptr), LPARAM(0)).ok() };
+        sender.send_titles(update);
     }
 
     fn build_container_renders_for(
@@ -762,7 +807,7 @@ impl Dome {
         self.reconcile_monitors(screens);
 
         let windows: Vec<_> = self.registry.iter().collect();
-        for (managed, id) in windows {
+        for (_, id) in windows {
             if self
                 .registry
                 .get(id)
@@ -770,7 +815,10 @@ impl Dome {
             {
                 continue;
             }
-            self.set_constraints(id, managed.hwnd());
+            if let Some(entry) = self.registry.get(id) {
+                let ext = entry.ext.clone();
+                self.set_constraints(id, &*ext);
+            }
         }
     }
 
@@ -830,18 +878,6 @@ impl Dome {
             }
         }
     }
-}
-
-fn send_layout_frame(frame: LayoutFrame, app_hwnd: AppHandle) {
-    let boxed = Box::new(frame);
-    let ptr = Box::into_raw(boxed) as usize;
-    unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_LAYOUT, WPARAM(ptr), LPARAM(0)).ok() };
-}
-
-fn send_config(config: Config, app_hwnd: AppHandle) {
-    let boxed = Box::new(config);
-    let ptr = Box::into_raw(boxed) as usize;
-    unsafe { PostMessageW(Some(app_hwnd.hwnd()), WM_APP_CONFIG, WPARAM(ptr), LPARAM(0)).ok() };
 }
 
 fn on_open_actions(

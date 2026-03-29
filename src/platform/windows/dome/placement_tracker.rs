@@ -1,84 +1,58 @@
 use std::collections::HashMap;
-use std::time::Duration;
 
-use calloop::timer::{TimeoutAction, Timer};
-use calloop::{LoopHandle, RegistrationToken};
-
-use crate::platform::windows::handle::ManagedHwnd;
-
-use super::Dome;
-
-const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
-const DRAG_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
+use crate::platform::windows::external::HwndId;
 
 enum MoveKind {
     UserDrag,
     Programmatic,
 }
 
+/// Tracks which windows are currently being moved, either by user drag or
+/// programmatic repositioning. Pure state — no timers or time awareness.
+/// The run loop is responsible for scheduling debounce/timeout timers and
+/// calling `Dome::placement_timeout` when they fire.
 pub(super) struct PlacementTracker {
-    windows: HashMap<ManagedHwnd, (MoveKind, RegistrationToken)>,
-    handle: LoopHandle<'static, Dome>,
+    windows: HashMap<HwndId, MoveKind>,
 }
 
 impl PlacementTracker {
-    pub(super) fn new(handle: LoopHandle<'static, Dome>) -> Self {
+    pub(super) fn new() -> Self {
         Self {
             windows: HashMap::new(),
-            handle,
         }
     }
 
-    pub(super) fn drag_started(&mut self, hwnd: ManagedHwnd) {
-        self.cancel(hwnd);
-        let token = self
-            .handle
-            .insert_source(
-                Timer::from_duration(DRAG_SAFETY_TIMEOUT),
-                move |_, _, dome: &mut Dome| {
-                    dome.placement_tracker.windows.remove(&hwnd);
-                    dome.handle_resize(hwnd);
-                    TimeoutAction::Drop
-                },
-            )
-            .expect("Failed to insert timer");
-        self.windows.insert(hwnd, (MoveKind::UserDrag, token));
+    /// Mark a window as being dragged by the user.
+    pub(super) fn drag_started(&mut self, id: HwndId) {
+        self.windows.insert(id, MoveKind::UserDrag);
     }
 
-    pub(super) fn drag_ended(&mut self, hwnd: ManagedHwnd) {
-        self.cancel(hwnd);
+    /// Remove a window from the moving set after a drag ends.
+    pub(super) fn drag_ended(&mut self, id: HwndId) {
+        self.windows.remove(&id);
     }
 
-    pub(super) fn location_changed(&mut self, hwnd: ManagedHwnd) {
-        if matches!(self.windows.get(&hwnd), Some((MoveKind::UserDrag, _))) {
-            return;
+    /// Record a programmatic move for a window. Returns `true` if a new
+    /// debounce timer should be scheduled. Returns `false` if the window
+    /// is being dragged by the user (no debounce during drag).
+    pub(super) fn location_changed(&mut self, id: HwndId) -> bool {
+        if matches!(self.windows.get(&id), Some(MoveKind::UserDrag)) {
+            return false;
         }
-        self.cancel(hwnd);
-        let token = self
-            .handle
-            .insert_source(
-                Timer::from_duration(DEBOUNCE_INTERVAL),
-                move |_, _, dome: &mut Dome| {
-                    dome.placement_tracker.windows.remove(&hwnd);
-                    dome.handle_resize(hwnd);
-                    TimeoutAction::Drop
-                },
-            )
-            .expect("Failed to insert timer");
-        self.windows.insert(hwnd, (MoveKind::Programmatic, token));
+        self.windows.insert(id, MoveKind::Programmatic);
+        true
     }
 
-    pub(super) fn clear(&mut self, hwnd: ManagedHwnd) {
-        self.cancel(hwnd);
+    /// Remove a window from the moving set. Called by `Dome::placement_timeout`
+    /// when a timer fires.
+    pub(super) fn clear(&mut self, id: HwndId) {
+        self.windows.remove(&id);
     }
 
-    pub(super) fn is_moving(&self, hwnd: ManagedHwnd) -> bool {
-        self.windows.contains_key(&hwnd)
-    }
-
-    fn cancel(&mut self, hwnd: ManagedHwnd) {
-        if let Some((_, token)) = self.windows.remove(&hwnd) {
-            self.handle.remove(token);
-        }
+    /// Returns true if the window is currently being moved (drag or
+    /// programmatic). Used by `apply_layout` to skip repositioning
+    /// windows mid-move.
+    pub(super) fn is_moving(&self, id: HwndId) -> bool {
+        self.windows.contains_key(&id)
     }
 }

@@ -1,34 +1,31 @@
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
-use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::Console::{
     CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler,
 };
-use windows::Win32::UI::WindowsAndMessaging::{
-    IsZoomed, SW_MAXIMIZE, SW_RESTORE, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos, ShowWindow,
-};
 use windows::core::BOOL;
 
 use crate::core::Dimension;
+use crate::platform::windows::OFFSCREEN_POS;
+use crate::platform::windows::external::{HwndId, ManageExternalHwnd};
 
-use super::super::OFFSCREEN_POS;
-use super::super::handle::ManagedHwnd;
-use super::taskbar::Taskbar;
+use crate::platform::windows::taskbar::Taskbar;
 
 const DEFAULT_WIDTH: f32 = 800.0;
 const DEFAULT_HEIGHT: f32 = 600.0;
 
-struct WindowState {
+struct RecoveryEntry {
+    ext: Arc<dyn ManageExternalHwnd>,
     dimension: Dimension,
     is_maximized: bool,
 }
 
-static RECOVERY_STATE: LazyLock<Mutex<HashMap<isize, WindowState>>> =
+static RECOVERY_STATE: LazyLock<Mutex<HashMap<HwndId, RecoveryEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub(super) fn track(hwnd: HWND, dim: Dimension) {
+pub(super) fn track(ext: &Arc<dyn ManageExternalHwnd>, dim: Dimension) {
     // These windows belongs to previous crashed Dome instances
     let original_dim = if dim.x <= OFFSCREEN_POS || dim.y <= OFFSCREEN_POS {
         Dimension {
@@ -48,12 +45,13 @@ pub(super) fn track(hwnd: HWND, dim: Dimension) {
     } else {
         dim
     };
-    let is_maximized = unsafe { IsZoomed(hwnd) }.as_bool();
+    let is_maximized = ext.is_maximized();
 
     if let Ok(mut state) = RECOVERY_STATE.lock() {
         state.insert(
-            hwnd.0 as isize,
-            WindowState {
+            ext.id(),
+            RecoveryEntry {
+                ext: ext.clone(),
                 dimension: original_dim,
                 is_maximized,
             },
@@ -61,39 +59,21 @@ pub(super) fn track(hwnd: HWND, dim: Dimension) {
     }
 }
 
-pub(super) fn untrack(h: ManagedHwnd) {
+pub(super) fn untrack(id: HwndId) {
     if let Ok(mut state) = RECOVERY_STATE.lock() {
-        state.remove(&(h.hwnd().0 as isize));
+        state.remove(&id);
     }
 }
 
 pub(super) fn restore_all() {
     if let Ok(state) = RECOVERY_STATE.lock() {
-        for (&hwnd_val, window_state) in state.iter() {
-            let hwnd = HWND(hwnd_val as *mut _);
-            let dim = window_state.dimension;
-            unsafe {
-                if window_state.is_maximized {
-                    let _ = ShowWindow(hwnd, SW_RESTORE);
-                }
-                let _ = SetWindowPos(
-                    hwnd,
-                    None,
-                    dim.x as i32,
-                    dim.y as i32,
-                    dim.width as i32,
-                    dim.height as i32,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                );
-                if window_state.is_maximized {
-                    let _ = ShowWindow(hwnd, SW_MAXIMIZE);
-                }
-            }
+        for entry in state.values() {
+            entry.ext.recover(entry.dimension, entry.is_maximized);
         }
 
         if let Ok(taskbar) = Taskbar::new() {
-            for &hwnd_val in state.keys() {
-                taskbar.add_tab(HWND(hwnd_val as *mut _)).ok();
+            for entry in state.values() {
+                entry.ext.add_to_taskbar(&taskbar);
             }
         }
     }
@@ -107,7 +87,7 @@ pub(super) fn install_handlers() {
 
 unsafe extern "system" fn console_handler(ctrl_type: u32) -> BOOL {
     if ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT || ctrl_type == CTRL_CLOSE_EVENT {
-        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() };
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok().ok() };
         restore_all();
     }
     BOOL(0)

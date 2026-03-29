@@ -1,9 +1,9 @@
 mod overlay;
 mod recovery;
-mod taskbar;
 mod window;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use calloop::channel::Sender;
 use glutin::display::{Display, DisplayApiPreference};
@@ -11,35 +11,33 @@ use raw_window_handle::{RawDisplayHandle, WindowsDisplayHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, GWLP_USERDATA, GetForegroundWindow,
-    GetWindowLongPtrW, HWND_NOTOPMOST, HWND_TOPMOST, PostMessageW, RegisterClassW,
-    SetWindowLongPtrW, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, GWLP_USERDATA, GetForegroundWindow, PostMessageW,
+    RegisterClassW, SetWindowLongPtrW, WM_QUIT, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::PCWSTR;
 
 use self::overlay::{
     CONTAINER_OVERLAY_CLASS, ContainerOverlay, container_wnd_proc, raw_window_handle,
 };
-use self::taskbar::Taskbar;
 use self::window::{
-    ManagedWindow, Registry, WINDOW_OVERLAY_CLASS, is_d3d_exclusive_fullscreen_active,
+    ManagedWindow, Registry, WINDOW_OVERLAY_CLASS, create_window_overlay,
+    is_d3d_exclusive_fullscreen_active,
 };
-use super::dome::{
-    AppHandle, ContainerRender, HubEvent, LayoutFrame, TitleUpdate, WM_APP_CONFIG, WM_APP_LAYOUT,
-    WM_APP_TITLE, WindowShow,
-};
+use super::dome::{AppHandle, ContainerRender, HubEvent, LayoutFrame, TitleUpdate, WindowShow};
+use super::external::{HwndId, ManageExternalHwnd, ZOrder};
 use super::get_all_screens;
-use super::handle::{ManagedHwnd, WindowMode, get_dimension};
+use super::handle::{ExternalHwnd, WindowMode, enum_windows};
 use crate::config::Config;
 use crate::core::{ContainerId, WindowId};
+use crate::platform::windows::taskbar::Taskbar;
 
 pub(super) struct Wm {
     hwnd: HWND,
-    display: Display,
-    hub_sender: Sender<HubEvent>,
+    display: Option<Display>,
+    hub_sender: Option<Sender<HubEvent>>,
     config: Config,
     registry: Registry,
-    taskbar: Taskbar,
+    taskbar: Option<Taskbar>,
     last_focused: Option<WindowId>,
     container_overlays: HashMap<ContainerId, Box<ContainerOverlay>>,
     exclusive_fullscreen: HashSet<WindowId>,
@@ -49,6 +47,8 @@ impl Wm {
     pub(super) fn new(
         hub_sender: Sender<HubEvent>,
         config: Config,
+        app_wnd_proc: unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT,
+        overlay_wnd_proc: unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT,
     ) -> windows::core::Result<Box<Self>> {
         let hinstance = unsafe { GetModuleHandleW(None)? };
 
@@ -56,7 +56,7 @@ impl Wm {
 
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(wnd_proc),
+            lpfnWndProc: Some(app_wnd_proc),
             hInstance: hinstance.into(),
             lpszClassName: APP_CLASS,
             ..Default::default()
@@ -65,7 +65,7 @@ impl Wm {
 
         let wc_window = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(window_overlay_wnd_proc),
+            lpfnWndProc: Some(overlay_wnd_proc),
             hInstance: hinstance.into(),
             lpszClassName: WINDOW_OVERLAY_CLASS,
             ..Default::default()
@@ -109,11 +109,11 @@ impl Wm {
 
         let app = Box::new(Self {
             hwnd,
-            display,
-            hub_sender,
+            display: Some(display),
+            hub_sender: Some(hub_sender),
             config,
             registry: Registry::new(),
-            taskbar,
+            taskbar: Some(taskbar),
             last_focused: None,
             container_overlays: HashMap::new(),
             exclusive_fullscreen: HashSet::new(),
@@ -122,29 +122,41 @@ impl Wm {
         let ptr = &*app as *const _ as *mut Wm;
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize) };
 
-        app.send_event(HubEvent::AppInitialized(AppHandle::new(hwnd)));
+        let mut initial_windows: Vec<Arc<dyn ManageExternalHwnd>> = Vec::new();
+        if let Err(e) = enum_windows(|hwnd| {
+            initial_windows.push(Arc::new(ExternalHwnd::new(hwnd)));
+        }) {
+            tracing::warn!("Failed to enumerate windows: {e}");
+        }
+        app.send_event(HubEvent::AppInitialized {
+            app_hwnd: AppHandle::new(hwnd),
+            windows: initial_windows,
+        });
 
         Ok(app)
     }
 
-    fn send_event(&self, event: HubEvent) {
-        if self.hub_sender.send(event).is_err() {
+    pub(super) fn send_event(&self, event: HubEvent) {
+        if let Some(sender) = &self.hub_sender
+            && sender.send(event).is_err()
+        {
             tracing::error!("Hub thread died, shutting down");
             unsafe { PostMessageW(Some(self.hwnd), WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
         }
     }
 
-    fn apply_layout_frame(&mut self, frame: LayoutFrame) {
+    pub(in crate::platform::windows) fn apply_layout_frame(&mut self, frame: LayoutFrame) {
         // --- Lifecycle ---
         for create in &frame.created_windows {
-            let dim = get_dimension(create.hwnd);
-            recovery::track(create.hwnd, dim);
+            let dim = create.ext.get_dimension();
+            recovery::track(&create.ext, dim);
+            let overlay = self.display.as_ref().and_then(|d| create_window_overlay(d));
             let mut mw = ManagedWindow::new(
-                &self.display,
-                create.hwnd,
+                create.ext.clone(),
                 create.title.clone(),
                 create.process.clone(),
                 create.mode,
+                overlay,
             );
             // Hide before first frame — window may end up offscreen due to
             // viewport scrolling. apply_layout will show the visible ones.
@@ -159,20 +171,23 @@ impl Wm {
         for &id in &frame.deleted_windows {
             self.exclusive_fullscreen.remove(&id);
             if let Some(mw) = self.registry.get(id) {
-                self.taskbar.delete_tab(mw.hwnd()).ok();
-                recovery::untrack(mw.managed_hwnd());
+                if let Some(tb) = &self.taskbar {
+                    mw.remove_from_taskbar(tb);
+                }
+                recovery::untrack(mw.id());
             }
             self.registry.remove(id);
         }
 
         for &id in &frame.created_containers {
-            match ContainerOverlay::new(&self.display, self.config.clone(), self.hub_sender.clone())
-            {
-                Ok(overlay) => {
-                    self.container_overlays.insert(id, overlay);
-                }
-                Err(e) => {
-                    tracing::warn!(%id, "Failed to create container overlay: {e:#}");
+            if let (Some(display), Some(hub_sender)) = (&self.display, &self.hub_sender) {
+                match ContainerOverlay::new(display, self.config.clone(), hub_sender.clone()) {
+                    Ok(overlay) => {
+                        self.container_overlays.insert(id, overlay);
+                    }
+                    Err(e) => {
+                        tracing::warn!(%id, "Failed to create container overlay: {e:#}");
+                    }
                 }
             }
         }
@@ -188,7 +203,9 @@ impl Wm {
             }
             if let Some(mw) = self.registry.get_mut(id) {
                 mw.hide();
-                self.taskbar.delete_tab(mw.hwnd()).ok();
+                if let Some(tb) = &self.taskbar {
+                    mw.remove_from_taskbar(tb);
+                }
             }
         }
 
@@ -203,8 +220,10 @@ impl Wm {
 
         // --- Taskbar ---
         for &id in &frame.tabs_to_add {
-            if let Some(mw) = self.registry.get(id) {
-                self.taskbar.add_tab(mw.hwnd()).ok();
+            if let Some(mw) = self.registry.get(id)
+                && let Some(tb) = &self.taskbar
+            {
+                mw.add_to_taskbar(tb);
             }
         }
 
@@ -214,23 +233,64 @@ impl Wm {
         }
         if frame.focused != self.last_focused {
             self.last_focused = frame.focused;
-            if let Some(id) = frame.focused {
-                if let Some(mw) = self.registry.get(id) {
-                    mw.focus();
-                }
+            if let Some(id) = frame.focused
+                && let Some(mw) = self.registry.get(id)
+            {
+                mw.focus();
             }
         }
     }
 
-    fn apply_title_update(&mut self, update: TitleUpdate) {
-        for (hwnd, title) in &update.titles {
-            self.registry.set_title(*hwnd, title.clone());
+    pub(super) fn apply_title_update(&mut self, update: TitleUpdate) {
+        for (hwnd_id, title) in &update.titles {
+            self.registry.set_title(*hwnd_id, title.clone());
         }
 
         for data in &update.container_renders {
             let titles = self.registry.resolve_tab_titles(&data.children);
             if let Some(overlay) = self.container_overlays.get_mut(&data.placement.id) {
-                overlay.update(data.placement, titles, None);
+                overlay.update(data.placement, titles, ZOrder::Unchanged);
+            }
+        }
+    }
+
+    pub(super) fn apply_config(&mut self, config: Config) {
+        for overlay in self.container_overlays.values_mut() {
+            overlay.config = config.clone();
+        }
+        self.config = config;
+    }
+
+    pub(super) fn handle_display_change(&mut self) {
+        match get_all_screens() {
+            Ok(screens) => self.send_event(HubEvent::ScreensChanged(screens)),
+            Err(e) => tracing::warn!("Failed to enumerate screens: {e}"),
+        }
+
+        // If there is an active D3D context, immediately set the active window as
+        // exclusive fullscreen. We won't clear the exclusive fullscreen flag when D3D
+        // context got cleared due to 3 reasons:
+        // - Exclusive fullscreen is fragile, and can suddenly exit if:
+        //    - Another window got focus
+        //    - Fullscreen window got partially obscured by another window
+        //   All of which dome can accidentally cause. Dome tries its best to pause
+        //   everything when a window go fullscreen, so this shouldn't happen often, but
+        //   it might.
+        // - Some apps are really aggressive in trying to take fullscreen status back,
+        //   which can cause an infinite loop of dome accidentally takes control causing
+        //   fullscreen to ext, and app tries to take back fullscreen status.
+        // - Usually, game entering exclusive fullscreen only gives up exclusive
+        //   fullscreen on exit. We may have to say sorry to users toggling the in-app
+        //   fullscreen setting and tell them to relaunch the app as borderless.
+        if is_d3d_exclusive_fullscreen_active() {
+            let fg = HwndId::from(unsafe { GetForegroundWindow() });
+            if let Some(id) = self.registry.get_id(fg) {
+                tracing::info!(%id, "D3D exclusive fullscreen entered");
+                if let Some(mw) = self.registry.get_mut(id) {
+                    mw.set_mode(WindowMode::FullscreenExclusive);
+                }
+                self.exclusive_fullscreen.insert(id);
+                self.send_event(HubEvent::SetFullscreen(id));
             }
         }
     }
@@ -302,11 +362,11 @@ impl Wm {
 
         // Reverse-id sort (newest/highest first). Move focused to front of newly_active.
         newly_active_float.sort_by(|a, b| b.id.cmp(&a.id));
-        if let Some(focused_id) = frame.focused {
-            if let Some(pos) = newly_active_float.iter().position(|ws| ws.id == focused_id) {
-                let item = newly_active_float.remove(pos);
-                newly_active_float.insert(0, item);
-            }
+        if let Some(focused_id) = frame.focused
+            && let Some(pos) = newly_active_float.iter().position(|ws| ws.id == focused_id)
+        {
+            let item = newly_active_float.remove(pos);
+            newly_active_float.insert(0, item);
         }
         steady_float.sort_by(|a, b| b.id.cmp(&a.id));
         steady_tiling.sort_by(|a, b| b.id.cmp(&a.id));
@@ -323,15 +383,15 @@ impl Wm {
         steady_containers.sort_by(|a, b| b.placement.id.cmp(&a.placement.id));
 
         // Position in z-order
-        let mut anchor: Option<HWND> = None;
+        let mut anchor: Option<HwndId> = None;
 
         // 1. Newly active floats (iterate in reverse so focused ends up highest)
         for ws in newly_active_float.iter().rev() {
             let is_focused = frame.focused == Some(ws.id);
             if let Some(mw) = self.registry.get_mut(ws.id) {
-                mw.show(ws, is_focused, border, &self.config, Some(HWND_TOPMOST));
+                mw.show(ws, is_focused, border, &self.config, ZOrder::Topmost);
                 if anchor.is_none() {
-                    anchor = Some(mw.hwnd());
+                    anchor = Some(mw.id());
                 }
             }
         }
@@ -340,8 +400,9 @@ impl Wm {
         for ws in &steady_float {
             let is_focused = frame.focused == Some(ws.id);
             if let Some(mw) = self.registry.get_mut(ws.id) {
-                mw.show(ws, is_focused, border, &self.config, anchor);
-                anchor = Some(mw.hwnd());
+                let z = anchor.map(ZOrder::After).unwrap_or(ZOrder::Unchanged);
+                mw.show(ws, is_focused, border, &self.config, z);
+                anchor = Some(mw.id());
             }
         }
 
@@ -349,14 +410,14 @@ impl Wm {
         if let Some(data) = focused_container {
             let titles = self.registry.resolve_tab_titles(&data.children);
             if let Some(overlay) = self.container_overlays.get_mut(&data.placement.id) {
-                overlay.update(data.placement, titles, Some(HWND_NOTOPMOST));
+                overlay.update(data.placement, titles, ZOrder::NotTopmost);
                 overlay.show();
-                anchor = Some(overlay.hwnd());
+                anchor = Some(HwndId::from(overlay.hwnd()));
             }
         } else if let Some(ws) = focused_tiling {
             if let Some(mw) = self.registry.get_mut(ws.id) {
-                mw.show(ws, true, border, &self.config, Some(HWND_NOTOPMOST));
-                anchor = Some(mw.hwnd());
+                mw.show(ws, true, border, &self.config, ZOrder::NotTopmost);
+                anchor = Some(mw.id());
             }
         } else {
             anchor = None;
@@ -366,17 +427,19 @@ impl Wm {
         for data in &steady_containers {
             let titles = self.registry.resolve_tab_titles(&data.children);
             if let Some(overlay) = self.container_overlays.get_mut(&data.placement.id) {
-                overlay.update(data.placement, titles, anchor);
+                let z = anchor.map(ZOrder::After).unwrap_or(ZOrder::Unchanged);
+                overlay.update(data.placement, titles, z);
                 overlay.show();
-                anchor = Some(overlay.hwnd());
+                anchor = Some(HwndId::from(overlay.hwnd()));
             }
         }
 
         // 5. Steady tiling — chain below anchor
         for ws in &steady_tiling {
             if let Some(mw) = self.registry.get_mut(ws.id) {
-                mw.show(ws, false, border, &self.config, anchor);
-                anchor = Some(mw.hwnd());
+                let z = anchor.map(ZOrder::After).unwrap_or(ZOrder::Unchanged);
+                mw.show(ws, false, border, &self.config, z);
+                anchor = Some(mw.id());
             }
         }
     }
@@ -388,84 +451,19 @@ impl Drop for Wm {
     }
 }
 
-unsafe extern "system" fn wnd_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    match msg {
-        WM_APP_LAYOUT => {
-            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut Wm;
-            let frame = unsafe { *Box::from_raw(wparam.0 as *mut LayoutFrame) };
-            unsafe { (*ptr).apply_layout_frame(frame) };
-            LRESULT(0)
+#[cfg(test)]
+impl Wm {
+    pub(in crate::platform::windows) fn new_for_test(config: Config) -> Self {
+        Self {
+            hwnd: HWND::default(),
+            display: None,
+            hub_sender: None,
+            config,
+            registry: Registry::new(),
+            taskbar: None,
+            last_focused: None,
+            container_overlays: HashMap::new(),
+            exclusive_fullscreen: HashSet::new(),
         }
-        WM_APP_TITLE => {
-            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut Wm;
-            let update = unsafe { *Box::from_raw(wparam.0 as *mut TitleUpdate) };
-            unsafe { (*ptr).apply_title_update(update) };
-            LRESULT(0)
-        }
-        WM_APP_CONFIG => {
-            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut Wm;
-            let config = unsafe { *Box::from_raw(wparam.0 as *mut Config) };
-            unsafe {
-                for overlay in (*ptr).container_overlays.values_mut() {
-                    overlay.config = config.clone();
-                }
-                (*ptr).config = config;
-            }
-            LRESULT(0)
-        }
-        WM_DISPLAYCHANGE => {
-            let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut Wm;
-            if !ptr.is_null() {
-                let app = unsafe { &mut *ptr };
-                match get_all_screens() {
-                    Ok(screens) => app.send_event(HubEvent::ScreensChanged(screens)),
-                    Err(e) => tracing::warn!("Failed to enumerate screens: {e}"),
-                }
-
-                // If there is an active D3D context, immediately set the active window as
-                // exclusive fullscreen. We won't clear the exclusive fullscreen flag when D3D
-                // context got cleared due to 3 reasons:
-                // - Exclusive fullscreen is fragile, and can suddenly exit if:
-                //    - Another window got focus
-                //    - Fullscreen window got partially obscured by another window
-                //   All of which dome can accidentally cause. Dome tries its best to pause
-                //   everything when a window go fullscreen, so this shouldn't happen often, but
-                //   it might.
-                // - Some apps are really aggressive in trying to take fullscreen status back,
-                //   which can cause an infinite loop of dome accidentally takes control causing
-                //   fullscreen to ext, and app tries to take back fullscreen status.
-                // - Usually, game entering exclusive fullscreen only gives up exclusive
-                //   fullscreen on exit. We may have to say sorry to users toggling the in-app
-                //   fullscreen setting and tell them to relaunch the app as borderless.
-                if is_d3d_exclusive_fullscreen_active() {
-                    let fg = ManagedHwnd::new(unsafe { GetForegroundWindow() });
-                    if let Some(id) = app.registry.get_id(fg) {
-                        tracing::info!(%id, "D3D exclusive fullscreen entered");
-                        if let Some(mw) = app.registry.get_mut(id) {
-                            mw.set_mode(WindowMode::FullscreenExclusive);
-                        }
-                        app.exclusive_fullscreen.insert(id);
-                        app.send_event(HubEvent::SetFullscreen(id));
-                    }
-                }
-            }
-            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
-        }
-        WM_PAINT => LRESULT(0),
-        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
-}
-
-unsafe extern "system" fn window_overlay_wnd_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }

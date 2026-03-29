@@ -2,10 +2,10 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 
-pub(super) struct Taskbar(ITaskbarList);
+pub(crate) struct Taskbar(ITaskbarList);
 
 impl Taskbar {
-    pub(super) fn new() -> windows::core::Result<Self> {
+    pub(crate) fn new() -> windows::core::Result<Self> {
         unsafe {
             let list: ITaskbarList = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)?;
             list.HrInit()?;
@@ -13,11 +13,11 @@ impl Taskbar {
         }
     }
 
-    pub(super) fn add_tab(&self, hwnd: HWND) -> windows::core::Result<()> {
+    pub(crate) fn add_tab(&self, hwnd: HWND) -> windows::core::Result<()> {
         unsafe { self.0.AddTab(hwnd) }
     }
 
-    pub(super) fn delete_tab(&self, hwnd: HWND) -> windows::core::Result<()> {
+    pub(crate) fn delete_tab(&self, hwnd: HWND) -> windows::core::Result<()> {
         unsafe { self.0.DeleteTab(hwnd) }
     }
 }
