@@ -414,8 +414,10 @@ impl Dome {
                 // Window somehow got brought back to screen, maybe through window focused but the
                 // notification was not fired
                 tracing::trace!("Previously minimized borderless fullscreen window reappeared");
-                if is_borderless_fullscreen && let Err(e) = window.ax.minimize() {
-                    tracing::trace!("Failed to minimize window: {e:#}");
+                if is_borderless_fullscreen {
+                    if let Err(e) = window.ax.minimize() {
+                        tracing::trace!("Failed to minimize window: {e:#}");
+                    }
                 }
                 // No longer fullscreen borderless, so bring them back and put in offscreen
                 else {

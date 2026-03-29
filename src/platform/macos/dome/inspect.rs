@@ -43,8 +43,8 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     for (&cg_id, entry) in tracked.iter().filter(|(_, e)| e.ax.pid() == pid) {
         if !cg_window_ids.contains(&cg_id)
             || !entry.ax.is_valid()
-        // Skip minimized check for mock fullscreen - we minimize them ourselves
-            || (!matches!(entry.state, WindowState::BorderlessFullscreen) && entry.ax.is_minimized())
+        // Skip minimized check for windows Dome minimized (borderless fullscreen hiding)
+            || (!matches!(entry.state, WindowState::Minimized) && entry.ax.is_minimized())
         {
             to_remove.push(cg_id);
         }
