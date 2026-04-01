@@ -4,6 +4,7 @@ pub(super) mod external;
 mod handle;
 mod keyboard;
 mod taskbar;
+mod throttle;
 
 #[cfg(test)]
 mod tests;
@@ -26,11 +27,12 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
+use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
-    KillTimer, MONITORINFOF_PRIMARY, MSG, PostQuitMessage, PostThreadMessageW, RegisterClassW,
-    SetTimer, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW,
-    WS_EX_TOOLWINDOW, WS_POPUP,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow,
+    GetMessageW, KillTimer, MONITORINFOF_PRIMARY, MSG, PostQuitMessage, PostThreadMessageW,
+    RegisterClassW, SetTimer, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT,
+    WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR};
 
@@ -38,12 +40,17 @@ use crate::action::{Action, Actions};
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
-use dome::throttle::{Throttle, ThrottleResult};
+use dome::overlay::{
+    CONTAINER_OVERLAY_CLASS, WINDOW_OVERLAY_CLASS, container_wnd_proc, raw_window_handle,
+};
 use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
 use external::{HwndId, ManageExternalHwnd};
+use glutin::display::{Display as GlDisplay, DisplayApiPreference};
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
+use raw_window_handle::{RawDisplayHandle, WindowsDisplayHandle};
 use taskbar::Taskbar;
+use throttle::{Throttle, ThrottleResult};
 
 #[derive(Clone)]
 pub(super) struct ScreenInfo {
@@ -57,12 +64,12 @@ pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
 pub(super) const WM_APP_DISPLAY_CHANGE: u32 = WM_APP + 1;
 
 #[derive(Clone)]
-pub(in crate::platform::windows) struct HubSender {
+struct HubSender {
     thread_id: u32,
 }
 
 impl HubSender {
-    pub(in crate::platform::windows) fn send(&self, event: HubEvent) {
+    fn send(&self, event: HubEvent) {
         let ptr = Box::into_raw(Box::new(event)) as usize;
         unsafe {
             PostThreadMessageW(self.thread_id, WM_APP_HUBEVENT, WPARAM(ptr), LPARAM(0)).ok();
@@ -90,9 +97,6 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
     }));
 
-    let screens = get_all_screens()?;
-    anyhow::ensure!(!screens.is_empty(), "No monitors detected");
-
     let main_thread_id = unsafe { GetCurrentThreadId() };
     let dome_thread_id = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let barrier = Arc::new(std::sync::Barrier::new(2));
@@ -110,7 +114,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
                 std::sync::atomic::Ordering::Release,
             );
             bar.wait();
-            run_dome(config_clone, screens, main_thread_id);
+            run_dome(config_clone, main_thread_id);
         }));
         if result.is_err() {
             tracing::error!("Dome thread panicked");
@@ -161,7 +165,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn get_all_screens() -> Result<Vec<ScreenInfo>> {
+fn get_all_screens() -> Result<Vec<ScreenInfo>> {
     let mut monitors = Vec::new();
 
     unsafe extern "system" fn enum_proc(
@@ -378,19 +382,6 @@ impl Runner {
     }
 }
 
-struct TaskbarAdapter {
-    taskbar: Taskbar,
-}
-
-impl dome::ManageTaskbar for TaskbarAdapter {
-    fn add_tab(&self, id: HwndId) {
-        self.taskbar.add_tab(id.into()).ok();
-    }
-    fn delete_tab(&self, id: HwndId) {
-        self.taskbar.delete_tab(id.into()).ok();
-    }
-}
-
 struct GlOverlayFactory {
     display: glutin::display::Display,
     hub_sender: HubSender,
@@ -445,13 +436,28 @@ unsafe extern "system" fn window_overlay_wnd_proc(
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
-fn run_dome(config: Config, screens: Vec<ScreenInfo>, main_thread_id: u32) {
-    use dome::overlay::{
-        CONTAINER_OVERLAY_CLASS, WINDOW_OVERLAY_CLASS, container_wnd_proc, raw_window_handle,
-    };
-    use glutin::display::{Display as GlDisplay, DisplayApiPreference};
-    use raw_window_handle::{RawDisplayHandle, WindowsDisplayHandle};
+fn is_d3d_exclusive_fullscreen_active() -> bool {
+    unsafe { SHQueryUserNotificationState() }
+        .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN)
+}
 
+struct Win32Display;
+
+impl dome::QueryDisplay for Win32Display {
+    fn get_all_screens(&self) -> anyhow::Result<Vec<ScreenInfo>> {
+        get_all_screens()
+    }
+
+    fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId> {
+        if is_d3d_exclusive_fullscreen_active() {
+            Some(HwndId::from(unsafe { GetForegroundWindow() }))
+        } else {
+            None
+        }
+    }
+}
+
+fn run_dome(config: Config, main_thread_id: u32) {
     let hinstance = unsafe { GetModuleHandleW(None) }.expect("GetModuleHandleW failed");
 
     const APP_CLASS: PCWSTR = windows::core::w!("DomeApp");
@@ -508,7 +514,6 @@ fn run_dome(config: Config, screens: Vec<ScreenInfo>, main_thread_id: u32) {
             .expect("Failed to create GL display");
 
     let taskbar = Taskbar::new().expect("Failed to create Taskbar");
-    dome::recovery::install_handlers();
 
     let hub_sender = HubSender {
         thread_id: unsafe { GetCurrentThreadId() },
@@ -520,10 +525,11 @@ fn run_dome(config: Config, screens: Vec<ScreenInfo>, main_thread_id: u32) {
 
     let dome = Dome::new(
         config.clone(),
-        screens,
-        Box::new(TaskbarAdapter { taskbar }),
+        Arc::new(taskbar),
         Box::new(overlays),
-    );
+        Box::new(Win32Display),
+    )
+    .expect("Failed to initialize Dome");
 
     let mut initial_windows: Vec<Arc<dyn ManageExternalHwnd>> = Vec::new();
     if let Err(e) = handle::enum_windows(|hwnd| {
@@ -569,6 +575,3 @@ fn run_dome(config: Config, screens: Vec<ScreenInfo>, main_thread_id: u32) {
         }
     }
 }
-
-// Unlike macOS, we are allowed to move windows completely offscreen on Windows
-pub(super) const OFFSCREEN_POS: f32 = -32000.0;

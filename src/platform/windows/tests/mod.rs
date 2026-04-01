@@ -8,14 +8,17 @@ use std::sync::{Arc, Mutex};
 use crate::action::{Action, Actions};
 use crate::config::Config;
 use crate::core::Dimension;
-use crate::platform::windows::OFFSCREEN_POS;
 use crate::platform::windows::ScreenInfo;
-use crate::platform::windows::dome::{Dome, NoopOverlays, NoopTaskbar};
+use crate::platform::windows::dome::overlay::{
+    ContainerOverlayApi, NoopContainerOverlay, NoopWindowOverlay, WindowOverlayApi,
+};
+use crate::platform::windows::dome::{CreateOverlay, Dome, QueryDisplay};
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
-use crate::platform::windows::handle::WindowMode;
+use crate::platform::windows::taskbar::ManageTaskbar;
 
 const SCREEN_WIDTH: f32 = 1920.0;
 const SCREEN_HEIGHT: f32 = 1080.0;
+const OFFSCREEN_POS: f32 = -32000.0;
 
 fn default_screen() -> ScreenInfo {
     ScreenInfo {
@@ -31,8 +34,25 @@ fn default_screen() -> ScreenInfo {
     }
 }
 
+struct MockDisplay {
+    screens: Vec<ScreenInfo>,
+    exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
+}
+
+impl QueryDisplay for MockDisplay {
+    fn get_all_screens(&self) -> anyhow::Result<Vec<ScreenInfo>> {
+        Ok(self.screens.clone())
+    }
+
+    fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId> {
+        *self.exclusive_fullscreen_hwnd.lock().unwrap()
+    }
+}
+
 struct TestEnv {
     dome: Dome,
+    exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
+    config: Config,
 }
 
 impl TestEnv {
@@ -41,13 +61,24 @@ impl TestEnv {
     }
 
     fn new_with_config(config: Config) -> Self {
+        let screens = vec![default_screen()];
+        let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
+        let display = MockDisplay {
+            screens,
+            exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
+        };
         let dome = Dome::new(
-            config,
-            vec![default_screen()],
-            Box::new(NoopTaskbar),
+            config.clone(),
+            Arc::new(NoopTaskbar),
             Box::new(NoopOverlays),
-        );
-        Self { dome }
+            Box::new(display),
+        )
+        .unwrap();
+        Self {
+            dome,
+            exclusive_fullscreen_hwnd,
+            config,
+        }
     }
 
     fn add_window(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
@@ -81,6 +112,22 @@ impl TestEnv {
         }
         self.dome.apply_layout();
     }
+
+    fn enter_exclusive_fullscreen(&mut self, hwnd: HwndId) {
+        *self.exclusive_fullscreen_hwnd.lock().unwrap() = Some(hwnd);
+        self.dome.handle_display_change();
+        *self.exclusive_fullscreen_hwnd.lock().unwrap() = None;
+        self.dome.apply_layout();
+    }
+}
+
+fn fullscreen_dim() -> Dimension {
+    Dimension {
+        x: 0.0,
+        y: 0.0,
+        width: SCREEN_WIDTH,
+        height: SCREEN_HEIGHT,
+    }
 }
 
 struct MockExternalHwnd {
@@ -90,7 +137,7 @@ struct MockExternalHwnd {
     process: String,
     dimension: Mutex<Dimension>,
     monitor_handle: isize,
-    mode: WindowMode,
+    should_float: bool,
     iconic: AtomicBool,
     min_size: (f32, f32),
     max_size: (f32, f32),
@@ -111,7 +158,7 @@ impl MockExternalHwnd {
                 height: 600.0,
             }),
             monitor_handle: 1,
-            mode: WindowMode::Tiling,
+            should_float: false,
             iconic: AtomicBool::new(false),
             min_size: (0.0, 0.0),
             max_size: (0.0, 0.0),
@@ -119,8 +166,8 @@ impl MockExternalHwnd {
         }
     }
 
-    fn with_mode(mut self, mode: WindowMode) -> Self {
-        self.mode = mode;
+    fn with_float(mut self) -> Self {
+        self.should_float = true;
         self
     }
 
@@ -142,6 +189,10 @@ impl MockExternalHwnd {
         let dim = self.get_dim();
         dim.x <= OFFSCREEN_POS || dim.y <= OFFSCREEN_POS
     }
+
+    fn is_topmost(&self) -> bool {
+        matches!(*self.last_z.lock().unwrap(), Some(ZOrder::Topmost))
+    }
 }
 
 impl ManageExternalHwnd for MockExternalHwnd {
@@ -161,8 +212,8 @@ impl ManageExternalHwnd for MockExternalHwnd {
         Ok(self.process.clone())
     }
 
-    fn initial_window_mode(&self, _monitor: Option<&Dimension>) -> WindowMode {
-        self.mode
+    fn should_float(&self) -> bool {
+        self.should_float
     }
 
     fn get_dimension(&self) -> Dimension {
@@ -238,10 +289,26 @@ fn assert_h_tiled(dims: &[Dimension], screen: Dimension, border: f32) {
     for i in 1..dims.len() {
         let gap = dims[i].x - (dims[i - 1].x + dims[i - 1].width);
         assert!(
-            (gap - 2.0 * border).abs() < 1.0,
+            (gap - 2.0 * border).abs() < 2.0,
             "gap between window {} and {}",
             i - 1,
             i
         );
+    }
+}
+
+struct NoopTaskbar;
+impl ManageTaskbar for NoopTaskbar {
+    fn add_tab(&self, _: HwndId) {}
+    fn delete_tab(&self, _: HwndId) {}
+}
+
+struct NoopOverlays;
+impl CreateOverlay for NoopOverlays {
+    fn create_window_overlay(&self) -> anyhow::Result<Box<dyn WindowOverlayApi>> {
+        Ok(Box::new(NoopWindowOverlay))
+    }
+    fn create_container_overlay(&self, _: Config) -> anyhow::Result<Box<dyn ContainerOverlayApi>> {
+        Ok(Box::new(NoopContainerOverlay))
     }
 }

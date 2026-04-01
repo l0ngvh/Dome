@@ -39,6 +39,8 @@ fn toggle_fullscreen_on_and_off() {
     // Both should be back to tiled positions
     assert!(!w1.is_offscreen());
     assert!(!w2.is_offscreen());
+    assert!(!w1.is_topmost());
+    assert!(!w2.is_topmost());
     assert_eq!(w1.get_dim(), before1);
     assert_eq!(w2.get_dim(), before2);
 }
@@ -57,8 +59,10 @@ fn toggle_float() {
     // w1 should fill the screen (w2 is floating, not part of tiling)
     assert!(!w1.is_offscreen());
     assert!(!w2.is_offscreen());
+    assert!(!w1.is_topmost());
+    assert!(w2.is_topmost());
     let d1 = w1.get_dim();
-    let border = env.dome.config().border_size;
+    let border = env.config.border_size;
     assert!(
         (d1.width - (SCREEN_WIDTH - 2.0 * border)).abs() < 1.0,
         "w1 should fill screen width, got {}",
@@ -94,8 +98,12 @@ fn window_created_as_fullscreen_borderless() {
 
     // Second window arrives already fullscreen
     let w2 = Arc::new(
-        MockExternalHwnd::with_title(2, "Game", "game.exe")
-            .with_mode(WindowMode::FullscreenBorderless),
+        MockExternalHwnd::with_title(2, "Game", "game.exe").with_dimension(Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: SCREEN_WIDTH,
+            height: SCREEN_HEIGHT,
+        }),
     );
     env.add_window(w2.clone());
 
@@ -119,7 +127,7 @@ fn move_window_to_other_workspace() {
     assert_h_tiled(
         &[w1.get_dim()],
         default_screen().dimension,
-        env.dome.config().border_size,
+        env.config.border_size,
     );
 }
 
@@ -127,8 +135,12 @@ fn move_window_to_other_workspace() {
 fn fullscreen_borderless_minimizes_on_workspace_switch() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe")
-            .with_mode(WindowMode::FullscreenBorderless),
+        MockExternalHwnd::with_title(1, "Game", "game.exe").with_dimension(Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: SCREEN_WIDTH,
+            height: SCREEN_HEIGHT,
+        }),
     );
     env.add_window(w1.clone());
 
@@ -140,19 +152,15 @@ fn fullscreen_borderless_minimizes_on_workspace_switch() {
 #[test]
 fn fullscreen_exclusive_not_repositioned() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe")
-            .with_mode(WindowMode::FullscreenExclusive),
-    );
-    let initial = w1.get_dim();
+    let w1 = Arc::new(MockExternalHwnd::with_title(1, "Game", "game.exe"));
     env.add_window(w1.clone());
 
-    // FullscreenExclusive windows are never repositioned by the WM
-    assert_eq!(w1.get_dim(), initial);
+    env.enter_exclusive_fullscreen(HwndId::test(1));
+    let after_exclusive = w1.get_dim();
 
-    // Switching workspace should also not reposition (hide_window is noop for exclusive)
+    // Switching workspace should not reposition (hide_window is noop for exclusive)
     env.run_actions("focus workspace 1");
-    assert_eq!(w1.get_dim(), initial);
+    assert_eq!(w1.get_dim(), after_exclusive);
 }
 
 #[test]
@@ -168,6 +176,54 @@ fn iconic_window_restored_before_positioning() {
     let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
     env.add_window(w2.clone());
 
+    assert!(!w1.iconic.load(Ordering::Relaxed));
+    assert!(!w1.is_offscreen());
+}
+
+#[test]
+fn borderless_fullscreen_restored_on_workspace_switch_back() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(
+        MockExternalHwnd::with_title(1, "Game", "game.exe").with_dimension(fullscreen_dim()),
+    );
+    env.add_window(w1.clone());
+    assert!(!w1.iconic.load(Ordering::Relaxed));
+    assert_eq!(w1.get_dim(), fullscreen_dim());
+
+    env.run_actions("focus workspace 1");
+    assert!(w1.iconic.load(Ordering::Relaxed));
+
+    env.run_actions("focus workspace 0");
+    assert!(!w1.iconic.load(Ordering::Relaxed));
+    assert_eq!(w1.get_dim(), fullscreen_dim());
+}
+
+#[test]
+fn dome_minimized_window_survives_minimize_event() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(
+        MockExternalHwnd::with_title(1, "Game", "game.exe").with_dimension(fullscreen_dim()),
+    );
+    env.add_window(w1.clone());
+
+    env.run_actions("focus workspace 1");
+    assert!(w1.iconic.load(Ordering::Relaxed));
+
+    env.minimize_window(&w1);
+    assert!(w1.iconic.load(Ordering::Relaxed));
+}
+
+#[test]
+fn exclusive_fullscreen_survives_minimize_event() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(1, "Game", "game.exe"));
+    env.add_window(w1.clone());
+
+    env.enter_exclusive_fullscreen(HwndId::test(1));
+    assert!(!w1.iconic.load(Ordering::Relaxed));
+    assert!(!w1.is_offscreen());
+
+    env.minimize_window(&w1);
     assert!(!w1.iconic.load(Ordering::Relaxed));
     assert!(!w1.is_offscreen());
 }

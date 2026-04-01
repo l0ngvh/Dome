@@ -12,7 +12,7 @@ fn single_window_fills_screen() {
     assert_h_tiled(
         &[w1.get_dim()],
         default_screen().dimension,
-        env.dome.config().border_size,
+        env.config.border_size,
     );
 }
 
@@ -26,13 +26,15 @@ fn two_windows_split_screen() {
     assert_h_tiled(
         &[w1.get_dim(), w2.get_dim()],
         default_screen().dimension,
-        env.dome.config().border_size,
+        env.config.border_size,
     );
 }
 
 #[test]
 fn three_windows_split_screen() {
-    let mut env = TestEnv::new();
+    let mut config = Config::default();
+    config.automatic_tiling = false;
+    let mut env = TestEnv::new_with_config(config);
     let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
     let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
     let w3 = Arc::new(MockExternalHwnd::with_title(3, "App3", "app3.exe"));
@@ -42,8 +44,27 @@ fn three_windows_split_screen() {
     assert_h_tiled(
         &[w1.get_dim(), w2.get_dim(), w3.get_dim()],
         default_screen().dimension,
-        env.dome.config().border_size,
+        env.config.border_size,
     );
+}
+
+/// distribute_space uses binary search and may produce fractional widths
+/// (e.g. 1920/3 ≈ 639.999). The f32→i32 conversion in show_window must
+/// round, not truncate, or the cumulative error pushes the last window's
+/// right edge away from the screen edge.
+#[test]
+fn positions_are_rounded_not_truncated() {
+    let mut config = Config::default();
+    config.automatic_tiling = false;
+    let mut env = TestEnv::new_with_config(config);
+    let wins: Vec<_> = (1..=7)
+        .map(|i| Arc::new(MockExternalHwnd::with_title(i, "App", "app.exe")))
+        .collect();
+    for w in &wins {
+        env.add_window(w.clone());
+    }
+    let dims: Vec<_> = wins.iter().map(|w| w.get_dim()).collect();
+    assert_h_tiled(&dims, default_screen().dimension, env.config.border_size);
 }
 
 #[test]
@@ -92,7 +113,7 @@ fn resize_detects_fullscreen() {
     let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
     env.add_window(w1.clone());
 
-    let border = env.dome.config().border_size;
+    let border = env.config.border_size;
     let d = w1.get_dim();
     assert_eq!(d.x, border, "should start tiled with border inset");
 

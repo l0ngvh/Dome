@@ -19,7 +19,7 @@ fn window_destroyed_fills_screen() {
     assert_h_tiled(
         &[w2.get_dim()],
         default_screen().dimension,
-        env.dome.config().border_size,
+        env.config.border_size,
     );
 }
 
@@ -37,7 +37,7 @@ fn window_minimized_removes_from_tiling() {
     assert_h_tiled(
         &[w1.get_dim()],
         default_screen().dimension,
-        env.dome.config().border_size,
+        env.config.border_size,
     );
 }
 
@@ -168,6 +168,6 @@ fn title_changed_manages_unknown_window() {
     assert_h_tiled(
         &[w1.get_dim()],
         default_screen().dimension,
-        env.dome.config().border_size,
+        env.config.border_size,
     );
 }

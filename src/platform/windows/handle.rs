@@ -24,38 +24,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PWSTR};
 
 use crate::core::Dimension;
-use crate::platform::windows::OFFSCREEN_POS;
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WindowMode {
-    Tiling,
-    Float,
-    FullscreenBorderless,
-    ManagedFullscreen,
-    FullscreenExclusive,
-}
-
-impl WindowMode {
-    pub(crate) fn is_fullscreen(self) -> bool {
-        matches!(
-            self,
-            Self::FullscreenBorderless | Self::ManagedFullscreen | Self::FullscreenExclusive
-        )
-    }
-}
-
-impl std::fmt::Display for WindowMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Tiling => write!(f, "tiling"),
-            Self::Float => write!(f, "float"),
-            Self::FullscreenBorderless => write!(f, "fullscreen-borderless"),
-            Self::ManagedFullscreen => write!(f, "managed-fullscreen"),
-            Self::FullscreenExclusive => write!(f, "fullscreen-exclusive"),
-        }
-    }
-}
+// Unlike macOS, we are allowed to move windows completely offscreen on Windows
+pub(super) const OFFSCREEN_POS: f32 = -32000.0;
 
 pub(crate) fn get_dimension(hwnd: HWND) -> Dimension {
     let mut rect = RECT::default();
@@ -131,31 +103,28 @@ pub(crate) fn is_fullscreen(dim: &Dimension, monitor: &Dimension) -> bool {
         && dim.y + dim.height >= monitor.y + monitor.height
 }
 
-pub(crate) fn initial_window_mode(hwnd: HWND, monitor: Option<&Dimension>) -> WindowMode {
-    if monitor.is_some_and(|m| is_fullscreen(&get_dimension(hwnd), m)) {
-        return WindowMode::FullscreenBorderless;
-    }
+pub(crate) fn should_float(hwnd: HWND) -> bool {
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
     let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
 
     if style & WS_POPUP.0 != 0 {
         tracing::debug!(?hwnd, "Window identified as float due to WS_POPUP style.");
-        return WindowMode::Float;
+        return true;
     }
     if style & WS_THICKFRAME.0 == 0 {
         tracing::debug!(?hwnd, "Window identified as float due to no WS_THICKFRAME.");
-        return WindowMode::Float;
+        return true;
     }
     if ex_style & WS_EX_TOPMOST.0 != 0 {
         tracing::debug!(?hwnd, "Window identified as float due to WS_EX_TOPMOST.");
-        return WindowMode::Float;
+        return true;
     }
     if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
         tracing::debug!(
             ?hwnd,
             "Window identified as float due to WS_EX_DLGMODALFRAME."
         );
-        return WindowMode::Float;
+        return true;
     }
     // WS_EX_LAYERED is not checked because apps like Steam use it for custom UI rendering.
     // WS_EX_TRANSPARENT catches actual overlay windows that should float.
@@ -164,10 +133,9 @@ pub(crate) fn initial_window_mode(hwnd: HWND, monitor: Option<&Dimension>) -> Wi
             ?hwnd,
             "Window identified as float due to WS_EX_TRANSPARENT."
         );
-        return WindowMode::Float;
+        return true;
     }
-    tracing::debug!(?hwnd, "Window determined to be Tiling.");
-    WindowMode::Tiling
+    false
 }
 
 /// Returns (min_width, min_height, max_width, max_height) constraints
@@ -345,8 +313,8 @@ impl ManageExternalHwnd for ExternalHwnd {
         get_process_name(self.0)
     }
 
-    fn initial_window_mode(&self, monitor: Option<&Dimension>) -> WindowMode {
-        initial_window_mode(self.0, monitor)
+    fn should_float(&self) -> bool {
+        should_float(self.0)
     }
 
     fn get_dimension(&self) -> Dimension {

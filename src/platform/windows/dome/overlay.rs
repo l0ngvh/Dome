@@ -644,18 +644,3 @@ impl WindowOverlayApi for WindowOverlay {
         self.window.hide();
     }
 }
-
-pub(super) fn apply_inset(dim: Dimension, border: f32) -> Dimension {
-    Dimension {
-        x: dim.x + border,
-        y: dim.y + border,
-        width: (dim.width - 2.0 * border).max(0.0),
-        height: (dim.height - 2.0 * border).max(0.0),
-    }
-}
-
-pub(super) fn is_d3d_exclusive_fullscreen_active() -> bool {
-    use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
-    unsafe { SHQueryUserNotificationState() }
-        .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN)
-}

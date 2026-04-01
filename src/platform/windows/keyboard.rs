@@ -5,8 +5,9 @@ use std::thread::{self, JoinHandle};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LMENU, VK_LWIN, VK_MENU, VK_RMENU, VK_RWIN,
-    VK_SHIFT,
+    GetAsyncKeyState, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_LMENU,
+    VK_LWIN, VK_MENU, VK_OEM_4, VK_OEM_6, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RWIN, VK_SHIFT,
+    VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
@@ -147,8 +148,6 @@ fn is_key_pressed(vk: VIRTUAL_KEY) -> bool {
 }
 
 fn vk_to_string(vk: VIRTUAL_KEY) -> Option<String> {
-    use windows::Win32::UI::Input::KeyboardAndMouse::*;
-
     let s = match vk {
         VK_RETURN => "return",
         VK_BACK => "backspace",

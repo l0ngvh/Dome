@@ -2,8 +2,6 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
 use crate::core::Dimension;
-use crate::platform::windows::handle::WindowMode;
-
 /// Opaque window identity. Replaces `ManagedHwnd` throughout the codebase.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HwndId(isize);
@@ -76,7 +74,7 @@ pub(crate) trait ManageExternalHwnd: Send + Sync {
     fn is_manageable(&self) -> bool;
     fn get_window_title(&self) -> Option<String>;
     fn get_process_name(&self) -> anyhow::Result<String>;
-    fn initial_window_mode(&self, monitor: Option<&Dimension>) -> WindowMode;
+    fn should_float(&self) -> bool;
     fn get_dimension(&self) -> Dimension;
     fn get_size_constraints(&self) -> (f32, f32, f32, f32);
     fn get_monitor_handle(&self) -> Option<isize>;

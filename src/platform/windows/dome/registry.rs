@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use crate::core::{Child, WindowId};
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd};
-use crate::platform::windows::handle::WindowMode;
 
 use super::overlay::WindowOverlayApi;
+use super::window::WindowState;
 
 pub(super) struct WindowEntry {
     pub(super) ext: Arc<dyn ManageExternalHwnd>,
-    pub(super) mode: WindowMode,
+    pub(super) state: WindowState,
     pub(super) title: Option<String>,
     pub(super) process: String,
     pub(super) overlay: Box<dyn WindowOverlayApi>,
