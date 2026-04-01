@@ -177,11 +177,18 @@ pub(super) fn create_captures_async(
                 };
                 DispatchQueue::main().exec_async(move || {
                     let delegate = app_delegate();
-                    delegate
+                    if delegate
                         .ivars()
-                        .captures
-                        .borrow_mut()
-                        .insert(window_id, capture);
+                        .overlay_windows
+                        .borrow()
+                        .contains_key(&window_id)
+                    {
+                        delegate
+                            .ivars()
+                            .captures
+                            .borrow_mut()
+                            .insert(window_id, capture);
+                    }
                 });
             }
         },
