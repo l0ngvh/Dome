@@ -2,7 +2,6 @@ use std::cell::OnceCell;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use calloop::channel::Sender;
 use windows::Win32::Foundation::{GetLastError, HWND};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -13,12 +12,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
+use super::HubSender;
 use super::dome::HubEvent;
 use super::external::ManageExternalHwnd;
 use super::handle::ExternalHwnd;
 
 thread_local! {
-    static SENDER: OnceCell<Sender<HubEvent>> = const { OnceCell::new() };
+    static SENDER: OnceCell<HubSender> = const { OnceCell::new() };
 }
 
 pub(super) struct EventHooks(Vec<HWINEVENTHOOK>);
@@ -33,7 +33,7 @@ impl Drop for EventHooks {
     }
 }
 
-pub(super) fn install_event_hooks(sender: Sender<HubEvent>) -> Result<EventHooks> {
+pub(super) fn install_event_hooks(sender: HubSender) -> Result<EventHooks> {
     SENDER.with(|s| s.set(sender).ok());
 
     // We need separate hooks because SetWinEventHook only accepts contiguous
@@ -94,16 +94,16 @@ unsafe extern "system" fn event_hook_proc(
             | EVENT_OBJECT_SHOW
             | EVENT_SYSTEM_MINIMIZEEND
             | EVENT_OBJECT_UNCLOAKED => {
-                sender.send(HubEvent::WindowCreated(ext)).ok();
+                sender.send(HubEvent::WindowCreated(ext));
             }
             EVENT_OBJECT_NAMECHANGE => {
-                sender.send(HubEvent::WindowTitleChanged(ext)).ok();
+                sender.send(HubEvent::WindowTitleChanged(ext));
             }
             EVENT_OBJECT_DESTROY | EVENT_OBJECT_HIDE | EVENT_OBJECT_CLOAKED => {
-                sender.send(HubEvent::WindowDestroyed(ext)).ok();
+                sender.send(HubEvent::WindowDestroyed(ext));
             }
             EVENT_SYSTEM_MINIMIZESTART => {
-                sender.send(HubEvent::WindowMinimized(ext)).ok();
+                sender.send(HubEvent::WindowMinimized(ext));
             }
             EVENT_SYSTEM_FOREGROUND => {
                 // This can happen when Windows queue an event for an activated application, but by
@@ -115,20 +115,20 @@ unsafe extern "system" fn event_hook_proc(
                 if unsafe { GetForegroundWindow() } != hwnd {
                     return;
                 }
-                sender.send(HubEvent::WindowFocused(ext)).ok();
+                sender.send(HubEvent::WindowFocused(ext));
             }
             // MOVESIZESTART fires when user begins a drag/resize.
             // MOVESIZEEND fires after user drag/resize completes.
             // LOCATIONCHANGE catches programmatic resizes (e.g. maximize, restore)
             // which don't trigger the move/size cycle.
             EVENT_SYSTEM_MOVESIZESTART => {
-                sender.send(HubEvent::MoveSizeStart(ext)).ok();
+                sender.send(HubEvent::MoveSizeStart(ext));
             }
             EVENT_SYSTEM_MOVESIZEEND => {
-                sender.send(HubEvent::MoveSizeEnd(ext)).ok();
+                sender.send(HubEvent::MoveSizeEnd(ext));
             }
             EVENT_OBJECT_LOCATIONCHANGE => {
-                sender.send(HubEvent::LocationChanged(ext)).ok();
+                sender.send(HubEvent::LocationChanged(ext));
             }
             _ => {}
         }

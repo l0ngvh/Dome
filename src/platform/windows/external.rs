@@ -3,15 +3,32 @@ use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
 use crate::core::Dimension;
 use crate::platform::windows::handle::WindowMode;
-use crate::platform::windows::taskbar::Taskbar;
 
 /// Opaque window identity. Replaces `ManagedHwnd` throughout the codebase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HwndId(isize);
+
+impl std::fmt::Debug for HwndId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{:x}", self.0)
+    }
+}
+
+impl std::fmt::Display for HwndId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{:x}", self.0)
+    }
+}
 
 impl From<HWND> for HwndId {
     fn from(hwnd: HWND) -> Self {
         Self(hwnd.0 as isize)
+    }
+}
+
+impl From<HwndId> for HWND {
+    fn from(id: HwndId) -> Self {
+        HWND(id.0 as *mut _)
     }
 }
 
@@ -70,10 +87,6 @@ pub(crate) trait ManageExternalHwnd: Send + Sync {
     fn move_offscreen(&self);
     fn show_cmd(&self, cmd: ShowCmd);
     fn set_foreground_window(&self);
-
-    // --- Taskbar ---
-    fn add_to_taskbar(&self, taskbar: &Taskbar);
-    fn remove_from_taskbar(&self, taskbar: &Taskbar);
 
     // --- Recovery ---
     fn is_maximized(&self) -> bool;

@@ -64,8 +64,8 @@ mod tests {
     use super::*;
     use std::thread;
 
-    /// Simulates the calloop event loop side: tracks scheduled timer deadlines
-    /// and fires them like calloop's Timer would.
+    /// Simulates the event loop side: tracks scheduled timer deadlines
+    /// and fires them.
     struct ThrottleHarness {
         throttle: Throttle<i32>,
         processed: Vec<i32>,
@@ -96,8 +96,7 @@ mod tests {
             self.timer_deadline.is_some()
         }
 
-        /// Sleep until the scheduled timer deadline, then flush — just like
-        /// calloop would fire the Timer source after the delay.
+        /// Sleep until the scheduled timer deadline, then flush.
         fn wait_for_timer(&mut self) {
             let deadline = self.timer_deadline.take().expect("no timer scheduled");
             let remaining = deadline.saturating_duration_since(Instant::now());

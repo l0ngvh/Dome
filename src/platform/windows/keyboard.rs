@@ -2,7 +2,6 @@ use std::sync::mpsc;
 use std::sync::{OnceLock, RwLock};
 use std::thread::{self, JoinHandle};
 
-use calloop::channel::Sender;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -15,7 +14,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_SYSKEYDOWN,
 };
 
+use super::HubSender;
 use super::dome::HubEvent;
+use crate::action::Actions;
 use crate::config::{Config, Keymap, Modifiers};
 
 pub(super) struct KeyboardHookHandle {
@@ -24,14 +25,14 @@ pub(super) struct KeyboardHookHandle {
 }
 
 struct KeyboardState {
-    sender: Sender<HubEvent>,
+    sender: HubSender,
     config: RwLock<Config>,
 }
 
 static STATE: OnceLock<KeyboardState> = OnceLock::new();
 
 pub(super) fn install_keyboard_hook(
-    sender: Sender<HubEvent>,
+    sender: HubSender,
     config: Config,
 ) -> anyhow::Result<KeyboardHookHandle> {
     STATE
@@ -97,7 +98,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
 
             if let Some(actions) = get_actions(vk) {
                 if let Some(state) = STATE.get() {
-                    state.sender.send(HubEvent::Action(actions)).ok();
+                    state.sender.send(HubEvent::Action(actions));
                 }
                 return LRESULT(1);
             }
@@ -106,7 +107,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
-fn get_actions(vk: VIRTUAL_KEY) -> Option<crate::action::Actions> {
+fn get_actions(vk: VIRTUAL_KEY) -> Option<Actions> {
     if matches!(
         vk,
         VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN | VK_LMENU | VK_RMENU

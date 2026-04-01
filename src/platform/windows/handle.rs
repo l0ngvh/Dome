@@ -26,7 +26,6 @@ use windows::core::{BOOL, PWSTR};
 use crate::core::Dimension;
 use crate::platform::windows::OFFSCREEN_POS;
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
-use crate::platform::windows::taskbar::Taskbar;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowMode {
@@ -466,14 +465,6 @@ impl ManageExternalHwnd for ExternalHwnd {
         if !unsafe { SetForegroundWindow(self.0) }.as_bool() {
             tracing::warn!("SetForegroundWindow failed, another app may have focus lock");
         }
-    }
-
-    fn add_to_taskbar(&self, taskbar: &Taskbar) {
-        taskbar.add_tab(self.0).ok();
-    }
-
-    fn remove_from_taskbar(&self, taskbar: &Taskbar) {
-        taskbar.delete_tab(self.0).ok();
     }
 
     fn is_maximized(&self) -> bool {

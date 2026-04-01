@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use calloop::channel::Sender;
+use crate::platform::windows::HubSender;
 use glow::HasContext;
 use glutin::config::ConfigTemplateBuilder;
 use glutin::context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentContext};
@@ -25,37 +25,34 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-use super::super::dome::HubEvent;
-use super::super::external::ZOrder;
+use super::HubEvent;
 use crate::config::Config;
-use crate::core::{ContainerPlacement, WindowPlacement};
+use crate::core::{ContainerPlacement, Dimension, WindowPlacement};
 use crate::overlay;
+use crate::platform::windows::external::{HwndId, ZOrder};
 
-pub(super) const CONTAINER_OVERLAY_CLASS: PCWSTR = windows::core::w!("DomeContainerOverlay");
+pub(in crate::platform::windows) const CONTAINER_OVERLAY_CLASS: PCWSTR =
+    windows::core::w!("DomeContainerOverlay");
 
 /// `renderer` is declared before `window` so it drops first —
 /// GL cleanup runs while the window's HDC is still alive.
-pub(super) struct ContainerOverlay {
+pub(in crate::platform::windows) struct ContainerOverlay {
     renderer: OverlayRenderer,
     events: Vec<egui::Event>,
     width: u32,
     height: u32,
     placement: Option<ContainerPlacement>,
     tab_titles: Vec<String>,
-    pub(super) config: Config,
-    hub_sender: Sender<HubEvent>,
+    config: Config,
+    hub_sender: HubSender,
     window: OwnedHwnd,
 }
 
 impl ContainerOverlay {
-    pub(super) fn hwnd(&self) -> HWND {
-        self.window.hwnd()
-    }
-
-    pub(super) fn new(
+    pub(in crate::platform::windows) fn new(
         display: &Display,
         config: Config,
-        hub_sender: Sender<HubEvent>,
+        hub_sender: HubSender,
     ) -> anyhow::Result<Box<Self>> {
         let window = OwnedHwnd::new(CONTAINER_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
         let hwnd = window.hwnd();
@@ -78,13 +75,31 @@ impl ContainerOverlay {
         Ok(boxed)
     }
 
-    /// Update content and position. `z` is the caller-decided z-order.
-    pub(super) fn update(
-        &mut self,
-        placement: ContainerPlacement,
-        tab_titles: Vec<String>,
-        z: ZOrder,
-    ) {
+    fn rerender(&mut self) {
+        let Some(placement) = self.placement.as_ref() else {
+            return;
+        };
+        let tab_titles = &self.tab_titles;
+        let config = &self.config;
+        let events = std::mem::take(&mut self.events);
+        let clicked = self
+            .renderer
+            .render(self.width, self.height, 1.0, events, |ui| {
+                overlay::show_container(ui, placement, tab_titles, config)
+            });
+        if let Some(tab_idx) = clicked {
+            self.hub_sender
+                .send(HubEvent::TabClicked(placement.id, tab_idx));
+        }
+    }
+}
+
+impl ContainerOverlayApi for ContainerOverlay {
+    fn id(&self) -> HwndId {
+        HwndId::from(self.window.hwnd())
+    }
+
+    fn update(&mut self, placement: ContainerPlacement, tab_titles: Vec<String>, z: ZOrder) {
         let vf = placement.visible_frame;
         let w = vf.width.max(1.0) as u32;
         let h = vf.height.max(1.0) as u32;
@@ -119,33 +134,16 @@ impl ContainerOverlay {
             )
             .ok();
         }
-    }
 
-    pub(super) fn show(&mut self) {
         self.window.show();
     }
 
-    pub(super) fn hide(&mut self) {
+    fn hide(&mut self) {
         self.window.hide();
     }
 
-    fn rerender(&mut self) {
-        let Some(placement) = self.placement.as_ref() else {
-            return;
-        };
-        let tab_titles = &self.tab_titles;
-        let config = &self.config;
-        let events = std::mem::take(&mut self.events);
-        let clicked = self
-            .renderer
-            .render(self.width, self.height, 1.0, events, |ui| {
-                overlay::show_container(ui, placement, tab_titles, config)
-            });
-        if let Some(tab_idx) = clicked {
-            self.hub_sender
-                .send(HubEvent::TabClicked(placement.id, tab_idx))
-                .ok();
-        }
+    fn set_config(&mut self, config: Config) {
+        self.config = config;
     }
 }
 
@@ -155,7 +153,7 @@ impl Drop for ContainerOverlay {
     }
 }
 
-pub(super) unsafe extern "system" fn container_wnd_proc(
+pub(in crate::platform::windows) unsafe extern "system" fn container_wnd_proc(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
@@ -211,7 +209,7 @@ pub(super) unsafe extern "system" fn container_wnd_proc(
     }
 }
 
-pub(super) fn raw_window_handle(hwnd: HWND) -> RawWindowHandle {
+pub(in crate::platform::windows) fn raw_window_handle(hwnd: HWND) -> RawWindowHandle {
     let mut handle = Win32WindowHandle::new(std::num::NonZeroIsize::new(hwnd.0 as isize).unwrap());
     let hinstance = unsafe { GetModuleHandleW(None).unwrap() };
     handle.hinstance = std::num::NonZeroIsize::new(hinstance.0 as isize);
@@ -529,4 +527,135 @@ fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HR
 
         region
     }
+}
+
+pub(in crate::platform::windows) trait WindowOverlayApi {
+    fn id(&self) -> HwndId;
+    fn update(&mut self, wp: &WindowPlacement, is_focused: bool, config: &Config, z: ZOrder);
+    fn hide(&mut self);
+}
+
+pub(in crate::platform::windows) trait ContainerOverlayApi {
+    fn id(&self) -> HwndId;
+    fn update(&mut self, placement: ContainerPlacement, tab_titles: Vec<String>, z: ZOrder);
+    fn hide(&mut self);
+    fn set_config(&mut self, config: Config);
+}
+
+#[cfg(test)]
+pub(in crate::platform::windows) struct NoopWindowOverlay;
+
+#[cfg(test)]
+impl WindowOverlayApi for NoopWindowOverlay {
+    fn id(&self) -> HwndId {
+        HwndId::test(0)
+    }
+    fn update(&mut self, _: &WindowPlacement, _: bool, _: &Config, _: ZOrder) {}
+    fn hide(&mut self) {}
+}
+
+#[cfg(test)]
+pub(in crate::platform::windows) struct NoopContainerOverlay;
+
+#[cfg(test)]
+impl ContainerOverlayApi for NoopContainerOverlay {
+    fn id(&self) -> HwndId {
+        HwndId::test(0)
+    }
+    fn update(&mut self, _: ContainerPlacement, _: Vec<String>, _: ZOrder) {}
+    fn hide(&mut self) {}
+    fn set_config(&mut self, _: Config) {}
+}
+
+pub(in crate::platform::windows) const WINDOW_OVERLAY_CLASS: PCWSTR =
+    windows::core::w!("DomeWindowOverlay");
+
+pub(in crate::platform::windows) fn create_window_overlay(
+    display: &Display,
+) -> anyhow::Result<Box<dyn WindowOverlayApi>> {
+    Ok(Box::new(WindowOverlay::new(display)?))
+}
+
+struct WindowOverlay {
+    renderer: OverlayRenderer,
+    width: u32,
+    height: u32,
+    window: OwnedHwnd,
+}
+
+impl WindowOverlay {
+    fn new(display: &Display) -> anyhow::Result<Self> {
+        let window = OwnedHwnd::new(WINDOW_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
+        let renderer = OverlayRenderer::new(display, window.hwnd(), 1, 1)?;
+        Ok(Self {
+            renderer,
+            width: 1,
+            height: 1,
+            window,
+        })
+    }
+}
+
+impl WindowOverlayApi for WindowOverlay {
+    fn id(&self) -> HwndId {
+        HwndId::from(self.window.hwnd())
+    }
+
+    fn update(&mut self, wp: &WindowPlacement, _is_focused: bool, config: &Config, z: ZOrder) {
+        let vf = wp.visible_frame;
+        let w = vf.width.max(1.0) as u32;
+        let h = vf.height.max(1.0) as u32;
+
+        if self.width != w || self.height != h {
+            self.renderer.resize(w, h);
+            self.width = w;
+            self.height = h;
+        }
+
+        self.renderer.render(w, h, 1.0, vec![], |ui| {
+            overlay::paint_window_border(ui.painter(), wp, config);
+        });
+
+        let region = build_window_border_region(wp, config);
+        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
+
+        let z_after: Option<HWND> = z.into();
+        let mut flags = SWP_NOACTIVATE;
+        if z_after.is_none() {
+            flags |= SWP_NOZORDER;
+        }
+        unsafe {
+            SetWindowPos(
+                self.window.hwnd(),
+                z_after,
+                vf.x as i32,
+                vf.y as i32,
+                w as i32,
+                h as i32,
+                flags,
+            )
+            .ok();
+        }
+
+        self.window.show();
+    }
+
+    fn hide(&mut self) {
+        self.window.hide();
+    }
+}
+
+pub(super) fn apply_inset(dim: Dimension, border: f32) -> Dimension {
+    Dimension {
+        x: dim.x + border,
+        y: dim.y + border,
+        width: (dim.width - 2.0 * border).max(0.0),
+        height: (dim.height - 2.0 * border).max(0.0),
+    }
+}
+
+pub(super) fn is_d3d_exclusive_fullscreen_active() -> bool {
+    use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
+    unsafe { SHQueryUserNotificationState() }
+        .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN)
 }

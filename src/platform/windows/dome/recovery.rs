@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
+use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::Console::{
     CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler,
@@ -73,13 +74,14 @@ pub(super) fn restore_all() {
 
         if let Ok(taskbar) = Taskbar::new() {
             for entry in state.values() {
-                entry.ext.add_to_taskbar(&taskbar);
+                let hwnd: HWND = entry.ext.id().into();
+                taskbar.add_tab(hwnd).ok();
             }
         }
     }
 }
 
-pub(super) fn install_handlers() {
+pub(in crate::platform::windows) fn install_handlers() {
     unsafe {
         let _ = SetConsoleCtrlHandler(Some(console_handler), true);
     }
