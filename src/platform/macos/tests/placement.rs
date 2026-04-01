@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn single_window_placed_in_view() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
@@ -16,7 +16,7 @@ fn single_window_placed_in_view() {
 #[test]
 fn two_windows_split_horizontally() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
@@ -34,7 +34,7 @@ fn two_windows_split_horizontally() {
 #[test]
 fn workspace_switch_hides_and_restores() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
@@ -58,7 +58,7 @@ fn workspace_switch_hides_and_restores() {
 #[test]
 fn float_window_moved_by_user() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");

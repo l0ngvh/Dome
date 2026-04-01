@@ -9,7 +9,7 @@ use super::*;
 #[test]
 fn discover_native_fullscreen_window() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let ax = macos.window(cg1);
@@ -28,7 +28,7 @@ fn discover_native_fullscreen_window() {
     dome.reconcile_windows(&[], vec![nw]);
     macos.settle(&mut dome, 10);
 
-    assert!(dome.window_id_for_cg(cg1).is_some());
+    assert!(macos.ids.lock().unwrap().contains_key(&cg1));
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn on_open_moves_window_to_other_workspace() {
         },
         run: Actions::new(vec!["move workspace 3".parse().unwrap()]),
     });
-    let mut dome = setup_dome_with_config(config);
+    let mut dome = macos.setup_dome_with_config(config);
 
     let cg1 = macos.spawn_window(100, "Terminal", "zsh");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
@@ -64,7 +64,7 @@ fn on_open_moves_window_to_other_workspace() {
 #[test]
 fn is_moving_suppresses_placement() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
@@ -97,7 +97,7 @@ fn is_moving_suppresses_placement() {
 #[test]
 fn monitor_change_rehides_offscreen_windows() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
@@ -138,7 +138,7 @@ fn monitor_change_rehides_offscreen_windows() {
 #[test]
 fn remove_borderless_fullscreen_window_restores_siblings() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
@@ -163,7 +163,7 @@ fn remove_borderless_fullscreen_window_restores_siblings() {
 #[test]
 fn app_terminated_removes_windows() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Tab 1");
     let cg2 = macos.spawn_window(100, "Safari", "Tab 2");
@@ -188,7 +188,7 @@ fn app_terminated_removes_windows() {
 #[test]
 fn window_removed_fills_screen() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");

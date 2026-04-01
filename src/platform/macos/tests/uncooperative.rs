@@ -7,7 +7,7 @@ use super::*;
 #[test]
 fn drift_exhausts_retries_dome_gives_up() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
@@ -26,7 +26,7 @@ fn drift_exhausts_retries_dome_gives_up() {
 #[test]
 fn drift_retries_reset_on_new_target() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
@@ -54,7 +54,7 @@ fn drift_retries_reset_on_new_target() {
 #[test]
 fn drift_to_fullscreen_triggers_borderless_detection() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
@@ -73,7 +73,7 @@ fn drift_to_fullscreen_triggers_borderless_detection() {
 #[test]
 fn offscreen_window_fights_hide() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
@@ -102,7 +102,7 @@ fn offscreen_window_fights_hide() {
 #[test]
 fn constraint_changes_over_time() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Finder", "Home");
@@ -129,7 +129,7 @@ fn constraint_changes_over_time() {
 #[test]
 fn drift_correction_repositions_window() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
@@ -147,7 +147,7 @@ fn drift_correction_repositions_window() {
 #[test]
 fn window_min_size_constraint() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Finder", "Home");
@@ -167,7 +167,7 @@ fn window_min_size_constraint() {
 #[test]
 fn window_max_size_constraint() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Finder", "Home");
@@ -192,7 +192,7 @@ fn window_max_size_constraint() {
 #[test]
 fn size_constraint_from_external_move() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Finder", "Home");
@@ -212,12 +212,12 @@ fn size_constraint_from_external_move() {
 #[test]
 fn stale_move_events_ignored() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
-    let w1 = dome.window_id_for_cg(cg1).unwrap();
+    let w1 = macos.window_id(cg1);
     let placed_frame = macos.window_frame(cg1);
 
     // Add second window — cg1 gets relayouted to smaller size
@@ -245,7 +245,7 @@ fn stale_move_events_ignored() {
 #[test]
 fn offscreen_move_events_keep_windows_hidden() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
@@ -266,7 +266,7 @@ fn offscreen_move_events_keep_windows_hidden() {
 #[test]
 fn no_redundant_set_frame_after_settling() {
     let mut macos = MacOS::new();
-    let mut dome = setup_dome();
+    let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");

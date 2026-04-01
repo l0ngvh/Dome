@@ -184,13 +184,6 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn window_id_for_cg(
-        &self,
-        cg_id: CGWindowID,
-    ) -> Option<WindowId> {
-        self.registry.get(cg_id).map(|e| e.window_id)
-    }
-
     pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
         self.hub.sync_config(new_config.clone().into());
         self.sender

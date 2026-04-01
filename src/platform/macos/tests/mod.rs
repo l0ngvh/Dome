@@ -6,7 +6,7 @@ mod uncooperative;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::Result;
@@ -14,7 +14,7 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::action::Actions;
 use crate::config::Config;
-use crate::core::Dimension;
+use crate::core::{Dimension, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dome::{Dome, FrameSender, HubMessage, NewWindow, WindowMove};
@@ -39,6 +39,7 @@ fn default_screen() -> MonitorInfo {
 }
 
 type MoveLog = Rc<RefCell<Vec<(CGWindowID, i32, i32, i32, i32)>>>;
+type IdMap = Arc<Mutex<HashMap<CGWindowID, WindowId>>>;
 
 /// Mock AXWindow with shared state so clones given to Dome reflect
 /// the same position/size when Dome calls set_frame.
@@ -184,6 +185,7 @@ impl AXWindowApi for MockAXWindow {
 struct MacOS {
     windows: HashMap<CGWindowID, MockAXWindow>,
     moves: MoveLog,
+    ids: IdMap,
     next_cg_id: u32,
 }
 
@@ -192,6 +194,7 @@ impl MacOS {
         Self {
             windows: HashMap::new(),
             moves: Rc::new(RefCell::new(Vec::new())),
+            ids: Arc::new(Mutex::new(HashMap::new())),
             next_cg_id: 1,
         }
     }
@@ -267,7 +270,7 @@ impl MacOS {
         let ax = self.window(cg_id);
         let (x, y) = ax.position.get();
         let (w, h) = ax.size.get();
-        let window_id = dome.window_id_for_cg(cg_id).unwrap();
+        let window_id = self.window_id(cg_id);
         dome.windows_moved(vec![WindowMove {
             window_id,
             x,
@@ -290,7 +293,7 @@ impl MacOS {
         let moves: Vec<_> = pending
             .into_iter()
             .filter_map(|(cg_id, x, y, w, h)| {
-                let window_id = dome.window_id_for_cg(cg_id)?;
+                let window_id = self.ids.lock().unwrap().get(&cg_id).copied()?;
                 let is_native_fullscreen = self
                     .windows
                     .get(&cg_id)
@@ -326,7 +329,7 @@ impl MacOS {
             let moves: Vec<_> = pending
                 .into_iter()
                 .filter_map(|(cg_id, x, y, w, h)| {
-                    let window_id = dome.window_id_for_cg(cg_id)?;
+                    let window_id = self.ids.lock().unwrap().get(&cg_id).copied()?;
                     let is_native_fullscreen = self
                         .windows
                         .get(&cg_id)
@@ -357,20 +360,35 @@ impl MacOS {
             }
         }
     }
+    fn setup_dome(&self) -> Dome {
+        self.setup_dome_with_config(Config::default())
+    }
+
+    fn setup_dome_with_config(&self, config: Config) -> Dome {
+        let sender = TestSender {
+            ids: self.ids.clone(),
+        };
+        Dome::new(&[default_screen()], config, Box::new(sender))
+    }
+
+    fn window_id(&self, cg_id: CGWindowID) -> WindowId {
+        self.ids.lock().unwrap()[&cg_id]
+    }
 }
 
-struct NoopSender;
-impl FrameSender for NoopSender {
-    fn send(&self, _msg: HubMessage) {}
+struct TestSender {
+    ids: IdMap,
 }
 
-fn setup_dome() -> Dome {
-    setup_dome_with_config(Config::default())
-}
-
-fn setup_dome_with_config(config: Config) -> Dome {
-    let screen = default_screen();
-    Dome::new(&[screen], config, Box::new(NoopSender))
+impl FrameSender for TestSender {
+    fn send(&self, msg: HubMessage) {
+        if let HubMessage::Frame(frame) = msg {
+            let mut ids = self.ids.lock().unwrap();
+            for c in frame.creates {
+                ids.insert(c.cg_id, c.window_id);
+            }
+        }
+    }
 }
 
 fn new_window(macos: &MacOS, cg_id: CGWindowID) -> NewWindow {
