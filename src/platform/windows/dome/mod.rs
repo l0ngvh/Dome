@@ -291,6 +291,7 @@ impl Dome {
             )
         };
         self.set_constraints(id, &*ext);
+        self.recovery.track(&ext, dim);
 
         self.registry.insert(
             id_key,
@@ -309,6 +310,8 @@ impl Dome {
     #[tracing::instrument(skip(self))]
     fn remove_window(&mut self, id_key: HwndId) {
         self.placement_tracker.clear(id_key);
+        self.taskbar.delete_tab(id_key);
+        self.recovery.untrack(id_key);
         if let Some(id) = self.registry.remove_by_hwnd(id_key) {
             tracing::info!(%id, "Window removed");
             self.hub.delete_window(id);
@@ -446,19 +449,6 @@ impl Dome {
         let changes = self.hub.drain_changes();
 
         // Phase 1 — Lifecycle
-        for &id in &changes.created_windows {
-            let entry = self.registry.get_mut(id);
-            let dim = entry.ext.get_dimension();
-            self.recovery.track(&entry.ext, dim);
-        }
-
-        for &id in &changes.deleted_windows {
-            let entry = self.registry.get(id);
-            self.taskbar.delete_tab(entry.ext.id());
-            self.recovery.untrack(entry.ext.id());
-            self.registry.remove_by_id(id);
-        }
-
         for &id in &changes.created_containers {
             match self.overlays.create_container_overlay(self.config.clone()) {
                 Ok(overlay) => {
