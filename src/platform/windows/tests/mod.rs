@@ -130,6 +130,13 @@ fn fullscreen_dim() -> Dimension {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ZOrderState {
+    Bottom,
+    Normal,
+    Topmost,
+}
+
 struct MockExternalHwnd {
     hwnd_id: HwndId,
     manageable: bool,
@@ -141,7 +148,7 @@ struct MockExternalHwnd {
     iconic: AtomicBool,
     min_size: (f32, f32),
     max_size: (f32, f32),
-    last_z: Mutex<Option<ZOrder>>,
+    z_state: Mutex<ZOrderState>,
 }
 
 impl MockExternalHwnd {
@@ -162,7 +169,7 @@ impl MockExternalHwnd {
             iconic: AtomicBool::new(false),
             min_size: (0.0, 0.0),
             max_size: (0.0, 0.0),
-            last_z: Mutex::new(None),
+            z_state: Mutex::new(ZOrderState::Normal),
         }
     }
 
@@ -191,7 +198,11 @@ impl MockExternalHwnd {
     }
 
     fn is_topmost(&self) -> bool {
-        matches!(*self.last_z.lock().unwrap(), Some(ZOrder::Topmost))
+        *self.z_state.lock().unwrap() == ZOrderState::Topmost
+    }
+
+    fn is_bottom(&self) -> bool {
+        *self.z_state.lock().unwrap() == ZOrderState::Bottom
     }
 }
 
@@ -245,13 +256,20 @@ impl ManageExternalHwnd for MockExternalHwnd {
             width: cx as f32,
             height: cy as f32,
         };
-        *self.last_z.lock().unwrap() = Some(z);
+        let mut z_state = self.z_state.lock().unwrap();
+        match z {
+            ZOrder::Topmost => *z_state = ZOrderState::Topmost,
+            ZOrder::NotTopmost | ZOrder::After(_) => *z_state = ZOrderState::Normal,
+            ZOrder::Unchanged => {}
+        }
     }
 
     fn move_offscreen(&self) {
         let mut dim = self.dimension.lock().unwrap();
         dim.x = OFFSCREEN_POS;
         dim.y = OFFSCREEN_POS;
+        drop(dim);
+        *self.z_state.lock().unwrap() = ZOrderState::Bottom;
     }
 
     fn show_cmd(&self, cmd: ShowCmd) {

@@ -15,6 +15,7 @@ fn toggle_fullscreen_hides_siblings() {
     env.run_actions("toggle fullscreen");
 
     assert!(w1.is_offscreen());
+    assert!(w1.is_bottom());
     let d2 = w2.get_dim();
     assert_eq!(d2.x, 0.0);
     assert_eq!(d2.y, 0.0);
@@ -124,6 +125,7 @@ fn move_window_to_other_workspace() {
 
     // w2 should be offscreen, w1 should fill the screen
     assert!(w2.is_offscreen());
+    assert!(w2.is_bottom());
     assert_h_tiled(
         &[w1.get_dim()],
         default_screen().dimension,
@@ -226,4 +228,26 @@ fn exclusive_fullscreen_survives_minimize_event() {
     env.minimize_window(&w1);
     assert!(!w1.iconic.load(Ordering::Relaxed));
     assert!(!w1.is_offscreen());
+}
+
+#[test]
+fn float_restored_from_offscreen_is_topmost() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    // Float w2, then switch away
+    env.run_actions("toggle float");
+    assert!(w2.is_topmost());
+
+    env.run_actions("focus workspace 1");
+    assert!(w2.is_offscreen());
+    assert!(w2.is_bottom());
+
+    // Switch back — float should be topmost again
+    env.run_actions("focus workspace 0");
+    assert!(!w2.is_offscreen());
+    assert!(w2.is_topmost());
 }

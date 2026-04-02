@@ -14,9 +14,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor,
-    GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic,
-    IsWindowVisible, IsZoomed, MINMAXINFO, SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
-    SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW,
+    GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, HWND_BOTTOM,
+    IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE,
+    SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW,
     SetForegroundWindow, SetWindowPos, ShowWindow, ShowWindowAsync, WM_GETMINMAXINFO, WM_GETTEXT,
     WM_GETTEXTLENGTH, WS_CHILD, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
@@ -385,12 +385,12 @@ impl ManageExternalHwnd for ExternalHwnd {
         unsafe {
             SetWindowPos(
                 self.0,
-                None,
+                Some(HWND_BOTTOM),
                 OFFSCREEN_POS as i32,
                 OFFSCREEN_POS as i32,
                 0,
                 0,
-                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
+                SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
             )
             .ok()
         };

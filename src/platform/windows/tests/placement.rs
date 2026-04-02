@@ -81,10 +81,14 @@ fn workspace_switch_hides_and_restores() {
     env.run_actions("focus workspace 1");
     assert!(w1.is_offscreen());
     assert!(w2.is_offscreen());
+    assert!(w1.is_bottom());
+    assert!(w2.is_bottom());
 
     env.run_actions("focus workspace 0");
     assert!(!w1.is_offscreen());
     assert!(!w2.is_offscreen());
+    assert!(!w1.is_bottom());
+    assert!(!w2.is_bottom());
     assert_eq!(w1.get_dim(), placed1);
     assert_eq!(w2.get_dim(), placed2);
 }
