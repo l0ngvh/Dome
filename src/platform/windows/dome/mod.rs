@@ -185,16 +185,12 @@ impl Dome {
     #[tracing::instrument(skip_all)]
     pub(super) fn window_minimized(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
         let id_key = ext.id();
-        let dominated_by_dome = self
-            .registry
-            .get_id(id_key)
-            .and_then(|id| self.registry.get(id))
-            .is_some_and(|entry| {
-                matches!(
-                    entry.state,
-                    WindowState::Minimized | WindowState::FullscreenExclusive
-                )
-            });
+        let dominated_by_dome = self.registry.get_id(id_key).is_some_and(|id| {
+            matches!(
+                self.registry.get(id).state,
+                WindowState::Minimized | WindowState::FullscreenExclusive
+            )
+        });
         if !dominated_by_dome {
             self.remove_window(id_key);
         }
@@ -376,9 +372,7 @@ impl Dome {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
-        let Some(entry) = self.registry.get(id) else {
-            return;
-        };
+        let entry = self.registry.get(id);
         if entry.state == WindowState::FullscreenExclusive {
             return;
         }
@@ -453,17 +447,15 @@ impl Dome {
 
         // Phase 1 — Lifecycle
         for &id in &changes.created_windows {
-            if let Some(entry) = self.registry.get_mut(id) {
-                let dim = entry.ext.get_dimension();
-                self.recovery.track(&entry.ext, dim);
-            }
+            let entry = self.registry.get_mut(id);
+            let dim = entry.ext.get_dimension();
+            self.recovery.track(&entry.ext, dim);
         }
 
         for &id in &changes.deleted_windows {
-            if let Some(entry) = self.registry.get(id) {
-                self.taskbar.delete_tab(entry.ext.id());
-                self.recovery.untrack(entry.ext.id());
-            }
+            let entry = self.registry.get(id);
+            self.taskbar.delete_tab(entry.ext.id());
+            self.recovery.untrack(entry.ext.id());
             self.registry.remove_by_id(id);
         }
 
@@ -517,8 +509,9 @@ impl Dome {
                 } => {
                     for wp in windows {
                         window_ids.push(wp.id);
-                        if let Some(entry) = self.registry.get(wp.id)
-                            && self.placement_tracker.is_moving(entry.ext.id())
+                        if self
+                            .placement_tracker
+                            .is_moving(self.registry.get(wp.id).ext.id())
                         {
                             continue;
                         }
@@ -592,9 +585,7 @@ impl Dome {
 
         // Phase 3 — Hide
         for &id in &to_hide {
-            if let Some(entry) = self.registry.get(id) {
-                self.taskbar.delete_tab(entry.ext.id());
-            }
+            self.taskbar.delete_tab(self.registry.get(id).ext.id());
             self.hide_window(id);
         }
 
@@ -615,19 +606,17 @@ impl Dome {
 
         // Phase 5 — Taskbar
         for &id in &tabs_to_add {
-            if let Some(entry) = self.registry.get(id) {
-                self.taskbar.add_tab(entry.ext.id());
-            }
+            self.taskbar.add_tab(self.registry.get(id).ext.id());
         }
 
         // Phase 6 — Focus
         if focused != self.last_focused {
             self.last_focused = focused;
-            if let Some(id) = focused
-                && let Some(entry) = self.registry.get(id)
-                && entry.state != WindowState::FullscreenExclusive
-            {
-                entry.ext.set_foreground_window();
+            if let Some(id) = focused {
+                let entry = self.registry.get(id);
+                if entry.state != WindowState::FullscreenExclusive {
+                    entry.ext.set_foreground_window();
+                }
             }
         }
     }
@@ -643,11 +632,7 @@ impl Dome {
 
         let mut normal_windows: Vec<&WindowPlacement> = Vec::new();
         for wp in to_show {
-            if self
-                .registry
-                .get(wp.id)
-                .is_some_and(|e| e.state == WindowState::FullscreenExclusive)
-            {
+            if self.registry.get(wp.id).state == WindowState::FullscreenExclusive {
                 continue;
             }
             normal_windows.push(wp);
@@ -659,10 +644,8 @@ impl Dome {
         let mut steady_tiling: Vec<&WindowPlacement> = Vec::new();
 
         for wp in &normal_windows {
-            let is_newly_float = self
-                .registry
-                .get(wp.id)
-                .is_some_and(|e| e.state != WindowState::Positioned(PositionedState::Float))
+            let is_newly_float = self.registry.get(wp.id).state
+                != WindowState::Positioned(PositionedState::Float)
                 && wp.is_float;
             let is_newly_focused_float = wp.is_float && focus_changed && focused == Some(wp.id);
 
@@ -699,17 +682,13 @@ impl Dome {
         let mut anchor: Option<HwndId> = None;
 
         for wp in newly_active_float.iter().rev() {
-            if let Some(entry) = self.registry.get(wp.id) {
-                anchor = Some(entry.ext.id());
-            }
+            anchor = Some(self.registry.get(wp.id).ext.id());
             self.show_window(wp.id, wp, ZOrder::Topmost);
         }
 
         for wp in &steady_float {
             let z = anchor.map(ZOrder::After).unwrap_or(ZOrder::Unchanged);
-            if let Some(entry) = self.registry.get(wp.id) {
-                anchor = Some(entry.ext.id());
-            }
+            anchor = Some(self.registry.get(wp.id).ext.id());
             self.show_window(wp.id, wp, z);
         }
 
@@ -720,9 +699,7 @@ impl Dome {
                 anchor = Some(overlay.id());
             }
         } else if let Some(wp) = focused_tiling {
-            if let Some(entry) = self.registry.get(wp.id) {
-                anchor = Some(entry.ext.id());
-            }
+            anchor = Some(self.registry.get(wp.id).ext.id());
             self.show_window(wp.id, wp, ZOrder::NotTopmost);
         } else {
             anchor = None;
@@ -739,9 +716,7 @@ impl Dome {
 
         for wp in &steady_tiling {
             let z = anchor.map(ZOrder::After).unwrap_or(ZOrder::Unchanged);
-            if let Some(entry) = self.registry.get(wp.id) {
-                anchor = Some(entry.ext.id());
-            }
+            anchor = Some(self.registry.get(wp.id).ext.id());
             self.show_window(wp.id, wp, z);
         }
     }
@@ -785,17 +760,11 @@ impl Dome {
 
         let windows: Vec<_> = self.registry.iter().collect();
         for (_, id) in windows {
-            if self
-                .registry
-                .get(id)
-                .is_some_and(|i| i.state == WindowState::FullscreenExclusive)
-            {
+            if self.registry.get(id).state == WindowState::FullscreenExclusive {
                 continue;
             }
-            if let Some(entry) = self.registry.get(id) {
-                let ext = entry.ext.clone();
-                self.set_constraints(id, &*ext);
-            }
+            let ext = self.registry.get(id).ext.clone();
+            self.set_constraints(id, &*ext);
         }
     }
 

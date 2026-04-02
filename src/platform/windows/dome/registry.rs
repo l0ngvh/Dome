@@ -55,12 +55,12 @@ impl WindowRegistry {
         }
     }
 
-    pub(super) fn get(&self, id: WindowId) -> Option<&WindowEntry> {
-        self.by_id.get(&id)
+    pub(super) fn get(&self, id: WindowId) -> &WindowEntry {
+        &self.by_id[&id]
     }
 
-    pub(super) fn get_mut(&mut self, id: WindowId) -> Option<&mut WindowEntry> {
-        self.by_id.get_mut(&id)
+    pub(super) fn get_mut(&mut self, id: WindowId) -> &mut WindowEntry {
+        self.by_id.get_mut(&id).unwrap()
     }
 
     pub(super) fn get_id(&self, id: HwndId) -> Option<WindowId> {
@@ -89,7 +89,8 @@ impl WindowRegistry {
             .map(|c| match c {
                 Child::Window(wid) => self
                     .get(*wid)
-                    .and_then(|e| e.title.as_deref())
+                    .title
+                    .as_deref()
                     .unwrap_or("<no title>")
                     .to_owned(),
                 Child::Container(_) => "Container".to_owned(),

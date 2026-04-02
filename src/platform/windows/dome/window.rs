@@ -53,9 +53,7 @@ impl std::fmt::Display for WindowState {
 
 impl Dome {
     pub(super) fn show_window(&mut self, id: WindowId, wp: &WindowPlacement, z: ZOrder) {
-        let Some(entry) = self.registry.get_mut(id) else {
-            return;
-        };
+        let entry = self.registry.get_mut(id);
         match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => return,
             WindowState::Minimized => {
@@ -95,9 +93,7 @@ impl Dome {
     }
 
     pub(super) fn show_fullscreen_window(&mut self, id: WindowId, dimension: Dimension) {
-        let Some(entry) = self.registry.get_mut(id) else {
-            return;
-        };
+        let entry = self.registry.get_mut(id);
         match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => return,
             WindowState::Minimized => {
@@ -119,9 +115,7 @@ impl Dome {
     }
 
     pub(super) fn hide_window(&mut self, id: WindowId) {
-        let Some(entry) = self.registry.get_mut(id) else {
-            return;
-        };
+        let entry = self.registry.get_mut(id);
         match entry.state {
             WindowState::Positioned(PositionedState::Tiling | PositionedState::Float) => {
                 entry.ext.move_offscreen();
@@ -140,25 +134,20 @@ impl Dome {
     }
 
     pub(super) fn enter_fullscreen_borderless(&mut self, id: WindowId) {
-        if let Some(entry) = self.registry.get_mut(id) {
-            entry.state = WindowState::FullscreenBorderless;
-        }
+        self.registry.get_mut(id).state = WindowState::FullscreenBorderless;
         self.hub.set_fullscreen(id);
     }
 
     pub(super) fn exit_fullscreen_borderless(&mut self, id: WindowId) {
-        if let Some(entry) = self.registry.get_mut(id)
-            && entry.state == WindowState::FullscreenBorderless
-        {
+        let entry = self.registry.get_mut(id);
+        if entry.state == WindowState::FullscreenBorderless {
             entry.state = WindowState::Positioned(PositionedState::Tiling);
         }
         self.hub.unset_fullscreen(id);
     }
 
     pub(super) fn enter_fullscreen_exclusive(&mut self, id: WindowId) {
-        if let Some(entry) = self.registry.get_mut(id) {
-            entry.state = WindowState::FullscreenExclusive;
-        }
+        self.registry.get_mut(id).state = WindowState::FullscreenExclusive;
         if !self.hub.get_window(id).is_fullscreen() {
             self.hub.set_fullscreen(id);
         }
