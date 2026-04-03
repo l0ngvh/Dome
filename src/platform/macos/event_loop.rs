@@ -9,6 +9,7 @@ use calloop::timer::{TimeoutAction, Timer};
 use calloop::{EventLoop, LoopHandle, LoopSignal, RegistrationToken};
 use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
 use objc2::rc::autoreleasepool;
+use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions};
 use crate::platform::macos::dome::{
@@ -95,10 +96,10 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             runner.dome.config_changed(new_config);
         }
         HubEvent::SyncFocus { pid } => {
-            runner.dome.sync_focus(pid);
+            dispatch_sync_focus(runner, pid);
         }
         HubEvent::TitleChanged(cg_id) => {
-            runner.dome.title_changed(cg_id);
+            dispatch_title_read(runner, cg_id);
         }
         HubEvent::Action(actions) => {
             tracing::debug!(%actions, "Executing actions");
@@ -206,6 +207,35 @@ fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: Inst
                     .collect();
                 runner.dome.windows_moved(moves);
             }
+        },
+    );
+}
+
+fn dispatch_sync_focus(runner: &mut DomeRunner, pid: i32) {
+    runner.dispatcher.dispatch(
+        move || {
+            let app = RunningApp::new(pid)?;
+            if !app.is_active() {
+                return None;
+            }
+            Some(app.focused_window()?.cg_id())
+        },
+        |result, runner| {
+            if let Some(cg_id) = result {
+                runner.dome.focus_window_by_cg(cg_id);
+            }
+        },
+    );
+}
+
+fn dispatch_title_read(runner: &mut DomeRunner, cg_id: CGWindowID) {
+    let Some(entry) = runner.dome.tracked_window(cg_id) else {
+        return;
+    };
+    runner.dispatcher.dispatch(
+        move || entry.ax.read_title(),
+        move |title, runner| {
+            runner.dome.update_title(cg_id, title);
         },
     );
 }

@@ -193,16 +193,27 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn sync_focus(&mut self, pid: i32) {
-        if let Some(app) = RunningApp::new(pid) {
-            self.sync_app_focus(&app);
+    pub(in crate::platform::macos) fn tracked_window(
+        &self,
+        cg_id: CGWindowID,
+    ) -> Option<WindowEntry> {
+        self.registry.get(cg_id).cloned()
+    }
+
+    pub(in crate::platform::macos) fn focus_window_by_cg(&mut self, cg_id: CGWindowID) {
+        if let Some(entry) = self.registry.get(cg_id) {
+            self.hub.set_focus(entry.window_id);
         }
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn title_changed(&mut self, cg_id: CGWindowID) {
+    pub(in crate::platform::macos) fn update_title(
+        &mut self,
+        cg_id: CGWindowID,
+        title: Option<String>,
+    ) {
         if let Some(entry) = self.registry.get_mut(cg_id) {
-            entry.title = entry.ax.read_title();
+            entry.title = title;
             tracing::trace!(%entry, "Title changed");
         }
         self.flush_layout();
@@ -279,18 +290,6 @@ impl Dome {
 
     pub(in crate::platform::macos) fn register_observers(&mut self, apps: Vec<RunningApp>) {
         self.sender.send(HubMessage::RegisterObservers(apps));
-    }
-
-    #[tracing::instrument(skip_all, fields(pid = app.pid()))]
-    fn sync_app_focus(&mut self, app: &RunningApp) {
-        if !app.is_active() {
-            return;
-        }
-        if let Some(ax) = app.focused_window()
-            && let Some(entry) = self.registry.get(ax.cg_id())
-        {
-            self.hub.set_focus(entry.window_id);
-        }
     }
 
     fn handle_space_changed(&mut self) {

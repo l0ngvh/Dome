@@ -10,7 +10,7 @@ use super::window::WindowState;
 
 #[derive(Clone)]
 pub(in crate::platform::macos) struct WindowEntry {
-    pub(super) ax: Arc<dyn AXWindowApi>,
+    pub(in crate::platform::macos) ax: Arc<dyn AXWindowApi>,
     pub(super) window_id: WindowId,
     pub(super) app_name: Option<String>,
     pub(super) bundle_id: Option<String>,
