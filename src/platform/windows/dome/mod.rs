@@ -5,6 +5,7 @@ mod registry;
 mod window;
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::action::{Actions, FocusTarget, HubAction, MoveTarget, ToggleTarget};
@@ -76,7 +77,7 @@ pub(super) struct Dome {
     monitor_dimensions: HashMap<MonitorId, Dimension>,
     displayed: HashMap<MonitorId, DisplayedMonitor>,
     config: Config,
-    taskbar: Arc<dyn ManageTaskbar>,
+    taskbar: Rc<dyn ManageTaskbar>,
     overlays: Box<dyn CreateOverlay>,
     display: Box<dyn QueryDisplay>,
     container_overlays: HashMap<ContainerId, Box<dyn ContainerOverlayApi>>,
@@ -94,7 +95,7 @@ impl Drop for Dome {
 impl Dome {
     pub(super) fn new(
         config: Config,
-        taskbar: Arc<dyn ManageTaskbar>,
+        taskbar: Rc<dyn ManageTaskbar>,
         overlays: Box<dyn CreateOverlay>,
         display: Box<dyn QueryDisplay>,
     ) -> anyhow::Result<Self> {

@@ -161,6 +161,7 @@ pub(crate) fn kAXUIElementDestroyedNotification() -> CFRetained<CFString> {
     CFString::from_static_str("AXUIElementDestroyed")
 }
 
+#[cfg(not(test))]
 #[allow(non_snake_case)]
 pub(crate) fn kAXWindowsAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXWindows")
@@ -231,6 +232,7 @@ pub(crate) fn kAXMovedNotification() -> CFRetained<CFString> {
     CFString::from_static_str("AXMoved")
 }
 
+#[cfg(not(test))]
 #[allow(non_snake_case)]
 pub(crate) fn kAXFocusedWindowAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXFocusedWindow")

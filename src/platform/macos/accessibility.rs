@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::ptr::NonNull;
 
+#[cfg(not(test))]
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
@@ -48,6 +49,7 @@ impl std::fmt::Display for AXWindow {
 }
 
 impl AXWindow {
+    #[cfg(not(test))]
     pub(super) fn new(
         element: CFRetained<AXUIElement>,
         cg_id: CGWindowID,
@@ -90,12 +92,6 @@ impl AXWindow {
 
     pub(super) fn title(&self) -> Option<&str> {
         self.title.as_deref()
-    }
-
-    pub(super) fn update_title(&mut self) {
-        self.title = get_attribute::<CFString>(&self.element, &kAXTitleAttribute())
-            .map(|t| t.to_string())
-            .ok();
     }
 
     pub(super) fn is_native_fullscreen(&self) -> bool {
@@ -349,7 +345,6 @@ pub(super) trait AXWindowApi: Send + Sync + std::fmt::Display {
     fn unminimize(&self) -> Result<()>;
     fn is_valid(&self, marker: &DispatcherMarker) -> bool;
     fn is_minimized(&self, marker: &DispatcherMarker) -> bool;
-    fn is_manageable(&self, marker: &DispatcherMarker) -> bool;
     fn read_title(&self, marker: &DispatcherMarker) -> Option<String>;
 }
 
@@ -392,9 +387,6 @@ impl AXWindowApi for AXWindow {
     }
     fn is_minimized(&self, _marker: &DispatcherMarker) -> bool {
         self.is_minimized()
-    }
-    fn is_manageable(&self, _marker: &DispatcherMarker) -> bool {
-        self.is_manageable()
     }
     fn read_title(&self, _marker: &DispatcherMarker) -> Option<String> {
         get_attribute::<CFString>(&self.element, &kAXTitleAttribute())

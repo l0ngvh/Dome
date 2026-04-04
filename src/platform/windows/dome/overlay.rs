@@ -27,7 +27,7 @@ use windows::core::PCWSTR;
 
 use super::HubEvent;
 use crate::config::Config;
-use crate::core::{ContainerPlacement, Dimension, WindowPlacement};
+use crate::core::{ContainerPlacement, WindowPlacement};
 use crate::overlay;
 use crate::platform::windows::external::{HwndId, ZOrder};
 

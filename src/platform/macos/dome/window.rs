@@ -34,7 +34,7 @@ pub(super) enum PositionedState {
 }
 
 #[derive(Clone, Copy)]
-struct Placement {
+pub(super) struct Placement {
     target: RoundedDimension,
     actual: RoundedDimension,
     retries: u8,
@@ -502,11 +502,15 @@ impl Dome {
         match positioned_state {
             PositionedState::InView(placement) => {
                 let actual = placement.actual;
-                move_offscreen(&monitors, &actual, &*window.ax);
+                if let Err(e) = move_offscreen(&monitors, &actual, &*window.ax) {
+                    tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
+                }
                 window.state = WindowState::Positioned(PositionedState::Offscreen { actual })
             }
             PositionedState::Offscreen { actual } => {
-                move_offscreen(&monitors, &actual, &*window.ax);
+                if let Err(e) = move_offscreen(&monitors, &actual, &*window.ax) {
+                    tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
+                }
             }
         }
     }

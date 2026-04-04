@@ -9,14 +9,10 @@ mod tests;
 mod workspace;
 
 pub(crate) use hub::Hub;
-pub(crate) use hub::{
-    Changes, ContainerPlacement, MonitorLayout, MonitorPlacements, WindowPlacement,
-};
 #[cfg(target_os = "macos")]
-pub(crate) use node::Window;
-pub(crate) use node::{
-    Child, Container, ContainerId, Dimension, DisplayMode, MonitorId, SpawnMode, WindowId,
-};
+pub(crate) use hub::MonitorPlacements;
+pub(crate) use hub::{ContainerPlacement, MonitorLayout, WindowPlacement};
+pub(crate) use node::{Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, WindowId};
 
 const MAX_ITERATIONS: usize = 10000;
 

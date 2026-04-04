@@ -80,7 +80,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
         move |cfg| {
             logger.set_level(cfg.log_level);
             *keymaps.write().unwrap() = cfg.keymaps.clone();
-            tx.send(HubEvent::ConfigChanged(cfg)).ok();
+            tx.send(HubEvent::ConfigChanged(Box::new(cfg))).ok();
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))

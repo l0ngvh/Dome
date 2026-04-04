@@ -30,8 +30,10 @@ fn two_windows_split_screen() {
 
 #[test]
 fn three_windows_split_screen() {
-    let mut config = Config::default();
-    config.automatic_tiling = false;
+    let config = Config {
+        automatic_tiling: false,
+        ..Default::default()
+    };
     let mut env = TestEnv::new_with_config(config);
     let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
     let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
@@ -52,8 +54,10 @@ fn three_windows_split_screen() {
 /// right edge away from the screen edge.
 #[test]
 fn positions_are_rounded_not_truncated() {
-    let mut config = Config::default();
-    config.automatic_tiling = false;
+    let config = Config {
+        automatic_tiling: false,
+        ..Default::default()
+    };
     let mut env = TestEnv::new_with_config(config);
     let wins: Vec<_> = (1..=7)
         .map(|i| Arc::new(MockExternalHwnd::with_title(i, "App", "app.exe")))

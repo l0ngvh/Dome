@@ -95,7 +95,7 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             runner.signal.stop();
         }
         HubEvent::ConfigChanged(new_config) => {
-            runner.dome.config_changed(new_config);
+            runner.dome.config_changed(*new_config);
         }
         HubEvent::SyncFocus { pid } => {
             dispatch_sync_focus(runner, pid);

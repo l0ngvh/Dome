@@ -49,12 +49,6 @@ impl WindowRegistry {
         Some(window_id)
     }
 
-    pub(super) fn remove_by_id(&mut self, id: WindowId) {
-        if let Some(entry) = self.by_id.remove(&id) {
-            self.by_hwnd.remove(&entry.ext.id());
-        }
-    }
-
     pub(super) fn get(&self, id: WindowId) -> &WindowEntry {
         &self.by_id[&id]
     }

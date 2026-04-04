@@ -11,6 +11,7 @@ mod throttle;
 #[cfg(test)]
 mod tests;
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::thread;
 
@@ -281,7 +282,7 @@ fn run_dome(config: Config, main_thread_id: u32) {
 
     let dome = Dome::new(
         config.clone(),
-        Arc::new(taskbar),
+        Rc::new(taskbar),
         Box::new(overlays),
         Box::new(display::Win32Display),
     )

@@ -138,10 +138,12 @@ impl Dome {
             } else {
                 self.add_window(
                     ax.clone(),
-                    x,
-                    y,
-                    w,
-                    h,
+                    RoundedDimension {
+                        x,
+                        y,
+                        width: w,
+                        height: h,
+                    },
                     app_name.clone(),
                     bundle_id.clone(),
                     title.clone(),
@@ -407,20 +409,11 @@ impl Dome {
     fn add_window(
         &mut self,
         ax: Arc<dyn AXWindowApi>,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
+        dim: RoundedDimension,
         app_name: Option<String>,
         bundle_id: Option<String>,
         title: Option<String>,
     ) -> WindowId {
-        let dim = RoundedDimension {
-            x,
-            y,
-            width: w,
-            height: h,
-        };
         let monitor = self
             .monitor_registry
             .find_monitor_at(dim.x as f32, dim.y as f32);

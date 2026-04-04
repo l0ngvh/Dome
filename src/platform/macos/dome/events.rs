@@ -36,7 +36,7 @@ pub(in crate::platform::macos) enum HubEvent {
         observed_at: Instant,
     },
     Action(Actions),
-    ConfigChanged(Config),
+    ConfigChanged(Box<Config>),
     /// Periodic sync to catch missed AX notifications, as AX notifications are unreliable. Only
     /// syncs window state, not focus, as focus changes should come from user interactions. Beside
     /// we receive plenty of focus events, so missing them isn't a concern.

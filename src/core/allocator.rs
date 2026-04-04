@@ -163,7 +163,7 @@ mod test {
     fn drain_returns_created_and_deleted() {
         let mut allocator = Allocator::new();
         let id0 = allocator.allocate(TestNode { value: 1 });
-        let id1 = allocator.allocate(TestNode { value: 2 });
+        allocator.allocate(TestNode { value: 2 });
         allocator.delete(id0);
 
         let (created, deleted) = allocator.drain();

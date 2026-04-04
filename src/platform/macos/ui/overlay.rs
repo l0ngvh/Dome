@@ -281,6 +281,7 @@ impl MetalOverlayView {
 }
 
 pub(super) struct ContainerOverlayViewIvars {
+    #[expect(dead_code, reason = "retains CAMetalLayer to prevent deallocation")]
     layer: Retained<CAMetalLayer>,
     events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<ContainerRenderer>,

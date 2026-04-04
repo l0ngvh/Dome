@@ -10,6 +10,7 @@ use super::node::{
 #[derive(Debug, Default)]
 pub(crate) struct Changes {
     pub(crate) created_windows: Vec<WindowId>,
+    #[cfg_attr(target_os = "windows", expect(dead_code, reason = "used on macOS"))]
     pub(crate) deleted_windows: Vec<WindowId>,
     pub(crate) created_containers: Vec<ContainerId>,
     pub(crate) deleted_containers: Vec<ContainerId>,
@@ -123,14 +124,6 @@ impl Hub {
             .collect()
     }
 
-    #[cfg_attr(
-        all(target_os = "macos", not(test)),
-        expect(dead_code, reason = "used on Windows")
-    )]
-    pub(crate) fn get_monitor(&self, id: MonitorId) -> &Monitor {
-        self.monitors.get(id)
-    }
-
     #[cfg(test)]
     pub(super) fn all_monitors(&self) -> Vec<(MonitorId, Monitor)> {
         self.monitors.all_active()
@@ -221,10 +214,6 @@ impl Hub {
         self.workspaces.all_active()
     }
 
-    #[cfg_attr(
-        all(target_os = "macos", not(test)),
-        expect(dead_code, reason = "used on Windows")
-    )]
     pub(crate) fn get_workspace(&self, id: WorkspaceId) -> &Workspace {
         self.workspaces.get(id)
     }
@@ -345,6 +334,10 @@ impl Hub {
 
     /// Insert a new window as float to the current workspace.
     /// Update workspace focus to the newly inserted window.
+    #[cfg_attr(
+        all(target_os = "macos", not(test)),
+        expect(dead_code, reason = "used on Windows")
+    )]
     #[tracing::instrument(skip(self))]
     pub(crate) fn insert_float(&mut self, dimension: Dimension) -> WindowId {
         let current_ws = self.current_workspace();
@@ -464,7 +457,7 @@ impl Hub {
         };
 
         match self.windows.get(window_id).mode {
-            DisplayMode::Fullscreen => return,
+            DisplayMode::Fullscreen => (),
             DisplayMode::Float => {
                 self.detach_float_from_workspace(window_id);
                 self.reattach_float_window_as_split(window_id);

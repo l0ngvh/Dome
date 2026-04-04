@@ -44,6 +44,8 @@ type IdMap = Arc<Mutex<HashMap<CGWindowID, WindowId>>>;
 
 /// Mock AXWindow with shared state so clones given to Dome reflect
 /// the same position/size when Dome calls set_frame.
+type OverrideFrame = Rc<Cell<Option<(i32, i32, i32, i32)>>>;
+
 #[derive(Clone)]
 struct MockAXWindow {
     cg_id: CGWindowID,
@@ -57,7 +59,7 @@ struct MockAXWindow {
     max_size: Rc<Cell<Option<(i32, i32)>>>,
     /// When set, `set_frame` and `hide_at` snap to this position/size instead
     /// of the requested one, simulating a window that resists placement.
-    override_frame: Rc<Cell<Option<(i32, i32, i32, i32)>>>,
+    override_frame: OverrideFrame,
     /// Number of times `minimize()` was called on this window.
     minimize_count: Rc<Cell<u32>>,
     /// Number of times `unminimize()` was called on this window.
@@ -174,9 +176,6 @@ impl AXWindowApi for MockAXWindow {
     }
     fn is_minimized(&self, _marker: &DispatcherMarker) -> bool {
         false
-    }
-    fn is_manageable(&self, _marker: &DispatcherMarker) -> bool {
-        true
     }
     fn read_title(&self, _marker: &DispatcherMarker) -> Option<String> {
         Some(self.title.clone())

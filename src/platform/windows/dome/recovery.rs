@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::core::Dimension;
@@ -18,11 +19,11 @@ struct RecoveryEntry {
 
 pub(super) struct Recovery {
     state: HashMap<HwndId, RecoveryEntry>,
-    taskbar: Arc<dyn ManageTaskbar>,
+    taskbar: Rc<dyn ManageTaskbar>,
 }
 
 impl Recovery {
-    pub(super) fn new(taskbar: Arc<dyn ManageTaskbar>) -> Self {
+    pub(super) fn new(taskbar: Rc<dyn ManageTaskbar>) -> Self {
         Self {
             state: HashMap::new(),
             taskbar,

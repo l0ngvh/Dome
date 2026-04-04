@@ -48,7 +48,7 @@ pub(super) fn snapshot(hub: &Hub) -> String {
             containers,
         } => (windows.as_slice(), containers.as_slice()),
         MonitorLayout::Fullscreen(id) => {
-            let screen = hub.get_monitor(mp.monitor_id).dimension();
+            let screen = hub.monitors.get(mp.monitor_id).dimension;
             draw_rect(
                 &mut grid,
                 screen.x,
@@ -171,7 +171,7 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     } else {
         String::new()
     };
-    let screen = hub.get_monitor(hub.focused_monitor()).dimension();
+    let screen = hub.monitors.get(hub.focused_monitor()).dimension;
     let mut s = format!(
         "Hub(focused={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
         hub.current_workspace(),
@@ -859,7 +859,7 @@ fn validate_visible_placements(hub: &Hub) {
     let mut seen_window_ids = HashSet::new();
 
     for mp in &all_placements {
-        let screen = hub.get_monitor(mp.monitor_id).dimension();
+        let screen = hub.monitors.get(mp.monitor_id).dimension;
         let (windows, containers) = match &mp.layout {
             MonitorLayout::Normal {
                 windows,

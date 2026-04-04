@@ -25,16 +25,6 @@ pub(crate) struct Monitor {
     pub(super) active_workspace: WorkspaceId,
 }
 
-impl Monitor {
-    #[cfg_attr(
-        all(target_os = "macos", not(test)),
-        expect(dead_code, reason = "used on Windows")
-    )]
-    pub(crate) fn dimension(&self) -> Dimension {
-        self.dimension
-    }
-}
-
 impl Node for Monitor {
     type Id = MonitorId;
 }
@@ -74,10 +64,6 @@ impl Workspace {
         self.root
     }
 
-    #[cfg_attr(
-        all(target_os = "macos", not(test)),
-        expect(dead_code, reason = "used on Windows")
-    )]
     pub(crate) fn focused(&self) -> Option<Child> {
         self.focused
     }
@@ -538,6 +524,10 @@ impl Window {
         self.mode == DisplayMode::Float
     }
 
+    #[cfg_attr(
+        all(target_os = "macos", not(test)),
+        expect(dead_code, reason = "used on Windows")
+    )]
     pub(crate) fn is_fullscreen(&self) -> bool {
         self.mode == DisplayMode::Fullscreen
     }

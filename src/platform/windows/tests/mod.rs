@@ -2,6 +2,7 @@ mod lifecycle;
 mod placement;
 mod transitions;
 
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -69,7 +70,7 @@ impl TestEnv {
         };
         let dome = Dome::new(
             config.clone(),
-            Arc::new(NoopTaskbar),
+            Rc::new(NoopTaskbar),
             Box::new(NoopOverlays),
             Box::new(display),
         )
@@ -182,11 +183,6 @@ impl MockExternalHwnd {
             max_size: (0.0, 0.0),
             z_state: Mutex::new(ZOrderState::Normal),
         }
-    }
-
-    fn with_float(mut self) -> Self {
-        self.should_float = true;
-        self
     }
 
     fn with_manageable(mut self, manageable: bool) -> Self {

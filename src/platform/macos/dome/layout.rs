@@ -165,7 +165,7 @@ impl Dome {
                         Vec::new()
                     };
                     container_overlays.push(ContainerOverlayData {
-                        placement: cp.clone(),
+                        placement: *cp,
                         tab_titles,
                         cocoa_frame,
                     });

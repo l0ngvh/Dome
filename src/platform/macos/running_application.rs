@@ -120,6 +120,10 @@ mod real {
 pub(super) use real::RunningApp;
 
 #[cfg(test)]
+#[expect(
+    clippy::items_after_test_module,
+    reason = "re-export must follow module definition"
+)]
 mod mock {
     use std::fmt;
 
@@ -137,14 +141,6 @@ mod mock {
     }
 
     impl RunningApp {
-        pub(in crate::platform::macos) fn mock(pid: i32) -> Self {
-            Self {
-                pid,
-                hidden: false,
-                active: true,
-            }
-        }
-
         pub(in crate::platform::macos) fn new(pid: i32) -> Option<Self> {
             Some(Self {
                 pid,

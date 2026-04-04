@@ -56,9 +56,12 @@ fn spawn_test_window() {
 
 #[cfg(target_os = "windows")]
 fn spawn_test_window() {
-    Command::new("notepad.exe")
+    let mut child = Command::new("notepad.exe")
         .spawn()
         .expect("failed to spawn test window");
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
     thread::sleep(Duration::from_millis(500));
 }
 
