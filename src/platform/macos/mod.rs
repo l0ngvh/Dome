@@ -1,4 +1,5 @@
 mod accessibility;
+mod dispatcher;
 mod dome;
 mod event_loop;
 mod keyboard;

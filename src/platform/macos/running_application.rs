@@ -11,7 +11,7 @@ mod real {
     use objc2_foundation::NSNotification;
 
     use super::super::accessibility::AXWindow;
-    use super::super::event_loop::DispatcherMarker;
+    use super::super::dispatcher::DispatcherMarker;
     use super::super::objc2_wrapper::{
         get_attribute, get_cg_window_id, kAXFocusedWindowAttribute, kAXWindowsAttribute,
     };
@@ -127,7 +127,7 @@ mod mock {
     use objc2_app_kit::{NSRunningApplication, NSWorkspaceApplicationKey};
     use objc2_foundation::NSNotification;
 
-    use super::super::event_loop::DispatcherMarker;
+    use super::super::dispatcher::DispatcherMarker;
 
     #[derive(Clone)]
     pub(in crate::platform::macos) struct RunningApp {

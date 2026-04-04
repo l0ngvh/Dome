@@ -17,8 +17,8 @@ use crate::config::Config;
 use crate::core::{Dimension, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
+use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::{Dome, FrameSender, HubMessage, NewWindow, WindowMove};
-use crate::platform::macos::event_loop::DispatcherMarker;
 
 const SCREEN_WIDTH: f32 = 1920.0;
 const SCREEN_HEIGHT: f32 = 1080.0;
@@ -273,9 +273,8 @@ impl MacOS {
         let ax = self.window(cg_id);
         let (x, y) = ax.position.get();
         let (w, h) = ax.size.get();
-        let window_id = self.window_id(cg_id);
         dome.windows_moved(vec![WindowMove {
-            window_id,
+            cg_id,
             x,
             y,
             w,
@@ -295,27 +294,24 @@ impl MacOS {
         let observed_at = Instant::now() + std::time::Duration::from_secs(60);
         let moves: Vec<_> = pending
             .into_iter()
-            .filter_map(|(cg_id, x, y, w, h)| {
-                let window_id = self.ids.lock().unwrap().get(&cg_id).copied()?;
+            .map(|(cg_id, x, y, w, h)| {
                 let is_native_fullscreen = self
                     .windows
                     .get(&cg_id)
                     .map(|ax| ax.native_fullscreen.get())
                     .unwrap_or(false);
-                Some(WindowMove {
-                    window_id,
+                WindowMove {
+                    cg_id,
                     x,
                     y,
                     w,
                     h,
                     observed_at,
                     is_native_fullscreen,
-                })
+                }
             })
             .collect();
-        if !moves.is_empty() {
-            dome.windows_moved(moves);
-        }
+        dome.windows_moved(moves);
     }
 
     /// Run flush_moves in a loop until no new events are generated, or panic
@@ -331,27 +327,23 @@ impl MacOS {
             let observed_at = Instant::now() + std::time::Duration::from_secs(60);
             let moves: Vec<_> = pending
                 .into_iter()
-                .filter_map(|(cg_id, x, y, w, h)| {
-                    let window_id = self.ids.lock().unwrap().get(&cg_id).copied()?;
+                .map(|(cg_id, x, y, w, h)| {
                     let is_native_fullscreen = self
                         .windows
                         .get(&cg_id)
                         .map(|ax| ax.native_fullscreen.get())
                         .unwrap_or(false);
-                    Some(WindowMove {
-                        window_id,
+                    WindowMove {
+                        cg_id,
                         x,
                         y,
                         w,
                         h,
                         observed_at,
                         is_native_fullscreen,
-                    })
+                    }
                 })
                 .collect();
-            if moves.is_empty() {
-                return;
-            }
             dome.windows_moved(moves);
             if i == limit - 1 {
                 let remaining = self.moves.borrow().len();

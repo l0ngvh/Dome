@@ -217,7 +217,6 @@ fn stale_move_events_ignored() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
-    let w1 = macos.window_id(cg1);
     let placed_frame = macos.window_frame(cg1);
 
     // Add second window — cg1 gets relayouted to smaller size
@@ -229,7 +228,7 @@ fn stale_move_events_ignored() {
     // Stale event with old position and past timestamp
     let stale_time = Instant::now() - std::time::Duration::from_secs(10);
     dome.windows_moved(vec![WindowMove {
-        window_id: w1,
+        cg_id: cg1,
         x: placed_frame.0,
         y: placed_frame.1,
         w: placed_frame.2,

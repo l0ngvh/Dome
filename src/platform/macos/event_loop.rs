@@ -5,16 +5,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use calloop::channel::{Channel, Event as ChannelEvent};
-use calloop::futures::Scheduler;
 use calloop::timer::{TimeoutAction, Timer};
 use calloop::{EventLoop, LoopHandle, LoopSignal, RegistrationToken};
-use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions};
 use crate::platform::macos::accessibility::AXWindowApi;
+use crate::platform::macos::dispatcher::GcdDispatcher;
 use crate::platform::macos::dome::{
     Dome, HubEvent, WindowMove, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,
@@ -23,7 +22,7 @@ use crate::platform::macos::running_application::RunningApp;
 
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 
-struct DomeRunner {
+pub(super) struct DomeRunner {
     dome: Dome,
     dispatcher: GcdDispatcher,
     move_timers: HashMap<i32, RegistrationToken>,
@@ -204,7 +203,7 @@ fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: Inst
                 let moves = existing
                     .into_iter()
                     .map(|e| WindowMove {
-                        window_id: e.id,
+                        cg_id: e.cg_id,
                         x: e.x,
                         y: e.y,
                         w: e.w,
@@ -349,51 +348,4 @@ fn install_signal_handlers() {
 
 extern "C" fn signal_handler(_sig: libc::c_int) {
     SIGNAL_RECEIVED.store(true, Ordering::Relaxed);
-}
-
-/// Zero-sized proof token that the current code is running on a GCD
-/// dispatch queue, not the dome thread. The private field prevents
-/// construction outside `gcd_spawn`.
-pub(in crate::platform::macos) struct DispatcherMarker(());
-
-type ApplyFn = Box<dyn FnOnce(&mut DomeRunner)>;
-
-struct GcdDispatcher {
-    scheduler: Scheduler<ApplyFn>,
-}
-
-impl GcdDispatcher {
-    fn new(scheduler: Scheduler<ApplyFn>) -> Self {
-        Self { scheduler }
-    }
-
-    fn dispatch<W, R, A>(&self, work: W, apply: A)
-    where
-        W: FnOnce(&DispatcherMarker) -> R + Send + 'static,
-        R: Send + 'static,
-        A: FnOnce(R, &mut DomeRunner) + 'static,
-    {
-        self.scheduler
-            .schedule(async move {
-                let result = gcd_spawn(work).await;
-                Box::new(move |runner: &mut DomeRunner| apply(result, runner)) as ApplyFn
-            })
-            .ok();
-    }
-}
-
-async fn gcd_spawn<R: Send + 'static>(
-    work: impl FnOnce(&DispatcherMarker) -> R + Send + 'static,
-) -> R {
-    let (tx, rx) = futures_channel::oneshot::channel();
-    let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
-        DispatchQoS::UserInitiated,
-    ));
-    queue.exec_async(move || {
-        autoreleasepool(|_| {
-            let marker = DispatcherMarker(());
-            let _ = tx.send(work(&marker));
-        });
-    });
-    rx.await.expect("GCD task was cancelled")
 }

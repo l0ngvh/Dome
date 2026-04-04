@@ -5,10 +5,9 @@ use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFString, CFType};
 use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
 
 use crate::config::MacosWindow;
-use crate::core::WindowId;
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 
-use super::super::event_loop::DispatcherMarker;
+use super::super::dispatcher::DispatcherMarker;
 use super::super::running_application::RunningApp;
 use super::NewWindow;
 use super::registry::WindowEntry;
@@ -16,7 +15,7 @@ use super::window::WindowState;
 
 /// A still in display window (unminimized, in current space, returned by AXWindowsAttribute)
 pub(in crate::platform::macos) struct ExistingWindow {
-    pub(in crate::platform::macos) id: WindowId,
+    pub(in crate::platform::macos) cg_id: CGWindowID,
     pub(in crate::platform::macos) x: i32,
     pub(in crate::platform::macos) y: i32,
     pub(in crate::platform::macos) w: i32,
@@ -110,7 +109,7 @@ pub(in crate::platform::macos) fn compute_window_positions(
             continue;
         };
         existing.push(ExistingWindow {
-            id: window.window_id,
+            cg_id: ax.cg_id(),
             x,
             y,
             w,

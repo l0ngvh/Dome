@@ -40,7 +40,7 @@ pub(in crate::platform::macos) struct NewWindow {
 }
 
 pub(in crate::platform::macos) struct WindowMove {
-    pub(in crate::platform::macos) window_id: WindowId,
+    pub(in crate::platform::macos) cg_id: CGWindowID,
     pub(in crate::platform::macos) x: i32,
     pub(in crate::platform::macos) y: i32,
     pub(in crate::platform::macos) w: i32,
@@ -53,6 +53,11 @@ pub(in crate::platform::macos) trait FrameSender: Send {
     fn send(&self, msg: HubMessage);
 }
 
+/// Platform-specific state machine that bridges macOS accessibility events with the
+/// core tree model. Event-loop–facing methods accept `CGWindowID` rather than `WindowId`
+/// because callers dispatch work to background threads that capture registry snapshots —
+/// by the time results arrive the window may have been removed, so resolution to
+/// `WindowId` happens here where the registry can be checked.
 pub(in crate::platform::macos) struct Dome {
     hub: Hub,
     registry: Registry,
@@ -157,10 +162,14 @@ impl Dome {
 
     pub(in crate::platform::macos) fn windows_moved(&mut self, moves: Vec<WindowMove>) {
         for m in moves {
+            let Some(entry) = self.registry.get(m.cg_id) else {
+                continue;
+            };
+            let window_id = entry.window_id;
             if m.is_native_fullscreen {
-                self.window_entered_native_fullscreen(m.window_id);
+                self.window_entered_native_fullscreen(window_id);
             } else {
-                self.window_moved(m.window_id, m.x, m.y, m.w, m.h, m.observed_at);
+                self.window_moved(window_id, m.x, m.y, m.w, m.h, m.observed_at);
             }
         }
         self.flush_layout();

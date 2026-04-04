@@ -9,7 +9,7 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
-use super::event_loop::DispatcherMarker;
+use super::dispatcher::DispatcherMarker;
 use super::objc2_wrapper::{
     AXError, get_attribute, is_attribute_settable, kAXEnhancedUserInterfaceAttribute,
     kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute,
