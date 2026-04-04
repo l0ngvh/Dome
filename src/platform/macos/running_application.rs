@@ -11,6 +11,7 @@ mod real {
     use objc2_foundation::NSNotification;
 
     use super::super::accessibility::AXWindow;
+    use super::super::event_loop::DispatcherMarker;
     use super::super::objc2_wrapper::{
         get_attribute, get_cg_window_id, kAXFocusedWindowAttribute, kAXWindowsAttribute,
     };
@@ -51,7 +52,11 @@ mod real {
             self.0.isActive()
         }
 
-        pub(in crate::platform::macos) fn ax_windows(&self) -> Vec<AXWindow> {
+        /// Blocking AX IPC — queries `kAXWindowsAttribute` on the target process.
+        pub(in crate::platform::macos) fn ax_windows(
+            &self,
+            _marker: &DispatcherMarker,
+        ) -> Vec<AXWindow> {
             let ax_app = unsafe { AXUIElement::new_application(self.pid()) };
             let Ok(windows) =
                 get_attribute::<CFArray<AXUIElement>>(&ax_app, &kAXWindowsAttribute())
@@ -67,7 +72,11 @@ mod real {
                 .collect()
         }
 
-        pub(in crate::platform::macos) fn focused_window(&self) -> Option<AXWindow> {
+        /// Blocking AX IPC — queries `kAXFocusedWindowAttribute` on the target process.
+        pub(in crate::platform::macos) fn focused_window(
+            &self,
+            _marker: &DispatcherMarker,
+        ) -> Option<AXWindow> {
             let ax_app = unsafe { AXUIElement::new_application(self.pid()) };
             let focused =
                 get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute()).ok()?;
@@ -117,6 +126,8 @@ mod mock {
     use objc2::rc::Retained;
     use objc2_app_kit::{NSRunningApplication, NSWorkspaceApplicationKey};
     use objc2_foundation::NSNotification;
+
+    use super::super::event_loop::DispatcherMarker;
 
     #[derive(Clone)]
     pub(in crate::platform::macos) struct RunningApp {
@@ -170,12 +181,14 @@ mod mock {
 
         pub(in crate::platform::macos) fn ax_windows(
             &self,
+            _marker: &DispatcherMarker,
         ) -> Vec<super::super::accessibility::AXWindow> {
             Vec::new()
         }
 
         pub(in crate::platform::macos) fn focused_window(
             &self,
+            _marker: &DispatcherMarker,
         ) -> Option<super::super::accessibility::AXWindow> {
             None
         }

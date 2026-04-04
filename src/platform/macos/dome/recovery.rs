@@ -28,11 +28,14 @@ impl Recovery {
     // multiple monitors can make the exact placement of where we hide windows fuzzy
     // This has the side effect of moving all windows from different monitor on exit/crash, but that is
     // acceptable
-    pub(super) fn track(&mut self, window: Arc<dyn AXWindowApi>, screen: Dimension) {
-        let Ok((width, height)) = window.get_size() else {
-            return;
-        };
-        let original_dim = default_position(screen, width as f32, height as f32);
+    pub(super) fn track(
+        &mut self,
+        window: Arc<dyn AXWindowApi>,
+        w: i32,
+        h: i32,
+        screen: Dimension,
+    ) {
+        let original_dim = default_position(screen, w as f32, h as f32);
         self.state.insert(
             window.cg_id(),
             WindowState {

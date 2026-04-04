@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -9,9 +10,11 @@ use calloop::timer::{TimeoutAction, Timer};
 use calloop::{EventLoop, LoopHandle, LoopSignal, RegistrationToken};
 use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
 use objc2::rc::autoreleasepool;
+use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions};
+use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dome::{
     Dome, HubEvent, WindowMove, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,
@@ -117,7 +120,7 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             runner.dome.tab_clicked(container_id, tab_idx);
         }
         HubEvent::SpaceChanged => {
-            runner.dome.space_changed();
+            dispatch_space_changed(runner);
         }
     });
 }
@@ -168,9 +171,14 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
     let tracked = runner.dome.tracked_for_pid(pid);
     let ignore_rules = runner.dome.ignore_rules();
     runner.dispatcher.dispatch(
-        move || {
+        move |marker| {
             let app = RunningApp::new(pid)?;
-            Some(compute_reconciliation(&app, &tracked, &ignore_rules))
+            Some(compute_reconciliation(
+                &app,
+                &tracked,
+                &ignore_rules,
+                marker,
+            ))
         },
         |result, runner| {
             if let Some((to_remove, to_add)) = result {
@@ -187,9 +195,9 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
 fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: Instant) {
     let tracked = runner.dome.tracked_for_pid(pid);
     runner.dispatcher.dispatch(
-        move || {
+        move |marker| {
             let app = RunningApp::new(pid)?;
-            Some(compute_window_positions(&app, &tracked))
+            Some(compute_window_positions(&app, &tracked, marker))
         },
         move |result, runner| {
             if let Some(existing) = result {
@@ -213,12 +221,12 @@ fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: Inst
 
 fn dispatch_sync_focus(runner: &mut DomeRunner, pid: i32) {
     runner.dispatcher.dispatch(
-        move || {
+        move |marker| {
             let app = RunningApp::new(pid)?;
             if !app.is_active() {
                 return None;
             }
-            Some(app.focused_window()?.cg_id())
+            Some(app.focused_window(marker)?.cg_id())
         },
         |result, runner| {
             if let Some(cg_id) = result {
@@ -233,9 +241,49 @@ fn dispatch_title_read(runner: &mut DomeRunner, cg_id: CGWindowID) {
         return;
     };
     runner.dispatcher.dispatch(
-        move || entry.ax.read_title(),
+        move |marker| entry.ax.read_title(marker),
         move |title, runner| {
             runner.dome.update_title(cg_id, title);
+        },
+    );
+}
+
+fn dispatch_space_changed(runner: &mut DomeRunner) {
+    runner.dispatcher.dispatch(
+        move |marker| {
+            let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+            let app = RunningApp::from(app);
+            let ax = app.focused_window(marker)?;
+            let cg_id = ax.cg_id();
+            let is_native_fs = ax.is_native_fullscreen();
+            let pos = ax.get_position().ok();
+            let size = ax.get_size().ok();
+            let app_name = ax.app_name().map(str::to_owned);
+            let bundle_id = ax.bundle_id().map(str::to_owned);
+            let title = ax.title().map(str::to_owned);
+            Some((
+                cg_id,
+                is_native_fs,
+                pos,
+                size,
+                Arc::new(ax) as Arc<dyn AXWindowApi>,
+                app_name,
+                bundle_id,
+                title,
+            ))
+        },
+        |result, runner| {
+            let Some((cg_id, is_native_fs, pos, size, ax, app_name, bundle_id, title)) = result
+            else {
+                return;
+            };
+            if is_native_fs {
+                runner
+                    .dome
+                    .enter_native_fullscreen(cg_id, ax, app_name, bundle_id, title);
+            } else if let (Some(pos), Some(size)) = (pos, size) {
+                runner.dome.exit_native_fullscreen(cg_id, pos, size);
+            }
         },
     );
 }
@@ -245,7 +293,7 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
     let tracked = runner.dome.all_tracked();
     let ignore_rules = runner.dome.ignore_rules();
     runner.dispatcher.dispatch(
-        move || compute_reconcile_all(observed_pids, tracked, ignore_rules),
+        move |marker| compute_reconcile_all(observed_pids, tracked, ignore_rules, marker),
         |result, runner| {
             for pid in result.terminated_pids {
                 // FIXME: cleanup observer for terminated apps
@@ -303,6 +351,11 @@ extern "C" fn signal_handler(_sig: libc::c_int) {
     SIGNAL_RECEIVED.store(true, Ordering::Relaxed);
 }
 
+/// Zero-sized proof token that the current code is running on a GCD
+/// dispatch queue, not the dome thread. The private field prevents
+/// construction outside `gcd_spawn`.
+pub(in crate::platform::macos) struct DispatcherMarker(());
+
 type ApplyFn = Box<dyn FnOnce(&mut DomeRunner)>;
 
 struct GcdDispatcher {
@@ -316,7 +369,7 @@ impl GcdDispatcher {
 
     fn dispatch<W, R, A>(&self, work: W, apply: A)
     where
-        W: FnOnce() -> R + Send + 'static,
+        W: FnOnce(&DispatcherMarker) -> R + Send + 'static,
         R: Send + 'static,
         A: FnOnce(R, &mut DomeRunner) + 'static,
     {
@@ -329,14 +382,17 @@ impl GcdDispatcher {
     }
 }
 
-async fn gcd_spawn<R: Send + 'static>(work: impl FnOnce() -> R + Send + 'static) -> R {
+async fn gcd_spawn<R: Send + 'static>(
+    work: impl FnOnce(&DispatcherMarker) -> R + Send + 'static,
+) -> R {
     let (tx, rx) = futures_channel::oneshot::channel();
     let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(
         DispatchQoS::UserInitiated,
     ));
     queue.exec_async(move || {
         autoreleasepool(|_| {
-            let _ = tx.send(work());
+            let marker = DispatcherMarker(());
+            let _ = tx.send(work(&marker));
         });
     });
     rx.await.expect("GCD task was cancelled")

@@ -13,7 +13,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions, FocusTarget, HubAction, MoveTarget, ToggleTarget};
@@ -143,7 +142,7 @@ impl Dome {
                     title.clone(),
                 )
             };
-            self.recovery.track(ax, self.primary_screen);
+            self.recovery.track(ax, w, h, self.primary_screen);
             let actions = {
                 let entry = self.registry.by_id(window_id);
                 on_open_actions(entry, &self.config.macos.on_open)
@@ -242,8 +241,42 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn space_changed(&mut self) {
-        self.handle_space_changed();
+    /// Handles the frontmost window entering native fullscreen after a space
+    /// change. If `cg_id` is tracked, transitions it to `NativeFullscreen`
+    /// state. If untracked, inserts it as a new fullscreen window.
+    pub(in crate::platform::macos) fn enter_native_fullscreen(
+        &mut self,
+        cg_id: CGWindowID,
+        ax: Arc<dyn AXWindowApi>,
+        app_name: Option<String>,
+        bundle_id: Option<String>,
+        title: Option<String>,
+    ) {
+        if let Some(entry) = self.registry.get(cg_id) {
+            let window_id = entry.window_id;
+            self.window_entered_native_fullscreen(window_id);
+        } else {
+            self.add_native_fullscreen_window(ax, app_name, bundle_id, title);
+        }
+        self.flush_layout();
+    }
+
+    /// Handles the frontmost window exiting native fullscreen after a space
+    /// change. Only acts if `cg_id` is tracked and currently in
+    /// `NativeFullscreen` state — calls `window_moved` with the pre-read
+    /// position and size so the window re-enters tiling.
+    pub(in crate::platform::macos) fn exit_native_fullscreen(
+        &mut self,
+        cg_id: CGWindowID,
+        pos: (i32, i32),
+        size: (i32, i32),
+    ) {
+        if let Some(entry) = self.registry.get(cg_id)
+            && matches!(entry.state, WindowState::NativeFullscreen)
+        {
+            let window_id = entry.window_id;
+            self.window_moved(window_id, pos.0, pos.1, size.0, size.1, Instant::now());
+        }
         self.flush_layout();
     }
 
@@ -290,48 +323,6 @@ impl Dome {
 
     pub(in crate::platform::macos) fn register_observers(&mut self, apps: Vec<RunningApp>) {
         self.sender.send(HubMessage::RegisterObservers(apps));
-    }
-
-    fn handle_space_changed(&mut self) {
-        let Some(app) = NSWorkspace::sharedWorkspace().frontmostApplication() else {
-            return;
-        };
-        let app = RunningApp::from(app);
-        // All AX APIs should be synchronous here, as we should pause everything until we know
-        // whether we are dealing with native fullscreen or not.
-        let Some(ax) = app.focused_window() else {
-            return;
-        };
-        let cg_id = ax.cg_id();
-        let is_native_fs = ax.is_native_fullscreen();
-
-        if let Some(entry) = self.registry.get_mut(cg_id) {
-            let _span = tracing::debug_span!("space_changed",).entered();
-            let window_id = entry.window_id;
-            if is_native_fs {
-                entry.state = WindowState::NativeFullscreen;
-                self.hub.set_fullscreen(window_id);
-            } else if !is_native_fs && matches!(entry.state, WindowState::NativeFullscreen) {
-                let Ok(pos) = ax.get_position() else {
-                    return;
-                };
-                let Ok(size) = ax.get_size() else {
-                    return;
-                };
-                self.window_moved(window_id, pos.0, pos.1, size.0, size.1, Instant::now());
-            }
-        } else if is_native_fs {
-            let window_id = self.hub.insert_fullscreen();
-            self.registry.insert(
-                Arc::new(ax.clone()),
-                window_id,
-                WindowState::NativeFullscreen,
-                ax.app_name().map(str::to_owned),
-                ax.bundle_id().map(str::to_owned),
-                ax.title().map(str::to_owned),
-            );
-            tracing::info!(%ax, %window_id, "New native fullscreen window");
-        }
     }
 
     fn remove_app_windows(&mut self, pid: i32) {

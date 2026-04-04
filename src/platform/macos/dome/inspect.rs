@@ -8,6 +8,7 @@ use crate::config::MacosWindow;
 use crate::core::WindowId;
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 
+use super::super::event_loop::DispatcherMarker;
 use super::super::running_application::RunningApp;
 use super::NewWindow;
 use super::registry::WindowEntry;
@@ -35,6 +36,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     app: &RunningApp,
     tracked: &HashMap<CGWindowID, WindowEntry>,
     ignore_rules: &[MacosWindow],
+    marker: &DispatcherMarker,
 ) -> (Vec<CGWindowID>, Vec<NewWindow>) {
     let pid = app.pid();
     let cg_window_ids = list_cg_window_ids();
@@ -42,16 +44,16 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     let mut to_remove = Vec::new();
     for (&cg_id, entry) in tracked.iter().filter(|(_, e)| e.ax.pid() == pid) {
         if !cg_window_ids.contains(&cg_id)
-            || !entry.ax.is_valid()
+            || !entry.ax.is_valid(marker)
         // Skip minimized check for windows Dome minimized (borderless fullscreen hiding)
-            || (!matches!(entry.state, WindowState::Minimized) && entry.ax.is_minimized())
+            || (!matches!(entry.state, WindowState::Minimized) && entry.ax.is_minimized(marker))
         {
             to_remove.push(cg_id);
         }
     }
 
     let mut to_add = Vec::new();
-    for ax in app.ax_windows() {
+    for ax in app.ax_windows(marker) {
         if tracked.contains_key(&ax.cg_id()) {
             continue;
         }
@@ -94,16 +96,17 @@ pub(in crate::platform::macos) fn compute_reconciliation(
 pub(in crate::platform::macos) fn compute_window_positions(
     app: &RunningApp,
     tracked: &HashMap<CGWindowID, WindowEntry>,
+    marker: &DispatcherMarker,
 ) -> Vec<ExistingWindow> {
     let mut existing = Vec::new();
-    for ax in app.ax_windows() {
+    for ax in app.ax_windows(marker) {
         let Some(window) = tracked.get(&ax.cg_id()) else {
             continue;
         };
-        let Ok((x, y)) = window.ax.get_position() else {
+        let Ok((x, y)) = window.ax.get_position(marker) else {
             continue;
         };
-        let Ok((w, h)) = window.ax.get_size() else {
+        let Ok((w, h)) = window.ax.get_size(marker) else {
             continue;
         };
         existing.push(ExistingWindow {
@@ -112,7 +115,7 @@ pub(in crate::platform::macos) fn compute_window_positions(
             y,
             w,
             h,
-            is_native_fullscreen: window.ax.is_native_fullscreen(),
+            is_native_fullscreen: window.ax.is_native_fullscreen(marker),
         });
     }
     existing
@@ -122,6 +125,7 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
     observed_pids: HashSet<i32>,
     tracked: HashMap<CGWindowID, WindowEntry>,
     ignore_rules: Vec<MacosWindow>,
+    marker: &DispatcherMarker,
 ) -> ReconcileAllResult {
     let running: Vec<_> = RunningApp::all().collect();
     let running_pids: HashSet<_> = running.iter().map(|app| app.pid()).collect();
@@ -145,7 +149,7 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
         if app.is_hidden() {
             hidden_pids.push(app.pid());
         } else {
-            let (removed, added) = compute_reconciliation(app, &tracked, &ignore_rules);
+            let (removed, added) = compute_reconciliation(app, &tracked, &ignore_rules, marker);
             to_remove.extend(removed);
             to_add.extend(added);
         }

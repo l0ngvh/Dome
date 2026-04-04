@@ -9,6 +9,7 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
+use super::event_loop::DispatcherMarker;
 use super::objc2_wrapper::{
     AXError, get_attribute, is_attribute_settable, kAXEnhancedUserInterfaceAttribute,
     kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute,
@@ -280,9 +281,6 @@ impl AXWindow {
     }
 
     fn set_position(&self, x: i32, y: i32) -> Result<()> {
-        if self.get_position().ok() == Some((x, y)) {
-            return Ok(());
-        }
         let pos_ptr: *mut CGPoint = &mut CGPoint::new(x as f64, y as f64);
         let pos_ptr = NonNull::new(pos_ptr.cast()).unwrap();
         let pos_ptr = unsafe { AXValue::new(AXValueType::CGPoint, pos_ptr) }.unwrap();
@@ -294,9 +292,6 @@ impl AXWindow {
     }
 
     fn set_size(&self, width: i32, height: i32) -> Result<()> {
-        if self.get_size().ok() == Some((width, height)) {
-            return Ok(());
-        }
         let size_ptr: *mut CGSize = &mut CGSize::new(width as f64, height as f64);
         let size = NonNull::new(size_ptr.cast()).unwrap();
         let size = unsafe { AXValue::new(AXValueType::CGSize, size) }.unwrap();
@@ -335,23 +330,32 @@ fn is_screen_locked() -> bool {
     false
 }
 
+/// Abstraction over macOS accessibility (AX) window operations.
+///
+/// Read methods take a `&DispatcherMarker` parameter to enforce at compile time
+/// that blocking AX IPC calls only happen on GCD dispatch queues, never on the
+/// dome thread. Write methods (which are intentionally dome-thread operations)
+/// and pure getters omit the marker.
 pub(super) trait AXWindowApi: Send + Sync + std::fmt::Display {
     fn cg_id(&self) -> CGWindowID;
     fn pid(&self) -> i32;
-    fn is_native_fullscreen(&self) -> bool;
-    fn get_position(&self) -> Result<(i32, i32)>;
-    fn get_size(&self) -> Result<(i32, i32)>;
+    fn is_native_fullscreen(&self, marker: &DispatcherMarker) -> bool;
+    fn get_position(&self, marker: &DispatcherMarker) -> Result<(i32, i32)>;
+    fn get_size(&self, marker: &DispatcherMarker) -> Result<(i32, i32)>;
     fn set_frame(&self, x: i32, y: i32, width: i32, height: i32) -> Result<()>;
     fn focus(&self) -> Result<()>;
     fn hide_at(&self, x: i32, y: i32) -> Result<()>;
     fn minimize(&self) -> Result<()>;
     fn unminimize(&self) -> Result<()>;
-    fn is_valid(&self) -> bool;
-    fn is_minimized(&self) -> bool;
-    fn is_manageable(&self) -> bool;
-    fn read_title(&self) -> Option<String>;
+    fn is_valid(&self, marker: &DispatcherMarker) -> bool;
+    fn is_minimized(&self, marker: &DispatcherMarker) -> bool;
+    fn is_manageable(&self, marker: &DispatcherMarker) -> bool;
+    fn read_title(&self, marker: &DispatcherMarker) -> Option<String>;
 }
 
+// The marker proves the caller is on a GCD queue. It isn't forwarded to the
+// concrete `AXWindow` methods because those are the underlying implementation
+// that the trait delegates to.
 impl AXWindowApi for AXWindow {
     fn cg_id(&self) -> CGWindowID {
         self.cg_id()
@@ -359,13 +363,13 @@ impl AXWindowApi for AXWindow {
     fn pid(&self) -> i32 {
         self.pid()
     }
-    fn is_native_fullscreen(&self) -> bool {
+    fn is_native_fullscreen(&self, _marker: &DispatcherMarker) -> bool {
         self.is_native_fullscreen()
     }
-    fn get_position(&self) -> Result<(i32, i32)> {
+    fn get_position(&self, _marker: &DispatcherMarker) -> Result<(i32, i32)> {
         self.get_position()
     }
-    fn get_size(&self) -> Result<(i32, i32)> {
+    fn get_size(&self, _marker: &DispatcherMarker) -> Result<(i32, i32)> {
         self.get_size()
     }
     fn set_frame(&self, x: i32, y: i32, w: i32, h: i32) -> Result<()> {
@@ -383,16 +387,16 @@ impl AXWindowApi for AXWindow {
     fn unminimize(&self) -> Result<()> {
         self.unminimize()
     }
-    fn is_valid(&self) -> bool {
+    fn is_valid(&self, _marker: &DispatcherMarker) -> bool {
         self.is_valid()
     }
-    fn is_minimized(&self) -> bool {
+    fn is_minimized(&self, _marker: &DispatcherMarker) -> bool {
         self.is_minimized()
     }
-    fn is_manageable(&self) -> bool {
+    fn is_manageable(&self, _marker: &DispatcherMarker) -> bool {
         self.is_manageable()
     }
-    fn read_title(&self) -> Option<String> {
+    fn read_title(&self, _marker: &DispatcherMarker) -> Option<String> {
         get_attribute::<CFString>(&self.element, &kAXTitleAttribute())
             .map(|t| t.to_string())
             .ok()

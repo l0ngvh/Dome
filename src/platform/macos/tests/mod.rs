@@ -18,6 +18,7 @@ use crate::core::{Dimension, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dome::{Dome, FrameSender, HubMessage, NewWindow, WindowMove};
+use crate::platform::macos::event_loop::DispatcherMarker;
 
 const SCREEN_WIDTH: f32 = 1920.0;
 const SCREEN_HEIGHT: f32 = 1080.0;
@@ -106,6 +107,8 @@ impl MockAXWindow {
     }
 }
 
+// Marker params on read methods satisfy the trait contract. Tests never call
+// these methods directly — they feed pre-built data to Dome instead.
 impl AXWindowApi for MockAXWindow {
     fn cg_id(&self) -> CGWindowID {
         self.cg_id
@@ -113,13 +116,13 @@ impl AXWindowApi for MockAXWindow {
     fn pid(&self) -> i32 {
         self.pid
     }
-    fn is_native_fullscreen(&self) -> bool {
+    fn is_native_fullscreen(&self, _marker: &DispatcherMarker) -> bool {
         self.native_fullscreen.get()
     }
-    fn get_position(&self) -> Result<(i32, i32)> {
+    fn get_position(&self, _marker: &DispatcherMarker) -> Result<(i32, i32)> {
         Ok(self.position.get())
     }
-    fn get_size(&self) -> Result<(i32, i32)> {
+    fn get_size(&self, _marker: &DispatcherMarker) -> Result<(i32, i32)> {
         Ok(self.size.get())
     }
     fn set_frame(&self, x: i32, y: i32, w: i32, h: i32) -> Result<()> {
@@ -166,16 +169,16 @@ impl AXWindowApi for MockAXWindow {
         self.unminimize_count.set(self.unminimize_count.get() + 1);
         Ok(())
     }
-    fn is_valid(&self) -> bool {
+    fn is_valid(&self, _marker: &DispatcherMarker) -> bool {
         true
     }
-    fn is_minimized(&self) -> bool {
+    fn is_minimized(&self, _marker: &DispatcherMarker) -> bool {
         false
     }
-    fn is_manageable(&self) -> bool {
+    fn is_manageable(&self, _marker: &DispatcherMarker) -> bool {
         true
     }
-    fn read_title(&self) -> Option<String> {
+    fn read_title(&self, _marker: &DispatcherMarker) -> Option<String> {
         Some(self.title.clone())
     }
 }
