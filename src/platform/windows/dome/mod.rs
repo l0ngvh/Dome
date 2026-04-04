@@ -64,6 +64,11 @@ pub(super) trait QueryDisplay {
     fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId>;
 }
 
+/// Platform-specific state machine that bridges Win32 window events with the core tree
+/// model. Event-loop–facing methods accept `HwndId` rather than `WindowId` because callers
+/// may dispatch work to background threads — by the time results arrive the window may
+/// have been removed, so resolution to `WindowId` happens here where the registry can be
+/// checked.
 pub(super) struct Dome {
     hub: Hub,
     registry: WindowRegistry,
