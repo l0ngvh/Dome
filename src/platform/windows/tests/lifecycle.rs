@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
-use crate::platform::windows::external::ManageExternalHwnd;
-
 use super::*;
+use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 
 #[test]
 fn window_destroyed_fills_screen() {
@@ -73,8 +71,7 @@ fn move_size_suppresses_placement() {
     let placed = w1.get_dim();
 
     // Simulate user starting a drag
-    env.dome
-        .move_size_started(w1.clone() as Arc<dyn ManageExternalHwnd>);
+    env.dome.move_size_started(w1.hwnd_id);
 
     // Add a second window — triggers relayout, but w1 should be skipped
     let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
@@ -84,8 +81,7 @@ fn move_size_suppresses_placement() {
     assert_eq!(w1.get_dim(), placed);
 
     // End drag — w1 should be repositioned on next layout
-    env.dome
-        .move_size_ended(w1.clone() as Arc<dyn ManageExternalHwnd>);
+    env.dome.move_size_ended(w1.hwnd_id);
     env.dome.apply_layout();
 
     // Now both should be tiled
@@ -160,9 +156,8 @@ fn title_changed_manages_unknown_window() {
     let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
 
     // Title change on an unknown window should try to manage it
-    env.dome
-        .title_changed(w1.clone() as Arc<dyn ManageExternalHwnd>);
-    env.dome.apply_layout();
+    // (Runner dispatches as WindowCreated — here we simulate directly)
+    env.add_window(w1.clone());
 
     assert!(!w1.is_offscreen());
     assert_h_tiled(

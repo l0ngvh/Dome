@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use crate::platform::windows::external::ManageExternalHwnd;
-
 use super::*;
 
 #[test]
@@ -129,8 +127,8 @@ fn resize_detects_fullscreen() {
         height: SCREEN_HEIGHT,
     };
 
-    env.dome
-        .move_size_ended(w1.clone() as Arc<dyn ManageExternalHwnd>);
+    env.dome.move_size_ended(w1.hwnd_id);
+    env.dome.check_fullscreen_state(w1.hwnd_id);
     env.dome.apply_layout();
 
     // Hub should detect fullscreen — window positioned at full monitor dimensions

@@ -1,42 +1,36 @@
+mod display;
 mod dome;
 mod event_listener;
-pub(super) mod external;
+mod external;
 mod handle;
 mod keyboard;
+mod runner;
 mod taskbar;
 mod throttle;
 
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 use crate::logging::Logger;
 use anyhow::Result;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
-};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
-use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow,
-    GetMessageW, KillTimer, MONITORINFOF_PRIMARY, MSG, PostQuitMessage, PostThreadMessageW,
-    RegisterClassW, SetTimer, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_PAINT, WM_QUIT,
-    WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG,
+    PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_PAINT,
+    WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
-use windows::core::{BOOL, PCWSTR};
+use windows::core::PCWSTR;
 
-use crate::action::{Action, Actions};
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
@@ -45,12 +39,11 @@ use dome::overlay::{
 };
 use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
-use external::{HwndId, ManageExternalHwnd};
+use external::HwndId;
 use glutin::display::{Display as GlDisplay, DisplayApiPreference};
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use raw_window_handle::{RawDisplayHandle, WindowsDisplayHandle};
 use taskbar::Taskbar;
-use throttle::{Throttle, ThrottleResult};
 
 #[derive(Clone)]
 pub(super) struct ScreenInfo {
@@ -62,6 +55,7 @@ pub(super) struct ScreenInfo {
 
 pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
 pub(super) const WM_APP_DISPLAY_CHANGE: u32 = WM_APP + 1;
+pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 2;
 
 #[derive(Clone)]
 struct HubSender {
@@ -143,7 +137,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
         move |cfg| {
             logger.set_level(cfg.log_level);
             keyboard::update_config(cfg.clone());
-            sender.send(HubEvent::ConfigChanged(cfg));
+            sender.send(HubEvent::ConfigChanged(Box::new(cfg)));
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
@@ -163,223 +157,6 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     uninstall_keyboard_hook(keyboard_hook);
 
     Ok(())
-}
-
-fn get_all_screens() -> Result<Vec<ScreenInfo>> {
-    let mut monitors = Vec::new();
-
-    unsafe extern "system" fn enum_proc(
-        hmonitor: HMONITOR,
-        _hdc: HDC,
-        _rect: *mut RECT,
-        lparam: LPARAM,
-    ) -> BOOL {
-        let monitors = unsafe { &mut *(lparam.0 as *mut Vec<ScreenInfo>) };
-        let mut info = MONITORINFOEXW {
-            monitorInfo: windows::Win32::Graphics::Gdi::MONITORINFO {
-                cbSize: size_of::<MONITORINFOEXW>() as u32,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        if unsafe { GetMonitorInfoW(hmonitor, &mut info.monitorInfo) }.as_bool() {
-            let rc = info.monitorInfo.rcWork;
-            let name = String::from_utf16_lossy(
-                &info
-                    .szDevice
-                    .iter()
-                    .take_while(|&&c| c != 0)
-                    .copied()
-                    .collect::<Vec<_>>(),
-            );
-
-            monitors.push(ScreenInfo {
-                handle: hmonitor.0 as isize,
-                name,
-                dimension: Dimension {
-                    x: rc.left as f32,
-                    y: rc.top as f32,
-                    width: (rc.right - rc.left) as f32,
-                    height: (rc.bottom - rc.top) as f32,
-                },
-                is_primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
-            });
-        }
-        BOOL(1)
-    }
-
-    let success = unsafe {
-        EnumDisplayMonitors(
-            None,
-            None,
-            Some(enum_proc),
-            LPARAM(&mut monitors as *mut _ as isize),
-        )
-    };
-    anyhow::ensure!(success.as_bool(), "EnumDisplayMonitors failed");
-    Ok(monitors)
-}
-
-const FOCUS_THROTTLE_INTERVAL: Duration = Duration::from_millis(500);
-const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
-const DRAG_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
-
-const TIMER_FOCUS: usize = 1;
-const TIMER_WINDOW_BASE: usize = 0x1000;
-
-enum TimerKind {
-    FocusThrottle,
-    PlacementDebounce(HwndId),
-    DragSafety(HwndId),
-}
-
-struct Runner {
-    dome: Dome,
-    focus_throttle: Throttle<HwndId>,
-    window_timers: HashMap<HwndId, usize>,
-    next_timer_id: usize,
-    main_thread_id: u32,
-}
-
-impl Runner {
-    fn schedule_timer(&mut self, kind: TimerKind, delay: Duration) -> usize {
-        let id = match &kind {
-            TimerKind::FocusThrottle => TIMER_FOCUS,
-            _ => {
-                let id = self.next_timer_id;
-                self.next_timer_id += 1;
-                id
-            }
-        };
-        if let TimerKind::PlacementDebounce(hwnd) | TimerKind::DragSafety(hwnd) = &kind {
-            self.window_timers.insert(*hwnd, id);
-        }
-        unsafe {
-            SetTimer(None, id, delay.as_millis() as u32, None);
-        }
-        id
-    }
-
-    fn cancel_timer(&mut self, hwnd: &HwndId) {
-        if let Some(id) = self.window_timers.remove(hwnd) {
-            unsafe { KillTimer(None, id).ok() };
-        }
-    }
-
-    fn handle_timer(&mut self, timer_id: usize) {
-        unsafe { KillTimer(None, timer_id).ok() };
-        if timer_id == TIMER_FOCUS {
-            if let Some(id) = self.focus_throttle.flush() {
-                self.dome.handle_focus(id);
-                self.dome.apply_layout();
-            }
-            return;
-        }
-        let hwnd = self
-            .window_timers
-            .iter()
-            .find(|(_, v)| **v == timer_id)
-            .map(|(k, _)| *k);
-        if let Some(hwnd) = hwnd {
-            self.window_timers.remove(&hwnd);
-            self.dome.placement_timeout(hwnd);
-            self.dome.apply_layout();
-        }
-    }
-
-    fn handle_event(&mut self, event: HubEvent) {
-        match event {
-            HubEvent::Shutdown => {
-                tracing::info!("Shutdown requested");
-                unsafe { PostQuitMessage(0) };
-                return;
-            }
-            HubEvent::ConfigChanged(c) => {
-                self.dome.config_changed(c);
-            }
-            HubEvent::WindowCreated(ext) => {
-                if let Some(actions) = self.dome.window_created(ext) {
-                    self.handle_actions(&actions);
-                }
-            }
-            HubEvent::WindowDestroyed(ext) => {
-                self.dome.window_destroyed(ext);
-            }
-            HubEvent::WindowMinimized(ext) => {
-                self.dome.window_minimized(ext);
-            }
-            HubEvent::WindowFocused(ext) => {
-                let id = ext.id();
-                match self.focus_throttle.submit(id) {
-                    ThrottleResult::Send(id) => {
-                        self.dome.handle_focus(id);
-                    }
-                    ThrottleResult::Pending => return,
-                    ThrottleResult::ScheduleFlush(delay) => {
-                        self.focus_throttle.mark_timer_scheduled();
-                        self.schedule_timer(TimerKind::FocusThrottle, delay);
-                        return;
-                    }
-                }
-            }
-            HubEvent::MoveSizeStart(ext) => {
-                let id = ext.id();
-                self.cancel_timer(&id);
-                self.dome.move_size_started(ext);
-                self.schedule_timer(TimerKind::DragSafety(id), DRAG_SAFETY_TIMEOUT);
-                return;
-            }
-            HubEvent::MoveSizeEnd(ext) => {
-                let id = ext.id();
-                self.cancel_timer(&id);
-                self.dome.move_size_ended(ext);
-            }
-            HubEvent::LocationChanged(ext) => {
-                let id = ext.id();
-                if self.dome.location_changed(ext) {
-                    self.cancel_timer(&id);
-                    self.schedule_timer(TimerKind::PlacementDebounce(id), DEBOUNCE_INTERVAL);
-                }
-                return;
-            }
-            HubEvent::WindowTitleChanged(ext) => {
-                if let Some(actions) = self.dome.title_changed(ext) {
-                    self.handle_actions(&actions);
-                }
-            }
-            HubEvent::Action(a) => {
-                self.handle_actions(&a);
-            }
-            HubEvent::TabClicked(id, idx) => {
-                self.dome.tab_clicked(id, idx);
-            }
-        }
-        self.dome.apply_layout();
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn handle_actions(&mut self, actions: &Actions) {
-        for action in actions {
-            match action {
-                Action::Hub(hub) => self.dome.execute_hub_action(hub),
-                Action::Exec { command } => {
-                    if let Err(e) = std::process::Command::new("cmd")
-                        .args(["/C", command])
-                        .spawn()
-                    {
-                        tracing::warn!(%command, "Failed to exec: {e}");
-                    }
-                }
-                Action::Exit => {
-                    unsafe {
-                        PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
-                    };
-                    unsafe { PostQuitMessage(0) };
-                }
-            }
-        }
-    }
 }
 
 struct GlOverlayFactory {
@@ -434,27 +211,6 @@ unsafe extern "system" fn window_overlay_wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
-}
-
-fn is_d3d_exclusive_fullscreen_active() -> bool {
-    unsafe { SHQueryUserNotificationState() }
-        .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN)
-}
-
-struct Win32Display;
-
-impl dome::QueryDisplay for Win32Display {
-    fn get_all_screens(&self) -> anyhow::Result<Vec<ScreenInfo>> {
-        get_all_screens()
-    }
-
-    fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId> {
-        if is_d3d_exclusive_fullscreen_active() {
-            Some(HwndId::from(unsafe { GetForegroundWindow() }))
-        } else {
-            None
-        }
-    }
 }
 
 fn run_dome(config: Config, main_thread_id: u32) {
@@ -527,30 +283,22 @@ fn run_dome(config: Config, main_thread_id: u32) {
         config.clone(),
         Arc::new(taskbar),
         Box::new(overlays),
-        Box::new(Win32Display),
+        Box::new(display::Win32Display),
     )
     .expect("Failed to initialize Dome");
 
-    let mut initial_windows: Vec<Arc<dyn ManageExternalHwnd>> = Vec::new();
+    let mut initial_hwnds = Vec::new();
     if let Err(e) = handle::enum_windows(|hwnd| {
-        initial_windows.push(Arc::new(handle::ExternalHwnd::new(hwnd)));
+        initial_hwnds.push(HwndId::from(hwnd));
     }) {
         tracing::warn!("Failed to enumerate windows: {e}");
     }
 
-    let mut runner = Runner {
-        dome,
-        focus_throttle: Throttle::new(FOCUS_THROTTLE_INTERVAL),
-        window_timers: HashMap::new(),
-        next_timer_id: TIMER_WINDOW_BASE,
-        main_thread_id,
-    };
+    let mut runner = runner::Runner::new(dome, unsafe { GetCurrentThreadId() }, main_thread_id);
 
-    let on_open = runner.dome.app_initialized(initial_windows);
-    for actions in on_open {
-        runner.handle_actions(&actions);
+    for hwnd_id in initial_hwnds {
+        runner.dispatch_window_created(hwnd_id);
     }
-    runner.dome.apply_layout();
 
     let mut msg = MSG::default();
     unsafe {
@@ -561,8 +309,11 @@ fn run_dome(config: Config, main_thread_id: u32) {
                     runner.handle_event(event);
                 }
                 WM_APP_DISPLAY_CHANGE => {
-                    runner.dome.handle_display_change();
-                    runner.dome.apply_layout();
+                    runner.handle_display_change();
+                }
+                WM_APP_DISPATCH_RESULT => {
+                    let apply = *Box::from_raw(msg.wParam.0 as *mut runner::ApplyFn);
+                    apply(&mut runner);
                 }
                 WM_TIMER => {
                     runner.handle_timer(msg.wParam.0);

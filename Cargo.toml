@@ -45,6 +45,7 @@ egui_glow = "0.31"
 glow = "0.16"
 glutin = "0.32"
 raw-window-handle = "0.6"
+rayon = "1.10"
 
 [dev-dependencies]
 insta = "1.44.3"

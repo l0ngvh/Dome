@@ -1,0 +1,300 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+
+use windows::Win32::Foundation::{LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{
+    KillTimer, PostQuitMessage, PostThreadMessageW, SetTimer, WM_QUIT,
+};
+
+use crate::action::{Action, Actions};
+use crate::platform::windows::WM_APP_DISPATCH_RESULT;
+use crate::platform::windows::dome::{Dome, HubEvent};
+use crate::platform::windows::external::{HwndId, InspectExternalHwnd, ManageExternalHwnd};
+use crate::platform::windows::handle::ExternalHwnd;
+use crate::platform::windows::throttle::{Throttle, ThrottleResult};
+
+const FOCUS_THROTTLE_INTERVAL: Duration = Duration::from_millis(500);
+const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
+const DRAG_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
+
+const TIMER_FOCUS: usize = 1;
+pub(super) const TIMER_WINDOW_BASE: usize = 0x1000;
+
+enum TimerKind {
+    FocusThrottle,
+    PlacementDebounce(HwndId),
+    DragSafety(HwndId),
+}
+
+pub(super) struct Runner {
+    dome: Dome,
+    dispatcher: ReadDispatcher,
+    focus_throttle: Throttle<HwndId>,
+    window_timers: HashMap<HwndId, usize>,
+    next_timer_id: usize,
+    main_thread_id: u32,
+}
+
+impl Runner {
+    pub(super) fn new(dome: Dome, thread_id: u32, main_thread_id: u32) -> Self {
+        Self {
+            dome,
+            dispatcher: ReadDispatcher::new(thread_id),
+            focus_throttle: Throttle::new(FOCUS_THROTTLE_INTERVAL),
+            window_timers: HashMap::new(),
+            next_timer_id: TIMER_WINDOW_BASE,
+            main_thread_id,
+        }
+    }
+
+    fn schedule_timer(&mut self, kind: TimerKind, delay: Duration) -> usize {
+        let id = match &kind {
+            TimerKind::FocusThrottle => TIMER_FOCUS,
+            _ => {
+                let id = self.next_timer_id;
+                self.next_timer_id += 1;
+                id
+            }
+        };
+        if let TimerKind::PlacementDebounce(hwnd) | TimerKind::DragSafety(hwnd) = &kind {
+            self.window_timers.insert(*hwnd, id);
+        }
+        unsafe {
+            SetTimer(None, id, delay.as_millis() as u32, None);
+        }
+        id
+    }
+
+    fn cancel_timer(&mut self, hwnd: &HwndId) {
+        if let Some(id) = self.window_timers.remove(hwnd) {
+            unsafe { KillTimer(None, id).ok() };
+        }
+    }
+
+    pub(super) fn handle_timer(&mut self, timer_id: usize) {
+        unsafe { KillTimer(None, timer_id).ok() };
+        if timer_id == TIMER_FOCUS {
+            if let Some(id) = self.focus_throttle.flush() {
+                self.dome.handle_focus(id);
+                self.dome.apply_layout();
+            }
+            return;
+        }
+        let hwnd = self
+            .window_timers
+            .iter()
+            .find(|(_, v)| **v == timer_id)
+            .map(|(k, _)| *k);
+        if let Some(hwnd) = hwnd {
+            self.window_timers.remove(&hwnd);
+            self.dome.placement_timeout(hwnd);
+            self.handle_resize(hwnd);
+        }
+    }
+
+    pub(super) fn handle_event(&mut self, event: HubEvent) {
+        match event {
+            HubEvent::Shutdown => {
+                tracing::info!("Shutdown requested");
+                unsafe { PostQuitMessage(0) };
+                return;
+            }
+            HubEvent::ConfigChanged(c) => {
+                self.dome.config_changed(*c);
+            }
+            HubEvent::WindowCreated(hwnd_id) => {
+                self.dispatch_window_created(hwnd_id);
+                return;
+            }
+            HubEvent::WindowDestroyed(hwnd_id) => {
+                self.dome.window_destroyed(hwnd_id);
+            }
+            HubEvent::WindowMinimized(hwnd_id) => {
+                self.dome.window_minimized(hwnd_id);
+            }
+            HubEvent::WindowFocused(hwnd_id) => match self.focus_throttle.submit(hwnd_id) {
+                ThrottleResult::Send(id) => {
+                    self.dome.handle_focus(id);
+                }
+                ThrottleResult::Pending => return,
+                ThrottleResult::ScheduleFlush(delay) => {
+                    self.focus_throttle.mark_timer_scheduled();
+                    self.schedule_timer(TimerKind::FocusThrottle, delay);
+                    return;
+                }
+            },
+            HubEvent::MoveSizeStart(hwnd_id) => {
+                self.cancel_timer(&hwnd_id);
+                self.dome.move_size_started(hwnd_id);
+                self.schedule_timer(TimerKind::DragSafety(hwnd_id), DRAG_SAFETY_TIMEOUT);
+                return;
+            }
+            HubEvent::MoveSizeEnd(hwnd_id) => {
+                self.cancel_timer(&hwnd_id);
+                self.dome.move_size_ended(hwnd_id);
+                self.handle_resize(hwnd_id);
+                return;
+            }
+            HubEvent::LocationChanged(hwnd_id) => {
+                if self.dome.location_changed(hwnd_id) {
+                    self.cancel_timer(&hwnd_id);
+                    self.schedule_timer(TimerKind::PlacementDebounce(hwnd_id), DEBOUNCE_INTERVAL);
+                }
+                return;
+            }
+            HubEvent::WindowTitleChanged(hwnd_id) => {
+                if self.dome.registry_contains_hwnd(hwnd_id) {
+                    let inspect: Arc<dyn InspectExternalHwnd> =
+                        Arc::new(ExternalHwnd::new(hwnd_id.into()));
+                    self.dispatcher.dispatch(
+                        move || inspect.get_window_title(),
+                        move |title, runner| {
+                            if runner.dome.registry_contains_hwnd(hwnd_id) {
+                                runner.dome.update_titles(vec![(hwnd_id, title)]);
+                                runner.dome.apply_layout();
+                            }
+                        },
+                    );
+                } else {
+                    self.dispatch_window_created(hwnd_id);
+                }
+                return;
+            }
+            HubEvent::Action(a) => {
+                self.handle_actions(&a);
+            }
+            HubEvent::TabClicked(id, idx) => {
+                self.dome.tab_clicked(id, idx);
+            }
+        }
+        self.dome.apply_layout();
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn handle_actions(&mut self, actions: &Actions) {
+        for action in actions {
+            match action {
+                Action::Hub(hub) => self.dome.execute_hub_action(hub),
+                Action::Exec { command } => {
+                    if let Err(e) = std::process::Command::new("cmd")
+                        .args(["/C", command])
+                        .spawn()
+                    {
+                        tracing::warn!(%command, "Failed to exec: {e}");
+                    }
+                }
+                Action::Exit => {
+                    unsafe {
+                        PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
+                    };
+                    unsafe { PostQuitMessage(0) };
+                }
+            }
+        }
+    }
+
+    pub(super) fn dispatch_window_created(&mut self, hwnd_id: HwndId) {
+        let ext = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        let inspect: Arc<dyn InspectExternalHwnd> = ext.clone();
+        let manage: Arc<dyn ManageExternalHwnd> = ext;
+        self.dispatcher.dispatch(
+            move || {
+                if !inspect.is_manageable() {
+                    return None;
+                }
+                Some((
+                    inspect.get_window_title(),
+                    inspect.get_process_name().unwrap_or_default(),
+                    inspect.get_size_constraints(),
+                ))
+            },
+            move |result, runner| {
+                let Some((title, process, constraints)) = result else {
+                    return;
+                };
+                if runner.dome.registry_contains_hwnd(manage.id()) {
+                    return;
+                }
+                if let Some(actions) =
+                    runner
+                        .dome
+                        .try_manage_window(manage, title, process, constraints)
+                {
+                    runner.handle_actions(&actions);
+                }
+                runner.dome.apply_layout();
+            },
+        );
+    }
+
+    pub(super) fn handle_display_change(&mut self) {
+        let to_refresh = self.dome.handle_display_change();
+        for hwnd_id in to_refresh {
+            self.dispatch_constraint_read(hwnd_id);
+        }
+        self.dome.apply_layout();
+    }
+
+    fn handle_resize(&mut self, hwnd_id: HwndId) {
+        self.dome.check_fullscreen_state(hwnd_id);
+        self.dome.apply_layout();
+        self.dispatch_constraint_read(hwnd_id);
+    }
+
+    fn dispatch_constraint_read(&mut self, hwnd_id: HwndId) {
+        let Some(id) = self.dome.registry_get_id(hwnd_id) else {
+            return;
+        };
+        let inspect: Arc<dyn InspectExternalHwnd> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        self.dispatcher.dispatch(
+            move || inspect.get_size_constraints(),
+            move |constraints, runner| {
+                if runner.dome.registry_get_id(hwnd_id) != Some(id) {
+                    return;
+                }
+                runner.dome.set_constraints(id, constraints);
+                runner.dome.apply_layout();
+            },
+        );
+    }
+}
+
+pub(super) type ApplyFn = Box<dyn FnOnce(&mut Runner)>;
+
+struct ReadDispatcher {
+    pool: rayon::ThreadPool,
+    thread_id: u32,
+}
+
+impl ReadDispatcher {
+    fn new(thread_id: u32) -> Self {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(50)
+            .thread_name(|i| format!("dome-read-{i}"))
+            .build()
+            .expect("Failed to create read dispatcher thread pool");
+        Self { pool, thread_id }
+    }
+
+    fn dispatch<W, R, A>(&self, work: W, apply: A)
+    where
+        W: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+        A: FnOnce(R, &mut Runner) + Send + 'static,
+    {
+        let thread_id = self.thread_id;
+        self.pool.spawn(move || {
+            let result = work();
+            let boxed: ApplyFn = Box::new(move |runner| apply(result, runner));
+            let ptr = Box::into_raw(Box::new(boxed)) as usize;
+            unsafe {
+                if PostThreadMessageW(thread_id, WM_APP_DISPATCH_RESULT, WPARAM(ptr), LPARAM(0))
+                    .is_err()
+                {
+                    drop(Box::from_raw(ptr as *mut ApplyFn));
+                }
+            }
+        });
+    }
+}

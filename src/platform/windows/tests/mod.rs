@@ -81,8 +81,21 @@ impl TestEnv {
         }
     }
 
-    fn add_window(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
-        let on_open = self.dome.window_created(ext);
+    fn add_window(&mut self, ext: Arc<MockExternalHwnd>) {
+        if !ext.manageable {
+            return;
+        }
+        let on_open = self.dome.try_manage_window(
+            ext.clone(),
+            ext.title.clone(),
+            ext.process.clone(),
+            (
+                ext.min_size.0,
+                ext.min_size.1,
+                ext.max_size.0,
+                ext.max_size.1,
+            ),
+        );
         if let Some(actions) = on_open {
             for action in &actions {
                 if let Action::Hub(hub_action) = action {
@@ -94,14 +107,12 @@ impl TestEnv {
     }
 
     fn destroy_window(&mut self, ext: &Arc<MockExternalHwnd>) {
-        self.dome
-            .window_destroyed(ext.clone() as Arc<dyn ManageExternalHwnd>);
+        self.dome.window_destroyed(ext.hwnd_id);
         self.dome.apply_layout();
     }
 
     fn minimize_window(&mut self, ext: &Arc<MockExternalHwnd>) {
-        self.dome
-            .window_minimized(ext.clone() as Arc<dyn ManageExternalHwnd>);
+        self.dome.window_minimized(ext.hwnd_id);
         self.dome.apply_layout();
     }
 
@@ -211,33 +222,12 @@ impl ManageExternalHwnd for MockExternalHwnd {
         self.hwnd_id
     }
 
-    fn is_manageable(&self) -> bool {
-        self.manageable
-    }
-
-    fn get_window_title(&self) -> Option<String> {
-        self.title.clone()
-    }
-
-    fn get_process_name(&self) -> anyhow::Result<String> {
-        Ok(self.process.clone())
-    }
-
     fn should_float(&self) -> bool {
         self.should_float
     }
 
     fn get_dimension(&self) -> Dimension {
         self.get_dim()
-    }
-
-    fn get_size_constraints(&self) -> (f32, f32, f32, f32) {
-        (
-            self.min_size.0,
-            self.min_size.1,
-            self.max_size.0,
-            self.max_size.1,
-        )
     }
 
     fn get_monitor_handle(&self) -> Option<isize> {

@@ -24,21 +24,17 @@ use super::external::{HwndId, ManageExternalHwnd, ZOrder};
 use super::handle::is_fullscreen;
 use super::taskbar::ManageTaskbar;
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "These messages aren't bottleneck right now"
-)]
 pub(super) enum HubEvent {
-    WindowCreated(Arc<dyn ManageExternalHwnd>),
-    WindowDestroyed(Arc<dyn ManageExternalHwnd>),
-    WindowMinimized(Arc<dyn ManageExternalHwnd>),
-    WindowFocused(Arc<dyn ManageExternalHwnd>),
-    WindowTitleChanged(Arc<dyn ManageExternalHwnd>),
-    MoveSizeStart(Arc<dyn ManageExternalHwnd>),
-    MoveSizeEnd(Arc<dyn ManageExternalHwnd>),
-    LocationChanged(Arc<dyn ManageExternalHwnd>),
+    WindowCreated(HwndId),
+    WindowDestroyed(HwndId),
+    WindowMinimized(HwndId),
+    WindowFocused(HwndId),
+    WindowTitleChanged(HwndId),
+    MoveSizeStart(HwndId),
+    MoveSizeEnd(HwndId),
+    LocationChanged(HwndId),
     Action(Actions),
-    ConfigChanged(Config),
+    ConfigChanged(Box<Config>),
     TabClicked(ContainerId, usize),
     Shutdown,
 }
@@ -147,19 +143,6 @@ impl Dome {
         })
     }
 
-    pub(super) fn app_initialized(
-        &mut self,
-        windows: Vec<Arc<dyn ManageExternalHwnd>>,
-    ) -> Vec<Actions> {
-        let mut on_open = Vec::new();
-        for ext in windows {
-            if let Some(actions) = self.try_manage_window(ext) {
-                on_open.push(actions);
-            }
-        }
-        on_open
-    }
-
     pub(super) fn config_changed(&mut self, new_config: Config) {
         self.hub.sync_config(new_config.clone().into());
         for overlay in self.container_overlays.values_mut() {
@@ -169,22 +152,13 @@ impl Dome {
         tracing::info!("Config reloaded");
     }
 
-    pub(super) fn window_created(&mut self, ext: Arc<dyn ManageExternalHwnd>) -> Option<Actions> {
-        if !self.registry.contains_hwnd(ext.id()) {
-            self.try_manage_window(ext)
-        } else {
-            None
-        }
+    #[tracing::instrument(skip_all)]
+    pub(super) fn window_destroyed(&mut self, id_key: HwndId) {
+        self.remove_window(id_key);
     }
 
     #[tracing::instrument(skip_all)]
-    pub(super) fn window_destroyed(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
-        self.remove_window(ext.id());
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub(super) fn window_minimized(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
-        let id_key = ext.id();
+    pub(super) fn window_minimized(&mut self, id_key: HwndId) {
         let dominated_by_dome = self.registry.get_id(id_key).is_some_and(|id| {
             matches!(
                 self.registry.get(id).state,
@@ -196,63 +170,64 @@ impl Dome {
         }
     }
 
-    pub(super) fn move_size_started(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
-        self.placement_tracker.drag_started(ext.id());
+    pub(super) fn move_size_started(&mut self, id_key: HwndId) {
+        self.placement_tracker.drag_started(id_key);
     }
 
-    pub(super) fn move_size_ended(&mut self, ext: Arc<dyn ManageExternalHwnd>) {
-        self.placement_tracker.drag_ended(ext.id());
-        self.handle_resize(ext.id());
+    pub(super) fn move_size_ended(&mut self, id_key: HwndId) {
+        self.placement_tracker.drag_ended(id_key);
     }
 
-    pub(super) fn location_changed(&mut self, ext: Arc<dyn ManageExternalHwnd>) -> bool {
-        self.placement_tracker.location_changed(ext.id())
+    pub(super) fn location_changed(&mut self, id_key: HwndId) -> bool {
+        self.placement_tracker.location_changed(id_key)
     }
 
-    pub(super) fn title_changed(&mut self, ext: Arc<dyn ManageExternalHwnd>) -> Option<Actions> {
-        let id_key = ext.id();
-        if self.registry.contains_hwnd(id_key) {
-            let new_title = ext.get_window_title();
-            self.update_titles(vec![(id_key, new_title)]);
-            None
-        } else {
-            self.try_manage_window(ext)
-        }
-    }
-
-    pub(super) fn screens_changed(&mut self, screens: Vec<ScreenInfo>) {
+    pub(super) fn screens_changed(&mut self, screens: Vec<ScreenInfo>) -> Vec<HwndId> {
         tracing::info!(count = screens.len(), "Screen parameters changed");
-        self.update_screens(screens);
+        self.update_screens(screens)
     }
 
     pub(super) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
         self.hub.focus_tab_index(container_id, tab_idx);
     }
 
-    pub(super) fn handle_display_change(&mut self) {
-        match self.display.get_all_screens() {
+    pub(super) fn handle_display_change(&mut self) -> Vec<HwndId> {
+        let to_refresh = match self.display.get_all_screens() {
             Ok(screens) => self.screens_changed(screens),
-            Err(e) => tracing::warn!("Failed to enumerate screens: {e}"),
-        }
+            Err(e) => {
+                tracing::warn!("Failed to enumerate screens: {e}");
+                Vec::new()
+            }
+        };
         if let Some(fg) = self.display.get_exclusive_fullscreen_hwnd()
             && let Some(id) = self.registry.get_id(fg)
         {
             tracing::info!(%id, "D3D exclusive fullscreen entered");
             self.enter_fullscreen_exclusive(id);
         }
+        to_refresh
     }
 
-    fn try_manage_window(&mut self, ext: Arc<dyn ManageExternalHwnd>) -> Option<Actions> {
-        if !ext.is_manageable() {
-            return None;
-        }
-        let title = ext.get_window_title();
-        let process = ext.get_process_name().unwrap_or_default();
+    pub(super) fn registry_contains_hwnd(&self, id: HwndId) -> bool {
+        self.registry.contains_hwnd(id)
+    }
+
+    pub(super) fn registry_get_id(&self, id: HwndId) -> Option<WindowId> {
+        self.registry.get_id(id)
+    }
+
+    pub(super) fn try_manage_window(
+        &mut self,
+        ext: Arc<dyn ManageExternalHwnd>,
+        title: Option<String>,
+        process: String,
+        constraints: (f32, f32, f32, f32),
+    ) -> Option<Actions> {
         if should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
             return None;
         }
         let actions = on_open_actions(&process, title.as_deref(), &self.config.windows.on_open);
-        self.insert_window(ext, title, process);
+        self.insert_window(ext, title, process, constraints);
         actions
     }
 
@@ -261,6 +236,7 @@ impl Dome {
         ext: Arc<dyn ManageExternalHwnd>,
         title: Option<String>,
         process: String,
+        constraints: (f32, f32, f32, f32),
     ) {
         let id_key = ext.id();
         let dim = ext.get_dimension();
@@ -290,7 +266,7 @@ impl Dome {
                 self.hub.insert_tiling(),
             )
         };
-        self.set_constraints(id, &*ext);
+        self.set_constraints(id, constraints);
         self.recovery.track(&ext, dim);
 
         self.registry.insert(
@@ -318,9 +294,9 @@ impl Dome {
         }
     }
 
-    fn set_constraints(&mut self, id: WindowId, ext: &dyn ManageExternalHwnd) {
+    pub(super) fn set_constraints(&mut self, id: WindowId, constraints: (f32, f32, f32, f32)) {
         let border = self.config.border_size;
-        let (min_w, min_h, max_w, max_h) = ext.get_size_constraints();
+        let (min_w, min_h, max_w, max_h) = constraints;
         if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
             let to_frame = |v: f32| {
                 if v > 0.0 {
@@ -363,15 +339,13 @@ impl Dome {
     }
 
     /// Called by the run loop when a drag safety timeout or resize debounce
-    /// timer fires. Removes the window from the placement tracker and
-    /// re-evaluates its layout.
+    /// timer fires. Removes the window from the placement tracker.
+    /// Runner calls handle_resize separately.
     pub(super) fn placement_timeout(&mut self, id: HwndId) {
         self.placement_tracker.clear(id);
-        self.handle_resize(id);
     }
 
-    #[tracing::instrument(skip(self))]
-    fn handle_resize(&mut self, id_key: HwndId) {
+    pub(super) fn check_fullscreen_state(&mut self, id_key: HwndId) {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
@@ -380,12 +354,7 @@ impl Dome {
             return;
         }
         let ext = entry.ext.clone();
-        self.set_constraints(id, &*ext);
-        self.check_fullscreen_state(id, &*ext);
-    }
-
-    fn check_fullscreen_state(&mut self, id: WindowId, ext: &dyn ManageExternalHwnd) {
-        let Some(monitor_dim) = self.find_monitor_dimension_from_ext(ext) else {
+        let Some(monitor_dim) = self.find_monitor_dimension_from_ext(&*ext) else {
             return;
         };
 
@@ -711,7 +680,7 @@ impl Dome {
         }
     }
 
-    fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
+    pub(super) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
         for (hwnd_id, title) in &titles {
             self.registry.set_title(*hwnd_id, title.clone());
         }
@@ -741,21 +710,18 @@ impl Dome {
         }
     }
 
-    fn update_screens(&mut self, screens: Vec<ScreenInfo>) {
+    fn update_screens(&mut self, screens: Vec<ScreenInfo>) -> Vec<HwndId> {
         if screens.is_empty() {
             tracing::warn!("Empty screen list, skipping update");
-            return;
+            return Vec::new();
         }
         self.reconcile_monitors(screens);
 
-        let windows: Vec<_> = self.registry.iter().collect();
-        for (_, id) in windows {
-            if self.registry.get(id).state == WindowState::FullscreenExclusive {
-                continue;
-            }
-            let ext = self.registry.get(id).ext.clone();
-            self.set_constraints(id, &*ext);
-        }
+        self.registry
+            .iter()
+            .filter(|(_, id)| self.registry.get(*id).state != WindowState::FullscreenExclusive)
+            .map(|(hwnd_id, _)| hwnd_id)
+            .collect()
     }
 
     fn reconcile_monitors(&mut self, screens: Vec<ScreenInfo>) {

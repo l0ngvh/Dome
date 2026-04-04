@@ -24,7 +24,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PWSTR};
 
 use crate::core::Dimension;
-use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
+use crate::platform::windows::external::{
+    HwndId, InspectExternalHwnd, ManageExternalHwnd, ShowCmd, ZOrder,
+};
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
 pub(super) const OFFSCREEN_POS: f32 = -32000.0;
@@ -301,28 +303,12 @@ impl ManageExternalHwnd for ExternalHwnd {
         HwndId::from(self.0)
     }
 
-    fn is_manageable(&self) -> bool {
-        is_manageable(self.0)
-    }
-
-    fn get_window_title(&self) -> Option<String> {
-        get_window_title(self.0)
-    }
-
-    fn get_process_name(&self) -> anyhow::Result<String> {
-        get_process_name(self.0)
-    }
-
     fn should_float(&self) -> bool {
         should_float(self.0)
     }
 
     fn get_dimension(&self) -> Dimension {
         get_dimension(self.0)
-    }
-
-    fn get_size_constraints(&self) -> (f32, f32, f32, f32) {
-        get_size_constraints(self.0)
     }
 
     fn get_monitor_handle(&self) -> Option<isize> {
@@ -457,5 +443,23 @@ impl ManageExternalHwnd for ExternalHwnd {
                 let _ = ShowWindow(self.0, SW_MAXIMIZE);
             }
         }
+    }
+}
+
+impl InspectExternalHwnd for ExternalHwnd {
+    fn is_manageable(&self) -> bool {
+        is_manageable(self.0)
+    }
+
+    fn get_window_title(&self) -> Option<String> {
+        get_window_title(self.0)
+    }
+
+    fn get_process_name(&self) -> anyhow::Result<String> {
+        get_process_name(self.0)
+    }
+
+    fn get_size_constraints(&self) -> (f32, f32, f32, f32) {
+        get_size_constraints(self.0)
     }
 }
