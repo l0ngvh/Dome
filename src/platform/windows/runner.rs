@@ -18,9 +18,6 @@ const FOCUS_THROTTLE_INTERVAL: Duration = Duration::from_millis(500);
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 const DRAG_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
 
-const TIMER_FOCUS: usize = 1;
-pub(super) const TIMER_WINDOW_BASE: usize = 0x1000;
-
 enum TimerKind {
     FocusThrottle,
     PlacementDebounce(HwndId),
@@ -31,8 +28,8 @@ pub(super) struct Runner {
     dome: Dome,
     dispatcher: ReadDispatcher,
     focus_throttle: Throttle<HwndId>,
+    focus_timer_id: Option<usize>,
     window_timers: HashMap<HwndId, usize>,
-    next_timer_id: usize,
     main_thread_id: u32,
 }
 
@@ -42,26 +39,26 @@ impl Runner {
             dome,
             dispatcher: ReadDispatcher::new(thread_id),
             focus_throttle: Throttle::new(FOCUS_THROTTLE_INTERVAL),
+            focus_timer_id: None,
             window_timers: HashMap::new(),
-            next_timer_id: TIMER_WINDOW_BASE,
             main_thread_id,
         }
     }
 
     fn schedule_timer(&mut self, kind: TimerKind, delay: Duration) -> usize {
-        let id = match &kind {
-            TimerKind::FocusThrottle => TIMER_FOCUS,
-            _ => {
-                let id = self.next_timer_id;
-                self.next_timer_id += 1;
-                id
-            }
+        // With hWnd=NULL, SetTimer ignores nIDEvent when it doesn't match an
+        // existing timer and returns a new system-generated ID. Pass the
+        // previous ID to replace an existing timer, or 0 to create a new one.
+        let hint = match &kind {
+            TimerKind::FocusThrottle => self.focus_timer_id.unwrap_or(0),
+            _ => 0,
         };
-        if let TimerKind::PlacementDebounce(hwnd) | TimerKind::DragSafety(hwnd) = &kind {
-            self.window_timers.insert(*hwnd, id);
-        }
-        unsafe {
-            SetTimer(None, id, delay.as_millis() as u32, None);
+        let id = unsafe { SetTimer(None, hint, delay.as_millis() as u32, None) };
+        match &kind {
+            TimerKind::FocusThrottle => self.focus_timer_id = Some(id),
+            TimerKind::PlacementDebounce(hwnd) | TimerKind::DragSafety(hwnd) => {
+                self.window_timers.insert(*hwnd, id);
+            }
         }
         id
     }
@@ -74,7 +71,7 @@ impl Runner {
 
     pub(super) fn handle_timer(&mut self, timer_id: usize) {
         unsafe { KillTimer(None, timer_id).ok() };
-        if timer_id == TIMER_FOCUS {
+        if self.focus_timer_id == Some(timer_id) {
             if let Some(id) = self.focus_throttle.flush() {
                 self.dome.handle_focus(id);
                 self.dome.apply_layout();
