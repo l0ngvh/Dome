@@ -93,10 +93,6 @@ impl Registry {
             .and_then(|&cg_id| self.windows.get(&cg_id))
     }
 
-    pub(super) fn contains_id(&self, window_id: WindowId) -> bool {
-        self.id_to_cg.contains_key(&window_id)
-    }
-
     pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> &mut WindowEntry {
         self.id_to_cg
             .get(&window_id)

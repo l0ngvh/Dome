@@ -201,3 +201,25 @@ fn window_removed_fills_screen() {
     assert!(!macos.is_offscreen(cg2));
     assert_eq!(macos.window_frame(cg2), (2, 2, 1916, 1076));
 }
+
+#[test]
+fn delete_currently_displayed_window() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    macos.settle(&mut dome, 10);
+
+    dome.reconcile_windows(&[cg1], vec![]);
+    macos.settle(&mut dome, 10);
+
+    // Remaining window fills screen
+    assert!(!macos.is_offscreen(cg2));
+    assert_eq!(macos.window_frame(cg2), (2, 2, 1916, 1076));
+
+    // Second settle proves displayed state was cleaned up
+    macos.settle(&mut dome, 10);
+    assert!(!macos.is_offscreen(cg2));
+}

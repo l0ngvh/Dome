@@ -37,9 +37,7 @@ impl Dome {
             })
             .collect();
         for wid in to_hide {
-            if self.registry.contains_id(wid) {
-                self.hide_window(wid);
-            }
+            self.hide_window(wid);
         }
         for mp in placements {
             let displayed: HashSet<WindowId> = match &mp.layout {
@@ -74,10 +72,7 @@ impl Dome {
         let changes = self.hub.drain_changes();
 
         for &wid in &changes.created_windows {
-            if !changes.deleted_windows.contains(&wid)
-                && !all_displayed_windows.contains(&wid)
-                && self.registry.contains_id(wid)
-            {
+            if !changes.deleted_windows.contains(&wid) && !all_displayed_windows.contains(&wid) {
                 self.hide_window(wid);
             }
         }

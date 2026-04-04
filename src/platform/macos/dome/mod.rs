@@ -337,6 +337,7 @@ impl Dome {
     fn remove_app_windows(&mut self, pid: i32) {
         for (cg_id, window_id) in self.registry.remove_by_pid(pid) {
             self.recovery.untrack(cg_id);
+            self.monitor_registry.remove_displayed_window(window_id);
             self.hub.delete_window(window_id);
         }
     }
@@ -344,6 +345,7 @@ impl Dome {
     fn remove_window(&mut self, cg_id: CGWindowID) {
         if let Some(window_id) = self.registry.remove(cg_id) {
             self.recovery.untrack(cg_id);
+            self.monitor_registry.remove_displayed_window(window_id);
             self.hub.delete_window(window_id);
         }
     }

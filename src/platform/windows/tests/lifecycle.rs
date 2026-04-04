@@ -166,3 +166,26 @@ fn title_changed_manages_unknown_window() {
         env.config.border_size,
     );
 }
+
+#[test]
+fn delete_currently_displayed_window() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    env.destroy_window(&w1);
+
+    // Remaining window fills screen
+    assert!(!w2.is_offscreen());
+    assert_h_tiled(
+        &[w2.get_dim()],
+        default_screen().dimension,
+        env.config.border_size,
+    );
+
+    // Second apply_layout proves displayed state was cleaned up
+    env.dome.apply_layout();
+    assert!(!w2.is_offscreen());
+}

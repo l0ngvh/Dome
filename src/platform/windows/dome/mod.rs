@@ -40,8 +40,8 @@ pub(super) enum HubEvent {
 }
 
 struct DisplayedMonitor {
-    window_ids: Vec<WindowId>,
-    container_ids: Vec<ContainerId>,
+    window_ids: HashSet<WindowId>,
+    container_ids: HashSet<ContainerId>,
 }
 
 #[derive(Clone)]
@@ -295,6 +295,9 @@ impl Dome {
         self.recovery.untrack(id_key);
         if let Some(id) = self.registry.remove_by_hwnd(id_key) {
             tracing::info!(%id, "Window removed");
+            for dm in self.displayed.values_mut() {
+                dm.window_ids.remove(&id);
+            }
             self.hub.delete_window(id);
         }
     }
@@ -459,12 +462,12 @@ impl Dome {
                 .copied()
                 .unwrap_or_default();
 
-            let mut window_ids = Vec::new();
-            let mut container_ids = Vec::new();
+            let mut window_ids = HashSet::new();
+            let mut container_ids = HashSet::new();
 
             match mp.layout {
                 MonitorLayout::Fullscreen(id) => {
-                    window_ids.push(id);
+                    window_ids.insert(id);
                     self.show_fullscreen_window(id, dimension);
                 }
                 MonitorLayout::Normal {
@@ -472,7 +475,7 @@ impl Dome {
                     containers,
                 } => {
                     for wp in windows {
-                        window_ids.push(wp.id);
+                        window_ids.insert(wp.id);
                         if self
                             .placement_tracker
                             .is_moving(self.registry.get(wp.id).ext.id())
@@ -485,7 +488,7 @@ impl Dome {
                         if !cp.is_tabbed && !cp.is_focused {
                             continue;
                         }
-                        container_ids.push(cp.id);
+                        container_ids.insert(cp.id);
                         let children = if cp.is_tabbed {
                             self.hub.get_container(cp.id).children().to_vec()
                         } else {

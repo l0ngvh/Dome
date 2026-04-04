@@ -93,6 +93,12 @@ impl MonitorRegistry {
         self.reverse.insert(monitor_id, screen.display_id);
     }
 
+    pub(super) fn remove_displayed_window(&mut self, window_id: WindowId) {
+        for entry in self.map.values_mut() {
+            entry.displayed_windows.remove(&window_id);
+        }
+    }
+
     fn remove_by_id(&mut self, monitor_id: MonitorId) {
         if let Some(display_id) = self.reverse.remove(&monitor_id) {
             self.map.remove(&display_id);
