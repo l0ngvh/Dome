@@ -1,6 +1,44 @@
+[tasks.fmt]
+command = "cargo"
+args = ["fmt", "--", "--check"]
+
+[tasks.clippy]
+clear = true
+command = "cargo"
+args = ["clippy", "--tests"]
+
+[tasks.test]
+clear = true
+command = "cargo"
+args = ["test", "--lib"]
+
+[tasks.audit]
+command = "cargo"
+args = ["audit"]
+
+[tasks.deny]
+command = "cargo"
+args = ["deny", "check"]
+
+[tasks.ci]
+dependencies = ["fmt", "clippy", "test", "deny"]
+
+[tasks.coverage]
+clear = true
+script_runner = "@shell"
+script = '''
+cargo +nightly llvm-cov test --lib --branch --lcov --output-path lcov.info
+'''
+
+[tasks.coverage-html]
+clear = true
+command = "cargo"
+toolchain = "nightly"
+args = ["llvm-cov", "test", "--lib", "--branch", "--html", "--open"]
+
 [tasks.e2e-coverage]
 clear = true
-env = { "RUSTUP_TOOLCHAIN" = "nightly-2026-01-01", "RUSTFLAGS" = "-C instrument-coverage -Zcoverage-options=branch --cfg=coverage --cfg=trybuild_no_target", "CARGO_LLVM_COV" = "1", "CARGO_LLVM_COV_TARGET_DIR" = "${CARGO_MAKE_WORKING_DIRECTORY}/target", "LLVM_PROFILE_FILE" = "${CARGO_MAKE_WORKING_DIRECTORY}/target/dome-%p-%11m.profraw" }
+env = { "RUSTUP_TOOLCHAIN" = "nightly", "RUSTFLAGS" = "-C instrument-coverage -Zcoverage-options=branch --cfg=coverage --cfg=trybuild_no_target", "CARGO_LLVM_COV" = "1", "CARGO_LLVM_COV_TARGET_DIR" = "${CARGO_MAKE_WORKING_DIRECTORY}/target", "LLVM_PROFILE_FILE" = "${CARGO_MAKE_WORKING_DIRECTORY}/target/dome-%p-%11m.profraw" }
 script_runner = "@shell"
 script = '''
 cargo llvm-cov clean --workspace
@@ -9,33 +47,15 @@ cargo test --test e2e -- --test-threads=1
 cargo llvm-cov report --branch --json
 '''
 
-[tasks.coverage]
-clear = true
-script_runner = "@shell"
-script = '''
-mkdir -p target/coverage
-cargo +nightly llvm-cov test --lib --branch --json --output-path target/coverage/core-coverage.json -- --skip smoke
-'''
-
-[tasks.coverage-html]
-clear = true
-command = "cargo"
-toolchain = "nightly"
-args = ["llvm-cov", "test", "--lib", "--branch", "--html", "--open", "--", "--skip", "smoke"]
-
 [tasks.e2e]
 command = "cargo"
 args = ["test", "--test", "e2e", "--", "--test-threads=1", "${@}"]
-
-# === Leak Detection ===
 
 [tasks.leak-check]
 description = "Run leak check"
 run_task = [
     { name = "leak-check-macos", condition = { platforms = ["mac"] } },
 ]
-
-
 
 [tasks.leak-check-macos]
 private = true
@@ -68,7 +88,3 @@ echo ""
 echo "For specific type: malloc_history $PID NSRunningApplication"
 ./target/debug/dome exit 2>/dev/null || kill $PID 2>/dev/null || true
 '''
-
-
-
-
