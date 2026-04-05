@@ -45,19 +45,6 @@ impl Hub {
         tracing::info!(%window_id, "Fullscreen unset");
     }
 
-    #[tracing::instrument(skip(self))]
-    pub(crate) fn toggle_fullscreen(&mut self) {
-        let current_ws = self.current_workspace();
-        let Some(Child::Window(window_id)) = self.workspaces.get(current_ws).focused else {
-            return;
-        };
-
-        match self.windows.get(window_id).mode {
-            DisplayMode::Fullscreen => self.unset_fullscreen(window_id),
-            DisplayMode::Tiling | DisplayMode::Float => self.set_fullscreen(window_id),
-        }
-    }
-
     pub(super) fn attach_fullscreen_to_workspace(&mut self, ws: WorkspaceId, id: WindowId) {
         let window = self.windows.get_mut(id);
         window.workspace = ws;

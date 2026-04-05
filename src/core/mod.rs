@@ -1,4 +1,5 @@
 mod allocator;
+mod command;
 mod float;
 mod fullscreen;
 mod hub;
