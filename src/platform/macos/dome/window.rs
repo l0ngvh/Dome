@@ -8,7 +8,7 @@ use crate::platform::macos::accessibility::AXWindowApi;
 
 use super::Dome;
 
-const MAX_DRIFT_RETRIES: u8 = 5;
+const MAX_ENFORCEMENT_RETRIES: u8 = 5;
 
 #[derive(Clone, Copy)]
 pub(super) enum WindowState {
@@ -28,9 +28,42 @@ pub(super) enum WindowState {
 pub(super) enum PositionedState {
     /// Window is moved offscreen by Dome. `actual` is the last observed position, may differ from
     /// the current hidden coordinates if monitors changed since the window was hidden.
-    Offscreen { actual: RoundedDimension },
+    Offscreen(OffscreenPlacement),
     /// Window is tiled or floating with an active placement target.
     InView(Placement),
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct OffscreenPlacement {
+    actual: RoundedDimension,
+    retries: u8,
+}
+
+impl OffscreenPlacement {
+    pub(super) fn new(actual: RoundedDimension) -> Self {
+        Self { actual, retries: 0 }
+    }
+
+    /// Check if the window drifted from the hidden position. Updates `actual`
+    /// unconditionally. Returns true if the window is NOT at the hidden
+    /// position (i.e. it fought back). Increments retries on drift.
+    fn record_drift(&mut self, new_actual: RoundedDimension, monitors: &[MonitorInfo]) -> bool {
+        self.actual = new_actual;
+        let (hidden_x, hidden_y) = hidden_position(monitors);
+        if new_actual.x == hidden_x || new_actual.y == hidden_y {
+            return false;
+        }
+        self.retries = self.retries.saturating_add(1);
+        true
+    }
+
+    fn should_retry(&self) -> bool {
+        self.retries <= MAX_ENFORCEMENT_RETRIES
+    }
+
+    fn just_gave_up(&self) -> bool {
+        self.retries == MAX_ENFORCEMENT_RETRIES + 1
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -85,12 +118,12 @@ impl Placement {
 
     /// Whether drift retries are not yet exhausted.
     fn should_retry(&self) -> bool {
-        self.retries <= MAX_DRIFT_RETRIES
+        self.retries <= MAX_ENFORCEMENT_RETRIES
     }
 
     /// Whether we just crossed the retry limit (for one-time logging).
     fn just_gave_up(&self) -> bool {
-        self.retries == MAX_DRIFT_RETRIES + 1
+        self.retries == MAX_ENFORCEMENT_RETRIES + 1
     }
 
     /// Compare actual vs target, return constraint if size mismatched.
@@ -187,9 +220,6 @@ pub(super) fn move_offscreen(
     if actual.x == hidden_x || actual.y == hidden_y {
         return Ok(());
     }
-    // TODO: if hide fail to move the window to offscreen position, this window is clearly
-    // trying to take focus, so we should pop it to float or something. Exception is full
-    // screen window, which, should be handled differently as a first party citizen
     ax.hide_at(hidden_x, hidden_y)
 }
 
@@ -233,8 +263,8 @@ impl Dome {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
-            WindowState::Positioned(PositionedState::Offscreen { actual }) => {
-                let actual = *actual;
+            WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
+                let actual = offscreen.actual;
                 window.state = WindowState::Positioned(PositionedState::InView(Placement::new(
                     actual, target,
                 )));
@@ -266,8 +296,8 @@ impl Dome {
                 }
                 window.state = WindowState::BorderlessFullscreen
             }
-            WindowState::Positioned(PositionedState::Offscreen { actual }) => {
-                let actual = *actual;
+            WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
+                let actual = offscreen.actual;
                 let target = round_dim(screen_dim);
                 window.state = WindowState::Positioned(PositionedState::InView(Placement::new(
                     actual, target,
@@ -334,7 +364,7 @@ impl Dome {
         });
 
         match &mut window.state {
-            WindowState::Positioned(PositionedState::Offscreen { actual }) => {
+            WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
                 if is_borderless_fullscreen {
                     // Window turned fullscreen, but not visible, so we hide them again
                     self.hub.set_fullscreen(window_id);
@@ -342,10 +372,13 @@ impl Dome {
                     if let Err(e) = window.ax.minimize() {
                         tracing::trace!("Failed to minimize window: {e:#}");
                     }
-                } else {
-                    *actual = new_placement;
-                    if let Err(e) = move_offscreen(&monitors, actual, &*window.ax) {
-                        tracing::trace!("re-hide failed: {e}");
+                } else if offscreen.record_drift(new_placement, &monitors) {
+                    if offscreen.should_retry() {
+                        if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
+                            tracing::trace!("re-hide failed: {e}");
+                        }
+                    } else if offscreen.just_gave_up() {
+                        tracing::debug!("Window {window} exhausted hide retries, giving up");
                     }
                 }
             }
@@ -424,12 +457,11 @@ impl Dome {
                     if let Err(e) = window.ax.unminimize() {
                         tracing::debug!("Failed to unminimize window: {e:#}");
                     }
-                    if let Err(e) = move_offscreen(&monitors, &new_placement, &*window.ax) {
+                    let offscreen = OffscreenPlacement::new(new_placement);
+                    if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
                         tracing::trace!("hide after unminimize failed: {e}");
                     }
-                    window.state = WindowState::Positioned(PositionedState::Offscreen {
-                        actual: new_placement,
-                    });
+                    window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
                     self.hub.unset_fullscreen(window_id);
                 }
             }
@@ -438,9 +470,9 @@ impl Dome {
                 // windows might now be inserted offscreen, which will be put back into view later
                 // if it's in view
                 if !is_borderless_fullscreen {
-                    window.state = WindowState::Positioned(PositionedState::Offscreen {
-                        actual: new_placement,
-                    });
+                    window.state = WindowState::Positioned(PositionedState::Offscreen(
+                        OffscreenPlacement::new(new_placement),
+                    ));
                     self.hub.unset_fullscreen(window_id);
                 }
             }
@@ -449,9 +481,9 @@ impl Dome {
                 if is_borderless_fullscreen {
                     window.state = WindowState::BorderlessFullscreen;
                 } else {
-                    window.state = WindowState::Positioned(PositionedState::Offscreen {
-                        actual: new_placement,
-                    });
+                    window.state = WindowState::Positioned(PositionedState::Offscreen(
+                        OffscreenPlacement::new(new_placement),
+                    ));
                     self.hub.unset_fullscreen(window_id);
                 }
             }
@@ -474,12 +506,13 @@ impl Dome {
             WindowState::NativeFullscreen | WindowState::Minimized => Ok(()),
             WindowState::Positioned(positioned_state) => match positioned_state {
                 PositionedState::InView(placement) => {
-                    let actual = placement.actual;
-                    window.state = WindowState::Positioned(PositionedState::Offscreen { actual });
-                    move_offscreen(&monitors, &actual, &*window.ax)
+                    let offscreen = OffscreenPlacement::new(placement.actual);
+                    let result = move_offscreen(&monitors, &offscreen.actual, &*window.ax);
+                    window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
+                    result
                 }
-                PositionedState::Offscreen { actual } => {
-                    move_offscreen(&monitors, actual, &*window.ax)
+                PositionedState::Offscreen(offscreen) => {
+                    move_offscreen(&monitors, &offscreen.actual, &*window.ax)
                 }
             },
         };
@@ -501,16 +534,26 @@ impl Dome {
         let monitors = self.monitor_registry.all_screens();
         match positioned_state {
             PositionedState::InView(placement) => {
-                let actual = placement.actual;
-                if let Err(e) = move_offscreen(&monitors, &actual, &*window.ax) {
+                let offscreen = OffscreenPlacement::new(placement.actual);
+                if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
                     tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
                 }
-                window.state = WindowState::Positioned(PositionedState::Offscreen { actual })
+                window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
             }
-            PositionedState::Offscreen { actual } => {
-                if let Err(e) = move_offscreen(&monitors, &actual, &*window.ax) {
+            PositionedState::Offscreen(offscreen) => {
+                if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
                     tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
                 }
+            }
+        }
+    }
+
+    pub(super) fn rehide_offscreen_windows(&self, screens: &[MonitorInfo]) {
+        for (_, entry) in self.registry.iter() {
+            if let WindowState::Positioned(PositionedState::Offscreen(offscreen)) = &entry.state
+                && let Err(e) = move_offscreen(screens, &offscreen.actual, &*entry.ax)
+            {
+                tracing::trace!("Failed to re-hide window: {e:#}");
             }
         }
     }

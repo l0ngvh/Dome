@@ -19,7 +19,7 @@ fn drift_exhausts_retries_dome_gives_up() {
     macos.report_move(&mut dome, cg1);
     macos.settle(&mut dome, 20);
 
-    // After MAX_DRIFT_RETRIES (5), Dome gives up — window stays at its chosen position
+    // After MAX_ENFORCEMENT_RETRIES (5), Dome gives up — window stays at its chosen position
     assert_eq!(macos.window_frame(cg1), (100, 100, 800, 600));
 }
 
@@ -90,13 +90,73 @@ fn offscreen_window_fights_hide() {
     macos.move_window(cg1, 100, 100, 800, 600);
     macos.report_move(&mut dome, cg1);
 
-    // Dome should keep re-hiding each round (never gives up, unlike drift).
-    // Don't use settle() — it would panic on non-convergence.
-    for _ in 0..5 {
-        let pending = macos.moves.borrow().len();
-        assert!(pending > 0, "Dome should keep issuing hide_at");
+    // Dome retries hiding up to MAX_ENFORCEMENT_RETRIES times, then gives up.
+    // report_move incremented retries to 1 and issued hide_at.
+    // Each flush_moves round: window fights back → record_drift increments retries → hide_at.
+    // After 4 flush rounds: retries = 5, should_retry() still true (5 <= 5).
+    // 5th flush round: retries = 6, should_retry() false, just_gave_up() true → no hide_at.
+    for _ in 0..4 {
+        assert!(
+            !macos.moves.borrow().is_empty(),
+            "Dome should still be retrying hide"
+        );
         macos.flush_moves(&mut dome);
     }
+    // One more round: retries exceed limit, Dome gives up
+    macos.flush_moves(&mut dome);
+    assert!(
+        macos.moves.borrow().is_empty(),
+        "Dome should have stopped issuing hide_at"
+    );
+}
+
+#[test]
+fn hide_retries_reset_on_fresh_hide() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    macos.settle(&mut dome, 10);
+
+    // Hide both by switching workspace
+    dome.run_hub_actions(&actions("focus workspace 1"));
+    macos.settle(&mut dome, 10);
+    assert!(macos.is_offscreen(cg1));
+
+    // cg1 fights back — exhaust retries
+    macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
+    macos.move_window(cg1, 100, 100, 800, 600);
+    macos.report_move(&mut dome, cg1);
+    for _ in 0..5 {
+        macos.flush_moves(&mut dome);
+    }
+    assert!(macos.moves.borrow().is_empty());
+
+    // Switch back to workspace 0 — cg1 becomes InView
+    macos.set_override_frame(cg1, None);
+    dome.run_hub_actions(&actions("focus workspace 0"));
+    macos.settle(&mut dome, 10);
+    assert!(!macos.is_offscreen(cg1));
+
+    // Switch away again — fresh hide, retries reset to 0
+    dome.run_hub_actions(&actions("focus workspace 1"));
+    macos.settle(&mut dome, 10);
+
+    // Now set override and start fighting again
+    macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
+    macos.move_window(cg1, 100, 100, 800, 600);
+    macos.report_move(&mut dome, cg1);
+    for _ in 0..4 {
+        assert!(!macos.moves.borrow().is_empty(), "should still be retrying");
+        macos.flush_moves(&mut dome);
+    }
+    macos.flush_moves(&mut dome);
+    assert!(
+        macos.moves.borrow().is_empty(),
+        "should have given up again"
+    );
 }
 
 #[test]

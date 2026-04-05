@@ -25,7 +25,7 @@ use crate::platform::macos::running_application::RunningApp;
 use monitor::MonitorRegistry;
 use recovery::Recovery;
 use registry::{Registry, WindowEntry};
-use window::{PositionedState, RoundedDimension, WindowState, move_offscreen};
+use window::{OffscreenPlacement, PositionedState, RoundedDimension, WindowState};
 
 pub(in crate::platform::macos) struct NewWindow {
     pub(in crate::platform::macos) ax: Arc<dyn AXWindowApi>,
@@ -363,14 +363,7 @@ impl Dome {
             self.primary_full_height = primary.full_height;
         }
 
-        // Re-hide windows that are offscreen with updated monitor positions
-        for (_, entry) in self.registry.iter() {
-            if let WindowState::Positioned(PositionedState::Offscreen { actual }) = &entry.state
-                && let Err(e) = move_offscreen(&screens, actual, &*entry.ax)
-            {
-                tracing::trace!("Failed to re-hide window: {e:#}");
-            }
-        }
+        self.rehide_offscreen_windows(&screens);
 
         reconcile_monitors(&mut self.hub, &mut self.monitor_registry, &screens);
     }
@@ -442,7 +435,7 @@ impl Dome {
             self.registry.insert(
                 ax.clone(),
                 window_id,
-                WindowState::Positioned(PositionedState::Offscreen { actual: dim }),
+                WindowState::Positioned(PositionedState::Offscreen(OffscreenPlacement::new(dim))),
                 app_name,
                 bundle_id,
                 title,
