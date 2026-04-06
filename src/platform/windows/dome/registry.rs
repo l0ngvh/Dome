@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::core::{Child, WindowId};
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd};
 
-use super::overlay::WindowOverlayApi;
 use super::window::WindowState;
 
 pub(super) struct WindowEntry {
@@ -12,7 +11,6 @@ pub(super) struct WindowEntry {
     pub(super) state: WindowState,
     pub(super) title: Option<String>,
     pub(super) process: String,
-    pub(super) overlay: Box<dyn WindowOverlayApi>,
 }
 
 impl std::fmt::Display for WindowEntry {

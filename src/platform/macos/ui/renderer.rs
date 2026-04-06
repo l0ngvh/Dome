@@ -89,74 +89,60 @@ impl MetalBackend {
     }
 }
 
-/// For container overlays (tab bars). No mirror capability needed.
-pub(super) struct ContainerRenderer {
-    inner: EguiRenderer,
-}
-
-impl ContainerRenderer {
-    pub(super) fn new(
-        backend: Rc<MetalBackend>,
-        scale: f64,
-        logical_w: f64,
-        logical_h: f64,
-    ) -> Self {
-        Self {
-            inner: EguiRenderer::new(backend, scale, logical_w, logical_h),
-        }
-    }
-
-    pub(super) fn layer(&self) -> Retained<CAMetalLayer> {
-        self.inner.layer()
-    }
-
-    pub(super) fn resize(&self, logical_w: f64, logical_h: f64, scale: f64) {
-        self.inner.resize(logical_w, logical_h, scale);
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub(super) fn render<R>(
-        &mut self,
-        pixels_per_point: f32,
-        events: Vec<egui::Event>,
-        ui_fn: impl FnMut(&mut egui::Ui) -> R,
-    ) -> R {
-        let (meshes, delta, surface_size, result) =
-            self.inner.prepare(pixels_per_point, events, ui_fn);
-        if let Some(ctx) = self.inner.begin_frame(&delta, surface_size) {
-            self.inner.draw_egui_meshes(&ctx, &meshes, pixels_per_point);
-            ctx.finish();
-        }
-        result
-    }
-}
-
-/// For per-window overlays. Draws borders via egui, and optionally shows a mirror of the
-/// window content from screen capture.
-pub(super) struct WindowRenderer {
-    inner: EguiRenderer,
+/// Unified renderer for all overlay types. Owns the Metal layer, egui context,
+/// texture cache, and optional mirror texture. Callers pass `FnOnce(&egui::Context)`
+/// and create their own `egui::Area`s inside.
+pub(super) struct OverlayRenderer {
+    backend: Rc<MetalBackend>,
+    layer: Retained<CAMetalLayer>,
+    egui_ctx: egui::Context,
+    egui_textures: HashMap<egui::TextureId, Retained<ProtocolObject<dyn MTLTexture>>>,
     mirror_texture: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
 }
 
-impl WindowRenderer {
+impl OverlayRenderer {
     pub(super) fn new(
         backend: Rc<MetalBackend>,
         scale: f64,
         logical_w: f64,
         logical_h: f64,
     ) -> Self {
+        let layer = CAMetalLayer::layer();
+        layer.setDevice(Some(backend.device()));
+        layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+        // Overlays composite over other windows, so non-drawn areas must be fully transparent.
+        // Must be premultiplied (0,0,0,0) — non-zero RGB with zero alpha would leak color
+        // through the premultiplied-alpha blend.
+        layer.setOpaque(false);
+        layer.setContentsScale(scale);
+        layer.setDrawableSize(objc2_core_foundation::CGSize {
+            width: logical_w * scale,
+            height: logical_h * scale,
+        });
+
         Self {
-            inner: EguiRenderer::new(backend, scale, logical_w, logical_h),
+            backend,
+            layer,
+            egui_ctx: egui::Context::default(),
+            egui_textures: HashMap::new(),
             mirror_texture: None,
         }
     }
 
     pub(super) fn layer(&self) -> Retained<CAMetalLayer> {
-        self.inner.layer()
+        self.layer.clone()
     }
 
     pub(super) fn resize(&self, logical_w: f64, logical_h: f64, scale: f64) {
-        self.inner.resize(logical_w, logical_h, scale);
+        self.layer.setDrawableSize(objc2_core_foundation::CGSize {
+            width: logical_w * scale,
+            height: logical_h * scale,
+        });
+        self.layer.setContentsScale(scale);
+    }
+
+    fn backend(&self) -> &MetalBackend {
+        &self.backend
     }
 
     /// Wraps the IOSurface as a Metal texture for zero-copy GPU reads from the capture buffer.
@@ -179,8 +165,7 @@ impl WindowRenderer {
         let surface_ref: &objc2_io_surface::IOSurfaceRef =
             unsafe { &*(surface as *const IOSurface as *const objc2_io_surface::IOSurfaceRef) };
         self.mirror_texture = self
-            .inner
-            .backend()
+            .backend
             .device
             // Plane 0 — BGRA is a single interleaved plane (unlike YCbCr which has separate planes).
             .newTextureWithDescriptor_iosurface_plane(&desc, surface_ref, 0);
@@ -193,196 +178,34 @@ impl WindowRenderer {
         self.mirror_texture = None;
     }
 
+    /// Runs the full render pipeline: egui layout → optional mirror quad → egui meshes.
+    /// `ctx_fn` receives `&egui::Context` and should create its own `egui::Area`s.
     #[tracing::instrument(skip_all)]
     pub(super) fn render<R>(
         &mut self,
         pixels_per_point: f32,
-        visible_content_bound: Option<[f32; 4]>,
-        ui_fn: impl FnMut(&mut egui::Ui) -> R,
+        events: Vec<egui::Event>,
+        mirror_bounds: Option<[f32; 4]>,
+        ctx_fn: impl FnMut(&egui::Context) -> R,
     ) -> R {
-        let (meshes, delta, surface_size, result) =
-            self.inner.prepare(pixels_per_point, Vec::new(), ui_fn);
-        if let Some(ctx) = self.inner.begin_frame(&delta, surface_size) {
+        let (meshes, delta, surface_size, result) = self.prepare(pixels_per_point, events, ctx_fn);
+        if let Some(ctx) = self.begin_frame(&delta, surface_size) {
             if let Some(tex) = &self.mirror_texture
-                && let Some(visible_content_bound) = visible_content_bound
+                && let Some(bounds) = mirror_bounds
             {
-                draw_mirror_quad(self.inner.backend(), &ctx, tex, visible_content_bound);
+                draw_mirror_quad(self.backend(), &ctx, tex, bounds);
             }
-            self.inner.draw_egui_meshes(&ctx, &meshes, pixels_per_point);
+            self.draw_egui_meshes(&ctx, &meshes, pixels_per_point);
             ctx.finish();
         }
         result
-    }
-}
-
-const SHADER_SOURCE: &str = r#"
-#include <metal_stdlib>
-using namespace metal;
-
-struct VertexIn {
-    float2 pos [[attribute(0)]];
-    float2 uv  [[attribute(1)]];
-    float4 color [[attribute(2)]];
-};
-
-struct VertexOut {
-    float4 position [[position]];
-    float2 uv;
-    float4 color;
-};
-
-vertex VertexOut vertex_main(
-    VertexIn in [[stage_in]],
-    constant float2 &surface_size [[buffer(1)]]
-) {
-    VertexOut out;
-    // Convert from egui coords (top-left origin, Y-down, in points) to Metal NDC
-    // (-1..1, center origin, Y-up). Y is negated to flip the axis.
-    out.position = float4(
-        2.0 * in.pos.x / surface_size.x - 1.0,
-        -(2.0 * in.pos.y / surface_size.y - 1.0),
-        0.0,
-        1.0
-    );
-    out.uv = in.uv;
-    out.color = in.color;
-    return out;
-}
-
-fragment float4 fragment_egui(
-    VertexOut in [[stage_in]],
-    texture2d<float> tex [[texture(0)]],
-    sampler smp [[sampler(0)]]
-) {
-    float4 color = tex.sample(smp, in.uv) * in.color;
-    color.rgb *= color.a;
-    return color;
-}
-
-fragment float4 fragment_mirror(
-    VertexOut in [[stage_in]],
-    texture2d<float> tex [[texture(0)]],
-    sampler smp [[sampler(0)]]
-) {
-    return tex.sample(smp, in.uv);
-}
-"#;
-
-/// pos(f32×2) + uv(f32×2) + color(u8×4). Shared by egui meshes and mirror quad
-/// so both can use the same vertex descriptor and pipeline layout.
-const VERTEX_STRIDE: usize = 20;
-
-impl MetalBackend {
-    fn create_pipeline(
-        device: &ProtocolObject<dyn MTLDevice>,
-        vertex_fn: &ProtocolObject<dyn MTLFunction>,
-        fragment_fn: &ProtocolObject<dyn MTLFunction>,
-        vertex_desc: &MTLVertexDescriptor,
-    ) -> Retained<ProtocolObject<dyn MTLRenderPipelineState>> {
-        let desc = MTLRenderPipelineDescriptor::new();
-        desc.setVertexFunction(Some(vertex_fn));
-        desc.setFragmentFunction(Some(fragment_fn));
-        desc.setVertexDescriptor(Some(vertex_desc));
-
-        let color0 = unsafe { desc.colorAttachments().objectAtIndexedSubscript(0) };
-        color0.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
-        color0.setBlendingEnabled(true);
-        // Source is One (not SrcAlpha) because egui outputs premultiplied-alpha colors.
-        color0.setSourceRGBBlendFactor(MTLBlendFactor::One);
-        color0.setDestinationRGBBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
-        color0.setSourceAlphaBlendFactor(MTLBlendFactor::OneMinusDestinationAlpha);
-        color0.setDestinationAlphaBlendFactor(MTLBlendFactor::One);
-
-        device
-            .newRenderPipelineStateWithDescriptor_error(&desc)
-            .expect("failed to create pipeline")
-    }
-}
-
-#[must_use]
-struct FrameContext {
-    encoder: Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>,
-    cmd_buf: Retained<ProtocolObject<dyn MTLCommandBuffer>>,
-    drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
-    drawable_w: NSUInteger,
-    drawable_h: NSUInteger,
-}
-
-impl FrameContext {
-    /// Registers drawable presentation, then Drop handles the rest.
-    fn finish(self) {
-        unsafe {
-            let _: () = objc2::msg_send![&*self.cmd_buf, presentDrawable: &*self.drawable];
-        }
-    }
-}
-
-impl Drop for FrameContext {
-    /// Always commits the command buffer so the drawable returns to the pool.
-    /// On the normal path (finish called), this also presents the new frame.
-    /// On error paths, no present was registered — previous frame stays visible.
-    fn drop(&mut self) {
-        self.encoder.endEncoding();
-        self.cmd_buf.commit();
-        // Overlays are event-driven (not vsync), so we wait for the GPU to finish
-        // before returning to avoid tearing.
-        self.cmd_buf.waitUntilCompleted();
-    }
-}
-
-/// Split into prepare → begin_frame → draw_egui_meshes so callers can inject custom
-/// draw calls (e.g. mirror quad) between Metal setup and egui mesh drawing.
-struct EguiRenderer {
-    backend: Rc<MetalBackend>,
-    layer: Retained<CAMetalLayer>,
-    egui_ctx: egui::Context,
-    egui_textures: HashMap<egui::TextureId, Retained<ProtocolObject<dyn MTLTexture>>>,
-}
-
-impl EguiRenderer {
-    fn new(backend: Rc<MetalBackend>, scale: f64, logical_w: f64, logical_h: f64) -> Self {
-        let layer = CAMetalLayer::layer();
-        layer.setDevice(Some(backend.device()));
-        layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
-        // Overlays composite over other windows, so non-drawn areas must be fully transparent.
-        // Must be premultiplied (0,0,0,0) — non-zero RGB with zero alpha would leak color
-        // through the premultiplied-alpha blend.
-        layer.setOpaque(false);
-        layer.setContentsScale(scale);
-        layer.setDrawableSize(objc2_core_foundation::CGSize {
-            width: logical_w * scale,
-            height: logical_h * scale,
-        });
-
-        Self {
-            backend,
-            layer,
-            egui_ctx: egui::Context::default(),
-            egui_textures: HashMap::new(),
-        }
-    }
-
-    fn layer(&self) -> Retained<CAMetalLayer> {
-        self.layer.clone()
-    }
-
-    fn resize(&self, logical_w: f64, logical_h: f64, scale: f64) {
-        self.layer.setDrawableSize(objc2_core_foundation::CGSize {
-            width: logical_w * scale,
-            height: logical_h * scale,
-        });
-        self.layer.setContentsScale(scale);
-    }
-
-    fn backend(&self) -> &MetalBackend {
-        &self.backend
     }
 
     fn prepare<R>(
         &mut self,
         pixels_per_point: f32,
         events: Vec<egui::Event>,
-        mut ui_fn: impl FnMut(&mut egui::Ui) -> R,
+        mut ctx_fn: impl FnMut(&egui::Context) -> R,
     ) -> (
         Vec<egui::ClippedPrimitive>,
         egui::TexturesDelta,
@@ -412,11 +235,7 @@ impl EguiRenderer {
 
         let mut result = None;
         let output = self.egui_ctx.run(raw_input, |ctx| {
-            egui::Area::new(egui::Id::new("overlay"))
-                .fixed_pos(egui::pos2(0.0, 0.0))
-                .show(ctx, |ui| {
-                    result = Some(ui_fn(ui));
-                });
+            result = Some(ctx_fn(ctx));
         });
         let meshes = self
             .egui_ctx
@@ -658,6 +477,121 @@ impl EguiRenderer {
         for id in &delta.free {
             self.egui_textures.remove(id);
         }
+    }
+}
+
+const SHADER_SOURCE: &str = r#"
+#include <metal_stdlib>
+using namespace metal;
+
+struct VertexIn {
+    float2 pos [[attribute(0)]];
+    float2 uv  [[attribute(1)]];
+    float4 color [[attribute(2)]];
+};
+
+struct VertexOut {
+    float4 position [[position]];
+    float2 uv;
+    float4 color;
+};
+
+vertex VertexOut vertex_main(
+    VertexIn in [[stage_in]],
+    constant float2 &surface_size [[buffer(1)]]
+) {
+    VertexOut out;
+    // Convert from egui coords (top-left origin, Y-down, in points) to Metal NDC
+    // (-1..1, center origin, Y-up). Y is negated to flip the axis.
+    out.position = float4(
+        2.0 * in.pos.x / surface_size.x - 1.0,
+        -(2.0 * in.pos.y / surface_size.y - 1.0),
+        0.0,
+        1.0
+    );
+    out.uv = in.uv;
+    out.color = in.color;
+    return out;
+}
+
+fragment float4 fragment_egui(
+    VertexOut in [[stage_in]],
+    texture2d<float> tex [[texture(0)]],
+    sampler smp [[sampler(0)]]
+) {
+    float4 color = tex.sample(smp, in.uv) * in.color;
+    color.rgb *= color.a;
+    return color;
+}
+
+fragment float4 fragment_mirror(
+    VertexOut in [[stage_in]],
+    texture2d<float> tex [[texture(0)]],
+    sampler smp [[sampler(0)]]
+) {
+    return tex.sample(smp, in.uv);
+}
+"#;
+
+/// pos(f32×2) + uv(f32×2) + color(u8×4). Shared by egui meshes and mirror quad
+/// so both can use the same vertex descriptor and pipeline layout.
+const VERTEX_STRIDE: usize = 20;
+
+impl MetalBackend {
+    fn create_pipeline(
+        device: &ProtocolObject<dyn MTLDevice>,
+        vertex_fn: &ProtocolObject<dyn MTLFunction>,
+        fragment_fn: &ProtocolObject<dyn MTLFunction>,
+        vertex_desc: &MTLVertexDescriptor,
+    ) -> Retained<ProtocolObject<dyn MTLRenderPipelineState>> {
+        let desc = MTLRenderPipelineDescriptor::new();
+        desc.setVertexFunction(Some(vertex_fn));
+        desc.setFragmentFunction(Some(fragment_fn));
+        desc.setVertexDescriptor(Some(vertex_desc));
+
+        let color0 = unsafe { desc.colorAttachments().objectAtIndexedSubscript(0) };
+        color0.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+        color0.setBlendingEnabled(true);
+        // Source is One (not SrcAlpha) because egui outputs premultiplied-alpha colors.
+        color0.setSourceRGBBlendFactor(MTLBlendFactor::One);
+        color0.setDestinationRGBBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
+        color0.setSourceAlphaBlendFactor(MTLBlendFactor::OneMinusDestinationAlpha);
+        color0.setDestinationAlphaBlendFactor(MTLBlendFactor::One);
+
+        device
+            .newRenderPipelineStateWithDescriptor_error(&desc)
+            .expect("failed to create pipeline")
+    }
+}
+
+#[must_use]
+struct FrameContext {
+    encoder: Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>,
+    cmd_buf: Retained<ProtocolObject<dyn MTLCommandBuffer>>,
+    drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
+    drawable_w: NSUInteger,
+    drawable_h: NSUInteger,
+}
+
+impl FrameContext {
+    /// Registers drawable presentation, then Drop handles the rest.
+    fn finish(self) {
+        unsafe {
+            let _: () = objc2::msg_send![&*self.cmd_buf, presentDrawable: &*self.drawable];
+        }
+    }
+}
+
+impl Drop for FrameContext {
+    /// Always commits the command buffer so the drawable returns to the pool.
+    /// On the normal path (finish called), this also presents the new frame.
+    /// On error paths, no present was registered — previous frame stays visible.
+    fn drop(&mut self) {
+        self.encoder.endEncoding();
+        self.cmd_buf.commit();
+        // Overlays are event-driven (not vsync), so we wait for the GPU to finish
+        // before returning to avoid tearing.
+        self.cmd_buf.waitUntilCompleted();
     }
 }
 

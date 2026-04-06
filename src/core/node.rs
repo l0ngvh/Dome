@@ -206,11 +206,6 @@ impl Container {
         &self.children
     }
 
-    #[cfg(test)]
-    pub(crate) fn dimension(&self) -> Dimension {
-        self.dimension
-    }
-
     pub(crate) fn min_size(&self) -> (f32, f32) {
         (self.min_width, self.min_height)
     }
@@ -498,14 +493,6 @@ impl Window {
             max_width: 0.0,
             max_height: 0.0,
         }
-    }
-
-    #[cfg_attr(
-        all(target_os = "windows", not(test)),
-        expect(dead_code, reason = "used on macOS")
-    )]
-    pub(crate) fn dimension(&self) -> Dimension {
-        self.dimension
     }
 
     pub(crate) fn min_size(&self) -> (f32, f32) {

@@ -5,16 +5,16 @@ use objc2_foundation::{NSPoint, NSRect, NSSize};
 use crate::core::{Child, Container, Dimension, MonitorLayout, MonitorPlacements, WindowId};
 
 use super::Dome;
-use super::events::{ContainerOverlayData, HubMessage, OverlayCreate, OverlayShow, RenderFrame};
+use super::events::{FloatShow, HubMessage, MonitorTilingData, RenderFrame};
 use super::registry::Registry;
-use super::window::{apply_inset, clip_to_bounds, hidden_monitor};
+use super::window::{apply_inset, clip_to_bounds};
 
 impl Dome {
     /// All fullscreen -> normal and normal -> fullscreen must be resolved before this step
     #[tracing::instrument(skip_all)]
     pub(super) fn flush_layout(&mut self) {
-        let mut shows = Vec::new();
-        let mut containers = Vec::new();
+        let mut tiling = Vec::new();
+        let mut float_shows = Vec::new();
         let placements = self.hub.get_visible_placements();
         let all_displayed_windows: HashSet<WindowId> = placements
             .iter()
@@ -47,9 +47,9 @@ impl Dome {
             self.monitor_registry
                 .get_entry_mut(mp.monitor_id)
                 .displayed_windows = displayed;
-            let (s, c) = self.apply_monitor_placements(&mp);
-            shows.extend(s);
-            containers.extend(c);
+            let (t, f) = self.apply_monitor_placements(&mp);
+            tiling.push(t);
+            float_shows.extend(f);
         }
 
         let focused = match self
@@ -69,65 +69,61 @@ impl Dome {
                 }
             }
         }
-        let changes = self.hub.drain_changes();
+        let created = std::mem::take(&mut self.pending_created);
+        let deleted = std::mem::take(&mut self.pending_deleted);
 
-        for &wid in &changes.created_windows {
-            if !changes.deleted_windows.contains(&wid) && !all_displayed_windows.contains(&wid) {
+        for &wid in &created {
+            if !deleted.contains(&wid) && !all_displayed_windows.contains(&wid) {
                 self.hide_window(wid);
             }
         }
 
-        let creates = changes
-            .created_windows
-            .iter()
-            .filter_map(|&wid| {
-                if changes.deleted_windows.contains(&wid) {
-                    return None;
-                }
-                let entry = self.registry.try_by_id(wid)?;
-                let dim = self.hub.get_window(wid).dimension();
-                let cg_id = entry.ax.cg_id();
-                Some(OverlayCreate {
-                    window_id: wid,
-                    cg_id,
-                    frame: to_ns_rect(self.primary_full_height, dim),
-                })
-            })
-            .collect();
-
-        let container_creates: Vec<_> = changes
-            .created_containers
-            .iter()
-            .copied()
-            .filter(|id| !changes.deleted_containers.contains(id))
-            .collect();
+        for &wid in &deleted {
+            let entry = self.registry.by_id(wid);
+            let cg_id = entry.cg_id;
+            self.recovery.untrack(cg_id);
+            self.monitor_registry.remove_displayed_window(wid);
+            self.registry.remove(cg_id);
+        }
 
         self.sender.send(HubMessage::Frame(RenderFrame {
-            creates,
-            deletes: changes.deleted_windows,
-            shows,
-            container_creates,
-            containers,
-            deleted_containers: changes.deleted_containers,
+            tiling,
+            float_shows,
         }));
     }
 
     fn apply_monitor_placements(
         &mut self,
         mp: &MonitorPlacements,
-    ) -> (Vec<OverlayShow>, Vec<ContainerOverlayData>) {
+    ) -> (MonitorTilingData, Vec<FloatShow>) {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
                 self.place_fullscreen_window(*window_id, mp.monitor_id);
-                (Vec::new(), Vec::new())
+                let screen = &self.monitor_registry.get_entry(mp.monitor_id).screen;
+                (
+                    MonitorTilingData {
+                        monitor_id: mp.monitor_id,
+                        monitor_dim: screen.dimension,
+                        cocoa_frame: to_ns_rect(self.primary_full_height, screen.dimension),
+                        scale: screen.scale,
+                        windows: Vec::new(),
+                        containers: Vec::new(),
+                    },
+                    Vec::new(),
+                )
             }
             MonitorLayout::Normal {
                 windows,
                 containers,
             } => {
-                let monitors = self.monitor_registry.all_screens();
                 let border_size = self.config.border_size;
-                let mut shows = Vec::new();
+                let screen = &self.monitor_registry.get_entry(mp.monitor_id).screen;
+                let monitor_dim = screen.dimension;
+                let scale = screen.scale;
+
+                let mut tiling_windows = Vec::new();
+                let mut float_shows = Vec::new();
+
                 for wp in windows {
                     let content_dim = apply_inset(wp.frame, border_size);
                     // Clip to visible_frame bounds — macOS doesn't reliably allow
@@ -145,32 +141,43 @@ impl Dome {
                         self.place_window(wp.id, target);
                     }
 
-                    shows.push(OverlayShow {
-                        window_id: wp.id,
-                        placement: *wp,
-                        cocoa_frame: to_ns_rect(self.primary_full_height, wp.visible_frame),
-                        scale: hidden_monitor(&monitors).scale,
-                        content_dim,
-                        visible_content,
-                    });
+                    if wp.is_float {
+                        let entry = self.registry.by_id(wp.id);
+                        float_shows.push(FloatShow {
+                            cg_id: entry.cg_id,
+                            placement: *wp,
+                            cocoa_frame: to_ns_rect(self.primary_full_height, wp.visible_frame),
+                            scale,
+                            content_dim,
+                            visible_content,
+                        });
+                    } else {
+                        tiling_windows.push(*wp);
+                    }
                 }
 
-                let mut container_overlays = Vec::new();
+                let mut container_data = Vec::new();
                 for cp in containers {
-                    let cocoa_frame = to_ns_rect(self.primary_full_height, cp.visible_frame);
                     let tab_titles = if cp.is_tabbed {
                         let container = self.hub.get_container(cp.id);
                         collect_tab_titles(container, &self.registry)
                     } else {
                         Vec::new()
                     };
-                    container_overlays.push(ContainerOverlayData {
-                        placement: *cp,
-                        tab_titles,
-                        cocoa_frame,
-                    });
+                    container_data.push((*cp, tab_titles));
                 }
-                (shows, container_overlays)
+
+                (
+                    MonitorTilingData {
+                        monitor_id: mp.monitor_id,
+                        monitor_dim,
+                        cocoa_frame: to_ns_rect(self.primary_full_height, monitor_dim),
+                        scale,
+                        windows: tiling_windows,
+                        containers: container_data,
+                    },
+                    float_shows,
+                )
             }
         }
     }

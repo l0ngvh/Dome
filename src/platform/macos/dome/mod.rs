@@ -72,6 +72,8 @@ pub(in crate::platform::macos) struct Dome {
     sender: Box<dyn FrameSender>,
     last_focused: Option<WindowId>,
     recovery: Recovery,
+    pending_created: Vec<WindowId>,
+    pending_deleted: Vec<WindowId>,
 }
 
 impl Dome {
@@ -101,6 +103,8 @@ impl Dome {
             sender,
             last_focused: None,
             recovery: Recovery::new(),
+            pending_created: Vec::new(),
+            pending_deleted: Vec::new(),
         }
     }
 
@@ -110,7 +114,9 @@ impl Dome {
         added: Vec<NewWindow>,
     ) -> Vec<Actions> {
         for &cg_id in removed {
-            self.remove_window(cg_id);
+            if let Some(entry) = self.registry.get(cg_id) {
+                self.remove_window(entry.window_id);
+            }
         }
         let mut on_open = Vec::new();
         for new in added {
@@ -234,8 +240,11 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn mirror_clicked(&mut self, window_id: WindowId) {
-        let entry = self.registry.by_id(window_id);
+    pub(in crate::platform::macos) fn mirror_clicked(&mut self, cg_id: CGWindowID) {
+        let Some(entry) = self.registry.get(cg_id) else {
+            return;
+        };
+        let window_id = entry.window_id;
         if let Err(e) = entry.ax.focus() {
             tracing::debug!("Failed to focus window: {e:#}");
         }
@@ -336,19 +345,19 @@ impl Dome {
         self.sender.send(HubMessage::RegisterObservers(apps));
     }
 
-    fn remove_app_windows(&mut self, pid: i32) {
-        for (cg_id, window_id) in self.registry.remove_by_pid(pid) {
-            self.recovery.untrack(cg_id);
-            self.monitor_registry.remove_displayed_window(window_id);
-            self.hub.delete_window(window_id);
-        }
+    fn remove_window(&mut self, wid: WindowId) {
+        self.hub.delete_window(wid);
+        self.pending_deleted.push(wid);
     }
 
-    fn remove_window(&mut self, cg_id: CGWindowID) {
-        if let Some(window_id) = self.registry.remove(cg_id) {
-            self.recovery.untrack(cg_id);
-            self.monitor_registry.remove_displayed_window(window_id);
-            self.hub.delete_window(window_id);
+    fn remove_app_windows(&mut self, pid: i32) {
+        let window_ids: Vec<WindowId> = self
+            .registry
+            .for_pid(pid)
+            .map(|(_, entry)| entry.window_id)
+            .collect();
+        for wid in window_ids {
+            self.remove_window(wid);
         }
     }
 
@@ -429,6 +438,7 @@ impl Dome {
                 title.clone(),
             );
             tracing::info!(%window_id, "New borderless fullscreen window");
+            self.pending_created.push(window_id);
             window_id
         } else {
             let window_id = self.hub.insert_tiling();
@@ -441,6 +451,7 @@ impl Dome {
                 title,
             );
             tracing::info!(%window_id, "New tiling window");
+            self.pending_created.push(window_id);
             window_id
         }
     }
@@ -462,6 +473,7 @@ impl Dome {
             title,
         );
         tracing::info!(%window_id, "New native fullscreen window");
+        self.pending_created.push(window_id);
         window_id
     }
 }

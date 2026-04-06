@@ -11,6 +11,7 @@ use super::window::WindowState;
 #[derive(Clone)]
 pub(in crate::platform::macos) struct WindowEntry {
     pub(in crate::platform::macos) ax: Arc<dyn AXWindowApi>,
+    pub(super) cg_id: CGWindowID,
     pub(super) window_id: WindowId,
     pub(super) app_name: Option<String>,
     pub(super) bundle_id: Option<String>,
@@ -39,6 +40,8 @@ impl std::fmt::Display for WindowEntry {
     }
 }
 
+/// Allow querying by CGWindowID for interaction between Dome and external events/UI, and by
+/// WindowId for Dome internal handling after confirming the window exist
 pub(super) struct Registry {
     windows: HashMap<CGWindowID, WindowEntry>,
     id_to_cg: HashMap<WindowId, CGWindowID>,
@@ -87,12 +90,6 @@ impl Registry {
             .unwrap()
     }
 
-    pub(super) fn try_by_id(&self, window_id: WindowId) -> Option<&WindowEntry> {
-        self.id_to_cg
-            .get(&window_id)
-            .and_then(|&cg_id| self.windows.get(&cg_id))
-    }
-
     pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> &mut WindowEntry {
         self.id_to_cg
             .get(&window_id)
@@ -107,21 +104,6 @@ impl Registry {
             .into_iter()
             .flatten()
             .filter_map(|&cg_id| Some((cg_id, self.windows.get(&cg_id)?)))
-    }
-
-    pub(super) fn remove_by_pid(&mut self, pid: i32) -> Vec<(CGWindowID, WindowId)> {
-        let Some(cg_ids) = self.pid_to_cg.remove(&pid) else {
-            return Vec::new();
-        };
-        let mut removed = Vec::new();
-        for cg_id in cg_ids {
-            if let Some(entry) = self.windows.remove(&cg_id) {
-                self.id_to_cg.remove(&entry.window_id);
-                tracing::info!(%entry, window_id = %entry.window_id, "Window removed");
-                removed.push((cg_id, entry.window_id));
-            }
-        }
-        removed
     }
 
     pub(super) fn iter(&self) -> impl Iterator<Item = (CGWindowID, &WindowEntry)> {
@@ -148,6 +130,7 @@ impl Registry {
             cg_id,
             WindowEntry {
                 ax,
+                cg_id,
                 window_id,
                 app_name,
                 bundle_id,

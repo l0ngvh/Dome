@@ -4,8 +4,6 @@ use std::collections::HashMap;
 pub(super) struct Allocator<T: Node> {
     storage: HashMap<T::Id, T>,
     next_id: usize,
-    created: Vec<T::Id>,
-    deleted: Vec<T::Id>,
 }
 
 impl<T: std::fmt::Debug + Node> Allocator<T> {
@@ -13,8 +11,6 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
         Self {
             storage: HashMap::new(),
             next_id: 0,
-            created: Vec::new(),
-            deleted: Vec::new(),
         }
     }
 
@@ -23,22 +19,12 @@ impl<T: std::fmt::Debug + Node> Allocator<T> {
         let id = T::Id::new(self.next_id);
         self.next_id += 1;
         self.storage.insert(id, node);
-        self.created.push(id);
         id
     }
 
     #[tracing::instrument(skip(self))]
     pub(super) fn delete(&mut self, id: T::Id) {
-        if self.storage.remove(&id).is_some() {
-            self.deleted.push(id);
-        }
-    }
-
-    pub(super) fn drain(&mut self) -> (Vec<T::Id>, Vec<T::Id>) {
-        (
-            std::mem::take(&mut self.created),
-            std::mem::take(&mut self.deleted),
-        )
+        self.storage.remove(&id);
     }
 
     pub(super) fn get(&self, id: T::Id) -> &T {
@@ -155,24 +141,7 @@ mod test {
         allocator.delete(id0);
         allocator.delete(id0);
 
-        let (_, deleted) = allocator.drain();
-        assert_eq!(deleted.len(), 1);
-    }
-
-    #[test]
-    fn drain_returns_created_and_deleted() {
-        let mut allocator = Allocator::new();
-        let id0 = allocator.allocate(TestNode { value: 1 });
-        allocator.allocate(TestNode { value: 2 });
-        allocator.delete(id0);
-
-        let (created, deleted) = allocator.drain();
-        assert_eq!(created, vec![TestId::new(0), TestId::new(1)]);
-        assert_eq!(deleted, vec![TestId::new(0)]);
-
-        let (created, deleted) = allocator.drain();
-        assert!(created.is_empty());
-        assert!(deleted.is_empty());
+        assert_eq!(allocator.all_active().len(), 1);
     }
 
     #[test]

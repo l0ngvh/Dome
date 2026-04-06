@@ -6,7 +6,7 @@ use objc2_foundation::NSRect;
 
 use crate::action::Actions;
 use crate::config::Config;
-use crate::core::{ContainerId, ContainerPlacement, Dimension, WindowId, WindowPlacement};
+use crate::core::{ContainerId, ContainerPlacement, Dimension, MonitorId, WindowPlacement};
 use crate::platform::macos::running_application::RunningApp;
 
 use super::super::MonitorInfo;
@@ -42,7 +42,7 @@ pub(in crate::platform::macos) enum HubEvent {
     /// we receive plenty of focus events, so missing them isn't a concern.
     Sync,
     ScreensChanged(Vec<MonitorInfo>),
-    MirrorClicked(WindowId),
+    MirrorClicked(CGWindowID),
     TabClicked(ContainerId, usize),
     /// macOS Space changed. Used to detect native fullscreen enter/exit since
     /// native fullscreen moves windows to a separate Space.
@@ -66,7 +66,7 @@ impl fmt::Display for HubEvent {
             Self::ScreensChanged(monitors) => {
                 write!(f, "ScreensChanged(count={})", monitors.len())
             }
-            Self::MirrorClicked(window_id) => write!(f, "MirrorClicked({window_id})"),
+            Self::MirrorClicked(cg_id) => write!(f, "MirrorClicked({cg_id})"),
             Self::TabClicked(container_id, tab_idx) => {
                 write!(f, "TabClicked({container_id}, tab_idx={tab_idx})")
             }
@@ -83,32 +83,35 @@ pub(in crate::platform::macos) enum HubMessage {
     Shutdown,
 }
 
+/// Rendering instructions produced by the hub thread after each layout cycle.
+/// The main thread consumes this to create, update, and destroy overlay windows,
+/// since macOS requires all UI operations to happen on the main thread.
 pub(in crate::platform::macos) struct RenderFrame {
-    pub(in crate::platform::macos) creates: Vec<OverlayCreate>,
-    pub(in crate::platform::macos) deletes: Vec<WindowId>,
-    pub(in crate::platform::macos) shows: Vec<OverlayShow>,
-    pub(in crate::platform::macos) container_creates: Vec<ContainerId>,
-    pub(in crate::platform::macos) containers: Vec<ContainerOverlayData>,
-    pub(in crate::platform::macos) deleted_containers: Vec<ContainerId>,
+    /// One entry per visible monitor. Contains tiling windows and containers to render on
+    /// that monitor's shared overlay. Monitors with no tiling content still get an entry
+    /// so the main thread can hide their overlay.
+    pub(in crate::platform::macos) tiling: Vec<MonitorTilingData>,
+    /// Float windows visible on the current workspace. Created on first appearance,
+    /// updated on subsequent frames. Float windows are rare, so the UI thread simply
+    /// removes overlays and captures for any window not in this list rather than
+    /// tracking individual deletions or float-to-tiling transitions.
+    pub(in crate::platform::macos) float_shows: Vec<FloatShow>,
 }
 
-pub(in crate::platform::macos) struct OverlayCreate {
-    pub(in crate::platform::macos) window_id: WindowId,
+pub(in crate::platform::macos) struct MonitorTilingData {
+    pub(in crate::platform::macos) monitor_id: MonitorId,
+    pub(in crate::platform::macos) monitor_dim: Dimension,
+    pub(in crate::platform::macos) cocoa_frame: NSRect,
+    pub(in crate::platform::macos) scale: f64,
+    pub(in crate::platform::macos) windows: Vec<WindowPlacement>,
+    pub(in crate::platform::macos) containers: Vec<(ContainerPlacement, Vec<String>)>,
+}
+
+pub(in crate::platform::macos) struct FloatShow {
     pub(in crate::platform::macos) cg_id: CGWindowID,
-    pub(in crate::platform::macos) frame: NSRect,
-}
-
-pub(in crate::platform::macos) struct OverlayShow {
-    pub(in crate::platform::macos) window_id: WindowId,
     pub(in crate::platform::macos) placement: WindowPlacement,
     pub(in crate::platform::macos) cocoa_frame: NSRect,
     pub(in crate::platform::macos) scale: f64,
     pub(in crate::platform::macos) content_dim: Dimension,
     pub(in crate::platform::macos) visible_content: Option<Dimension>,
-}
-
-pub(in crate::platform::macos) struct ContainerOverlayData {
-    pub(in crate::platform::macos) placement: ContainerPlacement,
-    pub(in crate::platform::macos) tab_titles: Vec<String>,
-    pub(in crate::platform::macos) cocoa_frame: NSRect,
 }

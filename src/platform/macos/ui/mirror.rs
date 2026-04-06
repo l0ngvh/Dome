@@ -15,7 +15,7 @@ use objc2_screen_capture_kit::{
 };
 
 use super::AppDelegate;
-use crate::core::{Dimension, WindowId};
+use crate::core::Dimension;
 
 pub(super) struct WindowCapture {
     stream: Retained<SCStream>,
@@ -33,7 +33,7 @@ impl WindowCapture {
     /// `scale` is passed separately because the original window may be hidden on a different monitor.
     pub(super) fn start(
         &mut self,
-        window_id: WindowId,
+        cg_id: CGWindowID,
         content_dim: Dimension,
         visible_content: Dimension,
         scale: f64,
@@ -57,7 +57,7 @@ impl WindowCapture {
             if !error.is_null() {
                 let error = unsafe { &*error };
                 tracing::warn!(
-                    %window_id,
+                    cg_id,
                     width,
                     height,
                     source_x = source_rect.origin.x,
@@ -78,7 +78,7 @@ impl WindowCapture {
                 if !error.is_null() {
                     let error = unsafe { &*error };
                     tracing::warn!(
-                        %window_id,
+                        cg_id,
                         width,
                         height,
                         source_x = source_rect.origin.x,
@@ -119,7 +119,7 @@ impl Drop for WindowCapture {
 }
 
 pub(super) fn create_captures_async(
-    windows: Vec<(CGWindowID, WindowId)>,
+    windows: Vec<CGWindowID>,
     queue: DispatchRetained<DispatchQueue>,
 ) {
     let block = RcBlock::new(
@@ -131,7 +131,7 @@ pub(super) fn create_captures_async(
             let content = unsafe { Retained::retain(content).unwrap() };
             let sc_windows = unsafe { content.windows() };
 
-            for &(cg_id, window_id) in &windows {
+            for &cg_id in &windows {
                 let Some(sc_window) = sc_windows.iter().find(|w| unsafe { w.windowID() } == cg_id)
                 else {
                     continue;
@@ -147,7 +147,7 @@ pub(super) fn create_captures_async(
                 let config = unsafe { SCStreamConfiguration::new() };
                 unsafe { config.setQueueDepth(3) };
 
-                let handler = StreamOutputHandler::new(window_id);
+                let handler = StreamOutputHandler::new(cg_id);
 
                 let stream = unsafe {
                     SCStream::initWithFilter_configuration_delegate(
@@ -179,15 +179,15 @@ pub(super) fn create_captures_async(
                     let delegate = app_delegate();
                     if delegate
                         .ivars()
-                        .overlay_windows
+                        .float_overlays
                         .borrow()
-                        .contains_key(&window_id)
+                        .contains_key(&cg_id)
                     {
                         delegate
                             .ivars()
                             .captures
                             .borrow_mut()
-                            .insert(window_id, capture);
+                            .insert(cg_id, capture);
                     }
                 });
             }
@@ -197,7 +197,7 @@ pub(super) fn create_captures_async(
 }
 
 struct StreamOutputHandlerIvars {
-    window_id: WindowId,
+    cg_id: CGWindowID,
 }
 
 define_class!(
@@ -218,14 +218,11 @@ define_class!(
             if output_type == SCStreamOutputType::Screen
                 && let Some(surface) = extract_io_surface(buffer)
             {
-                let window_id = self.ivars().window_id;
+                let cg_id = self.ivars().cg_id;
                 DispatchQueue::main().exec_async(move || {
                     let delegate = app_delegate();
-                    if let Some(overlay) = delegate
-                        .ivars()
-                        .overlay_windows
-                        .borrow_mut()
-                        .get_mut(&window_id)
+                    if let Some(overlay) =
+                        delegate.ivars().float_overlays.borrow_mut().get_mut(&cg_id)
                     {
                         overlay.apply_frame(&surface);
                     }
@@ -236,8 +233,8 @@ define_class!(
 );
 
 impl StreamOutputHandler {
-    fn new(window_id: WindowId) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { window_id });
+    fn new(cg_id: CGWindowID) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(StreamOutputHandlerIvars { cg_id });
         unsafe { msg_send![super(this), init] }
     }
 }

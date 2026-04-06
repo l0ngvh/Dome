@@ -49,7 +49,7 @@ fn three_windows_split_screen() {
 }
 
 /// distribute_space uses binary search and may produce fractional widths
-/// (e.g. 1920/3 ≈ 639.999). The f32→i32 conversion in show_window must
+/// (e.g. 1920/3 ≈ 639.999). The f32→i32 conversion in show_tiling must
 /// round, not truncate, or the cumulative error pushes the last window's
 /// right edge away from the screen edge.
 #[test]

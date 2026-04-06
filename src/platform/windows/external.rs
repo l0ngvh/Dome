@@ -1,5 +1,5 @@
 use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
+use windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST;
 
 use crate::core::Dimension;
 /// Opaque window identity. Replaces `ManagedHwnd` throughout the codebase.
@@ -40,7 +40,6 @@ impl HwndId {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ZOrder {
     Topmost,
-    NotTopmost,
     After(HwndId),
     Unchanged,
 }
@@ -49,7 +48,6 @@ impl From<ZOrder> for Option<HWND> {
     fn from(z: ZOrder) -> Self {
         match z {
             ZOrder::Topmost => Some(HWND_TOPMOST),
-            ZOrder::NotTopmost => Some(HWND_NOTOPMOST),
             ZOrder::After(id) => Some(HWND(id.0 as *mut _)),
             ZOrder::Unchanged => None,
         }

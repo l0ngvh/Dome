@@ -10,9 +10,7 @@ use crate::action::{Action, Actions};
 use crate::config::Config;
 use crate::core::Dimension;
 use crate::platform::windows::ScreenInfo;
-use crate::platform::windows::dome::overlay::{
-    ContainerOverlayApi, NoopContainerOverlay, NoopWindowOverlay, WindowOverlayApi,
-};
+use crate::platform::windows::dome::overlay::{FloatOverlayApi, TilingOverlayApi};
 use crate::platform::windows::dome::{CreateOverlay, Dome, QueryDisplay};
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
@@ -245,7 +243,7 @@ impl ManageExternalHwnd for MockExternalHwnd {
         let mut z_state = self.z_state.lock().unwrap();
         match z {
             ZOrder::Topmost => *z_state = ZOrderState::Topmost,
-            ZOrder::NotTopmost | ZOrder::After(_) => *z_state = ZOrderState::Normal,
+            ZOrder::After(_) => *z_state = ZOrderState::Normal,
             ZOrder::Unchanged => {}
         }
     }
@@ -307,12 +305,37 @@ impl ManageTaskbar for NoopTaskbar {
     fn delete_tab(&self, _: HwndId) {}
 }
 
+struct NoopFloatOverlay;
+impl FloatOverlayApi for NoopFloatOverlay {
+    fn id(&self) -> HwndId {
+        HwndId::test(0)
+    }
+    fn update(&mut self, _: &crate::core::WindowPlacement, _: &Config, _: ZOrder) {}
+    fn hide(&mut self) {}
+}
+
+struct NoopTilingOverlay;
+impl TilingOverlayApi for NoopTilingOverlay {
+    fn id(&self) -> HwndId {
+        HwndId::test(0)
+    }
+    fn update(
+        &mut self,
+        _: Dimension,
+        _: &[crate::core::WindowPlacement],
+        _: &[(crate::core::ContainerPlacement, Vec<String>)],
+    ) {
+    }
+    fn hide(&mut self) {}
+    fn set_config(&mut self, _: Config) {}
+}
+
 struct NoopOverlays;
 impl CreateOverlay for NoopOverlays {
-    fn create_window_overlay(&self) -> anyhow::Result<Box<dyn WindowOverlayApi>> {
-        Ok(Box::new(NoopWindowOverlay))
+    fn create_tiling_overlay(&self, _: Config) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
+        Ok(Box::new(NoopTilingOverlay))
     }
-    fn create_container_overlay(&self, _: Config) -> anyhow::Result<Box<dyn ContainerOverlayApi>> {
-        Ok(Box::new(NoopContainerOverlay))
+    fn create_float_overlay(&self) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
+        Ok(Box::new(NoopFloatOverlay))
     }
 }

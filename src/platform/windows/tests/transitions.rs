@@ -174,7 +174,7 @@ fn iconic_window_restored_before_positioning() {
     // Simulate the window becoming iconic externally
     w1.iconic.store(true, Ordering::Relaxed);
 
-    // Trigger relayout — show_window should restore before positioning
+    // Trigger relayout — show_tiling should restore before positioning
     let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
     env.add_window(w2.clone());
 
@@ -250,4 +250,73 @@ fn float_restored_from_offscreen_is_topmost() {
     env.run_actions("focus workspace 0");
     assert!(!w2.is_offscreen());
     assert!(w2.is_topmost());
+}
+
+#[test]
+fn float_to_tiling_loses_topmost() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    env.run_actions("toggle float");
+    assert!(w2.is_topmost());
+
+    env.run_actions("toggle float");
+    assert!(!w2.is_topmost());
+    assert!(!w1.is_topmost());
+}
+
+#[test]
+fn float_focus_change_retops() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    // Float both
+    env.run_actions("toggle float");
+    env.run_actions("focus left");
+    env.run_actions("toggle float");
+
+    // w1 is focused and float
+    assert!(w1.is_topmost());
+
+    // Focus w2
+    env.run_actions("focus right");
+    assert!(w2.is_topmost());
+}
+
+#[test]
+fn tiling_windows_not_topmost() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w3 = Arc::new(MockExternalHwnd::with_title(3, "App3", "app3.exe"));
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+    env.add_window(w3.clone());
+
+    assert!(!w1.is_topmost());
+    assert!(!w2.is_topmost());
+    assert!(!w3.is_topmost());
+}
+
+#[test]
+fn float_survives_sibling_add() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    env.add_window(w1.clone());
+
+    env.run_actions("toggle float");
+    assert!(w1.is_topmost());
+
+    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    env.add_window(w2.clone());
+
+    // w1 should still be float and topmost
+    assert!(w1.is_topmost());
+    assert!(!w2.is_topmost());
 }

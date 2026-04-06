@@ -2,17 +2,61 @@ use egui::{Align, Color32, CornerRadius, Layout, Rect, RichText, Sense, pos2, ve
 
 use crate::config::{Color, Config};
 use crate::core::SpawnMode;
-use crate::core::{ContainerPlacement, WindowPlacement};
+use crate::core::{ContainerId, ContainerPlacement, Dimension, WindowPlacement};
+
+/// Draws all tiling window borders and container overlays for a single monitor.
+/// Returns `(ContainerId, tab_index)` for each tab that was clicked.
+pub(crate) fn paint_tiling_overlay(
+    ctx: &egui::Context,
+    monitor: Dimension,
+    windows: &[WindowPlacement],
+    containers: &[(ContainerPlacement, Vec<String>)],
+    config: &Config,
+) -> Vec<(ContainerId, usize)> {
+    let mut clicked = Vec::new();
+
+    for wp in windows {
+        let vf = wp.visible_frame;
+        let origin = vec2(vf.x - monitor.x, vf.y - monitor.y);
+        egui::Area::new(egui::Id::new(("border", wp.id)))
+            .fixed_pos(origin.to_pos2())
+            .show(ctx, |ui| {
+                ui.set_clip_rect(Rect::from_min_size(
+                    origin.to_pos2(),
+                    vec2(vf.width, vf.height),
+                ));
+                paint_window_border(ui.painter(), wp, config, origin);
+            });
+    }
+
+    for (cp, titles) in containers {
+        let vf = cp.visible_frame;
+        let origin = vec2(vf.x - monitor.x, vf.y - monitor.y);
+        egui::Area::new(egui::Id::new(("container", cp.id)))
+            .fixed_pos(origin.to_pos2())
+            .show(ctx, |ui| {
+                ui.set_clip_rect(Rect::from_min_size(
+                    origin.to_pos2(),
+                    vec2(vf.width, vf.height),
+                ));
+                if let Some(tab) = show_container(ui, cp, titles, config, origin) {
+                    clicked.push((cp.id, tab));
+                }
+            });
+    }
+
+    clicked
+}
 
 /// Draws 4 border edges for a window overlay.
-/// Coordinates are relative to the overlay window origin. The overlay window is sized to
-/// `placement.visible_frame` (the clipped portion). Borders are drawn at positions offset
-/// from the full `placement.frame`, so edges clipped by the monitor are naturally outside
-/// the window bounds and get clipped by egui.
+/// `origin` is the visible_frame's top-left in canvas coordinates.
+/// For per-window overlays (floats), pass `Vec2::ZERO`.
+/// For the tiling overlay, pass `vec2(vf.x - monitor.x, vf.y - monitor.y)`.
 pub(crate) fn paint_window_border(
     painter: &egui::Painter,
     placement: &WindowPlacement,
     config: &Config,
+    origin: egui::Vec2,
 ) {
     let colors = border_colors(
         placement.is_focused,
@@ -26,21 +70,23 @@ pub(crate) fn paint_window_border(
         placement.visible_frame,
         config.border_size,
         colors,
+        origin,
     );
 }
 
 /// Draws container borders and an inline tab bar. Returns `Some(tab_index)` if a tab was clicked.
-/// The overlay window is sized to `placement.visible_frame`.
+/// `origin` is the visible_frame's top-left in canvas coordinates (same as `paint_window_border`).
 pub(crate) fn show_container(
     ui: &mut egui::Ui,
     placement: &ContainerPlacement,
     tab_titles: &[String],
     config: &Config,
+    origin: egui::Vec2,
 ) -> Option<usize> {
     let vf = placement.visible_frame;
     let f = placement.frame;
-    let ox = f.x - vf.x;
-    let oy = f.y - vf.y;
+    let ox = origin.x + f.x - vf.x;
+    let oy = origin.y + f.y - vf.y;
     let b = config.border_size;
     let w = f.width;
     let h = f.height;
@@ -77,7 +123,7 @@ pub(crate) fn show_container(
                 colors[2],
             );
         } else {
-            paint_border_edges(painter, f, vf, b, colors);
+            paint_border_edges(painter, f, vf, b, colors, origin);
         }
     }
 
@@ -162,7 +208,11 @@ pub(crate) fn show_container(
             );
         }
 
-        let response = ui.allocate_rect(tab_rect, Sense::click());
+        let response = ui.interact(
+            tab_rect,
+            egui::Id::new(("tab", placement.id, i)),
+            Sense::click(),
+        );
         if response.clicked() {
             clicked = Some(i);
         }
@@ -182,18 +232,19 @@ pub(crate) fn show_container(
     clicked
 }
 
-use crate::core::Dimension;
-
 fn paint_border_edges(
     painter: &egui::Painter,
     frame: Dimension,
     visible_frame: Dimension,
     b: f32,
     colors: [Color32; 4],
+    origin: egui::Vec2,
 ) {
-    // Offset: frame origin relative to visible_frame origin
-    let ox = frame.x - visible_frame.x;
-    let oy = frame.y - visible_frame.y;
+    // Offset: origin positions the visible_frame in canvas space, then frame is offset
+    // relative to visible_frame. For per-window overlays (origin=ZERO), this reduces to
+    // the original frame.x - visible_frame.x calculation.
+    let ox = origin.x + frame.x - visible_frame.x;
+    let oy = origin.y + frame.y - visible_frame.y;
     let w = frame.width;
     let h = frame.height;
 

@@ -12,7 +12,7 @@ use raw_window_handle::{RawWindowHandle, Win32WindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CombineRgn, CreateRectRgn, DeleteObject, EndPaint, HRGN, InvalidateRect,
+    BeginPaint, CombineRgn, CreateRectRgn, DeleteObject, EndPaint, HRGN, InvalidateRect, OffsetRgn,
     PAINTSTRUCT, RGN_OR, SetWindowRgn,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -27,187 +27,9 @@ use windows::core::PCWSTR;
 
 use super::HubEvent;
 use crate::config::Config;
-use crate::core::{ContainerPlacement, WindowPlacement};
+use crate::core::{ContainerPlacement, Dimension, WindowPlacement};
 use crate::overlay;
 use crate::platform::windows::external::{HwndId, ZOrder};
-
-pub(in crate::platform::windows) const CONTAINER_OVERLAY_CLASS: PCWSTR =
-    windows::core::w!("DomeContainerOverlay");
-
-/// `renderer` is declared before `window` so it drops first —
-/// GL cleanup runs while the window's HDC is still alive.
-pub(in crate::platform::windows) struct ContainerOverlay {
-    renderer: OverlayRenderer,
-    events: Vec<egui::Event>,
-    width: u32,
-    height: u32,
-    placement: Option<ContainerPlacement>,
-    tab_titles: Vec<String>,
-    config: Config,
-    hub_sender: HubSender,
-    window: OwnedHwnd,
-}
-
-impl ContainerOverlay {
-    pub(in crate::platform::windows) fn new(
-        display: &Display,
-        config: Config,
-        hub_sender: HubSender,
-    ) -> anyhow::Result<Box<Self>> {
-        let window = OwnedHwnd::new(CONTAINER_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
-        let hwnd = window.hwnd();
-
-        let renderer = OverlayRenderer::new(display, hwnd, 1, 1)?;
-
-        let mut boxed = Box::new(Self {
-            renderer,
-            events: Vec::new(),
-            width: 1,
-            height: 1,
-            placement: None,
-            tab_titles: Vec::new(),
-            config,
-            hub_sender,
-            window,
-        });
-        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
-
-        Ok(boxed)
-    }
-
-    fn rerender(&mut self) {
-        let Some(placement) = self.placement.as_ref() else {
-            return;
-        };
-        let tab_titles = &self.tab_titles;
-        let config = &self.config;
-        let events = std::mem::take(&mut self.events);
-        let clicked = self
-            .renderer
-            .render(self.width, self.height, 1.0, events, |ui| {
-                overlay::show_container(ui, placement, tab_titles, config)
-            });
-        if let Some(tab_idx) = clicked {
-            self.hub_sender
-                .send(HubEvent::TabClicked(placement.id, tab_idx));
-        }
-    }
-}
-
-impl ContainerOverlayApi for ContainerOverlay {
-    fn id(&self) -> HwndId {
-        HwndId::from(self.window.hwnd())
-    }
-
-    fn update(&mut self, placement: ContainerPlacement, tab_titles: Vec<String>, z: ZOrder) {
-        let vf = placement.visible_frame;
-        let w = vf.width.max(1.0) as u32;
-        let h = vf.height.max(1.0) as u32;
-
-        if self.width != w || self.height != h {
-            self.renderer.resize(w, h);
-            self.width = w;
-            self.height = h;
-        }
-
-        let region = build_container_region(&placement, &self.config);
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
-
-        self.placement = Some(placement);
-        self.tab_titles = tab_titles;
-        self.rerender();
-
-        let z_after: Option<HWND> = z.into();
-        let mut flags = SWP_NOACTIVATE;
-        if z_after.is_none() {
-            flags |= SWP_NOZORDER;
-        }
-        unsafe {
-            SetWindowPos(
-                self.window.hwnd(),
-                z_after,
-                vf.x as i32,
-                vf.y as i32,
-                w as i32,
-                h as i32,
-                flags,
-            )
-            .ok();
-        }
-
-        self.window.show();
-    }
-
-    fn hide(&mut self) {
-        self.window.hide();
-    }
-
-    fn set_config(&mut self, config: Config) {
-        self.config = config;
-    }
-}
-
-impl Drop for ContainerOverlay {
-    fn drop(&mut self) {
-        unsafe { SetWindowLongPtrW(self.window.hwnd(), GWLP_USERDATA, 0) };
-    }
-}
-
-pub(in crate::platform::windows) unsafe extern "system" fn container_wnd_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut ContainerOverlay;
-    if ptr.is_null() {
-        return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
-    }
-    let overlay = unsafe { &mut *ptr };
-    match msg {
-        WM_MOUSEMOVE => {
-            let x = (lparam.0 & 0xFFFF) as i16 as f32;
-            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
-            overlay
-                .events
-                .push(egui::Event::PointerMoved(egui::pos2(x, y)));
-            LRESULT(0)
-        }
-        WM_LBUTTONDOWN => {
-            let x = (lparam.0 & 0xFFFF) as i16 as f32;
-            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
-            overlay.events.push(egui::Event::PointerButton {
-                pos: egui::pos2(x, y),
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            });
-            LRESULT(0)
-        }
-        WM_LBUTTONUP => {
-            let x = (lparam.0 & 0xFFFF) as i16 as f32;
-            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
-            overlay.events.push(egui::Event::PointerButton {
-                pos: egui::pos2(x, y),
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            });
-            invalidate_rect(hwnd);
-            LRESULT(0)
-        }
-        WM_PAINT => {
-            unsafe {
-                let mut ps = std::mem::zeroed::<PAINTSTRUCT>();
-                BeginPaint(hwnd, &mut ps);
-                overlay.rerender();
-                EndPaint(hwnd, &ps).ok().ok(); // always returns nonzero per MSDN
-            }
-            LRESULT(0)
-        }
-        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
-    }
-}
 
 pub(in crate::platform::windows) fn raw_window_handle(hwnd: HWND) -> RawWindowHandle {
     let mut handle = Win32WindowHandle::new(std::num::NonZeroIsize::new(hwnd.0 as isize).unwrap());
@@ -344,7 +166,7 @@ impl OverlayRenderer {
         height: u32,
         pixels_per_point: f32,
         events: Vec<egui::Event>,
-        ui_fn: impl FnOnce(&mut egui::Ui) -> R,
+        mut ctx_fn: impl FnMut(&egui::Context) -> R,
     ) -> R {
         self.gl_context.make_current(&self.surface).ok();
         unsafe {
@@ -371,16 +193,9 @@ impl OverlayRenderer {
             ..Default::default()
         };
 
-        let mut ui_fn = Some(ui_fn);
         let mut result = None;
         let output = self.egui_ctx.run(raw_input, |ctx| {
-            egui::Area::new(egui::Id::new("overlay"))
-                .fixed_pos(egui::pos2(0.0, 0.0))
-                .show(ctx, |ui| {
-                    if let Some(f) = ui_fn.take() {
-                        result = Some(f(ui));
-                    }
-                });
+            result = Some(ctx_fn(ctx));
         });
         let meshes = self
             .egui_ctx
@@ -529,63 +344,234 @@ fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HR
     }
 }
 
-pub(in crate::platform::windows) trait WindowOverlayApi {
+pub(in crate::platform::windows) const TILING_OVERLAY_CLASS: PCWSTR =
+    windows::core::w!("DomeTilingOverlay");
+
+/// Per-monitor overlay that draws all tiling window borders and container tab bars.
+/// `renderer` is declared before `window` so it drops first.
+pub(in crate::platform::windows) struct TilingOverlay {
+    renderer: OverlayRenderer,
+    events: Vec<egui::Event>,
+    monitor: Dimension,
+    windows: Vec<WindowPlacement>,
+    containers: Vec<(ContainerPlacement, Vec<String>)>,
+    config: Config,
+    hub_sender: HubSender,
+    window: OwnedHwnd,
+}
+
+impl TilingOverlay {
+    pub(in crate::platform::windows) fn new(
+        display: &Display,
+        config: Config,
+        hub_sender: HubSender,
+    ) -> anyhow::Result<Box<Self>> {
+        let window = OwnedHwnd::new(TILING_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
+        let hwnd = window.hwnd();
+        let renderer = OverlayRenderer::new(display, hwnd, 1, 1)?;
+        let mut boxed = Box::new(Self {
+            renderer,
+            events: Vec::new(),
+            monitor: Dimension::default(),
+            windows: Vec::new(),
+            containers: Vec::new(),
+            config,
+            hub_sender,
+            window,
+        });
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
+        Ok(boxed)
+    }
+
+    fn rerender(&mut self) {
+        if self.windows.is_empty() && self.containers.is_empty() {
+            return;
+        }
+        let monitor = self.monitor;
+        let config = &self.config;
+        let events = std::mem::take(&mut self.events);
+        let w = monitor.width.max(1.0) as u32;
+        let h = monitor.height.max(1.0) as u32;
+        let clicked_tabs = self.renderer.render(w, h, 1.0, events, |ctx| {
+            overlay::paint_tiling_overlay(ctx, monitor, &self.windows, &self.containers, config)
+        });
+        for (container_id, tab_idx) in clicked_tabs {
+            self.hub_sender
+                .send(HubEvent::TabClicked(container_id, tab_idx));
+        }
+    }
+}
+
+impl TilingOverlayApi for TilingOverlay {
+    fn id(&self) -> HwndId {
+        HwndId::from(self.window.hwnd())
+    }
+
+    fn update(
+        &mut self,
+        monitor: Dimension,
+        windows: &[WindowPlacement],
+        containers: &[(ContainerPlacement, Vec<String>)],
+    ) {
+        let w = monitor.width.max(1.0) as u32;
+        let h = monitor.height.max(1.0) as u32;
+
+        if self.monitor != monitor {
+            self.renderer.resize(w, h);
+            self.monitor = monitor;
+        }
+
+        // Build combined region covering all border strips and tab bar rects
+        let region = unsafe { CreateRectRgn(0, 0, 0, 0) };
+        for wp in windows {
+            let wr = build_window_border_region(wp, &self.config);
+            let ox = (wp.visible_frame.x - monitor.x) as i32;
+            let oy = (wp.visible_frame.y - monitor.y) as i32;
+            unsafe {
+                OffsetRgn(wr, ox, oy);
+                CombineRgn(Some(region), Some(region), Some(wr), RGN_OR);
+                DeleteObject(wr.into()).ok().ok();
+            }
+        }
+        for (cp, _) in containers {
+            let cr = build_container_region(cp, &self.config);
+            let ox = (cp.visible_frame.x - monitor.x) as i32;
+            let oy = (cp.visible_frame.y - monitor.y) as i32;
+            unsafe {
+                OffsetRgn(cr, ox, oy);
+                CombineRgn(Some(region), Some(region), Some(cr), RGN_OR);
+                DeleteObject(cr.into()).ok().ok();
+            }
+        }
+        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
+
+        self.windows = windows.to_vec();
+        self.containers = containers.to_vec();
+        self.rerender();
+
+        unsafe {
+            SetWindowPos(
+                self.window.hwnd(),
+                None,
+                monitor.x as i32,
+                monitor.y as i32,
+                w as i32,
+                h as i32,
+                SWP_NOACTIVATE | SWP_NOZORDER,
+            )
+            .ok();
+        }
+        self.window.show();
+    }
+
+    fn hide(&mut self) {
+        self.window.hide();
+    }
+
+    fn set_config(&mut self, config: Config) {
+        self.config = config;
+    }
+}
+
+impl Drop for TilingOverlay {
+    fn drop(&mut self) {
+        unsafe { SetWindowLongPtrW(self.window.hwnd(), GWLP_USERDATA, 0) };
+    }
+}
+
+pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut TilingOverlay;
+    if ptr.is_null() {
+        return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+    }
+    let overlay = unsafe { &mut *ptr };
+    match msg {
+        WM_MOUSEMOVE => {
+            let x = (lparam.0 & 0xFFFF) as i16 as f32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            overlay
+                .events
+                .push(egui::Event::PointerMoved(egui::pos2(x, y)));
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            let x = (lparam.0 & 0xFFFF) as i16 as f32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            overlay.events.push(egui::Event::PointerButton {
+                pos: egui::pos2(x, y),
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            let x = (lparam.0 & 0xFFFF) as i16 as f32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            overlay.events.push(egui::Event::PointerButton {
+                pos: egui::pos2(x, y),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            invalidate_rect(hwnd);
+            LRESULT(0)
+        }
+        WM_PAINT => {
+            unsafe {
+                let mut ps = std::mem::zeroed::<PAINTSTRUCT>();
+                BeginPaint(hwnd, &mut ps);
+                overlay.rerender();
+                EndPaint(hwnd, &ps).ok().ok();
+            }
+            LRESULT(0)
+        }
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+pub(in crate::platform::windows) trait FloatOverlayApi {
     fn id(&self) -> HwndId;
-    fn update(&mut self, wp: &WindowPlacement, is_focused: bool, config: &Config, z: ZOrder);
+    fn update(&mut self, wp: &WindowPlacement, config: &Config, z: ZOrder);
     fn hide(&mut self);
 }
 
-pub(in crate::platform::windows) trait ContainerOverlayApi {
+pub(in crate::platform::windows) trait TilingOverlayApi {
     fn id(&self) -> HwndId;
-    fn update(&mut self, placement: ContainerPlacement, tab_titles: Vec<String>, z: ZOrder);
+    fn update(
+        &mut self,
+        monitor: Dimension,
+        windows: &[WindowPlacement],
+        containers: &[(ContainerPlacement, Vec<String>)],
+    );
     fn hide(&mut self);
     fn set_config(&mut self, config: Config);
 }
 
-#[cfg(test)]
-pub(in crate::platform::windows) struct NoopWindowOverlay;
+pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =
+    windows::core::w!("DomeFloatOverlay");
 
-#[cfg(test)]
-impl WindowOverlayApi for NoopWindowOverlay {
-    fn id(&self) -> HwndId {
-        HwndId::test(0)
-    }
-    fn update(&mut self, _: &WindowPlacement, _: bool, _: &Config, _: ZOrder) {}
-    fn hide(&mut self) {}
-}
-
-#[cfg(test)]
-pub(in crate::platform::windows) struct NoopContainerOverlay;
-
-#[cfg(test)]
-impl ContainerOverlayApi for NoopContainerOverlay {
-    fn id(&self) -> HwndId {
-        HwndId::test(0)
-    }
-    fn update(&mut self, _: ContainerPlacement, _: Vec<String>, _: ZOrder) {}
-    fn hide(&mut self) {}
-    fn set_config(&mut self, _: Config) {}
-}
-
-pub(in crate::platform::windows) const WINDOW_OVERLAY_CLASS: PCWSTR =
-    windows::core::w!("DomeWindowOverlay");
-
-pub(in crate::platform::windows) fn create_window_overlay(
+pub(in crate::platform::windows) fn create_float_overlay(
     display: &Display,
-) -> anyhow::Result<Box<dyn WindowOverlayApi>> {
-    Ok(Box::new(WindowOverlay::new(display)?))
+) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
+    Ok(Box::new(FloatOverlay::new(display)?))
 }
 
-struct WindowOverlay {
+struct FloatOverlay {
     renderer: OverlayRenderer,
     width: u32,
     height: u32,
     window: OwnedHwnd,
 }
 
-impl WindowOverlay {
+impl FloatOverlay {
     fn new(display: &Display) -> anyhow::Result<Self> {
-        let window = OwnedHwnd::new(WINDOW_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
+        let window = OwnedHwnd::new(FLOAT_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
         let renderer = OverlayRenderer::new(display, window.hwnd(), 1, 1)?;
         Ok(Self {
             renderer,
@@ -596,12 +582,12 @@ impl WindowOverlay {
     }
 }
 
-impl WindowOverlayApi for WindowOverlay {
+impl FloatOverlayApi for FloatOverlay {
     fn id(&self) -> HwndId {
         HwndId::from(self.window.hwnd())
     }
 
-    fn update(&mut self, wp: &WindowPlacement, _is_focused: bool, config: &Config, z: ZOrder) {
+    fn update(&mut self, wp: &WindowPlacement, config: &Config, z: ZOrder) {
         let vf = wp.visible_frame;
         let w = vf.width.max(1.0) as u32;
         let h = vf.height.max(1.0) as u32;
@@ -612,8 +598,17 @@ impl WindowOverlayApi for WindowOverlay {
             self.height = h;
         }
 
-        self.renderer.render(w, h, 1.0, vec![], |ui| {
-            overlay::paint_window_border(ui.painter(), wp, config);
+        self.renderer.render(w, h, 1.0, vec![], |ctx| {
+            let origin = egui::vec2(0.0, 0.0);
+            egui::Area::new(egui::Id::new(("border", wp.id)))
+                .fixed_pos(origin.to_pos2())
+                .show(ctx, |ui| {
+                    ui.set_clip_rect(egui::Rect::from_min_size(
+                        origin.to_pos2(),
+                        egui::vec2(vf.width, vf.height),
+                    ));
+                    overlay::paint_window_border(ui.painter(), wp, config, origin);
+                });
         });
 
         let region = build_window_border_region(wp, config);

@@ -36,7 +36,7 @@ use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
 use dome::overlay::{
-    CONTAINER_OVERLAY_CLASS, WINDOW_OVERLAY_CLASS, container_wnd_proc, raw_window_handle,
+    FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, raw_window_handle, tiling_overlay_wnd_proc,
 };
 use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
@@ -166,18 +166,18 @@ struct GlOverlayFactory {
 }
 
 impl dome::CreateOverlay for GlOverlayFactory {
-    fn create_window_overlay(&self) -> anyhow::Result<Box<dyn dome::overlay::WindowOverlayApi>> {
-        dome::overlay::create_window_overlay(&self.display)
-    }
-    fn create_container_overlay(
+    fn create_tiling_overlay(
         &self,
         config: Config,
-    ) -> anyhow::Result<Box<dyn dome::overlay::ContainerOverlayApi>> {
-        Ok(dome::overlay::ContainerOverlay::new(
+    ) -> anyhow::Result<Box<dyn dome::overlay::TilingOverlayApi>> {
+        Ok(dome::overlay::TilingOverlay::new(
             &self.display,
             config,
             self.hub_sender.clone(),
         )?)
+    }
+    fn create_float_overlay(&self) -> anyhow::Result<Box<dyn dome::overlay::FloatOverlayApi>> {
+        dome::overlay::create_float_overlay(&self.display)
     }
 }
 
@@ -205,7 +205,7 @@ unsafe extern "system" fn app_wnd_proc(
     }
 }
 
-unsafe extern "system" fn window_overlay_wnd_proc(
+unsafe extern "system" fn float_overlay_wnd_proc(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
@@ -230,21 +230,21 @@ fn run_dome(config: Config, main_thread_id: u32) {
 
     let wc_window = WNDCLASSW {
         style: CS_HREDRAW | CS_VREDRAW,
-        lpfnWndProc: Some(window_overlay_wnd_proc),
+        lpfnWndProc: Some(float_overlay_wnd_proc),
         hInstance: hinstance.into(),
-        lpszClassName: WINDOW_OVERLAY_CLASS,
+        lpszClassName: FLOAT_OVERLAY_CLASS,
         ..Default::default()
     };
     unsafe { RegisterClassW(&wc_window) };
 
-    let wc_container = WNDCLASSW {
+    let wc_tiling = WNDCLASSW {
         style: CS_HREDRAW | CS_VREDRAW,
-        lpfnWndProc: Some(container_wnd_proc),
+        lpfnWndProc: Some(tiling_overlay_wnd_proc),
         hInstance: hinstance.into(),
-        lpszClassName: CONTAINER_OVERLAY_CLASS,
+        lpszClassName: TILING_OVERLAY_CLASS,
         ..Default::default()
     };
-    unsafe { RegisterClassW(&wc_container) };
+    unsafe { RegisterClassW(&wc_tiling) };
 
     let app_hwnd = unsafe {
         CreateWindowExW(

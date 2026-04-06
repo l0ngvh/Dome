@@ -397,7 +397,7 @@ fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
     match child {
         Child::Window(id) => {
             let w = hub.get_window(id);
-            let dim = w.dimension();
+            let dim = w.dimension;
             s.push_str(&format!(
                 "{}Window(id={}, parent={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
                 prefix, id, w.parent, dim.x, dim.y, dim.width, dim.height
@@ -432,7 +432,7 @@ fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
 fn fmt_float_str(hub: &Hub, s: &mut String, float_id: WindowId, indent: usize) {
     let prefix = "  ".repeat(indent);
     let f = hub.get_window(float_id);
-    let dim = f.dimension();
+    let dim = f.dimension;
     s.push_str(&format!(
         "{}Float(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
         prefix, float_id, dim.x, dim.y, dim.width, dim.height
@@ -442,7 +442,7 @@ fn fmt_float_str(hub: &Hub, s: &mut String, float_id: WindowId, indent: usize) {
 fn fmt_fullscreen_str(hub: &Hub, s: &mut String, fs_id: WindowId, indent: usize) {
     let prefix = "  ".repeat(indent);
     let w = hub.get_window(fs_id);
-    let dim = w.dimension();
+    let dim = w.dimension;
     s.push_str(&format!(
         "{}Fullscreen(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
         prefix, fs_id, dim.x, dim.y, dim.width, dim.height
@@ -602,7 +602,7 @@ fn validate_window(hub: &Hub, wid: WindowId, expected_parent: Parent, workspace_
         "Window {wid} has wrong workspace"
     );
 
-    let dim = window.dimension();
+    let dim = window.dimension;
     let (min_w, min_h) = window.min_size();
     let (max_w, max_h) = window.max_size();
 
@@ -730,17 +730,17 @@ fn child_constraints(hub: &Hub, child: Child) -> (Dimension, (f32, f32), (f32, f
     match child {
         Child::Window(wid) => {
             let w = hub.get_window(wid);
-            (w.dimension(), w.min_size(), w.max_size())
+            (w.dimension, w.min_size(), w.max_size())
         }
         Child::Container(cid) => {
             let c = hub.get_container(cid);
-            (c.dimension(), c.min_size(), (0.0, 0.0))
+            (c.dimension, c.min_size(), (0.0, 0.0))
         }
     }
 }
 
 fn validate_container_dimensions(hub: &Hub, cid: ContainerId, container: &Container) {
-    let dim = container.dimension();
+    let dim = container.dimension;
     let children = container.children();
     let constraints: Vec<_> = children
         .iter()

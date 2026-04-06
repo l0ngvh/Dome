@@ -28,7 +28,7 @@ fn discover_native_fullscreen_window() {
     dome.reconcile_windows(&[], vec![nw]);
     macos.settle(&mut dome, 10);
 
-    assert!(macos.ids.lock().unwrap().contains_key(&cg1));
+    assert!(dome.tracked_window(cg1).is_some());
 }
 
 #[test]

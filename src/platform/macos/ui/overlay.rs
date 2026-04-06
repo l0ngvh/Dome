@@ -8,34 +8,33 @@ use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder,
     NSView, NSWindow, NSWindowCollectionBehavior, NSWindowLevel, NSWindowStyleMask,
 };
+use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
 use objc2_quartz_core::CAMetalLayer;
 
 use super::super::dome::HubEvent;
-use super::renderer::{ContainerRenderer, MetalBackend, WindowRenderer};
+use super::renderer::{MetalBackend, OverlayRenderer};
 use crate::config::Config;
-use crate::core::{ContainerId, ContainerPlacement, Dimension, WindowId, WindowPlacement};
+use crate::core::{ContainerPlacement, Dimension, WindowPlacement};
 use crate::overlay;
 
-const TILING_WINDOW_OVERLAY_LEVEL: NSWindowLevel = NSNormalWindowLevel - 2;
-const CONTAINER_OVERLAY_LEVEL: NSWindowLevel = NSNormalWindowLevel - 1;
-const FLOAT_WINDOW_OVERLAY_LEVEL: NSWindowLevel = NSFloatingWindowLevel;
+const FLOAT_OVERLAY_LEVEL: NSWindowLevel = NSFloatingWindowLevel;
 
-pub(super) struct WindowOverlay {
+pub(super) struct FloatOverlay {
     window: Retained<NSWindow>,
-    renderer: WindowRenderer,
+    renderer: OverlayRenderer,
     placement: Option<WindowPlacement>,
     visible_content_bounds: Option<[f32; 4]>,
     scale: f64,
     config: Config,
 }
 
-impl WindowOverlay {
+impl FloatOverlay {
     pub(super) fn new(
         mtm: MainThreadMarker,
         frame: NSRect,
-        window_id: WindowId,
+        cg_id: CGWindowID,
         hub_sender: CalloopSender<HubEvent>,
         backend: Rc<MetalBackend>,
         config: Config,
@@ -51,6 +50,7 @@ impl WindowOverlay {
         };
         window.setBackgroundColor(Some(&NSColor::clearColor()));
         window.setOpaque(false);
+        window.setLevel(FLOAT_OVERLAY_LEVEL);
         window.setCollectionBehavior(
             NSWindowCollectionBehavior::Auxiliary
                 | NSWindowCollectionBehavior::Default
@@ -62,13 +62,13 @@ impl WindowOverlay {
         unsafe { window.setReleasedWhenClosed(false) };
 
         let scale = window.backingScaleFactor();
-        let renderer = WindowRenderer::new(backend, scale, frame.size.width, frame.size.height);
-        let view = MetalOverlayView::new(
+        let renderer = OverlayRenderer::new(backend, scale, frame.size.width, frame.size.height);
+        let view = FloatOverlayView::new(
             mtm,
             NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
             renderer.layer(),
             hub_sender,
-            window_id,
+            cg_id,
         );
         window.setContentView(Some(&view));
 
@@ -96,14 +96,7 @@ impl WindowOverlay {
         self.renderer
             .resize(cocoa_frame.size.width, cocoa_frame.size.height, scale);
 
-        let level = if placement.is_float {
-            FLOAT_WINDOW_OVERLAY_LEVEL
-        } else {
-            TILING_WINDOW_OVERLAY_LEVEL
-        };
-        self.window.setLevel(level);
-
-        if !placement.is_focused && placement.is_float {
+        if !placement.is_focused {
             self.window.setIgnoresMouseEvents(false);
         } else {
             self.window.setIgnoresMouseEvents(true);
@@ -117,8 +110,12 @@ impl WindowOverlay {
 
         let config = &self.config;
         let mr = self.visible_content_bounds;
-        self.renderer.render(scale as f32, mr, |ui| {
-            overlay::paint_window_border(ui.painter(), placement, config);
+        self.renderer.render(scale as f32, Vec::new(), mr, |ctx| {
+            egui::Area::new(egui::Id::new("overlay"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    overlay::paint_window_border(ui.painter(), placement, config, egui::Vec2::ZERO);
+                });
         });
         self.window.setIsVisible(true);
     }
@@ -128,14 +125,20 @@ impl WindowOverlay {
         if let Some(placement) = self.placement {
             let config = &self.config;
             let mr = self.visible_content_bounds;
-            self.renderer.render(self.scale as f32, mr, |ui| {
-                overlay::paint_window_border(ui.painter(), &placement, config);
-            });
+            self.renderer
+                .render(self.scale as f32, Vec::new(), mr, |ctx| {
+                    egui::Area::new(egui::Id::new("overlay"))
+                        .fixed_pos(egui::pos2(0.0, 0.0))
+                        .show(ctx, |ui| {
+                            overlay::paint_window_border(
+                                ui.painter(),
+                                &placement,
+                                config,
+                                egui::Vec2::ZERO,
+                            );
+                        });
+                });
         }
-    }
-
-    pub(super) fn hide(&self) {
-        self.window.setIsVisible(false);
     }
 
     pub(super) fn apply_frame(&mut self, surface: &IOSurface) {
@@ -143,37 +146,47 @@ impl WindowOverlay {
         if let Some(placement) = self.placement {
             let config = &self.config;
             let mr = self.visible_content_bounds;
-            self.renderer.render(self.scale as f32, mr, |ui| {
-                overlay::paint_window_border(ui.painter(), &placement, config);
-            });
+            self.renderer
+                .render(self.scale as f32, Vec::new(), mr, |ctx| {
+                    egui::Area::new(egui::Id::new("overlay"))
+                        .fixed_pos(egui::pos2(0.0, 0.0))
+                        .show(ctx, |ui| {
+                            overlay::paint_window_border(
+                                ui.painter(),
+                                &placement,
+                                config,
+                                egui::Vec2::ZERO,
+                            );
+                        });
+                });
         }
     }
 }
 
-impl Drop for WindowOverlay {
+impl Drop for FloatOverlay {
     fn drop(&mut self) {
         self.window.close();
     }
 }
 
-pub(super) struct ContainerOverlay {
-    pub(super) window: Retained<NSWindow>,
-    pub(super) view: Retained<ContainerOverlayView>,
+pub(super) struct TilingOverlay {
+    window: Retained<NSWindow>,
+    view: Retained<TilingOverlayView>,
 }
 
-impl ContainerOverlay {
+impl TilingOverlay {
     pub(super) fn new(
         mtm: MainThreadMarker,
-        id: ContainerId,
         backend: Rc<MetalBackend>,
         config: Config,
+        cocoa_frame: NSRect,
+        scale: f64,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Self {
-        let frame = NSRect::ZERO;
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
                 NSWindow::alloc(mtm),
-                frame,
+                cocoa_frame,
                 NSWindowStyleMask::Borderless,
                 NSBackingStoreType::Buffered,
                 false,
@@ -181,7 +194,7 @@ impl ContainerOverlay {
         };
         window.setBackgroundColor(Some(&NSColor::clearColor()));
         window.setOpaque(false);
-        window.setLevel(CONTAINER_OVERLAY_LEVEL);
+        window.setLevel(NSNormalWindowLevel - 1);
         window.setCollectionBehavior(
             NSWindowCollectionBehavior::Auxiliary
                 | NSWindowCollectionBehavior::Default
@@ -193,19 +206,24 @@ impl ContainerOverlay {
         unsafe { window.setReleasedWhenClosed(false) };
         window.setIgnoresMouseEvents(false);
         window.setAcceptsMouseMovedEvents(true);
-        let view = ContainerOverlayView::new(mtm, id, backend, config, hub_sender);
+
+        let view = TilingOverlayView::new(mtm, backend, config, scale, hub_sender);
         window.setContentView(Some(&view));
+        window.setFrame_display(cocoa_frame, false);
+
         Self { window, view }
     }
 
-    pub(super) fn show(
+    pub(super) fn render(
         &self,
-        placement: ContainerPlacement,
-        tab_titles: Vec<String>,
         cocoa_frame: NSRect,
+        scale: f64,
+        monitor: Dimension,
+        windows: &[WindowPlacement],
+        containers: &[(ContainerPlacement, Vec<String>)],
     ) {
-        self.window.setFrame_display(cocoa_frame, true);
-        self.view.update(placement, tab_titles, cocoa_frame.size);
+        self.window.setFrame_display(cocoa_frame, false);
+        self.view.update(monitor, windows, containers, scale);
         self.window.orderFront(None);
     }
 
@@ -213,23 +231,33 @@ impl ContainerOverlay {
         self.view.clear();
         self.window.orderOut(None);
     }
+
+    pub(super) fn set_config(&self, config: Config) {
+        self.view.set_config(config);
+    }
 }
 
-pub(super) struct MetalOverlayViewIvars {
+impl Drop for TilingOverlay {
+    fn drop(&mut self) {
+        self.window.close();
+    }
+}
+
+pub(super) struct FloatOverlayViewIvars {
     layer: Retained<CAMetalLayer>,
     hub_sender: CalloopSender<HubEvent>,
-    pub(super) window_id: Cell<WindowId>,
+    cg_id: Cell<CGWindowID>,
 }
 
 define_class!(
     #[unsafe(super(NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
-    #[ivars = MetalOverlayViewIvars]
-    pub(super) struct MetalOverlayView;
+    #[ivars = FloatOverlayViewIvars]
+    pub(super) struct FloatOverlayView;
 
-    unsafe impl NSObjectProtocol for MetalOverlayView {}
+    unsafe impl NSObjectProtocol for FloatOverlayView {}
 
-    impl MetalOverlayView {
+    impl FloatOverlayView {
         #[unsafe(method(isFlipped))]
         fn is_flipped(&self) -> bool {
             true
@@ -251,7 +279,7 @@ define_class!(
         fn mouse_down(&self, _event: &NSEvent) {
             self.ivars()
                 .hub_sender
-                .send(HubEvent::MirrorClicked(self.ivars().window_id.get()))
+                .send(HubEvent::MirrorClicked(self.ivars().cg_id.get()))
                 .ok();
         }
 
@@ -262,46 +290,46 @@ define_class!(
     }
 );
 
-impl MetalOverlayView {
+impl FloatOverlayView {
     fn new(
         mtm: MainThreadMarker,
         frame: NSRect,
         layer: Retained<CAMetalLayer>,
         hub_sender: CalloopSender<HubEvent>,
-        window_id: WindowId,
+        cg_id: CGWindowID,
     ) -> Retained<Self> {
-        let ivars = MetalOverlayViewIvars {
+        let ivars = FloatOverlayViewIvars {
             layer,
             hub_sender,
-            window_id: Cell::new(window_id),
+            cg_id: Cell::new(cg_id),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 }
 
-pub(super) struct ContainerOverlayViewIvars {
+pub(super) struct TilingOverlayViewIvars {
     #[expect(dead_code, reason = "retains CAMetalLayer to prevent deallocation")]
     layer: Retained<CAMetalLayer>,
     events: RefCell<Vec<egui::Event>>,
-    renderer: RefCell<ContainerRenderer>,
-    placement: Cell<Option<ContainerPlacement>>,
-    tab_titles: RefCell<Vec<String>>,
+    renderer: RefCell<OverlayRenderer>,
+    monitor: Cell<Dimension>,
+    windows: RefCell<Vec<WindowPlacement>>,
+    containers: RefCell<Vec<(ContainerPlacement, Vec<String>)>>,
     config: RefCell<Config>,
     scale: Cell<f64>,
-    container_id: Cell<ContainerId>,
     hub_sender: CalloopSender<HubEvent>,
 }
 
 define_class!(
     #[unsafe(super(NSView, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
-    #[ivars = ContainerOverlayViewIvars]
-    pub(super) struct ContainerOverlayView;
+    #[ivars = TilingOverlayViewIvars]
+    pub(super) struct TilingOverlayView;
 
-    unsafe impl NSObjectProtocol for ContainerOverlayView {}
+    unsafe impl NSObjectProtocol for TilingOverlayView {}
 
-    impl ContainerOverlayView {
+    impl TilingOverlayView {
         #[unsafe(method(isFlipped))]
         fn is_flipped(&self) -> bool {
             true
@@ -316,7 +344,6 @@ define_class!(
                 pressed: true,
                 modifiers: egui::Modifiers::NONE,
             });
-
             self.render_now();
         }
 
@@ -359,87 +386,86 @@ define_class!(
     }
 );
 
-impl ContainerOverlayView {
+impl TilingOverlayView {
     fn new(
         mtm: MainThreadMarker,
-        id: ContainerId,
         backend: Rc<MetalBackend>,
         config: Config,
+        scale: f64,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Retained<Self> {
-        // TODO: Change scale when moved between monirors
-        let scale = objc2_app_kit::NSScreen::mainScreen(mtm)
-            .map(|s| s.backingScaleFactor())
-            .unwrap_or(2.0);
-        let frame = NSRect::ZERO;
-        let renderer = ContainerRenderer::new(backend, scale, 0.0, 0.0);
+        let renderer = OverlayRenderer::new(backend, scale, 0.0, 0.0);
         let layer = renderer.layer();
-        let ivars = ContainerOverlayViewIvars {
+        let ivars = TilingOverlayViewIvars {
             layer: layer.clone(),
             events: RefCell::new(Vec::new()),
             renderer: RefCell::new(renderer),
-            placement: Cell::new(None),
-            tab_titles: RefCell::new(Vec::new()),
+            monitor: Cell::new(Dimension::default()),
+            windows: RefCell::new(Vec::new()),
+            containers: RefCell::new(Vec::new()),
             config: RefCell::new(config),
             scale: Cell::new(scale),
-            container_id: Cell::new(id),
             hub_sender,
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         view.setLayer(Some(&layer));
         view.setWantsLayer(true);
         view
     }
 
-    pub(super) fn update(
+    fn update(
         &self,
-        placement: ContainerPlacement,
-        tab_titles: Vec<String>,
-        size: NSSize,
+        monitor: Dimension,
+        windows: &[WindowPlacement],
+        containers: &[(ContainerPlacement, Vec<String>)],
+        scale: f64,
     ) {
         let ivars = self.ivars();
-        ivars.placement.set(Some(placement));
-        ivars.container_id.set(placement.id);
-        *ivars.tab_titles.borrow_mut() = tab_titles;
-        let scale = ivars.scale.get();
+        ivars.monitor.set(monitor);
+        ivars.scale.set(scale);
+        *ivars.windows.borrow_mut() = windows.to_vec();
+        *ivars.containers.borrow_mut() = containers.to_vec();
         ivars
             .renderer
             .borrow()
-            .resize(size.width, size.height, scale);
+            .resize(monitor.width as f64, monitor.height as f64, scale);
         self.render_now();
     }
 
-    pub(super) fn clear(&self) {
+    fn clear(&self) {
         let ivars = self.ivars();
-        ivars.placement.set(None);
-        ivars.tab_titles.borrow_mut().clear();
+        ivars.windows.borrow_mut().clear();
+        ivars.containers.borrow_mut().clear();
     }
 
-    pub(super) fn set_config(&self, config: Config) {
+    fn set_config(&self, config: Config) {
         *self.ivars().config.borrow_mut() = config;
         self.render_now();
     }
 
     fn render_now(&self) {
         let ivars = self.ivars();
-        let Some(placement) = ivars.placement.get() else {
+        let windows = ivars.windows.borrow();
+        let containers = ivars.containers.borrow();
+        if windows.is_empty() && containers.is_empty() {
             return;
-        };
-        let scale = ivars.scale.get();
-        let tab_titles = ivars.tab_titles.borrow();
+        }
+        let monitor = ivars.monitor.get();
         let config = ivars.config.borrow();
         let events = std::mem::take(&mut *ivars.events.borrow_mut());
-        let clicked = ivars
+        let scale = ivars.scale.get();
+        let clicked_tabs = ivars
             .renderer
             .borrow_mut()
-            .render(scale as f32, events, |ui| {
-                overlay::show_container(ui, &placement, &tab_titles, &config)
+            .render(scale as f32, events, None, |ctx| {
+                overlay::paint_tiling_overlay(ctx, monitor, &windows, &containers, &config)
             });
-        if let Some(tab_idx) = clicked {
+        for (container_id, tab_idx) in clicked_tabs {
             ivars
                 .hub_sender
-                .send(HubEvent::TabClicked(ivars.container_id.get(), tab_idx))
+                .send(HubEvent::TabClicked(container_id, tab_idx))
                 .ok();
         }
     }

@@ -6,15 +6,6 @@ use super::node::{
     Window, WindowId, Workspace, WorkspaceId,
 };
 
-#[derive(Debug, Default)]
-pub(crate) struct Changes {
-    pub(crate) created_windows: Vec<WindowId>,
-    #[cfg_attr(target_os = "windows", expect(dead_code, reason = "used on macOS"))]
-    pub(crate) deleted_windows: Vec<WindowId>,
-    pub(crate) created_containers: Vec<ContainerId>,
-    pub(crate) deleted_containers: Vec<ContainerId>,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WindowPlacement {
     pub(crate) id: WindowId,
@@ -81,17 +72,6 @@ impl Hub {
             workspaces,
             windows: Allocator::new(),
             containers: Allocator::new(),
-        }
-    }
-
-    pub(crate) fn drain_changes(&mut self) -> Changes {
-        let (created_windows, deleted_windows) = self.windows.drain();
-        let (created_containers, deleted_containers) = self.containers.drain();
-        Changes {
-            created_windows,
-            deleted_windows,
-            created_containers,
-            deleted_containers,
         }
     }
 

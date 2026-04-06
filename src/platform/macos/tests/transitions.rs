@@ -163,12 +163,12 @@ fn float_focus_unfocus_cycle() {
     assert!(!macos.is_offscreen(cg2));
 
     // Click cg1 — unfocused float cg2 goes offscreen
-    dome.mirror_clicked(macos.window_id(cg1));
+    dome.mirror_clicked(cg1);
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg2));
 
     // Click float cg2 — it comes back from offscreen
-    dome.mirror_clicked(macos.window_id(cg2));
+    dome.mirror_clicked(cg2);
     macos.settle(&mut dome, 10);
     assert!(!macos.is_offscreen(cg2));
 }

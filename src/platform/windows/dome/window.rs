@@ -52,7 +52,50 @@ impl std::fmt::Display for WindowState {
 }
 
 impl Dome {
-    pub(super) fn show_window(&mut self, id: WindowId, wp: &WindowPlacement, z: ZOrder) {
+    pub(super) fn show_float(&mut self, id: WindowId, wp: &WindowPlacement, focus_changed: bool) {
+        let entry = self.registry.get_mut(id);
+        match entry.state {
+            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => return,
+            WindowState::Minimized => {
+                entry.ext.show_cmd(ShowCmd::Restore);
+            }
+            WindowState::Positioned(_) => {
+                if entry.ext.is_iconic() {
+                    entry.ext.show_cmd(ShowCmd::Restore);
+                }
+            }
+        }
+
+        let needs_topmost = entry.state != WindowState::Positioned(PositionedState::Float)
+            || (focus_changed && wp.is_focused);
+        let z = if needs_topmost {
+            ZOrder::Topmost
+        } else {
+            ZOrder::Unchanged
+        };
+
+        let border = self.config.border_size;
+        let content = apply_inset(wp.frame, border);
+        let x = content.x.round() as i32;
+        let y = content.y.round() as i32;
+        let w = content.width.round() as i32;
+        let h = content.height.round() as i32;
+
+        if let Some(overlay) = self.float_overlays.get_mut(&id) {
+            overlay.update(wp, &self.config, z);
+            if needs_topmost {
+                entry.ext.set_position(ZOrder::Topmost, x, y, w, h);
+            } else {
+                entry
+                    .ext
+                    .set_position(ZOrder::After(overlay.id()), x, y, w, h);
+            }
+        }
+
+        entry.state = WindowState::Positioned(PositionedState::Float);
+    }
+
+    pub(super) fn show_tiling(&mut self, id: WindowId, wp: &WindowPlacement, z: ZOrder) {
         let entry = self.registry.get_mut(id);
         match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => return,
@@ -67,29 +110,14 @@ impl Dome {
         }
         let border = self.config.border_size;
         let content = apply_inset(wp.frame, border);
-        let x = content.x.round() as i32;
-        let y = content.y.round() as i32;
-        let w = content.width.round() as i32;
-        let h = content.height.round() as i32;
-        match z {
-            ZOrder::Topmost => {
-                entry.ext.set_position(ZOrder::Topmost, x, y, w, h);
-                entry
-                    .overlay
-                    .update(wp, wp.is_focused, &self.config, ZOrder::Topmost);
-            }
-            _ => {
-                entry.overlay.update(wp, wp.is_focused, &self.config, z);
-                entry
-                    .ext
-                    .set_position(ZOrder::After(entry.overlay.id()), x, y, w, h);
-            }
-        }
-        entry.state = if wp.is_float {
-            WindowState::Positioned(PositionedState::Float)
-        } else {
-            WindowState::Positioned(PositionedState::Tiling)
-        };
+        entry.ext.set_position(
+            z,
+            content.x.round() as i32,
+            content.y.round() as i32,
+            content.width.round() as i32,
+            content.height.round() as i32,
+        );
+        entry.state = WindowState::Positioned(PositionedState::Tiling);
     }
 
     pub(super) fn show_fullscreen_window(&mut self, id: WindowId, dimension: Dimension) {
@@ -110,7 +138,7 @@ impl Dome {
             dimension.width.round() as i32,
             dimension.height.round() as i32,
         );
-        entry.overlay.hide();
+        self.float_overlays.remove(&id);
         entry.state = WindowState::Positioned(PositionedState::Tiling);
     }
 
@@ -119,12 +147,13 @@ impl Dome {
         match entry.state {
             WindowState::Positioned(PositionedState::Tiling | PositionedState::Float) => {
                 entry.ext.move_offscreen();
-                entry.overlay.hide();
+                if let Some(overlay) = self.float_overlays.get_mut(&id) {
+                    overlay.hide();
+                }
                 entry.state = WindowState::Positioned(PositionedState::Offscreen);
             }
             WindowState::FullscreenBorderless => {
                 entry.ext.show_cmd(ShowCmd::Minimize);
-                entry.overlay.hide();
                 entry.state = WindowState::Minimized;
             }
             WindowState::Positioned(PositionedState::Offscreen)

@@ -112,8 +112,8 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
             tracing::info!(count = screens.len(), "Screens changed");
             runner.dome.screens_changed(screens);
         }
-        HubEvent::MirrorClicked(window_id) => {
-            runner.dome.mirror_clicked(window_id);
+        HubEvent::MirrorClicked(cg_id) => {
+            runner.dome.mirror_clicked(cg_id);
         }
         HubEvent::TabClicked(container_id, tab_idx) => {
             runner.dome.tab_clicked(container_id, tab_idx);
