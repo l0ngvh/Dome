@@ -5,7 +5,12 @@ use super::*;
 #[test]
 fn single_window_fills_screen() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     assert_h_tiled(
         &[w1.get_dim()],
@@ -17,8 +22,18 @@ fn single_window_fills_screen() {
 #[test]
 fn two_windows_split_screen() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
     assert_h_tiled(
@@ -35,9 +50,24 @@ fn three_windows_split_screen() {
         ..Default::default()
     };
     let mut env = TestEnv::new_with_config(config);
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
-    let w3 = Arc::new(MockExternalHwnd::with_title(3, "App3", "app3.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
+    let w3 = Arc::new(MockExternalHwnd::with_title(
+        3,
+        "App3",
+        "app3.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
     env.add_window(w3.clone());
@@ -60,7 +90,14 @@ fn positions_are_rounded_not_truncated() {
     };
     let mut env = TestEnv::new_with_config(config);
     let wins: Vec<_> = (1..=7)
-        .map(|i| Arc::new(MockExternalHwnd::with_title(i, "App", "app.exe")))
+        .map(|i| {
+            Arc::new(MockExternalHwnd::with_title(
+                i,
+                "App",
+                "app.exe",
+                env.moves.clone(),
+            ))
+        })
         .collect();
     for w in &wins {
         env.add_window(w.clone());
@@ -72,8 +109,18 @@ fn positions_are_rounded_not_truncated() {
 #[test]
 fn workspace_switch_hides_and_restores() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -98,8 +145,18 @@ fn workspace_switch_hides_and_restores() {
 #[test]
 fn focus_left_right() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -116,7 +173,12 @@ fn focus_left_right() {
 #[test]
 fn resize_detects_fullscreen() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
 
     let border = env.config.border_size;
@@ -132,7 +194,9 @@ fn resize_detects_fullscreen() {
     };
 
     env.dome.move_size_ended(w1.hwnd_id);
-    env.dome.check_fullscreen_state(w1.hwnd_id);
+    env.dome.placement_timeout(w1.hwnd_id);
+    env.dome
+        .window_moved(w1.hwnd_id, ObservedPosition::Fullscreen);
     env.dome.apply_layout();
 
     // Hub should detect fullscreen — window positioned at full monitor dimensions

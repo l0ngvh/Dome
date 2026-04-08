@@ -6,8 +6,18 @@ use super::*;
 #[test]
 fn toggle_fullscreen_hides_siblings() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -26,8 +36,18 @@ fn toggle_fullscreen_hides_siblings() {
 #[test]
 fn toggle_fullscreen_on_and_off() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -49,8 +69,18 @@ fn toggle_fullscreen_on_and_off() {
 #[test]
 fn toggle_float() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -74,8 +104,18 @@ fn toggle_float() {
 #[test]
 fn fullscreen_restored_after_workspace_switch() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -94,17 +134,24 @@ fn fullscreen_restored_after_workspace_switch() {
 #[test]
 fn window_created_as_fullscreen_borderless() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
 
     // Second window arrives already fullscreen
     let w2 = Arc::new(
-        MockExternalHwnd::with_title(2, "Game", "game.exe").with_dimension(Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: SCREEN_WIDTH,
-            height: SCREEN_HEIGHT,
-        }),
+        MockExternalHwnd::with_title(2, "Game", "game.exe", env.moves.clone()).with_dimension(
+            Dimension {
+                x: 0.0,
+                y: 0.0,
+                width: SCREEN_WIDTH,
+                height: SCREEN_HEIGHT,
+            },
+        ),
     );
     env.add_window(w2.clone());
 
@@ -115,8 +162,18 @@ fn window_created_as_fullscreen_borderless() {
 #[test]
 fn move_window_to_other_workspace() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -137,12 +194,14 @@ fn move_window_to_other_workspace() {
 fn fullscreen_borderless_minimizes_on_workspace_switch() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe").with_dimension(Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: SCREEN_WIDTH,
-            height: SCREEN_HEIGHT,
-        }),
+        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone()).with_dimension(
+            Dimension {
+                x: 0.0,
+                y: 0.0,
+                width: SCREEN_WIDTH,
+                height: SCREEN_HEIGHT,
+            },
+        ),
     );
     env.add_window(w1.clone());
 
@@ -154,7 +213,12 @@ fn fullscreen_borderless_minimizes_on_workspace_switch() {
 #[test]
 fn fullscreen_exclusive_not_repositioned() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "Game", "game.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "Game",
+        "game.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
 
     env.enter_exclusive_fullscreen(HwndId::test(1));
@@ -168,14 +232,24 @@ fn fullscreen_exclusive_not_repositioned() {
 #[test]
 fn iconic_window_restored_before_positioning() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
 
     // Simulate the window becoming iconic externally
     w1.iconic.store(true, Ordering::Relaxed);
 
     // Trigger relayout — show_tiling should restore before positioning
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w2.clone());
 
     assert!(!w1.iconic.load(Ordering::Relaxed));
@@ -186,7 +260,8 @@ fn iconic_window_restored_before_positioning() {
 fn borderless_fullscreen_restored_on_workspace_switch_back() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe").with_dimension(fullscreen_dim()),
+        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone())
+            .with_dimension(fullscreen_dim()),
     );
     env.add_window(w1.clone());
     assert!(!w1.iconic.load(Ordering::Relaxed));
@@ -204,7 +279,8 @@ fn borderless_fullscreen_restored_on_workspace_switch_back() {
 fn dome_minimized_window_survives_minimize_event() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe").with_dimension(fullscreen_dim()),
+        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone())
+            .with_dimension(fullscreen_dim()),
     );
     env.add_window(w1.clone());
 
@@ -218,7 +294,12 @@ fn dome_minimized_window_survives_minimize_event() {
 #[test]
 fn exclusive_fullscreen_survives_minimize_event() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "Game", "game.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "Game",
+        "game.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
 
     env.enter_exclusive_fullscreen(HwndId::test(1));
@@ -233,8 +314,18 @@ fn exclusive_fullscreen_survives_minimize_event() {
 #[test]
 fn float_restored_from_offscreen_is_topmost() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -255,8 +346,18 @@ fn float_restored_from_offscreen_is_topmost() {
 #[test]
 fn float_to_tiling_loses_topmost() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -271,30 +372,55 @@ fn float_to_tiling_loses_topmost() {
 #[test]
 fn float_focus_change_retops() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
     // Float both
     env.run_actions("toggle float");
-    env.run_actions("focus left");
+    env.focus_window(&w1);
     env.run_actions("toggle float");
 
     // w1 is focused and float
     assert!(w1.is_topmost());
 
     // Focus w2
-    env.run_actions("focus right");
+    env.focus_window(&w2);
     assert!(w2.is_topmost());
 }
 
 #[test]
 fn tiling_windows_not_topmost() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
-    let w3 = Arc::new(MockExternalHwnd::with_title(3, "App3", "app3.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
+    let w3 = Arc::new(MockExternalHwnd::with_title(
+        3,
+        "App3",
+        "app3.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
     env.add_window(w3.clone());
@@ -307,13 +433,23 @@ fn tiling_windows_not_topmost() {
 #[test]
 fn float_survives_sibling_add() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
 
     env.run_actions("toggle float");
     assert!(w1.is_topmost());
 
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w2.clone());
 
     // w1 should still be float and topmost

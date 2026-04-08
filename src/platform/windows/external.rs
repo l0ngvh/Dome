@@ -1,7 +1,6 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST;
 
-use crate::core::Dimension;
 /// Opaque window identity. Replaces `ManagedHwnd` throughout the codebase.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HwndId(isize);
@@ -65,15 +64,13 @@ pub(crate) enum ShowCmd {
 pub(crate) trait ManageExternalHwnd: Send + Sync {
     fn id(&self) -> HwndId;
     fn should_float(&self) -> bool;
-    fn get_dimension(&self) -> Dimension;
-    fn get_monitor_handle(&self) -> Option<isize>;
     fn is_iconic(&self) -> bool;
     fn set_position(&self, z: ZOrder, x: i32, y: i32, cx: i32, cy: i32);
     fn move_offscreen(&self);
     fn show_cmd(&self, cmd: ShowCmd);
     fn set_foreground_window(&self);
     fn is_maximized(&self) -> bool;
-    fn recover(&self, dim: Dimension, was_maximized: bool);
+    fn recover(&self, was_maximized: bool);
 }
 
 /// Blocking reads on an external window (SendMessageTimeoutW).
@@ -83,4 +80,8 @@ pub(crate) trait InspectExternalHwnd: Send + Sync {
     fn get_window_title(&self) -> Option<String>;
     fn get_process_name(&self) -> anyhow::Result<String>;
     fn get_size_constraints(&self) -> (f32, f32, f32, f32);
+    /// Returns (x, y, width, height) in visible coordinates — the frame bounds
+    /// excluding invisible window borders. Same coordinate space as `set_position`.
+    fn get_visible_rect(&self) -> (i32, i32, i32, i32);
+    fn is_fullscreen(&self) -> bool;
 }

@@ -6,7 +6,7 @@ mod uncooperative;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::Result;
@@ -14,7 +14,7 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::action::Actions;
 use crate::config::Config;
-use crate::core::Dimension;
+use crate::core::{Child, Dimension, MonitorId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dispatcher::DispatcherMarker;
@@ -187,6 +187,7 @@ struct MacOS {
     windows: HashMap<CGWindowID, MockAXWindow>,
     moves: MoveLog,
     next_cg_id: u32,
+    frame_state: Arc<Mutex<FrameState>>,
 }
 
 impl MacOS {
@@ -195,6 +196,10 @@ impl MacOS {
             windows: HashMap::new(),
             moves: Rc::new(RefCell::new(Vec::new())),
             next_cg_id: 1,
+            frame_state: Arc::new(Mutex::new(FrameState {
+                focused: None,
+                focused_monitor_id: None,
+            })),
         }
     }
 
@@ -264,7 +269,7 @@ impl MacOS {
     }
 
     /// Simulate an external move (app/macOS moved the window) and feed it to Dome.
-    fn report_move(&self, dome: &mut Dome, cg_id: CGWindowID) {
+    fn simulate_external_move(&self, dome: &mut Dome, cg_id: CGWindowID) {
         let observed_at = Instant::now() + std::time::Duration::from_secs(60);
         let ax = self.window(cg_id);
         let (x, y) = ax.position.get();
@@ -356,15 +361,35 @@ impl MacOS {
     }
 
     fn setup_dome_with_config(&self, config: Config) -> Dome {
-        let sender = TestSender;
+        let sender = TestSender {
+            frame_state: self.frame_state.clone(),
+        };
         Dome::new(&[default_screen()], config, Box::new(sender))
+    }
+
+    fn last_frame_state(&self) -> FrameState {
+        self.frame_state.lock().unwrap().clone()
     }
 }
 
-struct TestSender;
+#[derive(Clone)]
+struct FrameState {
+    focused: Option<Child>,
+    focused_monitor_id: Option<MonitorId>,
+}
+
+struct TestSender {
+    frame_state: Arc<Mutex<FrameState>>,
+}
 
 impl FrameSender for TestSender {
-    fn send(&self, _msg: HubMessage) {}
+    fn send(&self, msg: HubMessage) {
+        if let HubMessage::Frame(frame) = &msg {
+            let mut state = self.frame_state.lock().unwrap();
+            state.focused = frame.focused;
+            state.focused_monitor_id = Some(frame.focused_monitor_id);
+        }
+    }
 }
 
 fn new_window(macos: &MacOS, cg_id: CGWindowID) -> NewWindow {

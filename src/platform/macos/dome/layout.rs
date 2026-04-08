@@ -89,6 +89,11 @@ impl Dome {
         self.sender.send(HubMessage::Frame(RenderFrame {
             tiling,
             float_shows,
+            focused: self
+                .hub
+                .get_workspace(self.hub.current_workspace())
+                .focused(),
+            focused_monitor_id: self.hub.focused_monitor(),
         }));
     }
 

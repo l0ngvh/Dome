@@ -87,7 +87,7 @@ fn is_moving_suppresses_placement() {
     // User stops dragging — in production, this triggers check_positions
     // which reads the window's current position and calls windows_moved
     dome.set_pid_moving(100, false);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     let new_frame = macos.window_frame(cg1);
     assert_ne!(new_frame, (500, 300, 400, 400));
@@ -147,7 +147,7 @@ fn remove_borderless_fullscreen_window_restores_siblings() {
 
     // Zoom cg1 → borderless fullscreen, cg2 hidden
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg2));
 
@@ -222,4 +222,89 @@ fn delete_currently_displayed_window() {
     // Second settle proves displayed state was cleaned up
     macos.settle(&mut dome, 10);
     assert!(!macos.is_offscreen(cg2));
+}
+
+#[test]
+fn render_frame_focused_window() {
+    let mut macos = MacOS::new();
+    let cg1 = macos.spawn_window(1, "App1", "Win1");
+    let mut dome = macos.setup_dome();
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+
+    let state = macos.last_frame_state();
+    assert!(matches!(state.focused, Some(Child::Window(_))));
+}
+
+#[test]
+fn render_frame_focused_none_after_last_window_removed() {
+    let mut macos = MacOS::new();
+    let cg1 = macos.spawn_window(1, "App1", "Win1");
+    let mut dome = macos.setup_dome();
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[cg1], vec![]);
+
+    let state = macos.last_frame_state();
+    assert_eq!(state.focused, None);
+}
+
+#[test]
+fn render_frame_focused_container_after_focus_parent() {
+    let mut macos = MacOS::new();
+    let cg1 = macos.spawn_window(1, "App1", "Win1");
+    let cg2 = macos.spawn_window(1, "App2", "Win2");
+    let mut dome = macos.setup_dome();
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    dome.run_hub_actions(&actions("focus parent"));
+
+    let state = macos.last_frame_state();
+    assert!(matches!(state.focused, Some(Child::Container(_))));
+}
+
+#[test]
+fn render_frame_focused_monitor_id() {
+    let mut macos = MacOS::new();
+    let cg1 = macos.spawn_window(1, "App1", "Win1");
+    let mut dome = macos.setup_dome();
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+
+    let state = macos.last_frame_state();
+    assert!(state.focused_monitor_id.is_some());
+}
+
+#[test]
+fn render_frame_focused_none_on_empty_workspace() {
+    let mut macos = MacOS::new();
+    let cg1 = macos.spawn_window(1, "App1", "Win1");
+    let mut dome = macos.setup_dome();
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    dome.run_hub_actions(&actions("focus workspace 1"));
+
+    let state = macos.last_frame_state();
+    assert_eq!(state.focused, None);
+}
+
+#[test]
+fn render_frame_focused_monitor_changes_on_focus_monitor() {
+    let macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    let second_monitor = MonitorInfo {
+        display_id: 2,
+        name: "External".to_string(),
+        dimension: Dimension {
+            x: 1920.0,
+            y: 0.0,
+            width: 2560.0,
+            height: 1440.0,
+        },
+        full_height: 1440.0,
+        is_primary: false,
+        scale: 2.0,
+    };
+    dome.screens_changed(vec![default_screen(), second_monitor]);
+
+    let before = macos.last_frame_state();
+    dome.run_hub_actions(&actions("focus monitor right"));
+    let after = macos.last_frame_state();
+
+    assert_ne!(before.focused_monitor_id, after.focused_monitor_id);
 }

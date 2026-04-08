@@ -142,14 +142,6 @@ Dome writes logs to a single `dome.log` file, overwritten on each launch:
 "cmd+shift+q" = ["exit"]
 ```
 
-### macOS Fullscreen Setup
-
-To support switching away from native fullscreen windows to empty workspaces, configure a keyboard shortcut in:
-
-**System Settings > Keyboard > Keyboard Shortcuts > Mission Control**
-
-Set `Cmd+Ctrl+Shift+Option+F12` → "Switch to Desktop 1"
-
 ### Window Rules
 
 Window rules let you customize behavior for specific applications. Rules are platform-specific.

@@ -9,7 +9,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::action::{Action, Actions};
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
-use crate::platform::windows::dome::{Dome, HubEvent};
+use crate::platform::windows::dome::{Dome, HubEvent, ObservedPosition};
 use crate::platform::windows::external::{HwndId, InspectExternalHwnd, ManageExternalHwnd};
 use crate::platform::windows::handle::ExternalHwnd;
 use crate::platform::windows::throttle::{Throttle, ThrottleResult};
@@ -86,7 +86,7 @@ impl Runner {
         if let Some(hwnd) = hwnd {
             self.window_timers.remove(&hwnd);
             self.dome.placement_timeout(hwnd);
-            self.handle_resize(hwnd);
+            self.dispatch_placement_read(hwnd);
         }
     }
 
@@ -130,7 +130,8 @@ impl Runner {
             HubEvent::MoveSizeEnd(hwnd_id) => {
                 self.cancel_timer(&hwnd_id);
                 self.dome.move_size_ended(hwnd_id);
-                self.handle_resize(hwnd_id);
+                self.dome.placement_timeout(hwnd_id);
+                self.dispatch_placement_read(hwnd_id);
                 return;
             }
             HubEvent::LocationChanged(hwnd_id) => {
@@ -200,14 +201,21 @@ impl Runner {
                 if !inspect.is_manageable() {
                     return None;
                 }
+                let observation = if inspect.is_fullscreen() {
+                    ObservedPosition::Fullscreen
+                } else {
+                    let (x, y, w, h) = inspect.get_visible_rect();
+                    ObservedPosition::Visible(x, y, w, h)
+                };
                 Some((
                     inspect.get_window_title(),
                     inspect.get_process_name().unwrap_or_default(),
                     inspect.get_size_constraints(),
+                    observation,
                 ))
             },
             move |result, runner| {
-                let Some((title, process, constraints)) = result else {
+                let Some((title, process, constraints, observation)) = result else {
                     return;
                 };
                 if runner.dome.registry_contains_hwnd(manage.id()) {
@@ -216,10 +224,34 @@ impl Runner {
                 if let Some(actions) =
                     runner
                         .dome
-                        .try_manage_window(manage, title, process, constraints)
+                        .try_manage_window(manage, title, process, constraints, observation)
                 {
                     runner.handle_actions(&actions);
                 }
+                runner.dome.apply_layout();
+            },
+        );
+    }
+
+    fn dispatch_placement_read(&mut self, hwnd_id: HwndId) {
+        let Some(id) = self.dome.registry_get_id(hwnd_id) else {
+            return;
+        };
+        let inspect: Arc<dyn InspectExternalHwnd> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        self.dispatcher.dispatch(
+            move || {
+                if inspect.is_fullscreen() {
+                    ObservedPosition::Fullscreen
+                } else {
+                    let (x, y, w, h) = inspect.get_visible_rect();
+                    ObservedPosition::Visible(x, y, w, h)
+                }
+            },
+            move |observation, runner| {
+                if runner.dome.registry_get_id(hwnd_id) != Some(id) {
+                    return;
+                }
+                runner.dome.window_moved(hwnd_id, observation);
                 runner.dome.apply_layout();
             },
         );
@@ -231,12 +263,6 @@ impl Runner {
             self.dispatch_constraint_read(hwnd_id);
         }
         self.dome.apply_layout();
-    }
-
-    fn handle_resize(&mut self, hwnd_id: HwndId) {
-        self.dome.check_fullscreen_state(hwnd_id);
-        self.dome.apply_layout();
-        self.dispatch_constraint_read(hwnd_id);
     }
 
     fn dispatch_constraint_read(&mut self, hwnd_id: HwndId) {

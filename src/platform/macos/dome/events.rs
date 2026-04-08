@@ -6,7 +6,7 @@ use objc2_foundation::NSRect;
 
 use crate::action::Actions;
 use crate::config::Config;
-use crate::core::{ContainerId, ContainerPlacement, Dimension, MonitorId, WindowPlacement};
+use crate::core::{Child, ContainerId, ContainerPlacement, Dimension, MonitorId, WindowPlacement};
 use crate::platform::macos::running_application::RunningApp;
 
 use super::super::MonitorInfo;
@@ -96,6 +96,8 @@ pub(in crate::platform::macos) struct RenderFrame {
     /// removes overlays and captures for any window not in this list rather than
     /// tracking individual deletions or float-to-tiling transitions.
     pub(in crate::platform::macos) float_shows: Vec<FloatShow>,
+    pub(in crate::platform::macos) focused: Option<Child>,
+    pub(in crate::platform::macos) focused_monitor_id: MonitorId,
 }
 
 pub(in crate::platform::macos) struct MonitorTilingData {

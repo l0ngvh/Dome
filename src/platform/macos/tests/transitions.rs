@@ -38,7 +38,7 @@ fn borderless_fullscreen_hidden_on_workspace_switch() {
 
     // Zoom cg1 to borderless fullscreen
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(cg1), (0, 0, 1920, 1080));
 
@@ -67,7 +67,7 @@ fn minimized_window_reappears_non_fullscreen() {
 
     // Zoom cg1 → borderless fullscreen → workspace switch → minimized
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     dome.run_hub_actions(&actions("focus workspace 1"));
     macos.settle(&mut dome, 10);
@@ -75,7 +75,7 @@ fn minimized_window_reappears_non_fullscreen() {
 
     // Window reappears at non-fullscreen size (user un-zoomed while minimized)
     macos.move_window(cg1, 100, 100, 800, 600);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     // Should unminimize and move offscreen (no longer fullscreen)
@@ -94,13 +94,13 @@ fn native_fullscreen_exit_to_borderless() {
 
     // Enter native fullscreen
     macos.enter_native_fullscreen(cg1);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     // Exit native fullscreen but window still covers the screen
     macos.exit_native_fullscreen(cg1);
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     // Should become borderless fullscreen, not moved offscreen
@@ -125,7 +125,7 @@ fn offscreen_window_becomes_borderless_fullscreen() {
 
     // cg1 auto-zooms to fullscreen while offscreen
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     // Should be minimized (borderless FS can't go offscreen)
@@ -185,7 +185,7 @@ fn hide_noop_for_native_fullscreen() {
 
     // Enter native fullscreen
     macos.enter_native_fullscreen(cg1);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     let frame_before = macos.window_frame(cg1);
 
@@ -208,7 +208,7 @@ fn hide_noop_for_minimized() {
 
     // Zoom → workspace switch → minimized
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     dome.run_hub_actions(&actions("focus workspace 1"));
     macos.settle(&mut dome, 10);
@@ -237,7 +237,7 @@ fn offscreen_window_rehidden_on_external_move() {
 
     // macOS moves cg1 to a visible position
     macos.move_window(cg1, 100, 100, 800, 600);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     // Dome should re-hide it
@@ -256,7 +256,7 @@ fn borderless_fullscreen_full_lifecycle() {
 
     // 1. Zoom → borderless fullscreen
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(cg1), (0, 0, 1920, 1080));
     assert!(macos.is_offscreen(cg2));
@@ -274,7 +274,7 @@ fn borderless_fullscreen_full_lifecycle() {
 
     // 4. Un-zoom → exits borderless fullscreen, both windows tiled
     macos.move_window(cg1, 100, 100, 800, 600);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     assert!(!macos.is_offscreen(cg1));
     assert!(!macos.is_offscreen(cg2));
@@ -292,7 +292,7 @@ fn minimized_borderless_reappears_still_fullscreen() {
 
     // Zoom → workspace switch → minimized
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     dome.run_hub_actions(&actions("focus workspace 1"));
     macos.settle(&mut dome, 10);
@@ -300,7 +300,7 @@ fn minimized_borderless_reappears_still_fullscreen() {
 
     // Window reappears still covering the screen — should re-minimize
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
     assert_eq!(macos.minimize_count(cg1), 2);
 }
@@ -315,7 +315,7 @@ fn zoom_button_triggers_borderless_fullscreen() {
     macos.settle(&mut dome, 10);
 
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     assert_eq!(macos.window_frame(cg1), (0, 0, 1920, 1080));
@@ -332,12 +332,12 @@ fn borderless_fullscreen_exit_to_tiling() {
 
     // Enter borderless fullscreen
     macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     // Un-zoom
     macos.move_window(cg1, 100, 100, 800, 600);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg1));
@@ -354,7 +354,7 @@ fn native_fullscreen_enter() {
     macos.settle(&mut dome, 10);
 
     macos.enter_native_fullscreen(cg1);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     // Hub treats fullscreen as taking the full monitor — sibling is hidden.
@@ -373,12 +373,12 @@ fn native_fullscreen_exit() {
     macos.settle(&mut dome, 10);
 
     macos.enter_native_fullscreen(cg1);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     macos.exit_native_fullscreen(cg1);
     macos.move_window(cg1, 200, 200, 800, 600);
-    macos.report_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg1));

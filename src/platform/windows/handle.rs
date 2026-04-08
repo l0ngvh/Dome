@@ -5,7 +5,9 @@ use windows::Win32::Foundation::{LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
-use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
@@ -29,7 +31,7 @@ use crate::platform::windows::external::{
 };
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
-pub(super) const OFFSCREEN_POS: f32 = -32000.0;
+pub(crate) const OFFSCREEN_POS: f32 = -32000.0;
 
 pub(crate) fn get_dimension(hwnd: HWND) -> Dimension {
     let mut rect = RECT::default();
@@ -96,13 +98,6 @@ pub(crate) fn is_manageable(hwnd: HWND) -> bool {
         return false;
     }
     true
-}
-
-pub(crate) fn is_fullscreen(dim: &Dimension, monitor: &Dimension) -> bool {
-    dim.x <= monitor.x
-        && dim.y <= monitor.y
-        && dim.x + dim.width >= monitor.x + monitor.width
-        && dim.y + dim.height >= monitor.y + monitor.height
 }
 
 pub(crate) fn should_float(hwnd: HWND) -> bool {
@@ -307,19 +302,6 @@ impl ManageExternalHwnd for ExternalHwnd {
         should_float(self.0)
     }
 
-    fn get_dimension(&self) -> Dimension {
-        get_dimension(self.0)
-    }
-
-    fn get_monitor_handle(&self) -> Option<isize> {
-        let hmonitor = unsafe { MonitorFromWindow(self.0, MONITOR_DEFAULTTONULL) };
-        if hmonitor.is_invalid() {
-            None
-        } else {
-            Some(hmonitor.0 as isize)
-        }
-    }
-
     fn is_iconic(&self) -> bool {
         unsafe { IsIconic(self.0) }.as_bool()
     }
@@ -425,7 +407,7 @@ impl ManageExternalHwnd for ExternalHwnd {
         unsafe { IsZoomed(self.0) }.as_bool()
     }
 
-    fn recover(&self, dim: Dimension, was_maximized: bool) {
+    fn recover(&self, was_maximized: bool) {
         unsafe {
             if was_maximized {
                 let _ = ShowWindow(self.0, SW_RESTORE);
@@ -433,11 +415,11 @@ impl ManageExternalHwnd for ExternalHwnd {
             let _ = SetWindowPos(
                 self.0,
                 None,
-                dim.x as i32,
-                dim.y as i32,
-                dim.width as i32,
-                dim.height as i32,
-                SWP_NOZORDER | SWP_NOACTIVATE,
+                100,
+                100,
+                0,
+                0,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
             );
             if was_maximized {
                 let _ = ShowWindow(self.0, SW_MAXIMIZE);
@@ -461,5 +443,51 @@ impl InspectExternalHwnd for ExternalHwnd {
 
     fn get_size_constraints(&self) -> (f32, f32, f32, f32) {
         get_size_constraints(self.0)
+    }
+
+    fn get_visible_rect(&self) -> (i32, i32, i32, i32) {
+        let mut frame_rect = RECT::default();
+        if unsafe {
+            DwmGetWindowAttribute(
+                self.0,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                &mut frame_rect as *mut _ as *mut _,
+                std::mem::size_of::<RECT>() as u32,
+            )
+        }
+        .is_ok()
+        {
+            (
+                frame_rect.left,
+                frame_rect.top,
+                frame_rect.right - frame_rect.left,
+                frame_rect.bottom - frame_rect.top,
+            )
+        } else {
+            let dim = get_dimension(self.0);
+            (
+                dim.x as i32,
+                dim.y as i32,
+                dim.width as i32,
+                dim.height as i32,
+            )
+        }
+    }
+
+    fn is_fullscreen(&self) -> bool {
+        let dim = get_dimension(self.0);
+        let monitor = unsafe { MonitorFromWindow(self.0, MONITOR_DEFAULTTONEAREST) };
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+            return false;
+        }
+        let rc = info.rcWork;
+        dim.x <= rc.left as f32
+            && dim.y <= rc.top as f32
+            && dim.x + dim.width >= rc.right as f32
+            && dim.y + dim.height >= rc.bottom as f32
     }
 }

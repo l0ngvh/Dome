@@ -20,9 +20,14 @@ use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
 use self::registry::{WindowEntry, WindowRegistry};
 use self::window::{PositionedState, WindowState};
+
+#[derive(Clone, Copy)]
+pub(super) enum ObservedPosition {
+    Fullscreen,
+    Visible(i32, i32, i32, i32),
+}
 use super::ScreenInfo;
 use super::external::{HwndId, ManageExternalHwnd, ZOrder};
-use super::handle::is_fullscreen;
 use super::taskbar::ManageTaskbar;
 
 pub(super) enum HubEvent {
@@ -80,6 +85,7 @@ pub(super) struct Dome {
     tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>>,
     float_overlays: HashMap<WindowId, Box<dyn FloatOverlayApi>>,
     last_focused: Option<WindowId>,
+    last_focused_monitor: Option<MonitorId>,
     pending_created: Vec<WindowId>,
     placement_tracker: PlacementTracker,
     recovery: Recovery,
@@ -148,6 +154,7 @@ impl Dome {
             tiling_overlays,
             float_overlays: HashMap::new(),
             last_focused: None,
+            last_focused_monitor: None,
             pending_created: Vec::new(),
             placement_tracker: PlacementTracker::new(),
             recovery: Recovery::new(taskbar),
@@ -233,12 +240,13 @@ impl Dome {
         title: Option<String>,
         process: String,
         constraints: (f32, f32, f32, f32),
+        observation: ObservedPosition,
     ) -> Option<Actions> {
         if should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
             return None;
         }
         let actions = on_open_actions(&process, title.as_deref(), &self.config.windows.on_open);
-        self.insert_window(ext, title, process, constraints);
+        self.insert_window(ext, title, process, constraints, observation);
         actions
     }
 
@@ -248,29 +256,35 @@ impl Dome {
         title: Option<String>,
         process: String,
         constraints: (f32, f32, f32, f32),
+        observation: ObservedPosition,
     ) {
         let id_key = ext.id();
-        let dim = ext.get_dimension();
-        let monitor = self.find_monitor_dimension_from_ext(&*ext);
 
-        let (state, id) = if monitor.is_some_and(|m| is_fullscreen(&ext.get_dimension(), &m)) {
-            (
+        let (state, id) = match observation {
+            ObservedPosition::Fullscreen => (
                 WindowState::FullscreenBorderless,
                 self.hub.insert_fullscreen(),
-            )
-        } else if ext.should_float() {
-            (
-                WindowState::Positioned(PositionedState::Float),
-                self.hub.insert_float(dim),
-            )
-        } else {
-            (
-                WindowState::Positioned(PositionedState::Tiling),
-                self.hub.insert_tiling(),
-            )
+            ),
+            ObservedPosition::Visible(x, y, w, h) => {
+                let dim = Dimension {
+                    x: x as f32,
+                    y: y as f32,
+                    width: w as f32,
+                    height: h as f32,
+                };
+                let offscreen = WindowState::Positioned(PositionedState::Offscreen {
+                    retries: 0,
+                    actual: (x, y, w, h),
+                });
+                if ext.should_float() {
+                    (offscreen, self.hub.insert_float(dim))
+                } else {
+                    (offscreen, self.hub.insert_tiling())
+                }
+            }
         };
         self.set_constraints(id, constraints);
-        self.recovery.track(&ext, dim);
+        self.recovery.track(&ext);
 
         self.registry.insert(
             id_key,
@@ -332,12 +346,6 @@ impl Dome {
         }
     }
 
-    fn find_monitor_dimension_from_ext(&self, ext: &dyn ManageExternalHwnd) -> Option<Dimension> {
-        let handle = ext.get_monitor_handle()?;
-        let id = self.monitor_handles.get(&handle)?;
-        self.monitor_dimensions.get(id).copied()
-    }
-
     pub(super) fn handle_focus(&mut self, id_key: HwndId) {
         if let Some(id) = self.registry.get_id(id_key) {
             self.hub.set_focus(id);
@@ -347,45 +355,17 @@ impl Dome {
 
     /// Called by the run loop when a drag safety timeout or resize debounce
     /// timer fires. Removes the window from the placement tracker.
-    /// Runner calls handle_resize separately.
     pub(super) fn placement_timeout(&mut self, id: HwndId) {
         self.placement_tracker.clear(id);
     }
 
-    pub(super) fn check_fullscreen_state(&mut self, id_key: HwndId) {
+    pub(super) fn window_moved(&mut self, id_key: HwndId, observation: ObservedPosition) {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
-        let entry = self.registry.get(id);
-        if entry.state == WindowState::FullscreenExclusive {
-            return;
-        }
-        let ext = entry.ext.clone();
-        let Some(monitor_dim) = self.find_monitor_dimension_from_ext(&*ext) else {
-            return;
-        };
-
-        let was_fs = self.hub.get_window(id).is_fullscreen();
-        let window_dim = ext.get_dimension();
-        let is_fs = is_fullscreen(&window_dim, &monitor_dim);
-        if was_fs != is_fs {
-            tracing::debug!(
-                ?window_dim,
-                ?monitor_dim,
-                was_fs,
-                is_fs,
-                "Fullscreen state changed"
-            );
-        }
-
-        match (was_fs, is_fs) {
-            (false, true) => {
-                self.enter_fullscreen_borderless(id);
-            }
-            (true, false) => {
-                self.exit_fullscreen_borderless(id);
-            }
-            _ => {}
+        match observation {
+            ObservedPosition::Fullscreen => self.window_entered_borderless_fullscreen(id),
+            ObservedPosition::Visible(x, y, w, h) => self.window_drifted(id, x, y, w, h),
         }
     }
 
@@ -548,15 +528,23 @@ impl Dome {
         }
 
         // Focus
-        if focused != self.last_focused {
+        let current_monitor = self.hub.focused_monitor();
+        let monitor_changed = self
+            .last_focused_monitor
+            .is_some_and(|m| m != current_monitor);
+
+        if focused != self.last_focused || monitor_changed {
             self.last_focused = focused;
             if let Some(id) = focused {
                 let entry = self.registry.get(id);
-                if entry.state != WindowState::FullscreenExclusive {
+                if !matches!(entry.state, WindowState::FullscreenExclusive) {
                     entry.ext.set_foreground_window();
                 }
+            } else if let Some(overlay) = self.tiling_overlays.get(&current_monitor) {
+                overlay.focus();
             }
         }
+        self.last_focused_monitor = Some(current_monitor);
     }
 
     #[tracing::instrument(skip_all)]
@@ -570,7 +558,10 @@ impl Dome {
 
         // Float windows — ensure overlay exists, then position
         for wp in float_windows {
-            if self.registry.get(wp.id).state == WindowState::FullscreenExclusive {
+            if matches!(
+                self.registry.get(wp.id).state,
+                WindowState::FullscreenExclusive
+            ) {
                 continue;
             }
             if !self.float_overlays.contains_key(&wp.id) {
@@ -591,7 +582,7 @@ impl Dome {
         for data in per_monitor {
             if let Some(overlay) = self.tiling_overlays.get_mut(&data.monitor_id) {
                 if data.tiling_windows.is_empty() && data.containers.is_empty() {
-                    overlay.hide();
+                    overlay.clear();
                 } else {
                     overlay.update(data.dimension, &data.tiling_windows, &data.containers);
                 }
@@ -607,7 +598,10 @@ impl Dome {
                             .filter(|wp| focused != Some(wp.id)),
                     );
                 for wp in focused_first {
-                    if self.registry.get(wp.id).state == WindowState::FullscreenExclusive {
+                    if matches!(
+                        self.registry.get(wp.id).state,
+                        WindowState::FullscreenExclusive
+                    ) {
                         continue;
                     }
                     self.show_tiling(wp.id, wp, ZOrder::After(anchor));
@@ -635,7 +629,12 @@ impl Dome {
 
         self.registry
             .iter()
-            .filter(|(_, id)| self.registry.get(*id).state != WindowState::FullscreenExclusive)
+            .filter(|(_, id)| {
+                !matches!(
+                    self.registry.get(*id).state,
+                    WindowState::FullscreenExclusive
+                )
+            })
             .map(|(hwnd_id, _)| hwnd_id)
             .collect()
     }

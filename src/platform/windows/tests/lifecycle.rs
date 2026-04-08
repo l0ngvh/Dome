@@ -6,8 +6,18 @@ use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 #[test]
 fn window_destroyed_fills_screen() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -24,8 +34,18 @@ fn window_destroyed_fills_screen() {
 #[test]
 fn window_minimized_removes_from_tiling() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -51,10 +71,20 @@ fn on_open_moves_window_to_workspace() {
     });
     let mut env = TestEnv::new_with_config(config);
 
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "Terminal", "terminal.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "Terminal",
+        "terminal.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
 
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "Slack", "slack.exe"));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "Slack",
+        "slack.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w2.clone());
 
     // Slack moved to workspace 3, should be offscreen
@@ -65,7 +95,12 @@ fn on_open_moves_window_to_workspace() {
 #[test]
 fn move_size_suppresses_placement() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
 
     let placed = w1.get_dim();
@@ -74,7 +109,12 @@ fn move_size_suppresses_placement() {
     env.dome.move_size_started(w1.hwnd_id);
 
     // Add a second window — triggers relayout, but w1 should be skipped
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w2.clone());
 
     // w1 should still be at its original position (drag suppresses placement)
@@ -92,7 +132,12 @@ fn move_size_suppresses_placement() {
 #[test]
 fn screens_changed_updates_layout() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
 
     let before = w1.get_dim();
@@ -126,7 +171,10 @@ fn screens_changed_updates_layout() {
 #[test]
 fn unmanageable_window_is_ignored() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe").with_manageable(false));
+    let w1 = Arc::new(
+        MockExternalHwnd::with_title(1, "App1", "app1.exe", env.moves.clone())
+            .with_manageable(false),
+    );
     let initial = w1.get_dim();
     env.add_window(w1.clone());
 
@@ -143,7 +191,12 @@ fn ignored_window_rule_prevents_insertion() {
     });
     let mut env = TestEnv::new_with_config(config);
 
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "Bloat", "bloat.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "Bloat",
+        "bloat.exe",
+        env.moves.clone(),
+    ));
     let initial = w1.get_dim();
     env.add_window(w1.clone());
 
@@ -153,7 +206,12 @@ fn ignored_window_rule_prevents_insertion() {
 #[test]
 fn title_changed_manages_unknown_window() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
 
     // Title change on an unknown window should try to manage it
     // (Runner dispatches as WindowCreated — here we simulate directly)
@@ -170,8 +228,18 @@ fn title_changed_manages_unknown_window() {
 #[test]
 fn delete_currently_displayed_window() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(1, "App1", "app1.exe"));
-    let w2 = Arc::new(MockExternalHwnd::with_title(2, "App2", "app2.exe"));
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
 
@@ -188,4 +256,90 @@ fn delete_currently_displayed_window() {
     // Second apply_layout proves displayed state was cleaned up
     env.dome.apply_layout();
     assert!(!w2.is_offscreen());
+}
+
+#[test]
+fn destroy_last_window_focuses_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.reset_overlay_focus();
+
+    env.destroy_window(&w1);
+    assert_eq!(env.overlay_focus_count(), 1);
+}
+
+#[test]
+fn destroy_one_of_two_windows_does_not_focus_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+    env.reset_overlay_focus();
+
+    env.destroy_window(&w2);
+    assert_eq!(env.overlay_focus_count(), 0);
+}
+
+#[test]
+fn workspace_switch_to_empty_focuses_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.reset_overlay_focus();
+
+    env.run_actions("focus workspace 1");
+    assert_eq!(env.overlay_focus_count(), 1);
+}
+
+#[test]
+fn workspace_switch_back_does_not_focus_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.reset_overlay_focus();
+
+    env.run_actions("focus workspace 1");
+    env.reset_overlay_focus();
+    env.run_actions("focus workspace 0");
+    assert_eq!(env.overlay_focus_count(), 0);
+}
+
+#[test]
+fn focus_parent_focuses_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+    env.reset_overlay_focus();
+
+    env.run_actions("focus parent");
+    assert_eq!(env.overlay_focus_count(), 1);
+}
+
+#[test]
+fn focus_child_after_parent_does_not_focus_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    env.run_actions("focus parent");
+    env.reset_overlay_focus();
+    env.run_actions("focus down");
+    assert_eq!(env.overlay_focus_count(), 0);
+}
+
+#[test]
+fn monitor_switch_empty_to_empty_focuses_overlay() {
+    let mut env = TestEnv::new();
+    env.add_screen(second_screen());
+    env.run_actions("focus workspace 1");
+    env.reset_overlay_focus();
+
+    env.run_actions("focus monitor right");
+    assert_eq!(env.overlay_focus_count(), 1);
 }

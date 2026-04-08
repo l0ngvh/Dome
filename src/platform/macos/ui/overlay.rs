@@ -8,6 +8,8 @@ use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder,
     NSView, NSWindow, NSWindowCollectionBehavior, NSWindowLevel, NSWindowStyleMask,
 };
+use objc2_application_services::AXUIElement;
+use objc2_core_foundation::kCFBooleanTrue;
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
@@ -18,6 +20,36 @@ use super::renderer::{MetalBackend, OverlayRenderer};
 use crate::config::Config;
 use crate::core::{ContainerPlacement, Dimension, WindowPlacement};
 use crate::overlay;
+
+define_class!(
+    #[unsafe(super(NSWindow, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    struct KeyableWindow;
+
+    unsafe impl NSObjectProtocol for KeyableWindow {}
+
+    impl KeyableWindow {
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            true
+        }
+    }
+);
+
+impl KeyableWindow {
+    fn new(mtm: MainThreadMarker, frame: NSRect, style: NSWindowStyleMask) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(());
+        unsafe {
+            msg_send![
+                super(this),
+                initWithContentRect: frame,
+                styleMask: style,
+                backing: NSBackingStoreType::Buffered,
+                defer: false,
+            ]
+        }
+    }
+}
 
 const FLOAT_OVERLAY_LEVEL: NSWindowLevel = NSFloatingWindowLevel;
 
@@ -170,7 +202,7 @@ impl Drop for FloatOverlay {
 }
 
 pub(super) struct TilingOverlay {
-    window: Retained<NSWindow>,
+    window: Retained<KeyableWindow>,
     view: Retained<TilingOverlayView>,
 }
 
@@ -183,22 +215,12 @@ impl TilingOverlay {
         scale: f64,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Self {
-        let window = unsafe {
-            NSWindow::initWithContentRect_styleMask_backing_defer(
-                NSWindow::alloc(mtm),
-                cocoa_frame,
-                NSWindowStyleMask::Borderless,
-                NSBackingStoreType::Buffered,
-                false,
-            )
-        };
+        let window = KeyableWindow::new(mtm, cocoa_frame, NSWindowStyleMask::Borderless);
         window.setBackgroundColor(Some(&NSColor::clearColor()));
         window.setOpaque(false);
         window.setLevel(NSNormalWindowLevel - 1);
         window.setCollectionBehavior(
-            NSWindowCollectionBehavior::Auxiliary
-                | NSWindowCollectionBehavior::Default
-                | NSWindowCollectionBehavior::Transient
+            NSWindowCollectionBehavior::Default
                 | NSWindowCollectionBehavior::FullScreenNone
                 | NSWindowCollectionBehavior::FullScreenDisallowsTiling
                 | NSWindowCollectionBehavior::IgnoresCycle,
@@ -227,9 +249,24 @@ impl TilingOverlay {
         self.window.orderFront(None);
     }
 
-    pub(super) fn hide(&self) {
+    pub(super) fn clear(&self) {
         self.view.clear();
-        self.window.orderOut(None);
+        self.view.render_now();
+        self.window.orderFront(None);
+    }
+
+    // macOS 14+ "cooperative activation" silently ignores NSApplication.activate() for
+    // self-activation. The AX API bypasses this via the privileged accessibility subsystem.
+    pub(super) fn focus(&self, _mtm: MainThreadMarker) {
+        let pid = std::process::id() as i32;
+        let ax_app = unsafe { AXUIElement::new_application(pid) };
+        crate::platform::macos::objc2_wrapper::set_attribute_value(
+            &ax_app,
+            &crate::platform::macos::objc2_wrapper::kAXFrontmostAttribute(),
+            unsafe { kCFBooleanTrue.unwrap() },
+        )
+        .ok();
+        self.window.makeKeyAndOrderFront(None);
     }
 
     pub(super) fn set_config(&self, config: Config) {
@@ -449,9 +486,6 @@ impl TilingOverlayView {
         let ivars = self.ivars();
         let windows = ivars.windows.borrow();
         let containers = ivars.containers.borrow();
-        if windows.is_empty() && containers.is_empty() {
-            return;
-        }
         let monitor = ivars.monitor.get();
         let config = ivars.config.borrow();
         let events = std::mem::take(&mut *ivars.events.borrow_mut());

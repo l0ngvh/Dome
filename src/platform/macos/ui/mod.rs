@@ -2,7 +2,7 @@ mod mirror;
 mod overlay;
 mod renderer;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::rc::Rc;
@@ -22,7 +22,7 @@ use objc2_metal::MTLCreateSystemDefaultDevice;
 use super::dome::{FrameSender, HubEvent, HubMessage};
 use super::listeners::EventListener;
 use crate::config::Config;
-use crate::core::MonitorId;
+use crate::core::{Child, MonitorId};
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TilingOverlay};
 use renderer::MetalBackend;
@@ -70,7 +70,7 @@ impl Ui {
         config: Config,
     ) -> (Self, MessageSender) {
         let app = NSApplication::sharedApplication(mtm);
-        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+        app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
 
         let (frame_tx, frame_rx) = mpsc::channel();
 
@@ -143,6 +143,8 @@ struct AppDelegateIvars {
     event_listener: EventListener,
     backend: Rc<MetalBackend>,
     config: RefCell<Config>,
+    last_focused: Cell<Option<Child>>,
+    last_focused_monitor_id: Cell<Option<MonitorId>>,
 }
 
 define_class!(
@@ -185,6 +187,8 @@ impl AppDelegate {
             event_listener,
             backend,
             config: RefCell::new(config),
+            last_focused: Cell::new(None),
+            last_focused_monitor_id: Cell::new(None),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
@@ -219,7 +223,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         )
                     });
                     if data.windows.is_empty() && data.containers.is_empty() {
-                        overlay.hide();
+                        overlay.clear();
                     } else {
                         overlay.render(
                             data.cocoa_frame,
@@ -284,6 +288,31 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     frame.float_shows.iter().map(|s| s.cg_id).collect();
                 float_overlays.retain(|cg_id, _| active_floats.contains(cg_id));
                 captures.retain(|cg_id, _| active_floats.contains(cg_id));
+
+                drop(tiling_overlays);
+                drop(float_overlays);
+                drop(captures);
+
+                // Focus overlay when transitioning away from a window
+                {
+                    let last = delegate.ivars().last_focused.get();
+                    let last_monitor = delegate.ivars().last_focused_monitor_id.get();
+                    let monitor_changed =
+                        last_monitor.is_some_and(|m| m != frame.focused_monitor_id);
+                    if last != frame.focused || monitor_changed {
+                        delegate.ivars().last_focused.set(frame.focused);
+                        if !matches!(frame.focused, Some(Child::Window(_))) {
+                            let overlays = delegate.ivars().tiling_overlays.borrow();
+                            if let Some(overlay) = overlays.get(&frame.focused_monitor_id) {
+                                overlay.focus(mtm);
+                            }
+                        }
+                    }
+                    delegate
+                        .ivars()
+                        .last_focused_monitor_id
+                        .set(Some(frame.focused_monitor_id));
+                }
             }
             HubMessage::RegisterObservers(apps) => {
                 for app in &apps {
