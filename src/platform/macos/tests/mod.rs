@@ -179,6 +179,7 @@ impl AXWindowApi for MockAXWindow {
     fn read_title(&self, _marker: &DispatcherMarker) -> Option<String> {
         Some(self.title.clone())
     }
+    fn refresh_enhanced_ui(&self, _marker: &DispatcherMarker) {}
 }
 
 /// Simulated macOS environment. Owns all AX windows — assertions go through here.

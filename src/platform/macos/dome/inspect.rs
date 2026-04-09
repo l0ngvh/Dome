@@ -154,6 +154,15 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
         }
     }
 
+    // Refresh the cached kAXEnhancedUserInterfaceAttribute probe on tracked
+    // windows, deduped by PID so each app is probed at most once.
+    let mut refreshed_pids = HashSet::new();
+    for entry in tracked.values() {
+        if refreshed_pids.insert(entry.ax.pid()) {
+            entry.ax.refresh_enhanced_ui(marker);
+        }
+    }
+
     ReconcileAllResult {
         terminated_pids,
         new_apps,

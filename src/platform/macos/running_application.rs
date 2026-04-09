@@ -1,6 +1,7 @@
 #[cfg(not(test))]
 mod real {
     use std::fmt;
+    use std::sync::Arc;
 
     use objc2::rc::Retained;
     use objc2_app_kit::{
@@ -10,7 +11,7 @@ mod real {
     use objc2_core_foundation::CFArray;
     use objc2_foundation::NSNotification;
 
-    use super::super::accessibility::AXWindow;
+    use super::super::accessibility::{AXApp, AXWindow};
     use super::super::dispatcher::DispatcherMarker;
     use super::super::objc2_wrapper::{
         get_attribute, get_cg_window_id, kAXFocusedWindowAttribute, kAXWindowsAttribute,
@@ -52,14 +53,19 @@ mod real {
             self.0.isActive()
         }
 
+        /// Blocking AX IPC — creates an AXUIElement for the app process.
+        pub(in crate::platform::macos) fn ax_app(&self, _marker: &DispatcherMarker) -> Arc<AXApp> {
+            Arc::new(AXApp::new(&self.0))
+        }
+
         /// Blocking AX IPC — queries `kAXWindowsAttribute` on the target process.
         pub(in crate::platform::macos) fn ax_windows(
             &self,
-            _marker: &DispatcherMarker,
+            marker: &DispatcherMarker,
         ) -> Vec<AXWindow> {
-            let ax_app = unsafe { AXUIElement::new_application(self.pid()) };
+            let ax_app = self.ax_app(marker);
             let Ok(windows) =
-                get_attribute::<CFArray<AXUIElement>>(&ax_app, &kAXWindowsAttribute())
+                get_attribute::<CFArray<AXUIElement>>(&ax_app.element, &kAXWindowsAttribute())
             else {
                 return Vec::new();
             };
@@ -67,7 +73,7 @@ mod real {
                 .into_iter()
                 .filter_map(|w| {
                     let cg_id = get_cg_window_id(&w)?;
-                    Some(AXWindow::new(w, cg_id, &self.0))
+                    Some(AXWindow::new(w, cg_id, ax_app.clone()))
                 })
                 .collect()
         }
@@ -75,13 +81,13 @@ mod real {
         /// Blocking AX IPC — queries `kAXFocusedWindowAttribute` on the target process.
         pub(in crate::platform::macos) fn focused_window(
             &self,
-            _marker: &DispatcherMarker,
+            marker: &DispatcherMarker,
         ) -> Option<AXWindow> {
-            let ax_app = unsafe { AXUIElement::new_application(self.pid()) };
+            let ax_app = self.ax_app(marker);
             let focused =
-                get_attribute::<AXUIElement>(&ax_app, &kAXFocusedWindowAttribute()).ok()?;
+                get_attribute::<AXUIElement>(&ax_app.element, &kAXFocusedWindowAttribute()).ok()?;
             let cg_id = get_cg_window_id(&focused)?;
-            Some(AXWindow::new(focused, cg_id, &self.0))
+            Some(AXWindow::new(focused, cg_id, ax_app))
         }
 
         pub(in crate::platform::macos) fn all() -> impl Iterator<Item = RunningApp> {

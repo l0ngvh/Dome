@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use anyhow::{Context, Result};
 use std::ptr::NonNull;
 
@@ -19,14 +22,92 @@ use super::objc2_wrapper::{
     set_attribute_value,
 };
 
-#[derive(Clone)]
-pub(super) struct AXWindow {
-    element: CFRetained<AXUIElement>,
-    app: CFRetained<AXUIElement>,
-    cg_id: CGWindowID,
+/// Per-app accessibility state shared across all windows of the same application.
+///
+/// Holds the AXUIElement for the app process and cached app metadata (name, bundle ID).
+/// Always used behind `Arc<AXApp>` so multiple `AXWindow`s from the same app share one instance.
+pub(super) struct AXApp {
+    pub(super) element: CFRetained<AXUIElement>,
     pid: i32,
     app_name: Option<String>,
     bundle_id: Option<String>,
+    /// Cached probe of `kAXEnhancedUserInterfaceAttribute` existence on this app.
+    /// `true` means the app supports the attribute (typically screen-reader-aware apps).
+    /// Refreshed periodically via `refresh_enhanced_ui` during reconciliation.
+    has_enhanced_ui_attr: AtomicBool,
+}
+
+// Safety: AXUIElement operations are IPC calls to the accessibility server,
+// safe to use from any thread for manipulating other applications' windows.
+unsafe impl Send for AXApp {}
+unsafe impl Sync for AXApp {}
+
+impl AXApp {
+    #[cfg(not(test))]
+    pub(super) fn new(app: &NSRunningApplication) -> Self {
+        let pid = app.processIdentifier();
+        let element = unsafe { AXUIElement::new_application(pid) };
+        let app_name = app.localizedName().map(|n| n.to_string());
+        let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
+        let has_enhanced_ui_attr =
+            get_attribute::<CFBoolean>(&element, &kAXEnhancedUserInterfaceAttribute()).is_ok();
+        Self {
+            element,
+            pid,
+            app_name,
+            bundle_id,
+            has_enhanced_ui_attr: AtomicBool::new(has_enhanced_ui_attr),
+        }
+    }
+
+    pub(super) fn pid(&self) -> i32 {
+        self.pid
+    }
+
+    pub(super) fn app_name(&self) -> Option<&str> {
+        self.app_name.as_deref()
+    }
+
+    pub(super) fn bundle_id(&self) -> Option<&str> {
+        self.bundle_id.as_deref()
+    }
+
+    /// Whether this app supports `kAXEnhancedUserInterfaceAttribute`.
+    /// Uses a cached value — `Relaxed` ordering is fine since this is a
+    /// performance hint, not a synchronization primitive.
+    pub(super) fn has_enhanced_ui_attr(&self) -> bool {
+        self.has_enhanced_ui_attr.load(Ordering::Relaxed)
+    }
+
+    /// Re-probes `kAXEnhancedUserInterfaceAttribute` on the app element and
+    /// updates the cache. Called during periodic reconciliation on a GCD queue.
+    pub(super) fn refresh_enhanced_ui(&self) {
+        let exists =
+            get_attribute::<CFBoolean>(&self.element, &kAXEnhancedUserInterfaceAttribute()).is_ok();
+        self.has_enhanced_ui_attr.store(exists, Ordering::Relaxed);
+    }
+}
+
+impl std::fmt::Display for AXApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}] {}",
+            self.pid,
+            self.app_name.as_deref().unwrap_or("Unknown")
+        )?;
+        if let Some(bundle_id) = &self.bundle_id {
+            write!(f, " ({bundle_id})")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct AXWindow {
+    element: CFRetained<AXUIElement>,
+    app: Arc<AXApp>,
+    cg_id: CGWindowID,
     title: Option<String>,
 }
 
@@ -37,8 +118,14 @@ unsafe impl Sync for AXWindow {}
 
 impl std::fmt::Display for AXWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}:{}] {}", self.pid, self.cg_id, self.app_name_())?;
-        if let Some(bundle_id) = &self.bundle_id {
+        write!(
+            f,
+            "[{}:{}] {}",
+            self.app.pid(),
+            self.cg_id,
+            self.app.app_name().unwrap_or("Unknown")
+        )?;
+        if let Some(bundle_id) = self.app.bundle_id() {
             write!(f, " ({bundle_id})")?;
         }
         if let Some(title) = &self.title {
@@ -53,23 +140,16 @@ impl AXWindow {
     pub(super) fn new(
         element: CFRetained<AXUIElement>,
         cg_id: CGWindowID,
-        app: &NSRunningApplication,
+        app: Arc<AXApp>,
     ) -> Self {
-        let pid = app.processIdentifier();
-        let ax_app = unsafe { AXUIElement::new_application(pid) };
-        let app_name = app.localizedName().map(|n| n.to_string());
-        let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
         let title = get_attribute::<CFString>(&element, &kAXTitleAttribute())
             .map(|t| t.to_string())
             .ok();
 
         Self {
             element,
-            app: ax_app,
+            app,
             cg_id,
-            pid,
-            app_name,
-            bundle_id,
             title,
         }
     }
@@ -79,15 +159,15 @@ impl AXWindow {
     }
 
     pub(super) fn pid(&self) -> i32 {
-        self.pid
+        self.app.pid()
     }
 
     pub(super) fn app_name(&self) -> Option<&str> {
-        self.app_name.as_deref()
+        self.app.app_name()
     }
 
     pub(super) fn bundle_id(&self) -> Option<&str> {
-        self.bundle_id.as_deref()
+        self.app.bundle_id()
     }
 
     pub(super) fn title(&self) -> Option<&str> {
@@ -120,7 +200,7 @@ impl AXWindow {
             Err(AXError::InvalidUIElement)
         );
         if is_deleted {
-            tracing::trace!(app = %self.app_name_(), title = ?self.title, "not valid: window is deleted");
+            tracing::trace!(app = %self.app.app_name().unwrap_or("Unknown"), title = ?self.title, "not valid: window is deleted");
             return false;
         }
         true
@@ -142,24 +222,14 @@ impl AXWindow {
     }
 
     pub(super) fn focus(&self) -> Result<()> {
-        let is_frontmost = get_attribute::<CFBoolean>(&self.app, &kAXFrontmostAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false);
-        if !is_frontmost {
-            set_attribute_value(&self.app, &kAXFrontmostAttribute(), unsafe {
-                kCFBooleanTrue.unwrap()
-            })
-            .with_context(|| format!("focus for {self}"))?;
-        }
-        let is_main = get_attribute::<CFBoolean>(&self.element, &kAXMainAttribute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false);
-        if !is_main {
-            set_attribute_value(&self.element, &kAXMainAttribute(), unsafe {
-                kCFBooleanTrue.unwrap()
-            })
-            .with_context(|| format!("focus for {self}"))?;
-        }
+        set_attribute_value(&self.app.element, &kAXFrontmostAttribute(), unsafe {
+            kCFBooleanTrue.unwrap()
+        })
+        .with_context(|| format!("focus for {self}"))?;
+        set_attribute_value(&self.element, &kAXMainAttribute(), unsafe {
+            kCFBooleanTrue.unwrap()
+        })
+        .with_context(|| format!("focus for {self}"))?;
         Ok(())
     }
 
@@ -223,7 +293,7 @@ impl AXWindow {
 
         let is_root = match get_attribute::<AXUIElement>(&self.element, &kAXParentAttribute()) {
             Err(_) => true,
-            Ok(parent) => CFEqual(Some(&*parent), Some(&*self.app)),
+            Ok(parent) => CFEqual(Some(&*parent), Some(&*self.app.element)),
         };
         if !is_root {
             tracing::trace!(window = %self, "not manageable: window is not root");
@@ -262,16 +332,25 @@ impl AXWindow {
     where
         F: FnOnce() -> Result<()>,
     {
-        let was_enabled =
-            get_attribute::<CFBoolean>(&self.app, &kAXEnhancedUserInterfaceAttribute()).ok();
-        let _ = set_attribute_value(&self.app, &kAXEnhancedUserInterfaceAttribute(), unsafe {
-            kCFBooleanFalse.unwrap()
-        });
+        let has_attr = self.app.has_enhanced_ui_attr();
+        if has_attr
+            && let Err(err) = set_attribute_value(
+                &self.app.element,
+                &kAXEnhancedUserInterfaceAttribute(),
+                unsafe { kCFBooleanFalse.unwrap() },
+            )
+        {
+            tracing::trace!("Failed to disable enhanced UI for {self}: {err:#}");
+        }
         let result = f();
-        if was_enabled.is_some() {
-            let _ = set_attribute_value(&self.app, &kAXEnhancedUserInterfaceAttribute(), unsafe {
-                kCFBooleanTrue.unwrap()
-            });
+        if has_attr
+            && let Err(err) = set_attribute_value(
+                &self.app.element,
+                &kAXEnhancedUserInterfaceAttribute(),
+                unsafe { kCFBooleanTrue.unwrap() },
+            )
+        {
+            tracing::trace!("Failed to re-enable enhanced UI for {self}: {err:#}");
         }
         result
     }
@@ -296,10 +375,6 @@ impl AXWindow {
             &kAXSizeAttribute(),
             &size,
         )?)
-    }
-
-    fn app_name_(&self) -> &str {
-        self.app_name.as_deref().unwrap_or("Unknown")
     }
 }
 
@@ -346,6 +421,9 @@ pub(super) trait AXWindowApi: Send + Sync + std::fmt::Display {
     fn is_valid(&self, marker: &DispatcherMarker) -> bool;
     fn is_minimized(&self, marker: &DispatcherMarker) -> bool;
     fn read_title(&self, marker: &DispatcherMarker) -> Option<String>;
+    /// Refresh the cached `kAXEnhancedUserInterfaceAttribute` probe for this
+    /// window's app. Deduplication by PID is the caller's responsibility.
+    fn refresh_enhanced_ui(&self, marker: &DispatcherMarker);
 }
 
 // The marker proves the caller is on a GCD queue. It isn't forwarded to the
@@ -392,5 +470,8 @@ impl AXWindowApi for AXWindow {
         get_attribute::<CFString>(&self.element, &kAXTitleAttribute())
             .map(|t| t.to_string())
             .ok()
+    }
+    fn refresh_enhanced_ui(&self, _marker: &DispatcherMarker) {
+        self.app.refresh_enhanced_ui();
     }
 }
