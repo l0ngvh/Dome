@@ -20,7 +20,6 @@ use crate::config::{Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{ContainerId, Dimension, Hub, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
-use crate::platform::macos::running_application::RunningApp;
 
 use monitor::MonitorRegistry;
 use recovery::Recovery;
@@ -333,16 +332,20 @@ impl Dome {
         self.observed_pids.insert(pid);
     }
 
-    pub(in crate::platform::macos) fn unmark_pid_observed(&mut self, pid: i32) {
-        self.observed_pids.remove(&pid);
+    /// Replaces `observed_pids` wholesale with the given set. Called after
+    /// `refresh_all_observers` completes on the main thread.
+    pub(in crate::platform::macos) fn set_observed_pids(&mut self, pids: HashSet<i32>) {
+        self.observed_pids = pids;
     }
 
     pub(in crate::platform::macos) fn remove_untracked_app(&mut self, pid: i32) {
         self.remove_app_windows(pid);
     }
 
-    pub(in crate::platform::macos) fn register_observers(&mut self, apps: Vec<RunningApp>) {
-        self.sender.send(HubMessage::RegisterObservers(apps));
+    /// Sends a message to the main thread to tear down all observers and
+    /// re-register from scratch.
+    pub(in crate::platform::macos) fn refresh_observers(&self) {
+        self.sender.send(HubMessage::RefreshObservers);
     }
 
     fn remove_window(&mut self, wid: WindowId) {

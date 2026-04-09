@@ -314,10 +314,8 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         .set(Some(frame.focused_monitor_id));
                 }
             }
-            HubMessage::RegisterObservers(apps) => {
-                for app in &apps {
-                    delegate.ivars().event_listener.register_app(app);
-                }
+            HubMessage::RefreshObservers => {
+                delegate.ivars().event_listener.refresh_all_observers();
             }
             HubMessage::ConfigChanged(new_config) => {
                 *delegate.ivars().config.borrow_mut() = new_config.clone();

@@ -121,6 +121,12 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         HubEvent::SpaceChanged => {
             dispatch_space_changed(runner);
         }
+        HubEvent::PidObserved { pid } => {
+            runner.dome.mark_pid_observed(pid);
+        }
+        HubEvent::ObservedPidsRefreshed(pids) => {
+            runner.dome.set_observed_pids(pids);
+        }
     });
 }
 
@@ -295,9 +301,7 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
         move |marker| compute_reconcile_all(observed_pids, tracked, ignore_rules, marker),
         |result, runner| {
             for pid in result.terminated_pids {
-                // FIXME: cleanup observer for terminated apps
                 cancel_move_timer(runner, pid);
-                runner.dome.unmark_pid_observed(pid);
                 runner.dome.remove_untracked_app(pid);
             }
             for pid in result.hidden_pids.clone() {
@@ -311,15 +315,8 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
                 runner.dome.run_hub_actions(&actions);
                 handle_system_actions(runner, &actions);
             }
-            if !result.new_apps.is_empty() {
-                for app in &result.new_apps {
-                    runner.dome.mark_pid_observed(app.pid());
-                }
-                runner.dome.register_observers(result.new_apps);
-            }
-            // Windows moved/resized events aren't fired from time to time, like when windows
-            // are brought into view after new monitors are plugged in, or when windows moved
-            // from fullscreen.
+            // Periodic position check for all observed PIDs — compensates for
+            // missed move/resize events.
             let pids_to_check: Vec<_> = runner
                 .dome
                 .observed_pids()
@@ -332,6 +329,11 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
             for pid in pids_to_check {
                 start_move_timer(runner, pid, Instant::now());
             }
+            // Tear down all observers and re-register from scratch. Handles
+            // failed creation retries, partial registration, runtime staleness,
+            // and terminated app cleanup. The main thread sends
+            // ObservedPidsRefreshed back to rebuild observed_pids wholesale.
+            runner.dome.refresh_observers();
         },
     );
 }

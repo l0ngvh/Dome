@@ -25,7 +25,6 @@ pub(in crate::platform::macos) struct ExistingWindow {
 
 pub(in crate::platform::macos) struct ReconcileAllResult {
     pub(in crate::platform::macos) terminated_pids: Vec<i32>,
-    pub(in crate::platform::macos) new_apps: Vec<RunningApp>,
     pub(in crate::platform::macos) hidden_pids: Vec<i32>,
     pub(in crate::platform::macos) to_remove: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_add: Vec<NewWindow>,
@@ -135,12 +134,6 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
         .copied()
         .collect();
 
-    let new_apps: Vec<_> = running
-        .iter()
-        .filter(|app| !observed_pids.contains(&app.pid()))
-        .cloned()
-        .collect();
-
     let mut hidden_pids = Vec::new();
     let mut to_remove = Vec::new();
     let mut to_add = Vec::new();
@@ -165,7 +158,6 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
 
     ReconcileAllResult {
         terminated_pids,
-        new_apps,
         hidden_pids,
         to_remove,
         to_add,

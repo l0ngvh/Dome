@@ -111,6 +111,18 @@ pub(crate) fn add_observer_notification(
     Ok(())
 }
 
+pub(crate) fn remove_observer_notification(
+    observer: &AXObserver,
+    element: &AXUIElement,
+    notification: &CFString,
+) -> Result<(), AXError> {
+    let res = unsafe { observer.remove_notification(element, notification) };
+    if res != RawAXError::Success {
+        return Err(res.into());
+    }
+    Ok(())
+}
+
 #[allow(non_snake_case)]
 pub(crate) fn kAXPositionAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXPosition")

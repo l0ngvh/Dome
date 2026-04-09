@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::time::Instant;
 
@@ -7,7 +8,6 @@ use objc2_foundation::NSRect;
 use crate::action::Actions;
 use crate::config::Config;
 use crate::core::{Child, ContainerId, ContainerPlacement, Dimension, MonitorId, WindowPlacement};
-use crate::platform::macos::running_application::RunningApp;
 
 use super::super::MonitorInfo;
 
@@ -47,6 +47,13 @@ pub(in crate::platform::macos) enum HubEvent {
     /// macOS Space changed. Used to detect native fullscreen enter/exit since
     /// native fullscreen moves windows to a separate Space.
     SpaceChanged,
+    /// A single PID was observed (from app-launch path).
+    PidObserved {
+        pid: i32,
+    },
+    /// Full set of observed PIDs after a refresh cycle. Replaces
+    /// `observed_pids` wholesale.
+    ObservedPidsRefreshed(HashSet<i32>),
     Shutdown,
 }
 
@@ -71,6 +78,10 @@ impl fmt::Display for HubEvent {
                 write!(f, "TabClicked({container_id}, tab_idx={tab_idx})")
             }
             Self::SpaceChanged => write!(f, "SpaceChanged"),
+            Self::PidObserved { pid } => write!(f, "PidObserved(pid={pid})"),
+            Self::ObservedPidsRefreshed(pids) => {
+                write!(f, "ObservedPidsRefreshed(count={})", pids.len())
+            }
             Self::Shutdown => write!(f, "Shutdown"),
         }
     }
@@ -78,7 +89,7 @@ impl fmt::Display for HubEvent {
 
 pub(in crate::platform::macos) enum HubMessage {
     Frame(RenderFrame),
-    RegisterObservers(Vec<RunningApp>),
+    RefreshObservers,
     ConfigChanged(Config),
     Shutdown,
 }

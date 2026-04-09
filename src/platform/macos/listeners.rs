@@ -1,6 +1,7 @@
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -38,6 +39,7 @@ use super::objc2_wrapper::{
     kAXFocusedWindowChangedNotification, kAXMovedNotification, kAXResizedNotification,
     kAXTitleChangedNotification, kAXUIElementDestroyedNotification, kAXWindowCreatedNotification,
     kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification,
+    remove_observer_notification,
 };
 use super::running_application::RunningApp;
 use super::send_hub_event;
@@ -70,7 +72,45 @@ pub(super) struct EventListener {
     screen_observer: Retained<ProtocolObject<dyn NSObjectProtocol>>,
 }
 
-type Observers = Rc<RefCell<HashMap<i32, CFRetained<AXObserver>>>>;
+/// Wraps an `AXObserver` added to a run loop. Tracks registered notifications
+/// so `Drop` can remove them, then removes the run loop source.
+/// `PhantomData<*const ()>` makes the type `!Send`/`!Sync`.
+struct RegisteredObserver {
+    observer: CFRetained<AXObserver>,
+    element: CFRetained<AXUIElement>,
+    notifications: Vec<CFRetained<CFString>>,
+    run_loop: CFRetained<CFRunLoop>,
+    _bound_to_thread: PhantomData<*const ()>,
+}
+
+impl RegisteredObserver {
+    fn add_notification(
+        &mut self,
+        notification: CFRetained<CFString>,
+        refcon: *mut std::ffi::c_void,
+    ) -> Result<(), crate::platform::macos::objc2_wrapper::AXError> {
+        add_observer_notification(&self.observer, &self.element, &notification, refcon)?;
+        self.notifications.push(notification);
+        Ok(())
+    }
+}
+
+impl Drop for RegisteredObserver {
+    fn drop(&mut self) {
+        for notification in &self.notifications {
+            if let Err(err) =
+                remove_observer_notification(&self.observer, &self.element, notification)
+            {
+                tracing::trace!("Failed to remove notification: {err:#}");
+            }
+        }
+        let source = unsafe { self.observer.run_loop_source() };
+        self.run_loop
+            .remove_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
+    }
+}
+
+type Observers = Rc<RefCell<HashMap<i32, RegisteredObserver>>>;
 type FocusThrottle = Pin<Box<Throttle<i32>>>;
 type TitleThrottle = Pin<Box<Throttle<CGWindowID>>>;
 
@@ -99,8 +139,16 @@ impl EventListener {
         }
     }
 
-    pub(super) fn register_app(&self, app: &RunningApp) {
-        try_register_app(&self.ctx, app);
+    /// Tears down all observers and re-registers from scratch. Sends
+    /// `ObservedPidsRefreshed` back to the hub thread with the full set of
+    /// successfully registered PIDs. Must be called on the main thread.
+    pub(super) fn refresh_all_observers(&self) {
+        self.ctx.observers.borrow_mut().clear();
+        for app in RunningApp::all() {
+            try_register_app(&self.ctx, &app);
+        }
+        let pids: HashSet<i32> = self.ctx.observers.borrow().keys().copied().collect();
+        send_hub_event(&self.ctx.hub_sender, HubEvent::ObservedPidsRefreshed(pids));
     }
 }
 
@@ -108,13 +156,6 @@ impl Drop for EventListener {
     fn drop(&mut self) {
         if let Some(ref timer) = self.sync_timer {
             CFRunLoopTimer::invalidate(timer);
-        }
-
-        if let Some(run_loop) = CFRunLoop::current() {
-            for observer in self.ctx.observers.borrow().values() {
-                let source = unsafe { observer.run_loop_source() };
-                run_loop.remove_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
-            }
         }
 
         let notification_center = NSWorkspace::sharedWorkspace().notificationCenter();
@@ -321,7 +362,12 @@ fn handle_app_launched(ctx: &ListenerCtx, notification: &NSNotification) {
         return;
     };
     tracing::debug!(%app, "App launched");
-    try_register_app(ctx, &app);
+    if try_register_app(ctx, &app) {
+        tracing::debug!(%app, "Registered app");
+    }
+    if ctx.observers.borrow().contains_key(&app.pid()) {
+        send_hub_event(&ctx.hub_sender, HubEvent::PidObserved { pid: app.pid() });
+    }
     send_hub_event(
         &ctx.hub_sender,
         HubEvent::VisibleWindowsChanged { pid: app.pid() },
@@ -334,12 +380,7 @@ fn handle_app_terminated(ctx: &ListenerCtx, notification: &NSNotification) {
     };
     let pid = app.pid();
     tracing::debug!(%app, "App terminated");
-    if let Some(observer) = ctx.observers.borrow_mut().remove(&pid) {
-        let source = unsafe { observer.run_loop_source() };
-        if let Some(run_loop) = CFRunLoop::current() {
-            run_loop.remove_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
-        }
-    }
+    ctx.observers.borrow_mut().remove(&pid);
     send_hub_event(&ctx.hub_sender, HubEvent::AppTerminated { pid });
 }
 
@@ -361,12 +402,12 @@ fn handle_app_activated(ctx: &mut ListenerCtx, notification: &NSNotification) {
     ctx.focus_throttle.submit(app.pid());
 }
 
-fn try_register_app(ctx: &ListenerCtx, app: &RunningApp) {
+fn try_register_app(ctx: &ListenerCtx, app: &RunningApp) -> bool {
     let pid = app.pid();
 
     let mut observers_ref = ctx.observers.borrow_mut();
     if observers_ref.contains_key(&pid) {
-        return;
+        return false;
     }
 
     let run_loop = CFRunLoop::current().unwrap();
@@ -374,14 +415,22 @@ fn try_register_app(ctx: &ListenerCtx, app: &RunningApp) {
         Ok(o) => o,
         Err(err) => {
             tracing::debug!(%pid, "Can't create observer: {err:#}");
-            return;
+            return false;
         }
     };
     let source = unsafe { observer.run_loop_source() };
     run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
 
-    let context_ptr = ctx as *const ListenerCtx as *mut std::ffi::c_void;
     let ax_app = unsafe { AXUIElement::new_application(pid) };
+    let mut registered = RegisteredObserver {
+        observer,
+        element: ax_app,
+        notifications: Vec::new(),
+        run_loop: run_loop.clone(),
+        _bound_to_thread: PhantomData,
+    };
+
+    let context_ptr = ctx as *const ListenerCtx as *mut std::ffi::c_void;
     for notification in [
         kAXWindowCreatedNotification(),
         kAXWindowMiniaturizedNotification(),
@@ -394,14 +443,13 @@ fn try_register_app(ctx: &ListenerCtx, app: &RunningApp) {
         kAXApplicationShownNotification(),
         kAXTitleChangedNotification(),
     ] {
-        if let Err(err) = add_observer_notification(&observer, &ax_app, &notification, context_ptr)
-        {
+        if let Err(err) = registered.add_notification(notification, context_ptr) {
             tracing::debug!(%pid, "Can't add notification: {err:#}");
         }
     }
 
-    tracing::info!(%app, "Registered app");
-    observers_ref.insert(pid, observer);
+    observers_ref.insert(pid, registered);
+    true
 }
 
 #[tracing::instrument(skip_all)]

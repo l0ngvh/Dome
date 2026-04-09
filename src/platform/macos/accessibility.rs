@@ -31,10 +31,10 @@ pub(super) struct AXApp {
     pid: i32,
     app_name: Option<String>,
     bundle_id: Option<String>,
-    /// Cached probe of `kAXEnhancedUserInterfaceAttribute` existence on this app.
-    /// `true` means the app supports the attribute (typically screen-reader-aware apps).
+    /// Whether `kAXEnhancedUserInterfaceAttribute` is settable on this app.
+    /// Used by `with_animation_disabled` to skip set calls on apps that don't support it.
     /// Refreshed periodically via `refresh_enhanced_ui` during reconciliation.
-    has_enhanced_ui_attr: AtomicBool,
+    can_set_enhanced_ui: AtomicBool,
 }
 
 // Safety: AXUIElement operations are IPC calls to the accessibility server,
@@ -49,14 +49,14 @@ impl AXApp {
         let element = unsafe { AXUIElement::new_application(pid) };
         let app_name = app.localizedName().map(|n| n.to_string());
         let bundle_id = app.bundleIdentifier().map(|b| b.to_string());
-        let has_enhanced_ui_attr =
-            get_attribute::<CFBoolean>(&element, &kAXEnhancedUserInterfaceAttribute()).is_ok();
+        let can_set_enhanced_ui =
+            is_attribute_settable(&element, &kAXEnhancedUserInterfaceAttribute());
         Self {
             element,
             pid,
             app_name,
             bundle_id,
-            has_enhanced_ui_attr: AtomicBool::new(has_enhanced_ui_attr),
+            can_set_enhanced_ui: AtomicBool::new(can_set_enhanced_ui),
         }
     }
 
@@ -72,19 +72,18 @@ impl AXApp {
         self.bundle_id.as_deref()
     }
 
-    /// Whether this app supports `kAXEnhancedUserInterfaceAttribute`.
+    /// Whether `kAXEnhancedUserInterfaceAttribute` is settable on this app.
     /// Uses a cached value — `Relaxed` ordering is fine since this is a
     /// performance hint, not a synchronization primitive.
-    pub(super) fn has_enhanced_ui_attr(&self) -> bool {
-        self.has_enhanced_ui_attr.load(Ordering::Relaxed)
+    pub(super) fn can_set_enhanced_ui(&self) -> bool {
+        self.can_set_enhanced_ui.load(Ordering::Relaxed)
     }
 
-    /// Re-probes `kAXEnhancedUserInterfaceAttribute` on the app element and
-    /// updates the cache. Called during periodic reconciliation on a GCD queue.
+    /// Re-probes whether `kAXEnhancedUserInterfaceAttribute` is settable on the
+    /// app element and updates the cache. Called during periodic reconciliation.
     pub(super) fn refresh_enhanced_ui(&self) {
-        let exists =
-            get_attribute::<CFBoolean>(&self.element, &kAXEnhancedUserInterfaceAttribute()).is_ok();
-        self.has_enhanced_ui_attr.store(exists, Ordering::Relaxed);
+        let settable = is_attribute_settable(&self.element, &kAXEnhancedUserInterfaceAttribute());
+        self.can_set_enhanced_ui.store(settable, Ordering::Relaxed);
     }
 }
 
@@ -332,25 +331,25 @@ impl AXWindow {
     where
         F: FnOnce() -> Result<()>,
     {
-        let has_attr = self.app.has_enhanced_ui_attr();
-        if has_attr
+        let can_set = self.app.can_set_enhanced_ui();
+        if can_set
             && let Err(err) = set_attribute_value(
                 &self.app.element,
                 &kAXEnhancedUserInterfaceAttribute(),
                 unsafe { kCFBooleanFalse.unwrap() },
             )
         {
-            tracing::trace!("Failed to disable enhanced UI for {self}: {err:#}");
+            tracing::trace!(window = %self, "Failed to disable enhanced UI: {err:#}");
         }
         let result = f();
-        if has_attr
+        if can_set
             && let Err(err) = set_attribute_value(
                 &self.app.element,
                 &kAXEnhancedUserInterfaceAttribute(),
                 unsafe { kCFBooleanTrue.unwrap() },
             )
         {
-            tracing::trace!("Failed to re-enable enhanced UI for {self}: {err:#}");
+            tracing::trace!(window = %self, "Failed to re-enable enhanced UI: {err:#}");
         }
         result
     }
