@@ -18,7 +18,7 @@ use crate::platform::macos::dome::{
     Dome, HubEvent, WindowMove, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,
 };
-use crate::platform::macos::running_application::RunningApp;
+use crate::platform::macos::running_application::{self, RunningApp};
 
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -178,8 +178,9 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
     runner.dispatcher.dispatch(
         move |marker| {
             let app = RunningApp::new(pid)?;
+            let ax_app = app.ax_app();
             Some(compute_reconciliation(
-                &app,
+                &ax_app,
                 &tracked,
                 &ignore_rules,
                 marker,
@@ -202,7 +203,8 @@ fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: Inst
     runner.dispatcher.dispatch(
         move |marker| {
             let app = RunningApp::new(pid)?;
-            Some(compute_window_positions(&app, &tracked, marker))
+            let ax_app = app.ax_app();
+            Some(compute_window_positions(&ax_app, &tracked, marker))
         },
         move |result, runner| {
             if let Some(existing) = result {
@@ -231,7 +233,8 @@ fn dispatch_sync_focus(runner: &mut DomeRunner, pid: i32) {
             if !app.is_active() {
                 return None;
             }
-            Some(app.focused_window(marker)?.cg_id())
+            let ax_app = app.ax_app();
+            Some(running_application::focused_window(&ax_app, marker)?.cg_id())
         },
         |result, runner| {
             if let Some(cg_id) = result {
@@ -256,9 +259,10 @@ fn dispatch_title_read(runner: &mut DomeRunner, cg_id: CGWindowID) {
 fn dispatch_space_changed(runner: &mut DomeRunner) {
     runner.dispatcher.dispatch(
         move |marker| {
-            let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
-            let app = RunningApp::from(app);
-            let ax = app.focused_window(marker)?;
+            let ns_app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+            let app = RunningApp::from(ns_app);
+            let ax_app = app.ax_app();
+            let ax = running_application::focused_window(&ax_app, marker)?;
             let cg_id = ax.cg_id();
             let is_native_fs = ax.is_native_fullscreen();
             let pos = ax.get_position().ok();

@@ -7,14 +7,16 @@ use std::ptr::NonNull;
 #[cfg(not(test))]
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
+#[cfg(not(test))]
+use objc2_core_foundation::CFArray;
 use objc2_core_foundation::{
     CFBoolean, CFDictionary, CFEqual, CFRetained, CFString, CFType, CGPoint, CGSize,
     kCFBooleanFalse, kCFBooleanTrue,
 };
 use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
-use super::dispatcher::DispatcherMarker;
-use super::objc2_wrapper::{
+use crate::platform::macos::dispatcher::DispatcherMarker;
+use crate::platform::macos::objc2_wrapper::{
     AXError, get_attribute, is_attribute_settable, kAXEnhancedUserInterfaceAttribute,
     kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute,
     kAXParentAttribute, kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute,
@@ -27,7 +29,7 @@ use super::objc2_wrapper::{
 /// Holds the AXUIElement for the app process and cached app metadata (name, bundle ID).
 /// Always used behind `Arc<AXApp>` so multiple `AXWindow`s from the same app share one instance.
 pub(super) struct AXApp {
-    pub(super) element: CFRetained<AXUIElement>,
+    element: CFRetained<AXUIElement>,
     pid: i32,
     app_name: Option<String>,
     bundle_id: Option<String>,
@@ -84,6 +86,62 @@ impl AXApp {
     pub(super) fn refresh_enhanced_ui(&self) {
         let settable = is_attribute_settable(&self.element, &kAXEnhancedUserInterfaceAttribute());
         self.can_set_enhanced_ui.store(settable, Ordering::Relaxed);
+    }
+
+    pub(super) fn set_frontmost(&self) -> Result<(), AXError> {
+        set_attribute_value(&self.element, &kAXFrontmostAttribute(), unsafe {
+            kCFBooleanTrue.unwrap()
+        })
+    }
+
+    pub(super) fn set_enhanced_ui(&self, enabled: bool) -> Result<(), AXError> {
+        let value = if enabled {
+            unsafe { kCFBooleanTrue.unwrap() }
+        } else {
+            unsafe { kCFBooleanFalse.unwrap() }
+        };
+        set_attribute_value(&self.element, &kAXEnhancedUserInterfaceAttribute(), value)
+    }
+
+    /// Returns `true` if the window's parent is the app element itself (i.e. a
+    /// top-level window, not a sheet or child panel).
+    pub(super) fn is_root_window(&self, window_element: &AXUIElement) -> bool {
+        match get_attribute::<AXUIElement>(window_element, &kAXParentAttribute()) {
+            Err(_) => true,
+            Ok(parent) => CFEqual(Some(&*parent), Some(&*self.element)),
+        }
+    }
+
+    #[cfg(not(test))]
+    pub(super) fn windows(&self) -> Result<CFRetained<CFArray<AXUIElement>>, AXError> {
+        get_attribute::<CFArray<AXUIElement>>(
+            &self.element,
+            &crate::platform::macos::objc2_wrapper::kAXWindowsAttribute(),
+        )
+    }
+
+    #[cfg(not(test))]
+    pub(super) fn focused_window_element(&self) -> Result<CFRetained<AXUIElement>, AXError> {
+        get_attribute::<AXUIElement>(
+            &self.element,
+            &crate::platform::macos::objc2_wrapper::kAXFocusedWindowAttribute(),
+        )
+    }
+
+    /// Exposes the raw AXUIElement for observer registration (add/remove notification).
+    pub(super) fn element(&self) -> &AXUIElement {
+        &self.element
+    }
+
+    #[cfg(test)]
+    pub(super) fn stub(pid: i32) -> Self {
+        Self {
+            element: unsafe { AXUIElement::new_application(pid) },
+            pid,
+            app_name: None,
+            bundle_id: None,
+            can_set_enhanced_ui: AtomicBool::new(false),
+        }
     }
 }
 
@@ -221,10 +279,9 @@ impl AXWindow {
     }
 
     pub(super) fn focus(&self) -> Result<()> {
-        set_attribute_value(&self.app.element, &kAXFrontmostAttribute(), unsafe {
-            kCFBooleanTrue.unwrap()
-        })
-        .with_context(|| format!("focus for {self}"))?;
+        self.app
+            .set_frontmost()
+            .with_context(|| format!("focus for {self}"))?;
         set_attribute_value(&self.element, &kAXMainAttribute(), unsafe {
             kCFBooleanTrue.unwrap()
         })
@@ -290,10 +347,7 @@ impl AXWindow {
             return false;
         }
 
-        let is_root = match get_attribute::<AXUIElement>(&self.element, &kAXParentAttribute()) {
-            Err(_) => true,
-            Ok(parent) => CFEqual(Some(&*parent), Some(&*self.app.element)),
-        };
+        let is_root = self.app.is_root_window(&self.element);
         if !is_root {
             tracing::trace!(window = %self, "not manageable: window is not root");
             return false;
@@ -332,23 +386,11 @@ impl AXWindow {
         F: FnOnce() -> Result<()>,
     {
         let can_set = self.app.can_set_enhanced_ui();
-        if can_set
-            && let Err(err) = set_attribute_value(
-                &self.app.element,
-                &kAXEnhancedUserInterfaceAttribute(),
-                unsafe { kCFBooleanFalse.unwrap() },
-            )
-        {
+        if can_set && let Err(err) = self.app.set_enhanced_ui(false) {
             tracing::trace!(window = %self, "Failed to disable enhanced UI: {err:#}");
         }
         let result = f();
-        if can_set
-            && let Err(err) = set_attribute_value(
-                &self.app.element,
-                &kAXEnhancedUserInterfaceAttribute(),
-                unsafe { kCFBooleanTrue.unwrap() },
-            )
-        {
+        if can_set && let Err(err) = self.app.set_enhanced_ui(true) {
             tracing::trace!(window = %self, "Failed to re-enable enhanced UI: {err:#}");
         }
         result

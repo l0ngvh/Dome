@@ -7,15 +7,11 @@ mod real {
     use objc2_app_kit::{
         NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceApplicationKey,
     };
-    use objc2_application_services::AXUIElement;
-    use objc2_core_foundation::CFArray;
     use objc2_foundation::NSNotification;
 
-    use super::super::accessibility::{AXApp, AXWindow};
-    use super::super::dispatcher::DispatcherMarker;
-    use super::super::objc2_wrapper::{
-        get_attribute, get_cg_window_id, kAXFocusedWindowAttribute, kAXWindowsAttribute,
-    };
+    use crate::platform::macos::accessibility::{AXApp, AXWindow};
+    use crate::platform::macos::dispatcher::DispatcherMarker;
+    use crate::platform::macos::objc2_wrapper::get_cg_window_id;
 
     #[derive(Clone)]
     pub(in crate::platform::macos) struct RunningApp(Retained<NSRunningApplication>);
@@ -53,41 +49,8 @@ mod real {
             self.0.isActive()
         }
 
-        /// Blocking AX IPC — creates an AXUIElement for the app process.
-        pub(in crate::platform::macos) fn ax_app(&self, _marker: &DispatcherMarker) -> Arc<AXApp> {
+        pub(in crate::platform::macos) fn ax_app(&self) -> Arc<AXApp> {
             Arc::new(AXApp::new(&self.0))
-        }
-
-        /// Blocking AX IPC — queries `kAXWindowsAttribute` on the target process.
-        pub(in crate::platform::macos) fn ax_windows(
-            &self,
-            marker: &DispatcherMarker,
-        ) -> Vec<AXWindow> {
-            let ax_app = self.ax_app(marker);
-            let Ok(windows) =
-                get_attribute::<CFArray<AXUIElement>>(&ax_app.element, &kAXWindowsAttribute())
-            else {
-                return Vec::new();
-            };
-            windows
-                .into_iter()
-                .filter_map(|w| {
-                    let cg_id = get_cg_window_id(&w)?;
-                    Some(AXWindow::new(w, cg_id, ax_app.clone()))
-                })
-                .collect()
-        }
-
-        /// Blocking AX IPC — queries `kAXFocusedWindowAttribute` on the target process.
-        pub(in crate::platform::macos) fn focused_window(
-            &self,
-            marker: &DispatcherMarker,
-        ) -> Option<AXWindow> {
-            let ax_app = self.ax_app(marker);
-            let focused =
-                get_attribute::<AXUIElement>(&ax_app.element, &kAXFocusedWindowAttribute()).ok()?;
-            let cg_id = get_cg_window_id(&focused)?;
-            Some(AXWindow::new(focused, cg_id, ax_app))
         }
 
         pub(in crate::platform::macos) fn all() -> impl Iterator<Item = RunningApp> {
@@ -98,6 +61,33 @@ mod real {
                 .filter(|app| is_valid_pid(app.processIdentifier()))
                 .map(RunningApp::from)
         }
+    }
+
+    /// Blocking AX IPC — queries `kAXWindowsAttribute` on the target process.
+    pub(in crate::platform::macos) fn ax_windows(
+        app: &Arc<AXApp>,
+        _marker: &DispatcherMarker,
+    ) -> Vec<AXWindow> {
+        let Ok(windows) = app.windows() else {
+            return Vec::new();
+        };
+        windows
+            .into_iter()
+            .filter_map(|w| {
+                let cg_id = get_cg_window_id(&w)?;
+                Some(AXWindow::new(w, cg_id, app.clone()))
+            })
+            .collect()
+    }
+
+    /// Blocking AX IPC — queries `kAXFocusedWindowAttribute` on the target process.
+    pub(in crate::platform::macos) fn focused_window(
+        app: &Arc<AXApp>,
+        _marker: &DispatcherMarker,
+    ) -> Option<AXWindow> {
+        let focused = app.focused_window_element().ok()?;
+        let cg_id = get_cg_window_id(&focused)?;
+        Some(AXWindow::new(focused, cg_id, app.clone()))
     }
 
     impl From<Retained<NSRunningApplication>> for RunningApp {
@@ -123,7 +113,7 @@ mod real {
 }
 
 #[cfg(not(test))]
-pub(super) use real::RunningApp;
+pub(super) use real::{RunningApp, ax_windows, focused_window};
 
 #[cfg(test)]
 #[expect(
@@ -132,12 +122,14 @@ pub(super) use real::RunningApp;
 )]
 mod mock {
     use std::fmt;
+    use std::sync::Arc;
 
     use objc2::rc::Retained;
     use objc2_app_kit::{NSRunningApplication, NSWorkspaceApplicationKey};
     use objc2_foundation::NSNotification;
 
-    use super::super::dispatcher::DispatcherMarker;
+    use crate::platform::macos::accessibility::{AXApp, AXWindow};
+    use crate::platform::macos::dispatcher::DispatcherMarker;
 
     #[derive(Clone)]
     pub(in crate::platform::macos) struct RunningApp {
@@ -181,23 +173,27 @@ mod mock {
             self.active
         }
 
-        pub(in crate::platform::macos) fn ax_windows(
-            &self,
-            _marker: &DispatcherMarker,
-        ) -> Vec<super::super::accessibility::AXWindow> {
-            Vec::new()
-        }
-
-        pub(in crate::platform::macos) fn focused_window(
-            &self,
-            _marker: &DispatcherMarker,
-        ) -> Option<super::super::accessibility::AXWindow> {
-            None
+        pub(in crate::platform::macos) fn ax_app(&self) -> Arc<AXApp> {
+            Arc::new(AXApp::stub(self.pid))
         }
 
         pub(in crate::platform::macos) fn all() -> impl Iterator<Item = RunningApp> {
             std::iter::empty()
         }
+    }
+
+    pub(in crate::platform::macos) fn ax_windows(
+        _app: &Arc<AXApp>,
+        _marker: &DispatcherMarker,
+    ) -> Vec<AXWindow> {
+        Vec::new()
+    }
+
+    pub(in crate::platform::macos) fn focused_window(
+        _app: &Arc<AXApp>,
+        _marker: &DispatcherMarker,
+    ) -> Option<AXWindow> {
+        None
     }
 
     impl From<Retained<NSRunningApplication>> for RunningApp {
@@ -218,4 +214,4 @@ mod mock {
 }
 
 #[cfg(test)]
-pub(super) use mock::RunningApp;
+pub(super) use mock::{RunningApp, ax_windows, focused_window};

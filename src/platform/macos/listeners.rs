@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use calloop::channel::Sender as CalloopSender;
@@ -31,9 +32,10 @@ use objc2_foundation::{
 };
 use std::cell::RefCell;
 
-use super::dome::HubEvent;
-use super::get_all_screens;
-use super::objc2_wrapper::{
+use crate::platform::macos::accessibility::AXApp;
+use crate::platform::macos::dome::HubEvent;
+use crate::platform::macos::get_all_screens;
+use crate::platform::macos::objc2_wrapper::{
     add_observer_notification, create_observer, get_cg_window_id, get_pid,
     kAXApplicationHiddenNotification, kAXApplicationShownNotification,
     kAXFocusedWindowChangedNotification, kAXMovedNotification, kAXResizedNotification,
@@ -41,9 +43,9 @@ use super::objc2_wrapper::{
     kAXWindowDeminiaturizedNotification, kAXWindowMiniaturizedNotification,
     remove_observer_notification,
 };
-use super::running_application::RunningApp;
-use super::send_hub_event;
-use super::throttle::Throttle;
+use crate::platform::macos::running_application::RunningApp;
+use crate::platform::macos::send_hub_event;
+use crate::platform::macos::throttle::Throttle;
 
 const FRAME_THROTTLE: Duration = Duration::from_millis(16);
 const SYNC_INTERVAL: Duration = Duration::from_secs(5);
@@ -77,7 +79,7 @@ pub(super) struct EventListener {
 /// `PhantomData<*const ()>` makes the type `!Send`/`!Sync`.
 struct RegisteredObserver {
     observer: CFRetained<AXObserver>,
-    element: CFRetained<AXUIElement>,
+    app: Arc<AXApp>,
     notifications: Vec<CFRetained<CFString>>,
     run_loop: CFRetained<CFRunLoop>,
     _bound_to_thread: PhantomData<*const ()>,
@@ -89,7 +91,7 @@ impl RegisteredObserver {
         notification: CFRetained<CFString>,
         refcon: *mut std::ffi::c_void,
     ) -> Result<(), crate::platform::macos::objc2_wrapper::AXError> {
-        add_observer_notification(&self.observer, &self.element, &notification, refcon)?;
+        add_observer_notification(&self.observer, self.app.element(), &notification, refcon)?;
         self.notifications.push(notification);
         Ok(())
     }
@@ -99,7 +101,7 @@ impl Drop for RegisteredObserver {
     fn drop(&mut self) {
         for notification in &self.notifications {
             if let Err(err) =
-                remove_observer_notification(&self.observer, &self.element, notification)
+                remove_observer_notification(&self.observer, self.app.element(), notification)
             {
                 tracing::trace!("Failed to remove notification: {err:#}");
             }
@@ -145,7 +147,8 @@ impl EventListener {
     pub(super) fn refresh_all_observers(&self) {
         self.ctx.observers.borrow_mut().clear();
         for app in RunningApp::all() {
-            try_register_app(&self.ctx, &app);
+            let ax_app = app.ax_app();
+            try_register_app(&self.ctx, &app, &ax_app);
         }
         let pids: HashSet<i32> = self.ctx.observers.borrow().keys().copied().collect();
         send_hub_event(&self.ctx.hub_sender, HubEvent::ObservedPidsRefreshed(pids));
@@ -362,7 +365,8 @@ fn handle_app_launched(ctx: &ListenerCtx, notification: &NSNotification) {
         return;
     };
     tracing::debug!(%app, "App launched");
-    if try_register_app(ctx, &app) {
+    let ax_app = app.ax_app();
+    if try_register_app(ctx, &app, &ax_app) {
         tracing::debug!(%app, "Registered app");
     }
     if ctx.observers.borrow().contains_key(&app.pid()) {
@@ -402,7 +406,7 @@ fn handle_app_activated(ctx: &mut ListenerCtx, notification: &NSNotification) {
     ctx.focus_throttle.submit(app.pid());
 }
 
-fn try_register_app(ctx: &ListenerCtx, app: &RunningApp) -> bool {
+fn try_register_app(ctx: &ListenerCtx, app: &RunningApp, ax_app: &Arc<AXApp>) -> bool {
     let pid = app.pid();
 
     let mut observers_ref = ctx.observers.borrow_mut();
@@ -421,10 +425,9 @@ fn try_register_app(ctx: &ListenerCtx, app: &RunningApp) -> bool {
     let source = unsafe { observer.run_loop_source() };
     run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
 
-    let ax_app = unsafe { AXUIElement::new_application(pid) };
     let mut registered = RegisteredObserver {
         observer,
-        element: ax_app,
+        app: ax_app.clone(),
         notifications: Vec::new(),
         run_loop: run_loop.clone(),
         _bound_to_thread: PhantomData,
