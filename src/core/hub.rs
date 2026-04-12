@@ -3,7 +3,7 @@ use crate::config::SizeConstraint;
 use super::allocator::{Allocator, NodeId};
 use super::node::{
     Child, Container, ContainerId, Dimension, DisplayMode, Monitor, MonitorId, Parent, SpawnMode,
-    Window, WindowId, Workspace, WorkspaceId,
+    Window, WindowId, WindowRestrictions, Workspace, WorkspaceId,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -294,9 +294,11 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_fullscreen(&mut self) -> WindowId {
+    pub(crate) fn insert_fullscreen(&mut self, restrictions: WindowRestrictions) -> WindowId {
         let current_ws = self.current_workspace();
-        let window_id = self.windows.allocate(Window::fullscreen(current_ws));
+        let window_id = self
+            .windows
+            .allocate(Window::fullscreen(current_ws, restrictions));
         self.attach_fullscreen_to_workspace(current_ws, window_id);
         self.set_focus(window_id);
         window_id

@@ -13,7 +13,9 @@ pub(crate) use hub::Hub;
 #[cfg(target_os = "macos")]
 pub(crate) use hub::MonitorPlacements;
 pub(crate) use hub::{ContainerPlacement, MonitorLayout, WindowPlacement};
-pub(crate) use node::{Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, WindowId};
+pub(crate) use node::{
+    Child, Container, ContainerId, Dimension, MonitorId, SpawnMode, WindowId, WindowRestrictions,
+};
 
 const MAX_ITERATIONS: usize = 10000;
 

@@ -1,4 +1,4 @@
-use crate::core::{Dimension, WindowId, WindowPlacement};
+use crate::core::{Dimension, WindowId, WindowPlacement, WindowRestrictions};
 use crate::platform::windows::external::{ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
 
@@ -80,7 +80,10 @@ impl Dome {
         let new_target = (x, y, w, h);
 
         let (needs_topmost, settled, prev_actual) = match entry.state {
-            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => return,
+            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {
+                debug_assert!(false, "show_float called on fullscreen window {id}");
+                return;
+            }
             WindowState::Minimized => {
                 entry.ext.show_cmd(ShowCmd::Restore);
                 (true, false, new_target)
@@ -140,7 +143,10 @@ impl Dome {
         let new_target = (x, y, w, h);
 
         let prev_actual = match entry.state {
-            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => return,
+            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {
+                debug_assert!(false, "show_tiling called on fullscreen window {id}");
+                return;
+            }
             WindowState::Positioned(PositionedState::Tiling(d)) if d.target == new_target => {
                 return;
             }
@@ -230,7 +236,8 @@ impl Dome {
         match window.state {
             WindowState::Positioned(_) => {
                 window.state = WindowState::FullscreenBorderless;
-                self.hub.set_fullscreen(id);
+                self.hub
+                    .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
             }
             WindowState::FullscreenExclusive | WindowState::FullscreenBorderless => {}
             WindowState::Minimized => window.ext.show_cmd(ShowCmd::Restore),
@@ -282,9 +289,7 @@ impl Dome {
 
     pub(super) fn enter_fullscreen_exclusive(&mut self, id: WindowId) {
         self.registry.get_mut(id).state = WindowState::FullscreenExclusive;
-        if !self.hub.get_window(id).is_fullscreen() {
-            self.hub.set_fullscreen(id);
-        }
+        self.hub.set_fullscreen(id, WindowRestrictions::BlockAll);
     }
 }
 

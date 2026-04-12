@@ -1,14 +1,55 @@
 use crate::action::MonitorTarget;
-use crate::core::node::{ContainerId, Direction, DisplayMode, MonitorId, Parent};
-use crate::core::{Child, Hub};
+use crate::core::Hub;
+use crate::core::node::{
+    Child, ContainerId, Direction, DisplayMode, MonitorId, Parent, WindowRestrictions,
+};
+
+enum RestrictedAction {
+    /// Operations that navigate or rearrange within the current tiling paradigm.
+    /// Blocked by: BlockAll.
+    TilingNavigation,
+    /// Operations that change the window's display mode (float, fullscreen).
+    /// Blocked by: BlockAll, ProtectFullscreen.
+    DisplayModeChange,
+    /// Move the window to a different workspace (same or different monitor).
+    /// Blocked by: BlockAll only. ProtectFullscreen does NOT block this — on macOS
+    /// and Windows, fullscreen windows (native, borderless) can freely move across workspaces.
+    WorkspaceMove,
+    /// Move the window to a different monitor's active workspace.
+    /// Blocked by: BlockAll, ProtectFullscreen. Fullscreen windows are bound to their
+    /// monitor — moving them cross-monitor would break the fullscreen association.
+    MonitorMove,
+}
+
+impl Hub {
+    fn is_restricted(&self, action: RestrictedAction) -> bool {
+        let ws = self.workspaces.get(self.current_workspace());
+        let Some(Child::Window(id)) = ws.focused else {
+            return false;
+        };
+        let restrictions = self.windows.get(id).restrictions;
+        match action {
+            RestrictedAction::TilingNavigation => restrictions == WindowRestrictions::BlockAll,
+            RestrictedAction::DisplayModeChange => restrictions != WindowRestrictions::None,
+            RestrictedAction::WorkspaceMove => restrictions == WindowRestrictions::BlockAll,
+            RestrictedAction::MonitorMove => restrictions != WindowRestrictions::None,
+        }
+    }
+}
 
 impl Hub {
     pub(crate) fn focus_workspace(&mut self, name: &str) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         let ws_id = self.get_or_create_workspace(name);
         self.focus_workspace_with_id(ws_id);
     }
 
     pub(crate) fn focus_monitor(&mut self, target: &MonitorTarget) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         let Some(target_id) = self.find_monitor_by_target(target) else {
             return;
         };
@@ -20,35 +61,59 @@ impl Hub {
     }
 
     pub(crate) fn focus_left(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.focus_in_direction(Direction::Horizontal, false);
     }
 
     pub(crate) fn focus_right(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.focus_in_direction(Direction::Horizontal, true);
     }
 
     pub(crate) fn focus_up(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.focus_in_direction(Direction::Vertical, false);
     }
 
     pub(crate) fn focus_down(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.focus_in_direction(Direction::Vertical, true);
     }
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn focus_parent(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.focus_split_parent()
     }
 
     pub(crate) fn focus_next_tab(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.focus_tab(true);
     }
 
     pub(crate) fn focus_prev_tab(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.focus_tab(false);
     }
 
     pub(crate) fn focus_tab_index(&mut self, container_id: ContainerId, index: usize) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         let container = self.containers.get_mut(container_id);
         let Some(new_child) = container.set_active_tab_by_index(index) else {
             return;
@@ -61,22 +126,37 @@ impl Hub {
     }
 
     pub(crate) fn move_left(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.move_in_direction(Direction::Horizontal, false);
     }
 
     pub(crate) fn move_right(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.move_in_direction(Direction::Horizontal, true);
     }
 
     pub(crate) fn move_up(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.move_in_direction(Direction::Vertical, false);
     }
 
     pub(crate) fn move_down(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         self.move_in_direction(Direction::Vertical, true);
     }
 
     pub(crate) fn move_focused_to_workspace(&mut self, target_workspace: &str) {
+        if self.is_restricted(RestrictedAction::WorkspaceMove) {
+            return;
+        }
         let current_ws = self.current_workspace();
         let Some(focused) = self.workspaces.get(current_ws).focused else {
             return;
@@ -86,6 +166,9 @@ impl Hub {
     }
 
     pub(crate) fn move_focused_to_monitor(&mut self, target: &MonitorTarget) {
+        if self.is_restricted(RestrictedAction::MonitorMove) {
+            return;
+        }
         let Some(target_id) = self.find_monitor_by_target(target) else {
             return;
         };
@@ -104,6 +187,9 @@ impl Hub {
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn toggle_spawn_mode(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         let current_ws = self.current_workspace();
         let Some(focused) = self.workspaces.get(current_ws).focused else {
             return;
@@ -130,12 +216,18 @@ impl Hub {
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn toggle_direction(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         let current_ws = self.current_workspace();
         self.toggle_split_direction(current_ws);
     }
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn toggle_container_layout(&mut self) {
+        if self.is_restricted(RestrictedAction::TilingNavigation) {
+            return;
+        }
         let current_ws = self.current_workspace();
         let Some(focused) = self.workspaces.get(current_ws).focused else {
             return;
@@ -159,6 +251,9 @@ impl Hub {
     /// Does nothing if no window is focused or a container is focused.
     #[tracing::instrument(skip(self))]
     pub(crate) fn toggle_float(&mut self) {
+        if self.is_restricted(RestrictedAction::DisplayModeChange) {
+            return;
+        }
         let current_ws = self.current_workspace();
         let Some(Child::Window(window_id)) = self.workspaces.get(current_ws).focused else {
             return;
@@ -182,6 +277,9 @@ impl Hub {
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn toggle_fullscreen(&mut self) {
+        if self.is_restricted(RestrictedAction::DisplayModeChange) {
+            return;
+        }
         let current_ws = self.current_workspace();
         let Some(Child::Window(window_id)) = self.workspaces.get(current_ws).focused else {
             return;
@@ -189,7 +287,9 @@ impl Hub {
 
         match self.windows.get(window_id).mode {
             DisplayMode::Fullscreen => self.unset_fullscreen(window_id),
-            DisplayMode::Tiling | DisplayMode::Float => self.set_fullscreen(window_id),
+            DisplayMode::Tiling | DisplayMode::Float => {
+                self.set_fullscreen(window_id, WindowRestrictions::None)
+            }
         }
     }
 

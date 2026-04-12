@@ -456,3 +456,90 @@ fn float_survives_sibling_add() {
     assert!(w1.is_topmost());
     assert!(!w2.is_topmost());
 }
+
+#[test]
+fn exclusive_fullscreen_blocks_all_commands() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "Game",
+        "game.exe",
+        env.moves.clone(),
+    ));
+    env.add_window(w1.clone());
+
+    env.enter_exclusive_fullscreen(HwndId::test(1));
+    let dim_before = w1.get_dim();
+
+    // BlockAll restriction should prevent toggle_float
+    env.run_actions("toggle float");
+    assert_eq!(w1.get_dim(), dim_before);
+
+    // BlockAll restriction should prevent toggle_fullscreen
+    env.run_actions("toggle fullscreen");
+    assert_eq!(w1.get_dim(), dim_before);
+
+    // BlockAll restriction should prevent focus/move/workspace commands
+    env.run_actions("focus left");
+    assert_eq!(w1.get_dim(), dim_before);
+
+    env.run_actions("focus workspace 1");
+    assert_eq!(w1.get_dim(), dim_before);
+
+    env.run_actions("focus monitor right");
+    assert_eq!(w1.get_dim(), dim_before);
+
+    env.run_actions("move left");
+    assert_eq!(w1.get_dim(), dim_before);
+
+    env.run_actions("move workspace 1");
+    assert_eq!(w1.get_dim(), dim_before);
+
+    env.run_actions("move monitor right");
+    assert_eq!(w1.get_dim(), dim_before);
+}
+
+#[test]
+fn borderless_fullscreen_blocks_toggle_float_but_allows_workspace_move() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(
+        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone())
+            .with_dimension(fullscreen_dim()),
+    );
+    env.add_window(w1.clone());
+    let dim_before = w1.get_dim();
+    assert_eq!(dim_before, fullscreen_dim());
+
+    // ProtectFullscreen restriction should block toggle_float
+    env.run_actions("toggle float");
+    assert_eq!(w1.get_dim(), dim_before);
+
+    // ProtectFullscreen allows workspace move — window should be minimized
+    env.run_actions("move workspace 1");
+    assert!(w1.iconic.load(Ordering::Relaxed));
+}
+
+#[test]
+fn borderless_fullscreen_exit_unblocks_commands() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(
+        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone())
+            .with_dimension(fullscreen_dim()),
+    );
+    env.add_window(w1.clone());
+    let dim_before = w1.get_dim();
+    assert_eq!(dim_before, fullscreen_dim());
+
+    // Blocked while borderless fullscreen
+    env.run_actions("toggle float");
+    assert_eq!(w1.get_dim(), dim_before);
+
+    // Exit borderless FS: window reports non-fullscreen dimensions
+    env.dome
+        .window_moved(w1.hwnd_id, ObservedPosition::Visible(100, 100, 800, 600));
+    env.dome.apply_layout();
+
+    // toggle_float should now work
+    env.run_actions("toggle float");
+    assert!(w1.is_topmost());
+}

@@ -1,11 +1,11 @@
 use crate::core::{
     Child, Hub, WindowId,
-    node::{DisplayMode, Parent, WorkspaceId},
+    node::{DisplayMode, Parent, WindowRestrictions, WorkspaceId},
 };
 
 impl Hub {
     #[tracing::instrument(skip(self))]
-    pub(crate) fn set_fullscreen(&mut self, window_id: WindowId) {
+    pub(crate) fn set_fullscreen(&mut self, window_id: WindowId, restrictions: WindowRestrictions) {
         let window = self.windows.get(window_id);
         let ws = window.workspace;
 
@@ -16,10 +16,20 @@ impl Hub {
             DisplayMode::Float => {
                 self.detach_float_from_workspace(window_id);
             }
-            DisplayMode::Fullscreen => return,
+            DisplayMode::Fullscreen => {
+                tracing::debug!(
+                    ?window_id,
+                    ?restrictions,
+                    "Updating restrictions on already-fullscreen window"
+                );
+                self.windows.get_mut(window_id).restrictions = restrictions;
+                return;
+            }
         }
 
-        self.windows.get_mut(window_id).mode = DisplayMode::Fullscreen;
+        let window = self.windows.get_mut(window_id);
+        window.mode = DisplayMode::Fullscreen;
+        window.restrictions = restrictions;
         self.attach_fullscreen_to_workspace(ws, window_id);
         self.workspaces.get_mut(ws).focused = Some(Child::Window(window_id));
         self.workspaces.get_mut(ws).viewport_offset = (0.0, 0.0);
@@ -34,6 +44,7 @@ impl Hub {
         }
 
         let ws = window.workspace;
+        self.windows.get_mut(window_id).restrictions = WindowRestrictions::None;
         self.detach_fullscreen_from_workspace(window_id);
 
         self.windows.get_mut(window_id).mode = DisplayMode::Tiling;

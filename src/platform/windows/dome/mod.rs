@@ -12,7 +12,7 @@ use crate::action::{Actions, FocusTarget, HubAction, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
     Child, ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout, WindowId,
-    WindowPlacement,
+    WindowPlacement, WindowRestrictions,
 };
 
 use self::overlay::{FloatOverlayApi, TilingOverlayApi};
@@ -263,7 +263,8 @@ impl Dome {
         let (state, id) = match observation {
             ObservedPosition::Fullscreen => (
                 WindowState::FullscreenBorderless,
-                self.hub.insert_fullscreen(),
+                self.hub
+                    .insert_fullscreen(WindowRestrictions::ProtectFullscreen),
             ),
             ObservedPosition::Visible(x, y, w, h) => {
                 let dim = Dimension {
@@ -558,12 +559,6 @@ impl Dome {
 
         // Float windows — ensure overlay exists, then position
         for wp in float_windows {
-            if matches!(
-                self.registry.get(wp.id).state,
-                WindowState::FullscreenExclusive
-            ) {
-                continue;
-            }
             if !self.float_overlays.contains_key(&wp.id) {
                 match self.overlay_factory.create_float_overlay() {
                     Ok(o) => {
@@ -598,12 +593,6 @@ impl Dome {
                             .filter(|wp| focused != Some(wp.id)),
                     );
                 for wp in focused_first {
-                    if matches!(
-                        self.registry.get(wp.id).state,
-                        WindowState::FullscreenExclusive
-                    ) {
-                        continue;
-                    }
                     self.show_tiling(wp.id, wp, ZOrder::After(anchor));
                     anchor = self.registry.get(wp.id).ext.id();
                 }

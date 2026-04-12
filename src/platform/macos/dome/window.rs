@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use crate::core::{Dimension, MonitorId, WindowId};
+use crate::core::{Dimension, MonitorId, WindowId, WindowRestrictions};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 
@@ -330,7 +330,8 @@ impl Dome {
     pub(super) fn window_entered_native_fullscreen(&mut self, window_id: WindowId) {
         let window = self.registry.by_id_mut(window_id);
         window.state = WindowState::NativeFullscreen;
-        self.hub.set_fullscreen(window.window_id);
+        self.hub
+            .set_fullscreen(window.window_id, WindowRestrictions::ProtectFullscreen);
     }
 
     #[tracing::instrument(skip(self))]
@@ -367,7 +368,8 @@ impl Dome {
             WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
                 if is_borderless_fullscreen {
                     // Window turned fullscreen, but not visible, so we hide them again
-                    self.hub.set_fullscreen(window_id);
+                    self.hub
+                        .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
                     window.state = WindowState::Minimized;
                     if let Err(e) = window.ax.minimize() {
                         tracing::trace!("Failed to minimize window: {e:#}");
@@ -395,7 +397,8 @@ impl Dome {
 
                 if is_borderless_fullscreen {
                     window.state = WindowState::BorderlessFullscreen;
-                    self.hub.set_fullscreen(window_id);
+                    self.hub
+                        .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
                     return;
                 }
                 let hub_window = self.hub.get_window(window_id);

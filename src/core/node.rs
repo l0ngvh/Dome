@@ -433,6 +433,18 @@ impl std::fmt::Display for Parent {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum WindowRestrictions {
+    #[default]
+    None,
+    /// Blocks all user-initiated operations globally (Windows exclusive fullscreen).
+    BlockAll,
+    /// Blocks toggle_fullscreen, toggle_float, move_to_monitor on this window.
+    /// Allows move_to_workspace — fullscreen windows can move across workspaces.
+    /// Protects platform-initiated fullscreen — only the platform can undo it.
+    ProtectFullscreen,
+}
+
 /// Represents a single application window
 #[derive(Debug, Clone)]
 pub(crate) struct Window {
@@ -441,6 +453,7 @@ pub(crate) struct Window {
     pub(super) workspace: WorkspaceId,
     pub(super) dimension: Dimension,
     pub(super) mode: DisplayMode,
+    pub(super) restrictions: WindowRestrictions,
     spawn_mode: SpawnMode,
     pub(super) min_width: f32,
     pub(super) min_height: f32,
@@ -459,6 +472,7 @@ impl Window {
             workspace,
             dimension: Dimension::default(),
             mode: DisplayMode::Tiling,
+            restrictions: WindowRestrictions::None,
             spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
@@ -473,6 +487,7 @@ impl Window {
             workspace,
             dimension,
             mode: DisplayMode::Float,
+            restrictions: WindowRestrictions::None,
             spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
@@ -481,12 +496,13 @@ impl Window {
         }
     }
 
-    pub(super) fn fullscreen(workspace: WorkspaceId) -> Self {
+    pub(super) fn fullscreen(workspace: WorkspaceId, restrictions: WindowRestrictions) -> Self {
         Self {
             parent: Parent::Workspace(workspace),
             workspace,
             dimension: Dimension::default(),
             mode: DisplayMode::Fullscreen,
+            restrictions,
             spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
@@ -511,10 +527,7 @@ impl Window {
         self.mode == DisplayMode::Float
     }
 
-    #[cfg_attr(
-        all(target_os = "macos", not(test)),
-        expect(dead_code, reason = "used on Windows")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "used in test validators"))]
     pub(crate) fn is_fullscreen(&self) -> bool {
         self.mode == DisplayMode::Fullscreen
     }

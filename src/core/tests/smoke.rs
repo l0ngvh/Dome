@@ -1,6 +1,6 @@
 use super::{setup_hub, setup_logger_with_level, snapshot_text, validate_hub};
 use crate::action::MonitorTarget;
-use crate::core::node::{Dimension, MonitorId, WindowId};
+use crate::core::node::{Dimension, MonitorId, WindowId, WindowRestrictions};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
@@ -9,6 +9,7 @@ use rayon::prelude::*;
 enum Op {
     InsertTiling,
     InsertFloat,
+    InsertFullscreen,
     DeleteWindow,
     FocusLeft,
     FocusRight,
@@ -43,6 +44,7 @@ enum Op {
 const ALL_OPS: &[Op] = &[
     Op::InsertTiling,
     Op::InsertFloat,
+    Op::InsertFullscreen,
     Op::DeleteWindow,
     Op::FocusLeft,
     Op::FocusRight,
@@ -99,6 +101,16 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize) {
                     let id = hub.insert_float(dim);
                     windows.push(id);
                     format!("InsertFloat -> {id}")
+                }
+                Op::InsertFullscreen => {
+                    let restrictions = match rng.random_range(0..3u8) {
+                        0 => WindowRestrictions::None,
+                        1 => WindowRestrictions::BlockAll,
+                        _ => WindowRestrictions::ProtectFullscreen,
+                    };
+                    let id = hub.insert_fullscreen(restrictions);
+                    windows.push(id);
+                    format!("InsertFullscreen({id}, {restrictions:?})")
                 }
                 Op::DeleteWindow => {
                     if windows.is_empty() {
@@ -179,8 +191,13 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize) {
                     }
                     let idx = rng.random_range(0..windows.len());
                     let id = windows[idx];
-                    hub.set_fullscreen(id);
-                    format!("SetFullscreen({id})")
+                    let restrictions = match rng.random_range(0..3u8) {
+                        0 => WindowRestrictions::None,
+                        1 => WindowRestrictions::BlockAll,
+                        _ => WindowRestrictions::ProtectFullscreen,
+                    };
+                    hub.set_fullscreen(id, restrictions);
+                    format!("SetFullscreen({id}, {restrictions:?})")
                 }
                 Op::UnsetFullscreen => {
                     if windows.is_empty() {

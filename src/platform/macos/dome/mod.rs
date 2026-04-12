@@ -17,7 +17,7 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions, FocusTarget, HubAction, MoveTarget, ToggleTarget};
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
-use crate::core::{ContainerId, Dimension, Hub, WindowId};
+use crate::core::{ContainerId, Dimension, Hub, WindowId, WindowRestrictions};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 
@@ -431,7 +431,9 @@ impl Dome {
                 && (dim.height - mon.height as i32).abs() <= tolerance
         });
         if is_borderless_fullscreen {
-            let window_id = self.hub.insert_fullscreen();
+            let window_id = self
+                .hub
+                .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
             self.registry.insert(
                 ax.clone(),
                 window_id,
@@ -466,7 +468,9 @@ impl Dome {
         bundle_id: Option<String>,
         title: Option<String>,
     ) -> WindowId {
-        let window_id = self.hub.insert_fullscreen();
+        let window_id = self
+            .hub
+            .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
         self.registry.insert(
             ax,
             window_id,
