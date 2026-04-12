@@ -4,6 +4,10 @@ use crate::core::{
 };
 
 impl Hub {
+    /// Runs layout for a workspace. Two passes: bottom-up to compute minimum sizes
+    /// (a container's min is the sum of its children's mins), then top-down to
+    /// distribute available space. A single pass can't do both — the total minimum
+    /// must be known before distributing remaining space.
     pub(super) fn adjust_workspace(&mut self, ws_id: WorkspaceId) {
         let ws = self.workspaces.get(ws_id);
         let Some(root) = ws.root else { return };

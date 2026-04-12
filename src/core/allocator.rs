@@ -1,3 +1,10 @@
+//! Backing store for all tree nodes. Uses HashMap with monotonically increasing
+//! typed IDs rather than Vec — nodes are frequently deleted (windows close,
+//! containers merge) and IDs must remain stable without index remapping or
+//! tombstones. Typed IDs (WindowId, ContainerId, etc.) prevent mixing up ID
+//! types at compile time. IDs are never reused (monotonic counter) so a stale
+//! ID can't accidentally refer to a new node.
+
 use std::collections::HashMap;
 
 #[derive(Debug)]

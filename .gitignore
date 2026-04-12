@@ -1,4 +1,5 @@
 /target
 .vscode
-/docs
 /scripts
+/docs
+/docs/book/

@@ -88,3 +88,60 @@ echo ""
 echo "For specific type: malloc_history $PID NSRunningApplication"
 ./target/debug/dome exit 2>/dev/null || kill $PID 2>/dev/null || true
 '''
+
+[tasks.setup]
+description = "Install all development tools"
+dependencies = ["setup-rustup", "setup-cargo-tools", "setup-mdbook"]
+
+[tasks.setup-rustup]
+private = true
+description = "Install rustup components, nightly toolchain, and cross-compilation targets"
+script_runner = "@shell"
+script = '''
+rustup component add rustfmt clippy
+rustup toolchain install nightly --profile minimal
+rustup component add llvm-tools-preview --toolchain nightly
+rustup target add x86_64-pc-windows-gnu
+'''
+
+[tasks.setup-cargo-tools]
+private = true
+description = "Install cargo subcommands"
+script_runner = "@shell"
+script = '''
+cargo install cargo-audit --locked
+cargo install cargo-deny --locked
+cargo install cargo-llvm-cov --locked
+cargo install cargo-insta --locked
+'''
+
+[tasks.setup-mdbook]
+private = true
+description = "Install mdbook"
+script_runner = "@shell"
+script = '''
+cargo install mdbook --locked
+'''
+
+[tasks.docs]
+clear = true
+description = "Build and test documentation site"
+script_runner = "@shell"
+script = '''
+mdbook build docs/
+mdbook test docs/
+'''
+
+[tasks.docs-test]
+description = "Run documentation tests"
+script_runner = "@shell"
+script = '''
+mdbook test docs/
+'''
+
+[tasks.docs-serve]
+description = "Serve documentation site with live reload"
+script_runner = "@shell"
+script = '''
+mdbook serve docs/
+'''

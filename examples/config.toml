@@ -28,7 +28,7 @@ tab_bar_background_color = "#262633"
 # Active tab background color
 active_tab_background_color = "#4d4d66"
 
-# Log level filter (default: none, uses RUST_LOG env var)
+# Log level filter (default: info)
 # log_level = "debug"
 
 [keymaps]

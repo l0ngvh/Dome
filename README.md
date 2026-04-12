@@ -1,204 +1,95 @@
 # Dome
 
-A cross-platform tiling window manager written in Rust.
-Currently support macOS and Windows, with Linux next on the roadmap
+**Dome** is a tiling window manager for macOS and Windows.
 
-## Features
+## Why
 
-- Automatic tiling
-- Native tabbed layout
-- Hot-reload configuration
-- Support for multiple monitors
-- Respect windows desired size
-- Scrolling
+There are already plenty of window managers on each platform, but they all
+behave slightly differently, just enough to trip up your muscle memory. Dome aims
+to give a consistent experience across macOS and Windows.
 
-## Installation
+Dome is inspired by how window managers on Wayland work, and strives to bring
+the same level of control that Wayland compositors offer on Linux to macOS and Windows.
+Dome uses a modified version of i3, which respects windows' minimum size
+constraints and allows for scrolling when all windows approach their minimum size.
+
+## Quick Start
+
+### Install
 
 ```bash
+git clone https://github.com/l0ngvh/Dome
+cd Dome
 cargo install --path .
-```
-
-## Usage
-
-### Launch
-
-```bash
-# Launch with default config (~/.config/dome/config.toml)
 dome
-
-# Launch with custom config
-dome launch --config /path/to/config.toml
 ```
 
-### Commands
+Requires a [Rust toolchain](https://rustup.rs/).
 
-Dome supports IPC commands that can be sent while the window manager is running:
+On macOS, Dome needs Accessibility permissions to manage windows, and Screen
+Capture permissions to render float windows. macOS will prompt you both on
+first launch.
+
+### Key bindings
+
+Dome ships with these default keybindings. Meta is ⌘ on macOS and ⊞ Win on Windows.
+
+| Key | Action |
+|-----|--------|
+| <kbd>Meta</kbd> + <kbd>H</kbd> | Focus left |
+| <kbd>Meta</kbd> + <kbd>J</kbd> | Focus down |
+| <kbd>Meta</kbd> + <kbd>K</kbd> | Focus up |
+| <kbd>Meta</kbd> + <kbd>L</kbd> | Focus right |
+| <kbd>Meta</kbd> + <kbd>P</kbd> | Focus parent container |
+| <kbd>Meta</kbd> + <kbd>[</kbd> | Focus previous tab |
+| <kbd>Meta</kbd> + <kbd>]</kbd> | Focus next tab |
+| <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> | Move window left |
+| <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>J</kbd> | Move window down |
+| <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>K</kbd> | Move window up |
+| <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> | Move window right |
+| <kbd>Meta</kbd> + <kbd>0</kbd>–<kbd>9</kbd> | Focus workspace 0–9 |
+| <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>0</kbd>–<kbd>9</kbd> | Move window to workspace 0–9 |
+| <kbd>Meta</kbd> + <kbd>Alt</kbd> + <kbd>H</kbd> / <kbd>J</kbd> / <kbd>K</kbd> / <kbd>L</kbd> | Focus monitor left/down/up/right |
+| <kbd>Meta</kbd> + <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> / <kbd>J</kbd> / <kbd>K</kbd> / <kbd>L</kbd> | Move window to monitor left/down/up/right |
+| <kbd>Meta</kbd> + <kbd>E</kbd> | Toggle spawn direction |
+| <kbd>Meta</kbd> + <kbd>D</kbd> | Toggle split direction |
+| <kbd>Meta</kbd> + <kbd>B</kbd> | Toggle split/tabbed layout |
+| <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> | Toggle floating |
+| <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>Q</kbd> | Exit Dome |
+
+See the [keybinding configuration](docs/configuration.md#keybindings) for the complete list and customization options.
+
+### CLI
+
+Dome can also be controlled through CLI. A few commands to get started:
 
 ```bash
-dome focus up|down|left|right
-dome focus parent
-dome focus next_tab|prev_tab
-dome focus workspace <name>
-dome focus monitor up|down|left|right|<name>
-
-dome move up|down|left|right
-dome move workspace <name>
-dome move monitor up|down|left|right|<name>
-
-dome toggle spawn_direction  # Toggle between horizontal/vertical/tabbed
-dome toggle direction
-dome toggle layout           # Toggle between split/tabbed layout
-dome toggle float
-dome toggle fullscreen
-
-dome exec <command>
-dome exit
+dome focus left|down|up|right    # Move focus
+dome move left|down|up|right     # Move window
+dome toggle float                # Toggle floating
+dome toggle fullscreen           # Toggle fullscreen
+dome toggle layout               # Toggle split/tabbed
+dome focus workspace <name>      # Switch workspace
+dome exit                        # Quit Dome
 ```
 
-## Configuration
+See the [command reference](docs/commands.md) for the full list.
 
-Create a config file at `~/.config/dome/config.toml`:
+## Documentation
 
-```toml
-# Border size in pixels (default: 2.0)
-border_size = 5.0
-
-# Automatic tiling - determine split direction based on window dimensions (default: true)
-automatic_tiling = true
-
-# Minimum window size - float for pixels, string for percentage (default: "5%")
-min_width = 200     # 200 logical pixels
-min_height = "10%"  # 10% of screen height
-
-# Maximum window size - float for pixels, string for percentage (default: 0 = no limit)
-# Windows that hit max constraints are centered within their allocated space
-max_width = 800     # 800 logical pixels
-max_height = "50%"  # 50% of screen height
-
-# Focused window border color (default: light blue)
-focused_color = "#6699ff"
-
-# Unfocused window border color (default: gray)
-border_color = "#4d4d4d"
-
-# Tab bar background color
-tab_bar_background_color = "#262633"
-
-# Active tab background color
-active_tab_background_color = "#4d4d66"
-
-# Log level (default: info)
-# log_level = "debug"
-```
-
-### Log File
-
-Dome writes logs to a single `dome.log` file, overwritten on each launch:
-
-- macOS: `~/Library/Logs/dome/dome.log`
-- Windows: `%APPDATA%\dome\logs\dome.log`
-- Linux: `$XDG_STATE_HOME/dome/dome.log` (defaults to `~/.local/state/dome/dome.log`)
-
-### Keybindings
-
-```toml
-[keymaps]
-"cmd+0" = ["focus workspace 0"]
-"cmd+1" = ["focus workspace 1"]
-
-"cmd+shift+0" = ["move workspace 0"]
-"cmd+shift+1" = ["move workspace 1"]
-
-"cmd+h" = ["focus left"]
-"cmd+j" = ["focus down"]
-"cmd+k" = ["focus up"]
-"cmd+l" = ["focus right"]
-"cmd+p" = ["focus parent"]
-"cmd+[" = ["focus prev_tab"]
-"cmd+]" = ["focus next_tab"]
-
-"cmd+shift+h" = ["move left"]
-"cmd+shift+j" = ["move down"]
-"cmd+shift+k" = ["move up"]
-"cmd+shift+l" = ["move right"]
-
-"cmd+alt+h" = ["focus monitor left"]
-"cmd+alt+j" = ["focus monitor down"]
-"cmd+alt+k" = ["focus monitor up"]
-"cmd+alt+l" = ["focus monitor right"]
-
-"cmd+alt+shift+h" = ["move monitor left"]
-"cmd+alt+shift+j" = ["move monitor down"]
-"cmd+alt+shift+k" = ["move monitor up"]
-"cmd+alt+shift+l" = ["move monitor right"]
-
-"cmd+e" = ["toggle spawn_direction"]
-"cmd+d" = ["toggle direction"]
-"cmd+b" = ["toggle layout"]
-"cmd+shift+f" = ["toggle float"]
-"cmd+shift+return" = ["toggle fullscreen"]
-
-"cmd+return" = ["exec open -a Terminal"]
-"cmd+shift+q" = ["exit"]
-```
-
-### Window Rules
-
-Window rules let you customize behavior for specific applications. Rules are platform-specific.
-
-#### macOS
-
-```toml
-# Ignore windows (don't manage)
-[[macos.ignore]]
-app = "System Preferences"
-
-# Regex matching
-[[macos.ignore]]
-app = "/.*Preferences/"
-
-# Match by bundle ID and title
-[[macos.ignore]]
-bundle_id = "com.apple.finder"
-title = "Trash"
-
-# Run actions on window open
-[[macos.on_open]]
-app = "Slack"
-run = ["move workspace 3"]
-
-[[macos.on_open]]
-app = "Safari"
-run = ["toggle float"]
-```
-
-#### Windows
-
-```toml
-# Ignore windows by process name
-[[windows.ignore]]
-process = "SystemSettings.exe"
-
-# Regex matching
-[[windows.ignore]]
-process = "/.*Settings.*/"
-
-# Match by title
-[[windows.ignore]]
-title = "Task Manager"
-
-# Run actions on window open
-[[windows.on_open]]
-process = "slack.exe"
-run = ["move workspace 3"]
-```
+- [Getting started](docs/getting-started.md) — platform-specific setup details
+- [Configuration](docs/configuration.md) — config file reference, keybindings, window rules
+- [Commands](docs/commands.md) — full command reference
+- [Architecture](docs/development/architecture.md) — how Dome is built (for contributors)
 
 ## Development
 
+Dome is written in Rust with a platform-independent core and platform-specific shells for macOS and Windows. See the [architecture docs](docs/development/architecture.md) for details.
+
 ```bash
-# Run tests with coverage (requires cargo-make)
-cargo install cargo-make
-cargo make coverage
+cargo install cargo-make         # Task runner (required)
+cargo make setup                 # Install dev tools
+cargo make coverage              # Run tests with coverage
 ```
 
 ## License

@@ -71,6 +71,8 @@ pub(super) struct Placement {
     target: RoundedDimension,
     actual: RoundedDimension,
     retries: u8,
+    /// When the last placement was issued. AX position-change notifications
+    /// generated before this timestamp reflect pre-placement state and are ignored.
     placed_at: Instant,
 }
 
@@ -171,6 +173,9 @@ struct RawConstraint {
     max_height: Option<f32>,
 }
 
+/// Window position/size with integer coordinates. Integers are used for
+/// pixel-exact comparison — floating-point coordinates would introduce rounding
+/// ambiguity in drift detection.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(super) struct RoundedDimension {
     pub(super) x: i32,
