@@ -9,7 +9,7 @@ use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSString, NSUInteger};
 use objc2_io_surface::IOSurface;
 use objc2_metal::*;
-use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
+use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
 
 pub(in crate::platform::macos) struct MetalBackend {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
@@ -114,6 +114,11 @@ impl OverlayRenderer {
         // Must be premultiplied (0,0,0,0) — non-zero RGB with zero alpha would leak color
         // through the premultiplied-alpha blend.
         layer.setOpaque(false);
+        // Synchronous presentation ensures drawable.present() updates CALayer.contents
+        // within the caller's CATransaction, so setDisableActions(true) can suppress
+        // the implicit crossfade animation. Without this, Metal presents asynchronously
+        // and the contents change happens outside any transaction scope.
+        layer.setPresentsWithTransaction(true);
         layer.setContentsScale(scale);
         layer.setDrawableSize(objc2_core_foundation::CGSize {
             width: logical_w * scale,
@@ -196,7 +201,15 @@ impl OverlayRenderer {
                 draw_mirror_quad(self.backend(), &ctx, tex, bounds);
             }
             self.draw_egui_meshes(&ctx, &meshes, pixels_per_point);
+            // Suppress implicit Core Animation on the contents property change.
+            // With presentsWithTransaction = true, finish() calls drawable.present()
+            // synchronously, updating CALayer.contents within this transaction.
+            // setDisableActions(true) suppresses the default 0.25s crossfade that
+            // Core Animation would otherwise apply to the contents change.
+            CATransaction::begin();
+            CATransaction::setDisableActions(true);
             ctx.finish();
+            CATransaction::commit();
         }
         result
     }
@@ -318,6 +331,7 @@ impl OverlayRenderer {
             drawable,
             drawable_w,
             drawable_h,
+            finished: false,
         })
     }
 
@@ -571,27 +585,34 @@ struct FrameContext {
     drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
     drawable_w: NSUInteger,
     drawable_h: NSUInteger,
+    finished: bool,
 }
 
 impl FrameContext {
-    /// Registers drawable presentation, then Drop handles the rest.
-    fn finish(self) {
-        unsafe {
-            let _: () = objc2::msg_send![&*self.cmd_buf, presentDrawable: &*self.drawable];
-        }
+    /// Presents the frame synchronously. With `presentsWithTransaction = true`,
+    /// `drawable.present()` updates `CALayer.contents` immediately within the
+    /// caller's `CATransaction`, rather than deferring to the next display refresh.
+    /// `waitUntilScheduled` (not `waitUntilCompleted`) is sufficient — the GPU
+    /// only needs to have scheduled the work, not finished it, for `present()` to
+    /// attach the drawable to the layer.
+    fn finish(mut self) {
+        self.encoder.endEncoding();
+        self.cmd_buf.commit();
+        self.cmd_buf.waitUntilScheduled();
+        self.drawable.present();
+        self.finished = true;
     }
 }
 
 impl Drop for FrameContext {
-    /// Always commits the command buffer so the drawable returns to the pool.
-    /// On the normal path (finish called), this also presents the new frame.
-    /// On error paths, no present was registered — previous frame stays visible.
+    /// Error-path cleanup: if `finish()` wasn't called, commit without presenting
+    /// so the drawable returns to the pool and the previous frame stays visible.
     fn drop(&mut self) {
-        self.encoder.endEncoding();
-        self.cmd_buf.commit();
-        // Overlays are event-driven (not vsync), so we wait for the GPU to finish
-        // before returning to avoid tearing.
-        self.cmd_buf.waitUntilCompleted();
+        if !self.finished {
+            self.encoder.endEncoding();
+            self.cmd_buf.commit();
+            self.cmd_buf.waitUntilCompleted();
+        }
     }
 }
 

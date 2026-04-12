@@ -20,6 +20,7 @@ pub(crate) fn paint_tiling_overlay(
         let origin = vec2(vf.x - monitor.x, vf.y - monitor.y);
         egui::Area::new(egui::Id::new(("border", wp.id)))
             .fixed_pos(origin.to_pos2())
+            .fade_in(false)
             .show(ctx, |ui| {
                 ui.set_clip_rect(Rect::from_min_size(
                     origin.to_pos2(),
@@ -34,6 +35,7 @@ pub(crate) fn paint_tiling_overlay(
         let origin = vec2(vf.x - monitor.x, vf.y - monitor.y);
         egui::Area::new(egui::Id::new(("container", cp.id)))
             .fixed_pos(origin.to_pos2())
+            .fade_in(false)
             .show(ctx, |ui| {
                 ui.set_clip_rect(Rect::from_min_size(
                     origin.to_pos2(),

@@ -35,8 +35,8 @@ objc2-core-media = { version = "0.3.2", default-features = false, features = ["s
 objc2-core-video = { version = "0.3.2", features = ["CVPixelBufferIOSurface", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "objc2-io-surface"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSObject", "NSString", "NSValue", "NSNotification", "NSDistributedNotificationCenter", "NSOperation", "NSGeometry", "NSError", "NSObjCRuntime", "NSArray", "NSDictionary"] }
 objc2-io-surface = { version = "0.3.2", features = ["IOSurfaceRef"] }
-objc2-quartz-core = { version = "0.3.2", features = ["CAMetalLayer"] }
-objc2-metal = { version = "0.3.2", features = ["MTLDevice", "MTLCommandQueue", "MTLRenderPipeline", "MTLTexture", "MTLBuffer", "MTLRenderCommandEncoder", "MTLCommandBuffer", "MTLRenderPass", "MTLLibrary", "MTLSampler", "MTLAllocation", "MTLResource", "objc2-io-surface"] }
+objc2-quartz-core = { version = "0.3.2", features = ["CAMetalLayer", "CATransaction"] }
+objc2-metal = { version = "0.3.2", features = ["MTLDevice", "MTLCommandQueue", "MTLRenderPipeline", "MTLTexture", "MTLBuffer", "MTLRenderCommandEncoder", "MTLCommandBuffer", "MTLDrawable", "MTLRenderPass", "MTLLibrary", "MTLSampler", "MTLAllocation", "MTLResource", "objc2-io-surface"] }
 objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "dispatch2", "SCShareableContent", "SCStream", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-media"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

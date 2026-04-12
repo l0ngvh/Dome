@@ -642,6 +642,7 @@ impl FloatOverlayApi for FloatOverlay {
             let origin = egui::vec2(0.0, 0.0);
             egui::Area::new(egui::Id::new(("border", wp.id)))
                 .fixed_pos(origin.to_pos2())
+                .fade_in(false)
                 .show(ctx, |ui| {
                     ui.set_clip_rect(egui::Rect::from_min_size(
                         origin.to_pos2(),

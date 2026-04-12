@@ -145,6 +145,7 @@ impl FloatOverlay {
         self.renderer.render(scale as f32, Vec::new(), mr, |ctx| {
             egui::Area::new(egui::Id::new("overlay"))
                 .fixed_pos(egui::pos2(0.0, 0.0))
+                .fade_in(false)
                 .show(ctx, |ui| {
                     overlay::paint_window_border(ui.painter(), placement, config, egui::Vec2::ZERO);
                 });
@@ -161,6 +162,7 @@ impl FloatOverlay {
                 .render(self.scale as f32, Vec::new(), mr, |ctx| {
                     egui::Area::new(egui::Id::new("overlay"))
                         .fixed_pos(egui::pos2(0.0, 0.0))
+                        .fade_in(false)
                         .show(ctx, |ui| {
                             overlay::paint_window_border(
                                 ui.painter(),
@@ -182,6 +184,7 @@ impl FloatOverlay {
                 .render(self.scale as f32, Vec::new(), mr, |ctx| {
                     egui::Area::new(egui::Id::new("overlay"))
                         .fixed_pos(egui::pos2(0.0, 0.0))
+                        .fade_in(false)
                         .show(ctx, |ui| {
                             overlay::paint_window_border(
                                 ui.painter(),
@@ -232,6 +235,7 @@ impl TilingOverlay {
         let view = TilingOverlayView::new(mtm, backend, config, scale, hub_sender);
         window.setContentView(Some(&view));
         window.setFrame_display(cocoa_frame, false);
+        window.orderFront(None);
 
         Self { window, view }
     }
@@ -246,13 +250,11 @@ impl TilingOverlay {
     ) {
         self.window.setFrame_display(cocoa_frame, false);
         self.view.update(monitor, windows, containers, scale);
-        self.window.orderFront(None);
     }
 
     pub(super) fn clear(&self) {
         self.view.clear();
         self.view.render_now();
-        self.window.orderFront(None);
     }
 
     // macOS 14+ "cooperative activation" silently ignores NSApplication.activate() for
