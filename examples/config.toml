@@ -31,6 +31,9 @@ active_tab_background_color = "#4d4d66"
 # Log level filter (default: info)
 # log_level = "debug"
 
+# Launch Dome at login (macOS and Windows, default: false)
+# start_at_login = false
+
 [keymaps]
 "cmd+0" = ["focus workspace 0"]
 "cmd+1" = ["focus workspace 1"]

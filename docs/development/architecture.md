@@ -290,6 +290,14 @@ TOML config parsed with serde. Hot-reload via `notify` file watcher — changes 
 
 Keymaps shared between keyboard listener and config update path with synchronization. macOS: `Arc<RwLock>`. Windows: `keyboard::update_config()` on config watcher thread.
 
+### Launch at Login
+
+`src/platform/macos/login_item.rs` manages a LaunchAgent plist (`~/Library/LaunchAgents/com.dome-wm.dome.plist`) for start-at-login on macOS. Uses `launchctl bootstrap`/`bootout` (not the deprecated `load`/`unload`). LaunchAgent chosen over `SMAppService` because `SMAppService` requires code signing.
+
+`src/platform/windows/login_item.rs` manages the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key on Windows via the `windows-registry` crate. Registry chosen over Task Scheduler (overkill) and Startup folder shortcuts (requires COM `IShellLink`).
+
+Both are synced on startup and on config hot-reload.
+
 ## Testing
 
 See [Testing](testing.md) for test rules, patterns, and commands.

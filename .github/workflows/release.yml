@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches Cargo.toml version
+        run: |
+          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $TAG_VERSION does not match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+
+  build-macos:
+    needs: validate
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install cargo-make
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
+      - name: Build and bundle
+        run: cargo make bundle -e BUNDLE_TARGET=${{ matrix.target }}
+      - name: Create DMG
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          DMG_NAME="dome-${VERSION}-${{ matrix.target }}.dmg"
+          mkdir -p dmg-staging
+          cp -R target/bundle/Dome.app dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "Dome" -srcfolder dmg-staging -ov -format UDZO "$DMG_NAME"
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+      - name: Create tarball
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          TAR_NAME="dome-${VERSION}-${{ matrix.target }}.tar.gz"
+          tar -czf "$TAR_NAME" -C target/${{ matrix.target }}/release dome
+          echo "TAR_NAME=$TAR_NAME" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dome-${{ matrix.target }}
+          path: |
+            ${{ env.DMG_NAME }}
+            ${{ env.TAR_NAME }}
+
+  build-windows:
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-make
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-make
+      - name: Install cargo-wix
+        uses: taiki-e/install-action@v2
+        with:
+          # Latest stable as of writing (2026-04). Pinned to avoid
+          # surprise breakage from new releases.
+          tool: cargo-wix@0.3.9
+      - name: Build and bundle
+        shell: bash
+        run: cargo make bundle
+      - name: Rename MSI
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          MSI_SOURCE=$(find target/wix -name '*.msi' | head -1)
+          if [ -z "$MSI_SOURCE" ]; then
+            echo "::error::No .msi file found in target/wix/"
+            exit 1
+          fi
+          MSI_NAME="dome-${VERSION}-x86_64-pc-windows-msvc.msi"
+          mv "$MSI_SOURCE" "$MSI_NAME"
+          echo "MSI_NAME=$MSI_NAME" >> "$GITHUB_ENV"
+      - name: Create portable zip
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ZIP_NAME="dome-${VERSION}-x86_64-pc-windows-msvc.zip"
+          7z a "$ZIP_NAME" ./target/release/dome.exe
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dome-windows
+          path: |
+            ${{ env.MSI_NAME }}
+            ${{ env.ZIP_NAME }}
+
+  publish:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Generate SHA256 checksums
+        run: |
+          sha256sum dome-*.dmg dome-*.tar.gz dome-*.msi dome-*.zip > checksums-sha256.txt
+      - uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            dome-*.dmg
+            dome-*.tar.gz
+            dome-*.msi
+            dome-*.zip
+            checksums-sha256.txt

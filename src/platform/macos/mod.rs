@@ -4,6 +4,7 @@ mod dome;
 mod event_loop;
 mod keyboard;
 mod listeners;
+mod login_item;
 mod objc2_wrapper;
 mod running_application;
 mod throttle;
@@ -46,6 +47,9 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let logger = Logger::init(&config);
     tracing::info!(%config_path, "Loaded config");
 
+    let bundle_path = login_item::detect_bundle_path();
+    login_item::sync_login_item(config.start_at_login, bundle_path.as_deref());
+
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
@@ -77,10 +81,13 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let _config_watcher = start_config_watcher(&config_path, {
         let keymaps = keymaps.clone();
         let tx = event_tx.clone();
+        let bundle_path_for_watcher = bundle_path.clone();
         move |cfg| {
             logger.set_level(cfg.log_level);
             *keymaps.write().unwrap() = cfg.keymaps.clone();
+            let start_at_login = cfg.start_at_login;
             tx.send(HubEvent::ConfigChanged(Box::new(cfg))).ok();
+            login_item::sync_login_item(start_at_login, bundle_path_for_watcher.as_deref());
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="windows-1252"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Product
+        Id="*"
+        Name="Dome"
+        UpgradeCode="5cb0b9a5-206f-4097-944f-b47b7491e6fc"
+        Manufacturer="Dome Contributors"
+        Language="1033"
+        Codepage="1252"
+        Version="!(wix.ProductVersion)">
+
+        <Package
+            Id="*"
+            Keywords="Installer"
+            Description="Dome - Cross-platform tiling window manager"
+            Manufacturer="Dome Contributors"
+            InstallerVersion="450"
+            Languages="1033"
+            Compressed="yes"
+            InstallScope="perMachine"
+            SummaryCodepage="1252" />
+
+        <MajorUpgrade
+            Schedule="afterInstallInitialize"
+            DowngradeErrorMessage="A newer version of [ProductName] is already installed. Setup will now exit." />
+
+        <MediaTemplate EmbedCab="yes" />
+
+        <Feature Id="Binaries" Title="Application" Description="Installs the dome.exe binary." Level="1" ConfigurableDirectory="APPLICATIONFOLDER" AllowAdvertise="no" Display="expand">
+            <ComponentRef Id="binary0" />
+            <Feature Id="Environment" Title="PATH Environment Variable" Description="Adds dome.exe to the system PATH." Level="1">
+                <ComponentRef Id="Path" />
+            </Feature>
+        </Feature>
+
+        <Directory Id="TARGETDIR" Name="SourceDir">
+            <Directory Id="ProgramFiles64Folder" Name="PFiles">
+                <Directory Id="APPLICATIONFOLDER" Name="Dome">
+                    <Component Id="binary0" Guid="*">
+                        <File Id="exe0" Name="dome.exe" DiskId="1" Source="!(wix.CargoTargetBinDir)dome.exe" KeyPath="yes" />
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
+
+        <DirectoryRef Id="APPLICATIONFOLDER">
+            <Component Id="Path" Guid="dd4464de-2d46-4040-ab5f-10333ac532a5" KeyPath="yes">
+                <Environment Id="PATH" Name="PATH" Value="[APPLICATIONFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
+            </Component>
+        </DirectoryRef>
+
+        <SetDirectory Id="APPLICATIONFOLDER" Value="[ProgramFiles64Folder]Dome" />
+    </Product>
+</Wix>

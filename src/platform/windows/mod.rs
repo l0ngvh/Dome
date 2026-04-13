@@ -4,6 +4,7 @@ mod event_listener;
 mod external;
 mod handle;
 mod keyboard;
+mod login_item;
 mod runner;
 mod taskbar;
 mod throttle;
@@ -87,6 +88,8 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     let logger = Logger::init(&config);
     tracing::info!(%config_path, "Loaded config");
 
+    login_item::sync_login_item(config.start_at_login);
+
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
         tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
@@ -138,7 +141,9 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
         move |cfg| {
             logger.set_level(cfg.log_level);
             keyboard::update_config(cfg.clone());
+            let start_at_login = cfg.start_at_login;
             sender.send(HubEvent::ConfigChanged(Box::new(cfg)));
+            login_item::sync_login_item(start_at_login);
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))

@@ -599,6 +599,8 @@ pub(crate) struct Config {
     pub(crate) windows: WindowsConfig,
     #[serde(default)]
     pub(crate) log_level: LogLevel,
+    #[serde(default)]
+    pub(crate) start_at_login: bool,
 }
 
 #[derive(Debug, Deserialize, Default, Clone, Copy)]
@@ -655,6 +657,7 @@ impl Default for Config {
             macos: MacosConfig::default(),
             windows: WindowsConfig::default(),
             log_level: LogLevel::default(),
+            start_at_login: false,
         }
     }
 }
@@ -838,5 +841,17 @@ mod tests {
     fn validation_allows_zero_max() {
         let config: Config = toml::from_str("min_width = 200\nmax_width = 0").unwrap();
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn start_at_login_defaults_to_false() {
+        let config: Config = toml::from_str("").unwrap();
+        assert!(!config.start_at_login);
+    }
+
+    #[test]
+    fn start_at_login_parses_true() {
+        let config: Config = toml::from_str("start_at_login = true").unwrap();
+        assert!(config.start_at_login);
     }
 }

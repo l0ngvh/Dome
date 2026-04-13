@@ -6,6 +6,24 @@ A Rust toolchain is required. Install one via [rustup.rs](https://rustup.rs/). T
 
 **macOS:** Dome requires Accessibility permissions. After first launch, macOS will prompt to grant access in System Settings → Privacy & Security → Accessibility. Dome cannot manage windows without this permission.
 
+## Homebrew (macOS)
+
+```bash
+brew tap longvh/dome
+brew install --cask dome
+```
+
+This installs `Dome.app` to `/Applications/` and symlinks the `dome` CLI into your PATH.
+
+## Scoop (Windows)
+
+```powershell
+scoop bucket add dome https://github.com/longvh/scoop-dome
+scoop install dome
+```
+
+This installs `dome.exe` and adds it to your PATH via Scoop's shim.
+
 ## Building from Source
 
 ```bash
@@ -15,6 +33,18 @@ cargo install --path .
 ```
 
 This compiles Dome in release mode and installs the `dome` binary to `~/.cargo/bin/`, which should be in your `PATH` if Rust was installed via rustup.
+
+## macOS App Bundle
+
+To produce a `Dome.app` bundle with a dock icon:
+
+```bash
+cargo make bundle
+```
+
+The bundle is created at `target/bundle/Dome.app`. Copy it to `/Applications/` for a permanent install. The binary inside the bundle also works as a CLI tool — `Dome.app/Contents/MacOS/dome focus left` etc. all work when invoked directly.
+
+To launch Dome automatically at login, add `start_at_login = true` to your config file. This registers a LaunchAgent plist; setting it to `false` removes it. This option only works on macOS.
 
 ## Launching Dome
 

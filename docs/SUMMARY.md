@@ -11,3 +11,4 @@
 - [Architecture](development/architecture.md)
 - [Conventions](development/conventions.md)
 - [Testing](development/testing.md)
+- [Releasing](development/releasing.md)

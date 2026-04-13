@@ -1,0 +1,43 @@
+name: Dispatch Package Updates
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download release assets for SHA computation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          gh release download "$GITHUB_REF_NAME" \
+            --pattern "dome-${VERSION}-aarch64-apple-darwin.dmg" \
+            --pattern "dome-${VERSION}-x86_64-apple-darwin.dmg" \
+            --pattern "dome-${VERSION}-x86_64-pc-windows-msvc.zip"
+      - name: Compute SHAs
+        id: shas
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha_aarch64_dmg=$(sha256sum dome-${VERSION}-aarch64-apple-darwin.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha_x86_64_dmg=$(sha256sum dome-${VERSION}-x86_64-apple-darwin.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha_zip=$(sha256sum dome-${VERSION}-x86_64-pc-windows-msvc.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Dispatch Homebrew cask update
+        continue-on-error: true
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        with:
+          token: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+          repository: longvh/homebrew-dome
+          event-type: new-release
+          client-payload: '{"version": "${{ steps.shas.outputs.version }}", "sha_aarch64_dmg": "${{ steps.shas.outputs.sha_aarch64_dmg }}", "sha_x86_64_dmg": "${{ steps.shas.outputs.sha_x86_64_dmg }}"}'
+      - name: Dispatch Scoop bucket update
+        continue-on-error: true
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        with:
+          token: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+          repository: longvh/scoop-dome
+          event-type: new-release

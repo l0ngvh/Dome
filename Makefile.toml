@@ -145,3 +145,42 @@ script_runner = "@shell"
 script = '''
 mdbook serve docs/
 '''
+
+[tasks.bundle]
+description = "Build release binary and create platform package. Set BUNDLE_TARGET to cross-compile (e.g. x86_64-apple-darwin)."
+run_task = [
+    { name = "bundle-macos-impl", condition = { platforms = ["mac"] } },
+    { name = "bundle-windows-impl", condition = { platforms = ["windows"] } },
+]
+
+[tasks.bundle-macos-impl]
+private = true
+script_runner = "@shell"
+script = '''
+set -euo pipefail
+if [ -n "${BUNDLE_TARGET:-}" ]; then
+  cargo build --release --target "$BUNDLE_TARGET"
+  BIN_SRC="target/$BUNDLE_TARGET/release/dome"
+else
+  cargo build --release
+  BIN_SRC="target/release/dome"
+fi
+VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+BUNDLE_DIR="target/bundle/Dome.app/Contents"
+rm -rf target/bundle/Dome.app
+mkdir -p "$BUNDLE_DIR/MacOS"
+cp resources/macos/Info.plist "$BUNDLE_DIR/Info.plist"
+plutil -replace CFBundleShortVersionString -string "$VERSION" "$BUNDLE_DIR/Info.plist"
+plutil -replace CFBundleVersion -string "$VERSION" "$BUNDLE_DIR/Info.plist"
+cp "$BIN_SRC" "$BUNDLE_DIR/MacOS/dome"
+echo "Created target/bundle/Dome.app (v$VERSION)"
+'''
+
+[tasks.bundle-windows-impl]
+private = true
+script_runner = "@shell"
+script = '''
+set -euo pipefail
+cargo build --release
+cargo wix --no-build --nocapture
+'''

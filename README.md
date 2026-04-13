@@ -16,6 +16,11 @@ Dome uses a modified version of i3 tiling algorithm, which respects windows'
 minimum size constraints and allows for scrolling when all windows approach
 their minimum size.
 
+## Features
+
+- **Float windows** — floating windows persistently stay on top of tiled windows, so they're never buried behind your layout.
+- **Window size constraints** — Dome respects windows' minimum and maximum size constraints. When tiled windows approach their minimum size, the layout becomes scrollable rather than forcing windows below their minimum.
+
 ## Quick Start
 
 ### Install
