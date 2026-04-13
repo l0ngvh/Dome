@@ -9,9 +9,12 @@ behave slightly differently, just enough to trip up your muscle memory. Dome aim
 to give a consistent experience across macOS and Windows.
 
 Dome is inspired by how window managers on Wayland work, and strives to bring
-the same level of control that Wayland compositors offer on Linux to macOS and Windows.
-Dome uses a modified version of i3, which respects windows' minimum size
-constraints and allows for scrolling when all windows approach their minimum size.
+the same level of control that Wayland compositors offer on Linux to macOS and
+Windows, using only public APIs wherever possible.
+
+Dome uses a modified version of i3 tiling algorithm, which respects windows'
+minimum size constraints and allows for scrolling when all windows approach
+their minimum size.
 
 ## Quick Start
 
@@ -80,7 +83,6 @@ See the [command reference](docs/commands.md) for the full list.
 - [Getting started](docs/getting-started.md) — platform-specific setup details
 - [Configuration](docs/configuration.md) — config file reference, keybindings, window rules
 - [Commands](docs/commands.md) — full command reference
-- [Architecture](docs/development/architecture.md) — how Dome is built (for contributors)
 
 ## Development
 
@@ -91,6 +93,13 @@ cargo install cargo-make         # Task runner (required)
 cargo make setup                 # Install dev tools
 cargo make coverage              # Run tests with coverage
 ```
+
+## Acknowledgement
+
+Dome is heavily inspired by the following projects:
+- [AeroSpace](https://github.com/nikitabobko/AeroSpace)
+- [GlazeWM](https://github.com/glzr-io/glazewm)
+- [Sway](https://github.com/swaywm/sway)
 
 ## License
 
