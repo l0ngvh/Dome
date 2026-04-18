@@ -10,6 +10,7 @@ type RawAXError = objc2_application_services::AXError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AXError {
     InvalidUIElement,
+    NullCgWindowId,
     Other(RawAXError),
 }
 
@@ -32,6 +33,9 @@ impl fmt::Display for AXError {
                     "The AXUIElementRef passed to the function is invalid (code: {})",
                     RawAXError::InvalidUIElement.0
                 )
+            }
+            AXError::NullCgWindowId => {
+                write!(f, "CGWindowID associated with this AXUIElementRef is null")
             }
             AXError::Other(err) => write!(f, "{}", decorate_raw_ax_error(*err)),
         }
@@ -173,7 +177,6 @@ pub(crate) fn kAXUIElementDestroyedNotification() -> CFRetained<CFString> {
     CFString::from_static_str("AXUIElementDestroyed")
 }
 
-#[cfg(not(test))]
 #[allow(non_snake_case)]
 pub(crate) fn kAXWindowsAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXWindows")
@@ -244,7 +247,6 @@ pub(crate) fn kAXMovedNotification() -> CFRetained<CFString> {
     CFString::from_static_str("AXMoved")
 }
 
-#[cfg(not(test))]
 #[allow(non_snake_case)]
 pub(crate) fn kAXFocusedWindowAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXFocusedWindow")
@@ -295,7 +297,7 @@ fn decorate_raw_ax_error(error: RawAXError) -> String {
     format!("{} (code: {})", description, error.0)
 }
 
-pub(crate) fn get_cg_window_id(element: &AXUIElement) -> Option<CGWindowID> {
+pub(crate) fn get_cg_window_id(element: &AXUIElement) -> Result<CGWindowID, AXError> {
     unsafe extern "C" {
         fn _AXUIElementGetWindow(element: &AXUIElement, out: *mut CGWindowID) -> RawAXError;
     }
@@ -303,8 +305,8 @@ pub(crate) fn get_cg_window_id(element: &AXUIElement) -> Option<CGWindowID> {
     let res = unsafe { _AXUIElementGetWindow(element, &mut window_id) };
     // 0 is kCGNullWindowID
     if res == RawAXError::Success && window_id != 0 {
-        Some(window_id)
+        Ok(window_id)
     } else {
-        None
+        Err(res.into())
     }
 }

@@ -2,25 +2,23 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
+use objc2_app_kit::NSRunningApplication;
 use std::ptr::NonNull;
 
-#[cfg(not(test))]
-use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::{AXUIElement, AXValue, AXValueType};
-#[cfg(not(test))]
-use objc2_core_foundation::CFArray;
 use objc2_core_foundation::{
-    CFBoolean, CFDictionary, CFEqual, CFRetained, CFString, CFType, CGPoint, CGSize,
+    CFArray, CFBoolean, CFDictionary, CFEqual, CFRetained, CFString, CFType, CGPoint, CGSize,
     kCFBooleanFalse, kCFBooleanTrue,
 };
 use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::objc2_wrapper::{
-    AXError, get_attribute, is_attribute_settable, kAXEnhancedUserInterfaceAttribute,
-    kAXFrontmostAttribute, kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute,
-    kAXParentAttribute, kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute,
-    kAXStandardWindowSubrole, kAXSubroleAttribute, kAXTitleAttribute, kAXWindowRole,
+    AXError, get_attribute, get_cg_window_id, is_attribute_settable,
+    kAXEnhancedUserInterfaceAttribute, kAXFocusedWindowAttribute, kAXFrontmostAttribute,
+    kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute, kAXParentAttribute,
+    kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole,
+    kAXSubroleAttribute, kAXTitleAttribute, kAXWindowRole, kAXWindowsAttribute,
     set_attribute_value,
 };
 
@@ -45,7 +43,6 @@ unsafe impl Send for AXApp {}
 unsafe impl Sync for AXApp {}
 
 impl AXApp {
-    #[cfg(not(test))]
     pub(super) fn new(app: &NSRunningApplication) -> Self {
         let pid = app.processIdentifier();
         let element = unsafe { AXUIElement::new_application(pid) };
@@ -112,36 +109,37 @@ impl AXApp {
         }
     }
 
-    #[cfg(not(test))]
-    pub(super) fn windows(&self) -> Result<CFRetained<CFArray<AXUIElement>>, AXError> {
-        get_attribute::<CFArray<AXUIElement>>(
-            &self.element,
-            &crate::platform::macos::objc2_wrapper::kAXWindowsAttribute(),
-        )
+    pub(super) fn windows(
+        self: Arc<Self>,
+        _marker: &DispatcherMarker,
+    ) -> Result<Vec<AXWindow>, AXError> {
+        let windows = get_attribute::<CFArray<AXUIElement>>(&self.element, &kAXWindowsAttribute())?;
+        let windows = windows
+            .into_iter()
+            .filter_map(|w| {
+                // TODO: figure out how to logs this error, as windows should have cg_id under
+                // normal circumstances
+                let Ok(cg_id) = get_cg_window_id(&w) else {
+                    return None;
+                };
+                Some(AXWindow::new(w, cg_id, self.clone()))
+            })
+            .collect();
+        Ok(windows)
     }
 
-    #[cfg(not(test))]
-    pub(super) fn focused_window_element(&self) -> Result<CFRetained<AXUIElement>, AXError> {
-        get_attribute::<AXUIElement>(
-            &self.element,
-            &crate::platform::macos::objc2_wrapper::kAXFocusedWindowAttribute(),
-        )
+    pub(super) fn focused_window(
+        self: Arc<Self>,
+        _marker: &DispatcherMarker,
+    ) -> Result<AXWindow, AXError> {
+        let focused = get_attribute::<AXUIElement>(&self.element, &kAXFocusedWindowAttribute())?;
+        let cg_id = get_cg_window_id(&focused)?;
+        Ok(AXWindow::new(focused, cg_id, self))
     }
 
     /// Exposes the raw AXUIElement for observer registration (add/remove notification).
     pub(super) fn element(&self) -> &AXUIElement {
         &self.element
-    }
-
-    #[cfg(test)]
-    pub(super) fn stub(pid: i32) -> Self {
-        Self {
-            element: unsafe { AXUIElement::new_application(pid) },
-            pid,
-            app_name: None,
-            bundle_id: None,
-            can_set_enhanced_ui: AtomicBool::new(false),
-        }
     }
 }
 
@@ -193,7 +191,6 @@ impl std::fmt::Display for AXWindow {
 }
 
 impl AXWindow {
-    #[cfg(not(test))]
     pub(super) fn new(
         element: CFRetained<AXUIElement>,
         cg_id: CGWindowID,

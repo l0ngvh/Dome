@@ -11,7 +11,7 @@ use crate::platform::macos::dome::NewWindow;
 use crate::platform::macos::dome::registry::WindowEntry;
 use crate::platform::macos::dome::window::WindowState;
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
-use crate::platform::macos::running_application::{self, RunningApp};
+use crate::platform::macos::running_application::RunningApp;
 
 /// A still in display window (unminimized, in current space, returned by AXWindowsAttribute)
 pub(in crate::platform::macos) struct ExistingWindow {
@@ -51,7 +51,15 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     }
 
     let mut to_add = Vec::new();
-    for ax in running_application::ax_windows(app, marker) {
+
+    let ax_windows = match app.clone().windows(marker) {
+        Ok(ax_windows) => ax_windows,
+        Err(e) => {
+            tracing::trace!("Failed to retrieve list of windows for {app}: {e}");
+            return (to_remove, Vec::new());
+        }
+    };
+    for ax in ax_windows {
         if tracked.contains_key(&ax.cg_id()) {
             continue;
         }
@@ -97,7 +105,14 @@ pub(in crate::platform::macos) fn compute_window_positions(
     marker: &DispatcherMarker,
 ) -> Vec<ExistingWindow> {
     let mut existing = Vec::new();
-    for ax in running_application::ax_windows(app, marker) {
+    let ax_windows = match app.clone().windows(marker) {
+        Ok(ax_windows) => ax_windows,
+        Err(e) => {
+            tracing::trace!("Failed to retrieve list of windows for {app}: {e}");
+            return Vec::new();
+        }
+    };
+    for ax in ax_windows {
         let Some(window) = tracked.get(&ax.cg_id()) else {
             continue;
         };

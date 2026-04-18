@@ -18,7 +18,7 @@ use crate::platform::macos::dome::{
     DebounceBurst, Dome, HubEvent, WindowMove, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,
 };
-use crate::platform::macos::running_application::{self, RunningApp};
+use crate::platform::macos::running_application::RunningApp;
 
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -246,7 +246,13 @@ fn dispatch_sync_focus(runner: &mut DomeRunner, pid: i32) {
                 return None;
             }
             let ax_app = app.ax_app();
-            Some(running_application::focused_window(&ax_app, marker)?.cg_id())
+            match ax_app.focused_window(marker) {
+                Ok(window) => Some(window.cg_id()),
+                Err(e) => {
+                    tracing::trace!("Failed to get focused window for app {app}: {e}");
+                    None
+                }
+            }
         },
         |result, runner| {
             if let Some(cg_id) = result {
@@ -274,20 +280,26 @@ fn dispatch_space_changed(runner: &mut DomeRunner) {
             let ns_app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
             let app = RunningApp::from(ns_app);
             let ax_app = app.ax_app();
-            let ax = running_application::focused_window(&ax_app, marker)?;
-            let cg_id = ax.cg_id();
-            let is_native_fs = ax.is_native_fullscreen();
-            let pos = ax.get_position().ok();
-            let size = ax.get_size().ok();
-            let app_name = ax.app_name().map(str::to_owned);
-            let bundle_id = ax.bundle_id().map(str::to_owned);
-            let title = ax.title().map(str::to_owned);
+            let focused_window = match ax_app.focused_window(marker) {
+                Ok(window) => window,
+                Err(e) => {
+                    tracing::trace!("Failed to get focused window for app {app}: {e}");
+                    return None;
+                }
+            };
+            let cg_id = focused_window.cg_id();
+            let is_native_fs = focused_window.is_native_fullscreen();
+            let pos = focused_window.get_position().ok();
+            let size = focused_window.get_size().ok();
+            let app_name = focused_window.app_name().map(str::to_owned);
+            let bundle_id = focused_window.bundle_id().map(str::to_owned);
+            let title = focused_window.title().map(str::to_owned);
             Some((
                 cg_id,
                 is_native_fs,
                 pos,
                 size,
-                Arc::new(ax) as Arc<dyn AXWindowApi>,
+                Arc::new(focused_window) as Arc<dyn AXWindowApi>,
                 app_name,
                 bundle_id,
                 title,

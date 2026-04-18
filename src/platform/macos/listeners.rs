@@ -524,7 +524,8 @@ unsafe extern "C-unwind" fn observer_callback(
     }
 
     if CFEqual(Some(notification), Some(&*kAXTitleChangedNotification())) {
-        if let Some(cg_id) = get_cg_window_id(&element) {
+        // TODO: might need to log this in case of error
+        if let Ok(cg_id) = get_cg_window_id(&element) {
             ctx.title_throttle.submit(cg_id);
         }
         return;
