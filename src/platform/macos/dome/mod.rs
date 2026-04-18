@@ -38,13 +38,24 @@ pub(in crate::platform::macos) struct NewWindow {
     pub(in crate::platform::macos) is_native_fullscreen: bool,
 }
 
+/// Timestamps of the first and last AX move/resize notifications in a
+/// coalesced debounce burst (equal when only one fired). The first is
+/// compared against the post-placement debounce window (was this burst
+/// caused by our placement?), and the last against the latest placement
+/// time (is this burst stale?).
+#[derive(Debug, Copy, Clone)]
+pub(in crate::platform::macos) struct DebounceBurst {
+    pub(in crate::platform::macos) first: Instant,
+    pub(in crate::platform::macos) last: Instant,
+}
+
 pub(in crate::platform::macos) struct WindowMove {
     pub(in crate::platform::macos) cg_id: CGWindowID,
     pub(in crate::platform::macos) x: i32,
     pub(in crate::platform::macos) y: i32,
     pub(in crate::platform::macos) w: i32,
     pub(in crate::platform::macos) h: i32,
-    pub(in crate::platform::macos) observed_at: Instant,
+    pub(in crate::platform::macos) observed_at: DebounceBurst,
     pub(in crate::platform::macos) is_native_fullscreen: bool,
 }
 
@@ -294,7 +305,18 @@ impl Dome {
             && matches!(entry.state, WindowState::NativeFullscreen)
         {
             let window_id = entry.window_id;
-            self.window_moved(window_id, pos.0, pos.1, size.0, size.1, Instant::now());
+            let now = Instant::now();
+            self.window_moved(
+                window_id,
+                pos.0,
+                pos.1,
+                size.0,
+                size.1,
+                DebounceBurst {
+                    first: now,
+                    last: now,
+                },
+            );
         }
         self.flush_layout();
     }

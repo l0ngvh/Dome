@@ -127,7 +127,7 @@ WindowState
 └── Minimized         — borderless fullscreen that can't be moved offscreen
 ```
 
-- `InView` carries target vs. actual position (integer coords for pixel-exact comparison). Stale observations filtered by timestamp.
+- `InView` carries target vs. actual position (integer coords for pixel-exact comparison). Stale observations filtered by coalesced timestamps from debouncing.
 - `Offscreen` has its own drift detection and retry logic.
 - All windows except borderless fullscreen start as `Offscreen` after discovery.
 - Transitions: `Offscreen`↔`InView`, Any→`NativeFullscreen` (space-change + AX fullscreen attr), `NativeFullscreen`→`InView`/`BorderlessFullscreen`, `InView`↔`BorderlessFullscreen` (covers monitor, confirmed not Dome's placement), `BorderlessFullscreen`→`Minimized` (when hiding).
@@ -182,7 +182,7 @@ Both platforms discover size limits and report to Hub via `set_window_constraint
 
 #### macOS
 
-No API to query limits upfront — must place, wait, read back. AX fires moved/resized per-app not per-window, so reading too early returns stale values.
+No API to query limits upfront — must place, wait, read back. AX fires moved/resized per-window, but the window element attached to the notification is unreliable (you can't trust which window it refers to), so reading too early returns stale values.
 
 1. Hub computes layout, platform positions the window.
 2. Window snaps to its own min/max.
@@ -191,7 +191,9 @@ No API to query limits upfront — must place, wait, read back. AX fires moved/r
 5. If actual differs from target, reports constraint via `set_window_constraint()`.
 6. Hub relayouts.
 
-Always at least one "wrong" frame for new windows. Per-app events create a race: one window's resize can trigger the debounce while another in the same app is still moving.
+On macOS, the constraint/drift check uses the first observed timestamp of the coalesced debounce burst: if it falls within 1s of the last placement, the burst is treated as the app reacting to that placement (possible constraint or edge drift). Bursts that start later than 1s after placement are treated as late-event drift and trigger a corrective `set_frame` via the shared 5-retry budget. We only limit the window 1s as there would be plenty move/resize events during a single Dome's session, plenty of oppotunities for constraint detections, so it's fine if we miss a few.
+
+This causes at least one "wrong" frame for new windows as constraint detection takes time. Per-app debouncing to prevent incorrect constraint check, one window's resize can trigger the move/resize events while another in the same app is still moving.
 
 #### Windows
 
@@ -215,7 +217,13 @@ WinEvent hooks (`SetWinEventHook`) fire for all window events across all process
 
 **Focus throttling** prevents feedback loops where Dome focuses A, the OS queues a focus event for B, processing B focuses B, queuing A, etc. A throttle interval breaks the cycle. Windows uses 500ms.
 
-**Resize debounce** waits for move/resize events to settle. Per-app on macOS (see [Constraints](#constraints)), per-window on Windows.
+**Resize debounce** waits for move/resize events to settle. Per-app on macOS, per-window on Windows.
+
+macOS debounce is per-PID (per-app) because the window element in AX notifications is unreliable. You can't trust which window actually moved, so when events settle you must query all windows for the PID to get actual positions. This means you need to wait until the entire app goes quiet, not just one window. If you debounced per-window, some windows in the app might still be moving when others report stopping, and you'd read stale positions. On Windows, WinEvent carries a reliable HWND, so per-window debouncing works.
+
+Pure debounce (not throttle) because constraint detection compares actual vs. target size, and during a drag the window is still being repositioned. A throttle would fire checks mid-drag, causing constraint detection to fight with the ongoing operation. Debounce waits until events stop (100ms quiet), then checks once after the window settles. The `set_pid_moving` flag suppresses layout corrections during the debounce window so the platform doesn't reposition a window the user is actively dragging.
+
+On macOS, only the first and last timestamps of the debounce burst are tracked, as a single `(Instant, Instant)` tuple. The stale check uses `.1` (last): if even the most recent notification predates the last placement, the burst is discarded. The constraint/drift check uses `.0` (first): if the burst started within 1s of placement, constraint detection runs; otherwise the late-event drift path re-issues `set_frame` and consumes one retry.
 
 ### Suspend (macOS)
 

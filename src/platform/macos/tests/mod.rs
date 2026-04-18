@@ -18,7 +18,9 @@ use crate::core::{Child, Dimension, MonitorId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dispatcher::DispatcherMarker;
-use crate::platform::macos::dome::{Dome, FrameSender, HubMessage, NewWindow, WindowMove};
+use crate::platform::macos::dome::{
+    DebounceBurst, Dome, FrameSender, HubMessage, NewWindow, WindowMove,
+};
 
 const SCREEN_WIDTH: f32 = 1920.0;
 const SCREEN_HEIGHT: f32 = 1080.0;
@@ -269,9 +271,17 @@ impl MacOS {
         self.window(cg_id).unminimize_count.get()
     }
 
+    // Why Instant::now() works for these helpers:
+    // observed_at.last must be >= placed_at for the stale check, and
+    // observed_at.first must be <= placed_at + 1s for the constraint/drift check.
+    // Both hold because settle sets placed_at immediately before the helper
+    // runs, so Instant::now() is microseconds after placed_at -- the stale
+    // check sees observed_at.last > placed_at and the constraint/drift check
+    // sees observed_at.first well within 1s of placed_at.
+
     /// Simulate an external move (app/macOS moved the window) and feed it to Dome.
     fn simulate_external_move(&self, dome: &mut Dome, cg_id: CGWindowID) {
-        let observed_at = Instant::now() + std::time::Duration::from_secs(60);
+        let observed_at = Instant::now();
         let ax = self.window(cg_id);
         let (x, y) = ax.position.get();
         let (w, h) = ax.size.get();
@@ -281,7 +291,10 @@ impl MacOS {
             y,
             w,
             h,
-            observed_at,
+            observed_at: DebounceBurst {
+                first: observed_at,
+                last: observed_at,
+            },
             is_native_fullscreen: ax.native_fullscreen.get(),
         }]);
     }
@@ -293,7 +306,7 @@ impl MacOS {
         if pending.is_empty() {
             return;
         }
-        let observed_at = Instant::now() + std::time::Duration::from_secs(60);
+        let observed_at = Instant::now();
         let moves: Vec<_> = pending
             .into_iter()
             .map(|(cg_id, x, y, w, h)| {
@@ -308,7 +321,10 @@ impl MacOS {
                     y,
                     w,
                     h,
-                    observed_at,
+                    observed_at: DebounceBurst {
+                        first: observed_at,
+                        last: observed_at,
+                    },
                     is_native_fullscreen,
                 }
             })
@@ -324,9 +340,7 @@ impl MacOS {
             if pending.is_empty() {
                 return;
             }
-            // Use a timestamp far in the future so events are never considered stale.
-            // In production, the debounce timer ensures observations are always recent.
-            let observed_at = Instant::now() + std::time::Duration::from_secs(60);
+            let observed_at = Instant::now();
             let moves: Vec<_> = pending
                 .into_iter()
                 .map(|(cg_id, x, y, w, h)| {
@@ -341,7 +355,10 @@ impl MacOS {
                         y,
                         w,
                         h,
-                        observed_at,
+                        observed_at: DebounceBurst {
+                            first: observed_at,
+                            last: observed_at,
+                        },
                         is_native_fullscreen,
                     }
                 })

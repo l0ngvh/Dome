@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::process::CommandExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,7 +15,7 @@ use crate::action::{Action, Actions};
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dispatcher::GcdDispatcher;
 use crate::platform::macos::dome::{
-    Dome, HubEvent, WindowMove, compute_reconcile_all, compute_reconciliation,
+    DebounceBurst, Dome, HubEvent, WindowMove, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,
 };
 use crate::platform::macos::running_application::{self, RunningApp};
@@ -25,7 +25,10 @@ const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 pub(super) struct DomeRunner {
     dome: Dome,
     dispatcher: GcdDispatcher,
-    move_timers: HashMap<i32, RegistrationToken>,
+    /// Per-PID debounce state: the calloop timer token and the first/last
+    /// timestamps of the coalesced AX notification burst accumulated during
+    /// debouncing.
+    move_state: HashMap<i32, (RegistrationToken, DebounceBurst)>,
     handle: LoopHandle<'static, DomeRunner>,
     signal: LoopSignal,
 }
@@ -43,7 +46,7 @@ pub(super) fn run_dome(dome: Dome, channel: Channel<HubEvent>) {
     let mut runner = DomeRunner {
         dome,
         dispatcher,
-        move_timers: HashMap::new(),
+        move_state: HashMap::new(),
         handle: handle.clone(),
         signal,
     };
@@ -84,7 +87,9 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         }
         HubEvent::AppTerminated { pid } => {
             tracing::debug!(pid, "App terminated");
-            cancel_move_timer(runner, pid);
+            if let Some((token, _)) = runner.move_state.remove(&pid) {
+                runner.handle.remove(token);
+            }
             runner.dome.app_terminated(pid);
         }
         HubEvent::Sync => {
@@ -149,27 +154,34 @@ fn handle_system_actions(runner: &mut DomeRunner, actions: &Actions) {
 }
 
 fn start_move_timer(runner: &mut DomeRunner, pid: i32, observed_at: Instant) {
-    cancel_move_timer(runner, pid);
+    let burst = if let Some((old_token, DebounceBurst { first, last: _ })) =
+        runner.move_state.remove(&pid)
+    {
+        runner.handle.remove(old_token);
+        DebounceBurst {
+            first,
+            last: observed_at,
+        }
+    } else {
+        DebounceBurst {
+            first: observed_at,
+            last: observed_at,
+        }
+    };
     runner.dome.set_pid_moving(pid, true);
     let token = runner
         .handle
         .insert_source(
             Timer::from_duration(DEBOUNCE_INTERVAL),
             move |_, _, runner: &mut DomeRunner| {
-                runner.move_timers.remove(&pid);
+                runner.move_state.remove(&pid);
                 runner.dome.set_pid_moving(pid, false);
-                dispatch_check_positions(runner, pid, observed_at);
+                dispatch_check_positions(runner, pid, burst);
                 TimeoutAction::Drop
             },
         )
         .expect("Failed to insert timer");
-    runner.move_timers.insert(pid, token);
-}
-
-fn cancel_move_timer(runner: &mut DomeRunner, pid: i32) {
-    if let Some(token) = runner.move_timers.remove(&pid) {
-        runner.handle.remove(token);
-    }
+    runner.move_state.insert(pid, (token, burst));
 }
 
 fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
@@ -198,7 +210,7 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
     );
 }
 
-fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: Instant) {
+fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: DebounceBurst) {
     let tracked = runner.dome.tracked_for_pid(pid);
     runner.dispatcher.dispatch(
         move |marker| {
@@ -305,13 +317,22 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
         move |marker| compute_reconcile_all(observed_pids, tracked, ignore_rules, marker),
         |result, runner| {
             for pid in result.terminated_pids {
-                cancel_move_timer(runner, pid);
+                if let Some((token, _)) = runner.move_state.remove(&pid) {
+                    runner.handle.remove(token);
+                }
                 runner.dome.remove_untracked_app(pid);
             }
             for pid in result.hidden_pids.clone() {
-                cancel_move_timer(runner, pid);
+                if let Some((token, _)) = runner.move_state.remove(&pid) {
+                    runner.handle.remove(token);
+                }
                 runner.dome.remove_untracked_app(pid);
             }
+            // On startup, it seems not all windows move/resized events aren't being fired,
+            // especially when there are multiple windows and viewport keeps being scrolled as
+            // windows are inserted. So we gives these newly inserted windows extra synthetic
+            // movement notification so constraint detection can work.
+            let added_pids: HashSet<i32> = result.to_add.iter().map(|w| w.ax.pid()).collect();
             let on_open = runner
                 .dome
                 .reconcile_windows(&result.to_remove, result.to_add);
@@ -320,14 +341,15 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
                 handle_system_actions(runner, &actions);
             }
             // Periodic position check for all observed PIDs — compensates for
-            // missed move/resize events.
+            // missed move/resize events during operation.
             let pids_to_check: Vec<_> = runner
                 .dome
                 .observed_pids()
                 .iter()
                 .copied()
+                .chain(added_pids)
                 .filter(|pid| {
-                    !result.hidden_pids.contains(pid) && !runner.move_timers.contains_key(pid)
+                    !result.hidden_pids.contains(pid) && !runner.move_state.contains_key(pid)
                 })
                 .collect();
             for pid in pids_to_check {

@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
@@ -6,7 +6,7 @@ use crate::core::{Dimension, MonitorId, WindowId, WindowRestrictions};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 
-use super::Dome;
+use super::{DebounceBurst, Dome};
 
 const MAX_ENFORCEMENT_RETRIES: u8 = 5;
 
@@ -99,23 +99,37 @@ impl Placement {
 
     // FIXME: Change this to if new placement encompass the old placement
     //
-    /// Check edge alignment and track retries. Returns true if this was a
-    /// drift (edges not aligned). Caller should check `should_retry()` to
-    /// decide whether to issue set_frame.
-    fn record_drift(&mut self, new_actual: RoundedDimension) -> bool {
+    /// Edge-alignment predicate. Returns true if `new_actual` has at least
+    /// one vertical *and* one horizontal edge misaligned with the target
+    /// (i.e. this is drift, not just an edge-anchored size delta). Pure —
+    /// no mutation; caller must follow up with `observe_drift` to consume a
+    /// retry.
+    fn has_drifted(&self, new_actual: RoundedDimension) -> bool {
         let target = self.target;
         let left = new_actual.x == target.x;
         let right = new_actual.x + new_actual.width == target.x + target.width;
         let top = new_actual.y == target.y;
         let bottom = new_actual.y + new_actual.height == target.y + target.height;
+        !((left || right) && (top || bottom))
+    }
 
-        if (left || right) && (top || bottom) {
-            return false;
-        }
-
+    /// Record a drift observation. Bumps `retries`, updates `actual`, and
+    /// returns the target to re-issue via `set_frame` while retries remain;
+    /// returns `None` once the budget is exhausted (logging the give-up
+    /// message once). Shared by the edge-based and late-event drift paths
+    /// so a single helper owns the retry accounting and logging.
+    fn observe_drift(&mut self, new_actual: RoundedDimension) -> Option<RoundedDimension> {
         self.retries = self.retries.saturating_add(1);
         self.actual = new_actual;
-        true
+        if self.should_retry() {
+            tracing::trace!(target = ?self.target, "window drifted, correcting");
+            Some(self.target)
+        } else {
+            if self.just_gave_up() {
+                tracing::debug!("window can't be moved to {:?}", self.target);
+            }
+            None
+        }
     }
 
     /// Whether drift retries are not yet exhausted.
@@ -339,7 +353,7 @@ impl Dome {
             .set_fullscreen(window.window_id, WindowRestrictions::ProtectFullscreen);
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn window_moved(
         &mut self,
         window_id: WindowId,
@@ -347,7 +361,7 @@ impl Dome {
         y: i32,
         w: i32,
         h: i32,
-        observed_at: Instant,
+        observed_at: DebounceBurst,
     ) {
         let new_placement = RoundedDimension {
             x,
@@ -368,6 +382,8 @@ impl Dome {
                 && (new_placement.width - mon.width as i32).abs() <= tolerance
                 && (new_placement.height - mon.height as i32).abs() <= tolerance
         });
+
+        tracing::Span::current().record("window", window.to_string());
 
         match &mut window.state {
             WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
@@ -390,7 +406,12 @@ impl Dome {
                 }
             }
             WindowState::Positioned(PositionedState::InView(p)) => {
-                if p.placed_at > observed_at {
+                // Stale check: if even the latest notification predates the
+                // last placement, the burst carries only pre-placement state
+                // and must be ignored. A burst that straddles placed_at
+                // (observed_at.first < placed_at <= observed_at.last) is kept, since
+                // at least one notification fired post-placement.
+                if observed_at.last < p.placed_at {
                     tracing::trace!(placed_at = ?p.placed_at, "stale observation, ignoring");
                     return;
                 }
@@ -415,41 +436,50 @@ impl Dome {
                     return;
                 }
 
-                if p.record_drift(new_placement) {
-                    let target = p.target;
-                    let should_retry = p.should_retry();
-                    let just_gave_up = p.just_gave_up();
-                    if should_retry {
-                        tracing::trace!(?target, "window {window} drifted, correcting");
-                        if let Err(e) =
-                            window
-                                .ax
-                                .set_frame(target.x, target.y, target.width, target.height)
+                // If the debounced events start within 1s of set_frame call, this is likely to be
+                // caused by the set_frame call, or at least the set_frame call was debounced
+                // alongside a previous burst, which is essentially the same.
+                if observed_at.first <= p.placed_at + Duration::from_secs(1) {
+                    if p.has_drifted(new_placement) {
+                        if let Some(target) = p.observe_drift(new_placement)
+                            && let Err(e) =
+                                window
+                                    .ax
+                                    .set_frame(target.x, target.y, target.width, target.height)
                         {
                             tracing::trace!("Window {} set_frame failed: {e}", window);
                         }
-                    } else if just_gave_up {
-                        tracing::debug!("Window {} can't be moved to {:?}", window, target,);
+                        return;
                     }
-                    return;
-                }
 
-                p.actual = new_placement;
-                let Some(c) = p.detect_constraint() else {
-                    return;
-                };
-                // Convert actual window size back to frame size by adding border back.
-                // Frame dimensions have border inset applied. If in the original frame,
-                // window width is smaller than sum of borders, then we will request a size
-                // that can accommodate the borders here.
-                let remove_inset = |v: f32| v + 2.0 * self.config.border_size;
-                self.hub.set_window_constraint(
-                    window_id,
-                    c.min_width.map(remove_inset),
-                    c.min_height.map(remove_inset),
-                    c.max_width.map(remove_inset),
-                    c.max_height.map(remove_inset),
-                );
+                    p.actual = new_placement;
+                    let Some(c) = p.detect_constraint() else {
+                        return;
+                    };
+                    // Convert actual window size back to frame size by adding border back.
+                    // Frame dimensions have border inset applied. If in the original frame,
+                    // window width is smaller than sum of borders, then we will request a size
+                    // that can accommodate the borders here.
+                    let remove_inset = |v: f32| v + 2.0 * self.config.border_size;
+                    self.hub.set_window_constraint(
+                        window_id,
+                        c.min_width.map(remove_inset),
+                        c.min_height.map(remove_inset),
+                        c.max_width.map(remove_inset),
+                        c.max_height.map(remove_inset),
+                    );
+                } else {
+                    // This is likely not caused by Dome calling AX's set_frame but by app
+                    // resizing itself or user move actions.
+                    if let Some(target) = p.observe_drift(new_placement)
+                        && let Err(e) =
+                            window
+                                .ax
+                                .set_frame(target.x, target.y, target.width, target.height)
+                    {
+                        tracing::trace!("Window {} set_frame failed: {e}", window);
+                    }
+                }
             }
             WindowState::Minimized => {
                 // Window somehow got brought back to screen, maybe through window focused but the
