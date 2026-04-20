@@ -59,7 +59,7 @@ fn float_window_with_tiling() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Float(id=WindowId(1), x=50.00, y=5.00, w=40.00, h=15.00)
       )
     )
@@ -111,7 +111,7 @@ fn delete_window_window() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -162,7 +162,7 @@ fn move_float_to_workspace() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
         Float(id=WindowId(1), x=50.00, y=5.00, w=40.00, h=15.00)
@@ -218,7 +218,7 @@ fn focus_falls_back_to_tiling_after_float_delete() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -278,10 +278,10 @@ fn focus_falls_back_to_container_focus_after_float_delete() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -420,7 +420,7 @@ fn toggle_float_to_tiling() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -466,7 +466,7 @@ fn toggle_tiling_to_float_with_existing_tiling() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Float(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
       )
     )
@@ -536,12 +536,12 @@ fn toggle_float_to_tiling_with_nested_containers() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=15.00, w=150.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=15.00, w=50.00, h=15.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=50.00, y=15.00, w=50.00, h=15.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=15.00, w=50.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
+          Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, direction=Horizontal,
+            Window(id=WindowId(1), x=0.00, y=15.00, w=50.00, h=15.00)
+            Window(id=WindowId(2), x=50.00, y=15.00, w=50.00, h=15.00)
+            Window(id=WindowId(3), x=100.00, y=15.00, w=50.00, h=15.00)
           )
         )
       )
@@ -601,10 +601,10 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(2),
-        Window(id=WindowId(2), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(2), x=0.00, y=0.00, w=150.00, h=30.00)
         Float(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00)
       )
     )
@@ -649,7 +649,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
         Float(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00)
@@ -694,7 +694,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -743,9 +743,9 @@ fn toggle_float_with_container_focused() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -801,7 +801,7 @@ fn delete_unfocused_float_window() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Window(id=WindowId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -881,7 +881,7 @@ fn delete_window_keeps_workspace_with_tiling() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(2), name=0)
     )

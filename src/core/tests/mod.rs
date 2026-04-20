@@ -399,8 +399,8 @@ fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
             let w = hub.get_window(id);
             let dim = w.dimension;
             s.push_str(&format!(
-                "{}Window(id={}, parent={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
-                prefix, id, w.parent, dim.x, dim.y, dim.width, dim.height
+                "{}Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
+                prefix, id, dim.x, dim.y, dim.width, dim.height
             ));
         }
         Child::Container(id) => {
@@ -411,10 +411,9 @@ fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
                 format!("tabbed=true, active_tab={}", c.active_tab_index())
             };
             s.push_str(&format!(
-                "{}Container(id={}, parent={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}, {},\n",
+                "{}Container(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}, {},\n",
                 prefix,
                 id,
-                c.parent,
                 c.dimension.x,
                 c.dimension.y,
                 c.dimension.width,

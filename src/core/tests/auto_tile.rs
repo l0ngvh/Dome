@@ -10,10 +10,10 @@ fn auto_tile_sets_horizontal_spawn_mode_when_width_greater_than_height() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -75,16 +75,16 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(6),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=0.00, w=25.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(0), parent=ContainerId(1), x=0.00, y=0.00, w=25.00, h=15.00)
-            Window(id=WindowId(6), parent=ContainerId(1), x=0.00, y=15.00, w=25.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Container(id=ContainerId(1), x=0.00, y=0.00, w=25.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(0), x=0.00, y=0.00, w=25.00, h=15.00)
+            Window(id=WindowId(6), x=0.00, y=15.00, w=25.00, h=15.00)
           )
-          Window(id=WindowId(1), parent=ContainerId(0), x=25.00, y=0.00, w=25.00, h=30.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=50.00, y=0.00, w=25.00, h=30.00)
-          Window(id=WindowId(3), parent=ContainerId(0), x=75.00, y=0.00, w=25.00, h=30.00)
-          Window(id=WindowId(4), parent=ContainerId(0), x=100.00, y=0.00, w=25.00, h=30.00)
-          Window(id=WindowId(5), parent=ContainerId(0), x=125.00, y=0.00, w=25.00, h=30.00)
+          Window(id=WindowId(1), x=25.00, y=0.00, w=25.00, h=30.00)
+          Window(id=WindowId(2), x=50.00, y=0.00, w=25.00, h=30.00)
+          Window(id=WindowId(3), x=75.00, y=0.00, w=25.00, h=30.00)
+          Window(id=WindowId(4), x=100.00, y=0.00, w=25.00, h=30.00)
+          Window(id=WindowId(5), x=125.00, y=0.00, w=25.00, h=30.00)
         )
       )
     )
@@ -133,11 +133,11 @@ fn auto_tile_preserves_tab_spawn_mode() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
+            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=28.00)
           )
         )
       )
@@ -188,13 +188,13 @@ fn auto_tile_adjusts_after_toggle_direction() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=10.00, direction=Horizontal,
-            Window(id=WindowId(0), parent=ContainerId(1), x=0.00, y=0.00, w=75.00, h=10.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=75.00, y=0.00, w=75.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
+          Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=10.00, direction=Horizontal,
+            Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=10.00)
+            Window(id=WindowId(3), x=75.00, y=0.00, w=75.00, h=10.00)
           )
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=10.00, w=150.00, h=10.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=20.00, w=150.00, h=10.00)
+          Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=10.00)
+          Window(id=WindowId(2), x=0.00, y=20.00, w=150.00, h=10.00)
         )
       )
     )
@@ -243,10 +243,10 @@ fn auto_tile_with_tab_spawn_mode() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
+          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -301,11 +301,11 @@ fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
+            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(3), x=75.00, y=2.00, w=75.00, h=28.00)
           )
         )
       )
@@ -347,12 +347,12 @@ fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(4), parent=ContainerId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
+            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(3), x=75.00, y=2.00, w=75.00, h=28.00)
+            Window(id=WindowId(4), x=75.00, y=2.00, w=75.00, h=28.00)
           )
         )
       )

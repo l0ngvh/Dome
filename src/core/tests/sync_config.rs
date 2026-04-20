@@ -31,9 +31,9 @@ fn sync_config_updates_tab_bar_height() {
     assert_snapshot!(snapshot_text(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=50.00 h=50.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=50.00, h=50.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=10.00, w=50.00, h=40.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=10.00, w=50.00, h=40.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=50.00, h=50.00, tabbed=true, active_tab=1,
+          Window(id=WindowId(0), x=0.00, y=10.00, w=50.00, h=40.00)
+          Window(id=WindowId(1), x=0.00, y=10.00, w=50.00, h=40.00)
         )
       )
     )
@@ -74,15 +74,15 @@ fn sync_config_recalculates_all_workspaces() {
     assert_snapshot!(snapshot_text(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=50.00 h=50.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=50.00, h=50.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=5.00, w=50.00, h=45.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=5.00, w=50.00, h=45.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=50.00, h=50.00, tabbed=true, active_tab=1,
+          Window(id=WindowId(0), x=0.00, y=5.00, w=50.00, h=45.00)
+          Window(id=WindowId(1), x=0.00, y=5.00, w=50.00, h=45.00)
         )
       )
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(3),
-        Container(id=ContainerId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=50.00, h=50.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(2), parent=ContainerId(1), x=0.00, y=5.00, w=50.00, h=45.00)
-          Window(id=WindowId(3), parent=ContainerId(1), x=0.00, y=5.00, w=50.00, h=45.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=50.00, h=50.00, tabbed=true, active_tab=1,
+          Window(id=WindowId(2), x=0.00, y=5.00, w=50.00, h=45.00)
+          Window(id=WindowId(3), x=0.00, y=5.00, w=50.00, h=45.00)
         )
       )
     )

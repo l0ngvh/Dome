@@ -12,9 +12,9 @@ fn set_focus_same_workspace() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -55,9 +55,9 @@ fn set_focus_same_workspace() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -107,10 +107,10 @@ fn set_focus_switches_workspace() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
-        Window(id=WindowId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -164,7 +164,7 @@ fn set_focus_float_same_workspace() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Float(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=10.00)
       )
     )
@@ -222,7 +222,7 @@ fn set_focus_float_switches_workspace() {
         Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=10.00)
       )
       Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
-        Window(id=WindowId(1), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -255,7 +255,7 @@ fn set_focus_to_a_different_workspace_prune_previous_workspace() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(1), name=2, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(1), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 

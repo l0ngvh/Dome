@@ -15,9 +15,9 @@ fn set_min_size_respects_minimum_width() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+          Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -67,9 +67,9 @@ fn set_min_size_respects_minimum_height() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=20.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=20.00, w=150.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=20.00)
+          Window(id=WindowId(1), x=0.00, y=20.00, w=150.00, h=10.00)
         )
       )
     )
@@ -119,10 +119,10 @@ fn set_min_size_distributes_remaining_space_equally() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=100.00, y=0.00, w=25.00, h=30.00)
-          Window(id=WindowId(2), parent=ContainerId(0), x=125.00, y=0.00, w=25.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+          Window(id=WindowId(1), x=100.00, y=0.00, w=25.00, h=30.00)
+          Window(id=WindowId(2), x=125.00, y=0.00, w=25.00, h=30.00)
         )
       )
     )
@@ -173,11 +173,11 @@ fn set_min_size_propagates_to_parent_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=100.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=0.00, w=100.00, h=15.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=50.00, y=15.00, w=100.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Container(id=ContainerId(1), x=50.00, y=0.00, w=100.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(1), x=50.00, y=0.00, w=100.00, h=15.00)
+            Window(id=WindowId(2), x=50.00, y=15.00, w=100.00, h=15.00)
           )
         )
       )
@@ -228,9 +228,9 @@ fn set_min_size_exceeds_screen_size() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=100.00, y=0.00, w=100.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+          Window(id=WindowId(1), x=100.00, y=0.00, w=100.00, h=30.00)
         )
       )
     )
@@ -284,13 +284,13 @@ fn set_min_size_exceeds_container_size() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=0.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=0.00, w=200.00, h=15.00)
-            Container(id=ContainerId(2), parent=ContainerId(1), x=0.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
-              Window(id=WindowId(2), parent=ContainerId(2), x=0.00, y=15.00, w=100.00, h=15.00)
-              Window(id=WindowId(3), parent=ContainerId(2), x=100.00, y=15.00, w=100.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=0.00, h=30.00)
+          Container(id=ContainerId(1), x=0.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(1), x=0.00, y=0.00, w=200.00, h=15.00)
+            Container(id=ContainerId(2), x=0.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
+              Window(id=WindowId(2), x=0.00, y=15.00, w=100.00, h=15.00)
+              Window(id=WindowId(3), x=100.00, y=15.00, w=100.00, h=15.00)
             )
           )
         )
@@ -348,13 +348,13 @@ fn set_min_size_exceeds_container_size_focus_first() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=250.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=0.00, w=200.00, h=15.00)
-            Container(id=ContainerId(2), parent=ContainerId(1), x=50.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
-              Window(id=WindowId(2), parent=ContainerId(2), x=50.00, y=15.00, w=100.00, h=15.00)
-              Window(id=WindowId(3), parent=ContainerId(2), x=150.00, y=15.00, w=100.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=250.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Container(id=ContainerId(1), x=50.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(1), x=50.00, y=0.00, w=200.00, h=15.00)
+            Container(id=ContainerId(2), x=50.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
+              Window(id=WindowId(2), x=50.00, y=15.00, w=100.00, h=15.00)
+              Window(id=WindowId(3), x=150.00, y=15.00, w=100.00, h=15.00)
             )
           )
         )
@@ -409,9 +409,9 @@ fn set_min_size_global_exceeds_screen_size() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=100.00, y=0.00, w=100.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+          Window(id=WindowId(1), x=100.00, y=0.00, w=100.00, h=30.00)
         )
       )
     )
@@ -462,9 +462,9 @@ fn set_min_size_exceeds_screen_height() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=40.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=20.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=20.00, w=150.00, h=20.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=40.00, direction=Vertical,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=20.00)
+          Window(id=WindowId(1), x=0.00, y=20.00, w=150.00, h=20.00)
         )
       )
     )
@@ -516,9 +516,9 @@ fn set_min_size_exceeds_screen_height_scroll_to_focus() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=40.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=20.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=20.00, w=150.00, h=20.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=40.00, direction=Vertical,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=20.00)
+          Window(id=WindowId(1), x=0.00, y=20.00, w=150.00, h=20.00)
         )
       )
     )
@@ -571,13 +571,13 @@ fn set_min_size_tabbed_child_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=50.00, y=0.00, w=100.00, h=30.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(1), parent=ContainerId(1), x=50.00, y=2.00, w=100.00, h=28.00)
-            Container(id=ContainerId(2), parent=ContainerId(1), x=50.00, y=2.00, w=100.00, h=28.00, direction=Vertical,
-              Window(id=WindowId(2), parent=ContainerId(2), x=50.00, y=2.00, w=100.00, h=8.00)
-              Window(id=WindowId(3), parent=ContainerId(2), x=50.00, y=10.00, w=100.00, h=20.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Container(id=ContainerId(1), x=50.00, y=0.00, w=100.00, h=30.00, tabbed=true, active_tab=1,
+            Window(id=WindowId(1), x=50.00, y=2.00, w=100.00, h=28.00)
+            Container(id=ContainerId(2), x=50.00, y=2.00, w=100.00, h=28.00, direction=Vertical,
+              Window(id=WindowId(2), x=50.00, y=2.00, w=100.00, h=8.00)
+              Window(id=WindowId(3), x=50.00, y=10.00, w=100.00, h=20.00)
             )
           )
         )
@@ -635,12 +635,12 @@ fn scroll_into_view_with_focused_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=100.00, y=0.00, w=100.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=100.00, y=0.00, w=100.00, h=10.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=100.00, y=10.00, w=100.00, h=10.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=20.00, w=100.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+          Container(id=ContainerId(1), x=100.00, y=0.00, w=100.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(1), x=100.00, y=0.00, w=100.00, h=10.00)
+            Window(id=WindowId(2), x=100.00, y=10.00, w=100.00, h=10.00)
+            Window(id=WindowId(3), x=100.00, y=20.00, w=100.00, h=10.00)
           )
         )
       )
@@ -697,12 +697,12 @@ fn delete_window_with_min_size_shrinks_parent_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=300.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=300.00, h=15.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=15.00, w=300.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(1), parent=ContainerId(1), x=0.00, y=15.00, w=100.00, h=15.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=100.00, y=15.00, w=100.00, h=15.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=200.00, y=15.00, w=100.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=300.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=300.00, h=15.00)
+          Container(id=ContainerId(1), x=0.00, y=15.00, w=300.00, h=15.00, direction=Horizontal,
+            Window(id=WindowId(1), x=0.00, y=15.00, w=100.00, h=15.00)
+            Window(id=WindowId(2), x=100.00, y=15.00, w=100.00, h=15.00)
+            Window(id=WindowId(3), x=200.00, y=15.00, w=100.00, h=15.00)
           )
         )
       )
@@ -746,11 +746,11 @@ fn delete_window_with_min_size_shrinks_parent_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=200.00, h=15.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=0.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(2), parent=ContainerId(1), x=0.00, y=15.00, w=100.00, h=15.00)
-            Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=15.00, w=100.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=200.00, h=15.00)
+          Container(id=ContainerId(1), x=0.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
+            Window(id=WindowId(2), x=0.00, y=15.00, w=100.00, h=15.00)
+            Window(id=WindowId(3), x=100.00, y=15.00, w=100.00, h=15.00)
           )
         )
       )
@@ -800,9 +800,9 @@ fn delete_window_with_min_size_allows_siblings_to_expand() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+          Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -845,7 +845,7 @@ fn delete_window_with_min_size_allows_siblings_to_expand() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Window(id=WindowId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -901,13 +901,13 @@ fn scroll_window_into_view_in_vertical_child_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=60.00, direction=Horizontal,
-          Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=0.00, w=100.00, h=60.00, direction=Vertical,
-            Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=20.00)
-            Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=20.00, w=100.00, h=20.00)
-            Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=40.00, w=100.00, h=20.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=60.00, direction=Horizontal,
+          Container(id=ContainerId(0), x=0.00, y=0.00, w=100.00, h=60.00, direction=Vertical,
+            Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=20.00)
+            Window(id=WindowId(1), x=0.00, y=20.00, w=100.00, h=20.00)
+            Window(id=WindowId(2), x=0.00, y=40.00, w=100.00, h=20.00)
           )
-          Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=0.00, w=50.00, h=60.00)
+          Window(id=WindowId(3), x=100.00, y=0.00, w=50.00, h=60.00)
         )
       )
     )
@@ -950,12 +950,12 @@ fn scroll_window_into_view_in_vertical_child_container() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(1), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=40.00, direction=Horizontal,
-          Container(id=ContainerId(0), parent=ContainerId(1), x=0.00, y=0.00, w=100.00, h=40.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=20.00)
-            Window(id=WindowId(2), parent=ContainerId(0), x=0.00, y=20.00, w=100.00, h=20.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=40.00, direction=Horizontal,
+          Container(id=ContainerId(0), x=0.00, y=0.00, w=100.00, h=40.00, direction=Vertical,
+            Window(id=WindowId(1), x=0.00, y=0.00, w=100.00, h=20.00)
+            Window(id=WindowId(2), x=0.00, y=20.00, w=100.00, h=20.00)
           )
-          Window(id=WindowId(3), parent=ContainerId(1), x=100.00, y=0.00, w=50.00, h=40.00)
+          Window(id=WindowId(3), x=100.00, y=0.00, w=50.00, h=40.00)
         )
       )
     )
@@ -1004,9 +1004,9 @@ fn max_height_centers_window_vertically_in_horizontal_split() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=7.50, w=75.00, h=15.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=7.50, w=75.00, h=15.00)
+          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -1056,9 +1056,9 @@ fn max_width_centers_window_horizontally_in_vertical_split() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=50.00, y=0.00, w=50.00, h=15.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=15.00, w=150.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), x=50.00, y=0.00, w=50.00, h=15.00)
+          Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
         )
       )
     )
@@ -1107,9 +1107,9 @@ fn max_width_limits_window_in_horizontal_split() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=30.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=30.00, y=0.00, w=120.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=30.00, h=30.00)
+          Window(id=WindowId(1), x=30.00, y=0.00, w=120.00, h=30.00)
         )
       )
     )
@@ -1159,9 +1159,9 @@ fn both_windows_at_max_centered_collectively() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=45.00, y=0.00, w=30.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=30.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=45.00, y=0.00, w=30.00, h=30.00)
+          Window(id=WindowId(1), x=75.00, y=0.00, w=30.00, h=30.00)
         )
       )
     )
@@ -1212,9 +1212,9 @@ fn tabbed_window_with_max_size_is_centered() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=45.00, y=11.00, w=60.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
+          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), x=45.00, y=11.00, w=60.00, h=10.00)
         )
       )
     )
@@ -1259,11 +1259,11 @@ fn nested_window_center_due_to_max_constraints() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=10.00, w=75.00, h=10.00)
-          Container(id=ContainerId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), parent=ContainerId(1), x=75.00, y=5.00, w=75.00, h=10.00)
-            Window(id=WindowId(2), parent=ContainerId(1), x=75.00, y=15.00, w=75.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=10.00, w=75.00, h=10.00)
+          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
+            Window(id=WindowId(1), x=75.00, y=5.00, w=75.00, h=10.00)
+            Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=10.00)
           )
         )
       )
@@ -1308,9 +1308,9 @@ fn new_max_clamps_existing_min() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=100.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(1), x=50.00, y=0.00, w=100.00, h=30.00)
         )
       )
     )
@@ -1363,9 +1363,9 @@ fn global_max_applies_to_all_windows() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=15.00, y=0.00, w=60.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=60.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=15.00, y=0.00, w=60.00, h=30.00)
+          Window(id=WindowId(1), x=75.00, y=0.00, w=60.00, h=30.00)
         )
       )
     )
@@ -1419,9 +1419,9 @@ fn per_window_max_overrides_global() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=30.00, y=0.00, w=30.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=60.00, y=0.00, w=60.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=30.00, y=0.00, w=30.00, h=30.00)
+          Window(id=WindowId(1), x=60.00, y=0.00, w=60.00, h=30.00)
         )
       )
     )
@@ -1469,7 +1469,7 @@ fn single_window_with_max_size_centered() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=45.00, y=7.50, w=60.00, h=15.00)
+        Window(id=WindowId(0), x=45.00, y=7.50, w=60.00, h=15.00)
       )
     )
 
@@ -1509,7 +1509,7 @@ fn single_window_with_max_larger_than_screen_fills_screen() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
 
@@ -1581,9 +1581,9 @@ fn clearing_constraint_allows_window_to_resize() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=100.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+          Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
     )
@@ -1625,9 +1625,9 @@ fn clearing_constraint_allows_window_to_resize() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -1709,9 +1709,9 @@ fn max_height_larger_than_container_fills_height_in_horizontal_split() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         )
       )
     )
@@ -1762,9 +1762,9 @@ fn max_width_larger_than_container_fills_width_in_vertical_split() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=15.00, w=150.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
+          Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
         )
       )
     )
@@ -1816,9 +1816,9 @@ fn tabbed_window_with_max_larger_than_container_fills_space() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
+          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
+          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
         )
       )
     )
@@ -1872,7 +1872,7 @@ fn window_max_smaller_than_global_min_width() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=50.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(0), x=50.00, y=0.00, w=50.00, h=30.00)
       )
     )
 
@@ -1925,7 +1925,7 @@ fn window_max_smaller_than_global_min_height() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
-        Window(id=WindowId(0), parent=WorkspaceId(0), x=0.00, y=10.00, w=150.00, h=10.00)
+        Window(id=WindowId(0), x=0.00, y=10.00, w=150.00, h=10.00)
       )
     )
 
@@ -1969,9 +1969,9 @@ fn window_max_smaller_than_global_min_multiple_windows() {
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
-        Container(id=ContainerId(0), parent=WorkspaceId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), parent=ContainerId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(1), parent=ContainerId(0), x=50.00, y=0.00, w=100.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
+          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+          Window(id=WindowId(1), x=50.00, y=0.00, w=100.00, h=30.00)
         )
       )
     )
