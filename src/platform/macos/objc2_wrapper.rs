@@ -306,6 +306,8 @@ pub(crate) fn get_cg_window_id(element: &AXUIElement) -> Result<CGWindowID, AXEr
     // 0 is kCGNullWindowID
     if res == RawAXError::Success && window_id != 0 {
         Ok(window_id)
+    } else if window_id == 0 {
+        Err(AXError::NullCgWindowId)
     } else {
         Err(res.into())
     }
