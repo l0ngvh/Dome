@@ -1,14 +1,14 @@
 use super::setup;
 
 use crate::core::{
-    ContainerPlacement, WindowPlacement,
+    ContainerPlacement, SpawnIndicator, WindowPlacement,
     hub::{Hub, MonitorLayout, MonitorPlacements},
 };
 
 fn placements(hub: &Hub) -> MonitorPlacements {
-    let mut all = hub.get_visible_placements();
-    assert_eq!(all.len(), 1);
-    all.remove(0)
+    let mut result = hub.get_visible_placements();
+    assert_eq!(result.monitors.len(), 1);
+    result.monitors.remove(0)
 }
 
 fn normal_windows(p: &MonitorPlacements) -> &[WindowPlacement] {
@@ -43,7 +43,7 @@ fn partially_visible_window_has_clipped_visible_frame() {
 }
 
 #[test]
-fn focused_window_tagged() {
+fn highlighted_window_tagged() {
     let mut hub = setup();
     let w0 = hub.insert_tiling();
     let w1 = hub.insert_tiling();
@@ -56,14 +56,14 @@ fn focused_window_tagged() {
             .iter()
             .find(|wp| wp.id == w0)
             .unwrap()
-            .is_focused
+            .is_highlighted
     );
     assert!(
         !normal_windows(&p)
             .iter()
             .find(|wp| wp.id == w1)
             .unwrap()
-            .is_focused
+            .is_highlighted
     );
 }
 
@@ -343,4 +343,153 @@ fn title_update_reflected_in_placements() {
     let containers = normal_containers(&p);
     let tabbed = containers.iter().find(|c| c.is_tabbed).unwrap();
     assert_eq!(tabbed.titles, vec!["New", "B"]);
+}
+
+#[test]
+fn focused_window_in_result() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+
+    hub.set_focus(w0);
+    assert_eq!(hub.get_visible_placements().focused_window, Some(w0));
+
+    hub.set_focus(w1);
+    assert_eq!(hub.get_visible_placements().focused_window, Some(w1));
+}
+
+#[test]
+fn focused_window_none_on_empty_workspace() {
+    let hub = setup();
+    assert_eq!(hub.get_visible_placements().focused_window, None);
+}
+
+#[test]
+fn focused_window_none_when_container_focused() {
+    let mut hub = setup();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.focus_parent();
+
+    let result = hub.get_visible_placements();
+    assert_eq!(result.focused_window, None);
+
+    let containers = normal_containers(&result.monitors[0]);
+    assert!(containers.iter().any(|cp| cp.is_highlighted));
+}
+
+#[test]
+fn spawn_indicator_on_highlighted_window() {
+    let mut hub = setup();
+    hub.insert_tiling();
+
+    let p = placements(&hub);
+    let wp = &normal_windows(&p)[0];
+    assert!(wp.is_highlighted);
+    // Default spawn mode is horizontal
+    assert_eq!(
+        wp.spawn_indicator,
+        Some(SpawnIndicator {
+            top: false,
+            right: true,
+            bottom: false,
+            left: false,
+        })
+    );
+}
+
+#[test]
+fn spawn_indicator_vertical() {
+    let mut hub = setup();
+    hub.insert_tiling();
+    hub.toggle_spawn_mode(); // Horizontal -> Vertical
+
+    let p = placements(&hub);
+    let wp = &normal_windows(&p)[0];
+    assert_eq!(
+        wp.spawn_indicator,
+        Some(SpawnIndicator {
+            top: false,
+            right: false,
+            bottom: true,
+            left: false,
+        })
+    );
+}
+
+#[test]
+fn spawn_indicator_tab() {
+    let mut hub = setup();
+    hub.insert_tiling();
+    hub.toggle_spawn_mode(); // Horizontal -> Vertical
+    hub.toggle_spawn_mode(); // Vertical -> Tab
+
+    let p = placements(&hub);
+    let wp = &normal_windows(&p)[0];
+    assert_eq!(
+        wp.spawn_indicator,
+        Some(SpawnIndicator {
+            top: true,
+            right: false,
+            bottom: false,
+            left: false,
+        })
+    );
+}
+
+#[test]
+fn spawn_indicator_none_for_float() {
+    let mut hub = setup();
+    hub.insert_tiling();
+    hub.toggle_float();
+
+    let p = placements(&hub);
+    let wp = &normal_windows(&p)[0];
+    assert!(wp.is_float);
+    assert!(wp.is_highlighted);
+    assert_eq!(wp.spawn_indicator, None);
+}
+
+#[test]
+fn spawn_indicator_none_on_unfocused_window() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+    hub.set_focus(w0);
+
+    let p = placements(&hub);
+    let w1p = normal_windows(&p).iter().find(|wp| wp.id == w1).unwrap();
+    assert!(!w1p.is_highlighted);
+    assert_eq!(w1p.spawn_indicator, None);
+}
+
+#[test]
+fn spawn_indicator_on_highlighted_container() {
+    let mut hub = setup();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.focus_parent();
+
+    let p = placements(&hub);
+    let cp = normal_containers(&p)
+        .iter()
+        .find(|c| c.is_highlighted)
+        .unwrap();
+    // Default horizontal container has spawn mode horizontal
+    assert_eq!(
+        cp.spawn_indicator,
+        Some(SpawnIndicator {
+            top: false,
+            right: true,
+            bottom: false,
+            left: false,
+        })
+    );
+}
+
+#[test]
+fn focused_monitor_in_result() {
+    let hub = setup();
+    let result = hub.get_visible_placements();
+    assert_eq!(result.focused_monitor, hub.focused_monitor());
 }

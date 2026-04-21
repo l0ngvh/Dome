@@ -1,6 +1,6 @@
 use crate::core::{
-    Child, Container, ContainerId, Hub, SpawnMode, WindowId,
-    node::{Dimension, Direction, DisplayMode, Parent, WorkspaceId},
+    Child, Container, ContainerId, Hub, WindowId,
+    node::{Dimension, Direction, DisplayMode, Parent, SpawnMode, WorkspaceId},
 };
 
 impl Hub {

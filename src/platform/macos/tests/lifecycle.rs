@@ -232,7 +232,7 @@ fn render_frame_focused_window() {
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
 
     let state = macos.last_frame_state();
-    assert!(matches!(state.focused, Some(Child::Window(_))));
+    assert!(state.focused_window.is_some());
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn render_frame_focused_none_after_last_window_removed() {
     dome.reconcile_windows(&[cg1], vec![]);
 
     let state = macos.last_frame_state();
-    assert_eq!(state.focused, None);
+    assert_eq!(state.focused_window, None);
 }
 
 #[test]
@@ -257,7 +257,7 @@ fn render_frame_focused_container_after_focus_parent() {
     dome.run_hub_actions(&actions("focus parent"));
 
     let state = macos.last_frame_state();
-    assert!(matches!(state.focused, Some(Child::Container(_))));
+    assert_eq!(state.focused_window, None);
 }
 
 #[test]
@@ -280,7 +280,7 @@ fn render_frame_focused_none_on_empty_workspace() {
     dome.run_hub_actions(&actions("focus workspace 1"));
 
     let state = macos.last_frame_state();
-    assert_eq!(state.focused, None);
+    assert_eq!(state.focused_window, None);
 }
 
 #[test]

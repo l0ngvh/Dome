@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::action::{Actions, FocusTarget, HubAction, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
-    Child, ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout, WindowId,
+    ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout, WindowId,
     WindowPlacement, WindowRestrictions,
 };
 
@@ -408,22 +408,16 @@ impl Dome {
     pub(super) fn apply_layout(&mut self) {
         let created = std::mem::take(&mut self.pending_created);
 
-        let focused = match self
-            .hub
-            .get_workspace(self.hub.current_workspace())
-            .focused()
-        {
-            Some(Child::Window(id)) => Some(id),
-            _ => None,
-        };
-
-        let placements = self.hub.get_visible_placements();
+        let result = self.hub.get_visible_placements();
+        let focused_window = result.focused_window;
+        let focused_monitor = result.focused_monitor;
+        let focused = focused_window;
 
         let mut float_windows: Vec<WindowPlacement> = Vec::new();
         let mut per_monitor: Vec<MonitorPositionData> = Vec::new();
         let mut new_displayed: HashMap<MonitorId, DisplayedMonitor> = HashMap::new();
 
-        for mp in placements {
+        for mp in result.monitors {
             let dimension = self
                 .monitor_dimensions
                 .get(&mp.monitor_id)
@@ -459,7 +453,7 @@ impl Dome {
                         }
                     }
                     for cp in &containers {
-                        if !cp.is_tabbed && !cp.is_focused {
+                        if !cp.is_tabbed && !cp.is_highlighted {
                             continue;
                         }
                         let titles = cp.titles.clone();
@@ -527,7 +521,7 @@ impl Dome {
         }
 
         // Focus
-        let current_monitor = self.hub.focused_monitor();
+        let current_monitor = focused_monitor;
         let monitor_changed = self
             .last_focused_monitor
             .is_some_and(|m| m != current_monitor);
@@ -568,7 +562,7 @@ impl Dome {
                     }
                 }
             }
-            self.show_float(wp.id, wp, focus_changed);
+            self.show_float(wp.id, wp, focus_changed, focused == Some(wp.id));
         }
 
         // Tiling windows — per monitor, chained after tiling overlay
@@ -601,9 +595,7 @@ impl Dome {
     pub(super) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
         for (hwnd_id, title) in &titles {
             self.registry.set_title(*hwnd_id, title.clone());
-            if let (Some(window_id), Some(title)) =
-                (self.registry.get_id(*hwnd_id), title)
-            {
+            if let (Some(window_id), Some(title)) = (self.registry.get_id(*hwnd_id), title) {
                 self.hub.set_window_title(window_id, title.clone());
             }
         }

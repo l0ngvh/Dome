@@ -14,7 +14,7 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::action::Actions;
 use crate::config::Config;
-use crate::core::{Child, Dimension, MonitorId};
+use crate::core::{Dimension, MonitorId, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dispatcher::DispatcherMarker;
@@ -200,7 +200,7 @@ impl MacOS {
             moves: Rc::new(RefCell::new(Vec::new())),
             next_cg_id: 1,
             frame_state: Arc::new(Mutex::new(FrameState {
-                focused: None,
+                focused_window: None,
                 focused_monitor_id: None,
             })),
         }
@@ -392,7 +392,7 @@ impl MacOS {
 
 #[derive(Clone)]
 struct FrameState {
-    focused: Option<Child>,
+    focused_window: Option<WindowId>,
     focused_monitor_id: Option<MonitorId>,
 }
 
@@ -404,7 +404,7 @@ impl FrameSender for TestSender {
     fn send(&self, msg: HubMessage) {
         if let HubMessage::Frame(frame) = &msg {
             let mut state = self.frame_state.lock().unwrap();
-            state.focused = frame.focused;
+            state.focused_window = frame.focused_window;
             state.focused_monitor_id = Some(frame.focused_monitor_id);
         }
     }

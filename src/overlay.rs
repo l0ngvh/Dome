@@ -1,8 +1,7 @@
 use egui::{Align, Color32, CornerRadius, Layout, Rect, RichText, Sense, pos2, vec2};
 
 use crate::config::{Color, Config};
-use crate::core::SpawnMode;
-use crate::core::{ContainerId, ContainerPlacement, Dimension, WindowPlacement};
+use crate::core::{ContainerId, ContainerPlacement, Dimension, SpawnIndicator, WindowPlacement};
 
 /// Draws all tiling window borders and container overlays for a single monitor.
 /// Returns `(ContainerId, tab_index)` for each tab that was clicked.
@@ -60,12 +59,7 @@ pub(crate) fn paint_window_border(
     config: &Config,
     origin: egui::Vec2,
 ) {
-    let colors = border_colors(
-        placement.is_focused,
-        placement.is_float,
-        placement.spawn_mode,
-        config,
-    );
+    let colors = border_colors(placement.is_highlighted, placement.spawn_indicator, config);
     paint_border_edges(
         painter,
         placement.frame,
@@ -95,14 +89,14 @@ pub(crate) fn show_container(
     let is_tabbed = placement.is_tabbed && !tab_titles.is_empty();
     let th = config.tab_bar_height;
 
-    let border_c = to_color32(if placement.is_focused {
+    let border_c = to_color32(if placement.is_highlighted {
         config.focused_color
     } else {
         config.border_color
     });
 
-    if placement.is_focused {
-        let colors = border_colors(true, false, placement.spawn_mode, config);
+    if placement.is_highlighted {
+        let colors = border_colors(true, placement.spawn_indicator, config);
         let painter = ui.painter();
 
         if is_tabbed {
@@ -177,7 +171,7 @@ pub(crate) fn show_container(
             ui.painter()
                 .rect_filled(tab_rect, CornerRadius::ZERO, active_bg);
 
-            if placement.is_focused {
+            if placement.is_highlighted {
                 // Active tab border: top, bottom, left, right
                 ui.painter().rect_filled(
                     Rect::from_min_size(pos2(tab_x, oy), vec2(tab_width, b)),
@@ -281,27 +275,26 @@ fn paint_border_edges(
     );
 }
 
-/// [top, right, bottom, left] border colors based on focus state and spawn mode.
+/// [top, right, bottom, left] border colors based on highlight state and spawn indicator.
 fn border_colors(
-    focused: bool,
-    is_float: bool,
-    spawn_mode: SpawnMode,
+    is_highlighted: bool,
+    spawn_indicator: Option<SpawnIndicator>,
     config: &Config,
 ) -> [Color32; 4] {
-    if !focused {
-        [to_color32(config.border_color); 4]
-    } else if is_float {
-        [to_color32(config.focused_color); 4]
-    } else {
-        let f = to_color32(config.focused_color);
-        let s = to_color32(config.spawn_indicator_color);
-        [
-            if spawn_mode.is_tab() { s } else { f },
-            if spawn_mode.is_horizontal() { s } else { f },
-            if spawn_mode.is_vertical() { s } else { f },
-            f,
-        ]
+    if !is_highlighted {
+        return [to_color32(config.border_color); 4];
     }
+    let Some(si) = spawn_indicator else {
+        return [to_color32(config.focused_color); 4];
+    };
+    let f = to_color32(config.focused_color);
+    let s = to_color32(config.spawn_indicator_color);
+    [
+        if si.top { s } else { f },
+        if si.right { s } else { f },
+        if si.bottom { s } else { f },
+        if si.left { s } else { f },
+    ]
 }
 
 fn to_color32(c: Color) -> Color32 {

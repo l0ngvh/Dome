@@ -6,14 +6,25 @@ use super::node::{
     Window, WindowId, WindowRestrictions, Workspace, WorkspaceId,
 };
 
+/// Result of `get_visible_placements()`. Bundles per-monitor placements with
+/// the keyboard focus target and focused monitor, so callers don't need
+/// separate queries to Hub for that information.
+pub(crate) struct VisiblePlacements {
+    pub(crate) focused_window: Option<WindowId>,
+    pub(crate) focused_monitor: MonitorId,
+    pub(crate) monitors: Vec<MonitorPlacements>,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WindowPlacement {
     pub(crate) id: WindowId,
     pub(crate) frame: Dimension,
     pub(crate) visible_frame: Dimension,
     pub(crate) is_float: bool,
-    pub(crate) is_focused: bool,
-    pub(crate) spawn_mode: SpawnMode,
+    /// Visual highlight: true when this window is the workspace focus.
+    /// Not keyboard focus -- use `VisiblePlacements.focused_window` for that.
+    pub(crate) is_highlighted: bool,
+    pub(crate) spawn_indicator: Option<SpawnIndicator>,
 }
 
 #[derive(Clone, Debug)]
@@ -21,8 +32,9 @@ pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
     pub(crate) frame: Dimension,
     pub(crate) visible_frame: Dimension,
-    pub(crate) is_focused: bool,
-    pub(crate) spawn_mode: SpawnMode,
+    /// Visual highlight: true when this container is the workspace focus.
+    pub(crate) is_highlighted: bool,
+    pub(crate) spawn_indicator: Option<SpawnIndicator>,
     pub(crate) is_tabbed: bool,
     pub(crate) active_tab_index: usize,
     pub(crate) titles: Vec<String>,
@@ -39,6 +51,28 @@ pub(crate) enum MonitorLayout {
         containers: Vec<ContainerPlacement>,
     },
     Fullscreen(WindowId),
+}
+
+/// Which border edges to highlight with the spawn indicator color.
+/// Each bool means "highlight this edge." `left` is always false today
+/// but included so we don't need a struct change if a future spawn mode uses it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SpawnIndicator {
+    pub(crate) top: bool,
+    pub(crate) right: bool,
+    pub(crate) bottom: bool,
+    pub(crate) left: bool,
+}
+
+impl SpawnIndicator {
+    fn from_spawn_mode(mode: SpawnMode) -> Self {
+        Self {
+            top: mode.is_tab(),
+            right: mode.is_horizontal(),
+            bottom: mode.is_vertical(),
+            left: false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -177,6 +211,7 @@ impl Hub {
         self.workspaces.all_active()
     }
 
+    #[cfg_attr(not(test), expect(dead_code, reason = "used in test validators"))]
     pub(crate) fn get_workspace(&self, id: WorkspaceId) -> &Workspace {
         self.workspaces.get(id)
     }
@@ -194,10 +229,11 @@ impl Hub {
         self.windows.get_mut(window_id).title = title;
     }
 
-    pub(crate) fn get_visible_placements(&self) -> Vec<MonitorPlacements> {
+    pub(crate) fn get_visible_placements(&self) -> VisiblePlacements {
         let current_ws = self.current_workspace();
 
-        self.visible_workspaces()
+        let monitors = self
+            .visible_workspaces()
             .into_iter()
             .map(|ws_id| {
                 let ws = self.workspaces.get(ws_id);
@@ -228,13 +264,18 @@ impl Hub {
                             let window = self.windows.get(id);
                             let frame = translate(window.dimension, offset_x, offset_y, screen);
                             if let Some(visible_frame) = clip(frame, screen) {
+                                let is_highlighted = focused == Some(Child::Window(id));
                                 windows.push(WindowPlacement {
                                     id,
                                     frame,
                                     visible_frame,
                                     is_float: false,
-                                    is_focused: focused == Some(Child::Window(id)),
-                                    spawn_mode: window.spawn_mode(),
+                                    is_highlighted,
+                                    spawn_indicator: if is_highlighted {
+                                        Some(SpawnIndicator::from_spawn_mode(window.spawn_mode()))
+                                    } else {
+                                        None
+                                    },
                                 });
                             }
                         }
@@ -244,12 +285,17 @@ impl Hub {
                             let Some(visible_frame) = clip(frame, screen) else {
                                 continue;
                             };
+                            let is_highlighted = focused == Some(Child::Container(id));
                             containers.push(ContainerPlacement {
                                 id,
                                 frame,
                                 visible_frame,
-                                is_focused: focused == Some(Child::Container(id)),
-                                spawn_mode: container.spawn_mode(),
+                                is_highlighted,
+                                spawn_indicator: if is_highlighted {
+                                    Some(SpawnIndicator::from_spawn_mode(container.spawn_mode()))
+                                } else {
+                                    None
+                                },
                                 is_tabbed: container.is_tabbed(),
                                 active_tab_index: container.active_tab_index(),
                                 titles: container
@@ -275,19 +321,20 @@ impl Hub {
                 }
 
                 for &(id, dim) in &ws.float_windows {
-                    let window = self.windows.get(id);
                     // Float dimensions are already screen-absolute (stored in the workspace
                     // tuple), so no translate() call needed. clip() works because both dim
                     // and screen are in absolute screen coordinates.
                     let frame = dim;
                     if let Some(visible_frame) = clip(frame, screen) {
+                        let is_highlighted = focused == Some(Child::Window(id));
                         windows.push(WindowPlacement {
                             id,
                             frame,
                             visible_frame,
                             is_float: true,
-                            is_focused: focused == Some(Child::Window(id)),
-                            spawn_mode: window.spawn_mode(),
+                            is_highlighted,
+                            // Floats never show spawn indicators
+                            spawn_indicator: None,
                         });
                     }
                 }
@@ -300,7 +347,18 @@ impl Hub {
                     },
                 }
             })
-            .collect()
+            .collect();
+
+        let focused_window = match self.workspaces.get(current_ws).focused() {
+            Some(Child::Window(id)) => Some(id),
+            _ => None,
+        };
+
+        VisiblePlacements {
+            focused_window,
+            focused_monitor: self.focused_monitor,
+            monitors,
+        }
     }
 
     /// Insert a new window as tiling to the current workspace.

@@ -22,7 +22,7 @@ use objc2_metal::MTLCreateSystemDefaultDevice;
 use super::dome::{FrameSender, HubEvent, HubMessage};
 use super::listeners::EventListener;
 use crate::config::Config;
-use crate::core::{Child, MonitorId};
+use crate::core::{MonitorId, WindowId};
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TilingOverlay};
 use renderer::MetalBackend;
@@ -143,7 +143,7 @@ struct AppDelegateIvars {
     event_listener: EventListener,
     backend: Rc<MetalBackend>,
     config: RefCell<Config>,
-    last_focused: Cell<Option<Child>>,
+    last_focused: Cell<Option<WindowId>>,
     last_focused_monitor_id: Cell<Option<MonitorId>>,
 }
 
@@ -255,6 +255,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         show.cocoa_frame,
                         show.scale,
                         show.content_dim,
+                        frame.focused_window == Some(show.placement.id),
                     );
 
                     if is_new {
@@ -262,7 +263,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     }
 
                     if let Some(capture) = captures.get_mut(&show.cg_id) {
-                        if !show.placement.is_focused {
+                        if frame.focused_window != Some(show.placement.id) {
                             capture.start(show.cg_id, show.content_dim, show.scale);
                         } else {
                             capture.stop();
@@ -292,9 +293,9 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     let last_monitor = delegate.ivars().last_focused_monitor_id.get();
                     let monitor_changed =
                         last_monitor.is_some_and(|m| m != frame.focused_monitor_id);
-                    if last != frame.focused || monitor_changed {
-                        delegate.ivars().last_focused.set(frame.focused);
-                        if !matches!(frame.focused, Some(Child::Window(_))) {
+                    if last != frame.focused_window || monitor_changed {
+                        delegate.ivars().last_focused.set(frame.focused_window);
+                        if frame.focused_window.is_none() {
                             let overlays = delegate.ivars().tiling_overlays.borrow();
                             if let Some(overlay) = overlays.get(&frame.focused_monitor_id) {
                                 overlay.focus(mtm);

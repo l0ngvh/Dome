@@ -317,7 +317,7 @@ fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HR
             // these regions are freshly created and never selected into a DC.
             DeleteObject(tab.into()).ok().ok();
 
-            if placement.is_focused {
+            if placement.is_highlighted {
                 let left = clamped_rgn(ox, oy + th, ox + b, oy + fh - b);
                 CombineRgn(Some(region), Some(region), Some(left), RGN_OR);
                 DeleteObject(left.into()).ok().ok();
@@ -328,7 +328,7 @@ fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HR
                 CombineRgn(Some(region), Some(region), Some(bottom), RGN_OR);
                 DeleteObject(bottom.into()).ok().ok();
             }
-        } else if placement.is_focused {
+        } else if placement.is_highlighted {
             let top = clamped_rgn(ox, oy, ox + fw, oy + b);
             let bottom = clamped_rgn(ox, oy + fh - b, ox + fw, oy + fh);
             let left = clamped_rgn(ox, oy + b, ox + b, oy + fh - b);

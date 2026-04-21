@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-use crate::core::{Child, Dimension, MonitorLayout, MonitorPlacements, WindowId};
+use crate::core::{Dimension, MonitorLayout, MonitorPlacements, WindowId};
 
 use super::Dome;
 use super::events::{FloatShow, HubMessage, MonitorTilingData, RenderFrame};
@@ -14,8 +14,9 @@ impl Dome {
     pub(super) fn flush_layout(&mut self) {
         let mut tiling = Vec::new();
         let mut float_shows = Vec::new();
-        let placements = self.hub.get_visible_placements();
-        let all_displayed_windows: HashSet<WindowId> = placements
+        let result = self.hub.get_visible_placements();
+        let all_displayed_windows: HashSet<WindowId> = result
+            .monitors
             .iter()
             .flat_map(|mp| match &mp.layout {
                 MonitorLayout::Normal { windows, .. } => {
@@ -24,7 +25,8 @@ impl Dome {
                 MonitorLayout::Fullscreen(wid) => vec![*wid],
             })
             .collect();
-        let to_hide: Vec<_> = placements
+        let to_hide: Vec<_> = result
+            .monitors
             .iter()
             .flat_map(|mp| {
                 let entry = self.monitor_registry.get_entry(mp.monitor_id);
@@ -38,7 +40,9 @@ impl Dome {
         for wid in to_hide {
             self.hide_window(wid);
         }
-        for mp in placements {
+        let focused_window = result.focused_window;
+        let focused_monitor = result.focused_monitor;
+        for mp in result.monitors {
             let displayed: HashSet<WindowId> = match &mp.layout {
                 MonitorLayout::Fullscreen(window_id) => HashSet::from([*window_id]),
                 MonitorLayout::Normal { windows, .. } => windows.iter().map(|p| p.id).collect(),
@@ -46,22 +50,14 @@ impl Dome {
             self.monitor_registry
                 .get_entry_mut(mp.monitor_id)
                 .displayed_windows = displayed;
-            let (t, f) = self.apply_monitor_placements(&mp);
+            let (t, f) = self.apply_monitor_placements(&mp, focused_window);
             tiling.push(t);
             float_shows.extend(f);
         }
 
-        let focused = match self
-            .hub
-            .get_workspace(self.hub.current_workspace())
-            .focused()
-        {
-            Some(Child::Window(id)) => Some(id),
-            _ => None,
-        };
-        if focused != self.last_focused {
-            self.last_focused = focused;
-            if let Some(id) = focused {
+        if focused_window != self.last_focused {
+            self.last_focused = focused_window;
+            if let Some(id) = focused_window {
                 let window = self.registry.by_id(id);
                 if let Err(err) = window.ax.focus() {
                     tracing::trace!("Failed to focus window: {err:#}");
@@ -88,17 +84,15 @@ impl Dome {
         self.sender.send(HubMessage::Frame(RenderFrame {
             tiling,
             float_shows,
-            focused: self
-                .hub
-                .get_workspace(self.hub.current_workspace())
-                .focused(),
-            focused_monitor_id: self.hub.focused_monitor(),
+            focused_window,
+            focused_monitor_id: focused_monitor,
         }));
     }
 
     fn apply_monitor_placements(
         &mut self,
         mp: &MonitorPlacements,
+        focused_window: Option<WindowId>,
     ) -> (MonitorTilingData, Vec<FloatShow>) {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
@@ -133,7 +127,7 @@ impl Dome {
                         // Float dimensions are screen-absolute. The OS clips at screen
                         // edges, so we use wp.frame for everything (no visible_frame).
                         let content_dim = apply_inset(wp.frame, border_size);
-                        if !wp.is_focused {
+                        if focused_window != Some(wp.id) {
                             self.move_window_offscreen(wp.id);
                         } else {
                             self.place_window(wp.id, content_dim);

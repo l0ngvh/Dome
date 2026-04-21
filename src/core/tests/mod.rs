@@ -41,7 +41,7 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     // ASCII visualization uses screen coords from get_visible_placements
     let mut grid = vec![vec![' '; ASCII_WIDTH]; ASCII_HEIGHT];
     let all = hub.get_visible_placements();
-    let mp = &all[0];
+    let mp = &all.monitors[0];
 
     let (windows, containers) = match &mp.layout {
         MonitorLayout::Normal {
@@ -106,13 +106,13 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     }
 
     // Draw focus border for non-float focused
-    let focused_float = windows.iter().find(|p| p.is_focused && p.is_float);
+    let focused_float = windows.iter().find(|p| p.is_highlighted && p.is_float);
     if focused_float.is_none() {
-        if let Some(wp) = windows.iter().find(|p| p.is_focused) {
+        if let Some(wp) = windows.iter().find(|p| p.is_highlighted) {
             let d = wp.visible_frame;
             let clip = clip_edges(wp.frame, wp.visible_frame);
             draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
-        } else if let Some(cp) = containers.iter().find(|p| p.is_focused) {
+        } else if let Some(cp) = containers.iter().find(|p| p.is_highlighted) {
             let d = cp.visible_frame;
             let clip = clip_edges(cp.frame, cp.visible_frame);
             draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
@@ -873,7 +873,7 @@ fn validate_visible_placements(hub: &Hub) {
     let all_placements = hub.get_visible_placements();
     let mut seen_window_ids = HashSet::new();
 
-    for mp in &all_placements {
+    for mp in &all_placements.monitors {
         let screen = hub.monitors.get(mp.monitor_id).dimension;
         let (windows, containers) = match &mp.layout {
             MonitorLayout::Normal {

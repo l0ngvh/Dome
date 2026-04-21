@@ -69,7 +69,13 @@ impl std::fmt::Display for WindowState {
 }
 
 impl Dome {
-    pub(super) fn show_float(&mut self, id: WindowId, wp: &WindowPlacement, focus_changed: bool) {
+    pub(super) fn show_float(
+        &mut self,
+        id: WindowId,
+        wp: &WindowPlacement,
+        focus_changed: bool,
+        is_focused: bool,
+    ) {
         let entry = self.registry.get_mut(id);
         let border = self.config.border_size;
         let content = apply_inset(wp.frame, border);
@@ -94,7 +100,7 @@ impl Dome {
                 }
                 match ps {
                     PositionedState::Float(d) => {
-                        let needs_topmost = focus_changed && wp.is_focused;
+                        let needs_topmost = focus_changed && is_focused;
                         let settled = d.target == new_target && !needs_topmost;
                         (needs_topmost, settled, d.actual)
                     }

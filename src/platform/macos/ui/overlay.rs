@@ -120,6 +120,7 @@ impl FloatOverlay {
         cocoa_frame: NSRect,
         scale: f64,
         content_dim: Dimension,
+        is_focused: bool,
     ) {
         self.placement = Some(*placement);
         self.scale = scale;
@@ -128,7 +129,7 @@ impl FloatOverlay {
         self.renderer
             .resize(cocoa_frame.size.width, cocoa_frame.size.height, scale);
 
-        if !placement.is_focused {
+        if !is_focused {
             self.window.setIgnoresMouseEvents(false);
         } else {
             self.window.setIgnoresMouseEvents(true);
