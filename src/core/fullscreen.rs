@@ -75,8 +75,9 @@ impl Hub {
         workspace.focused = workspace
             .fullscreen_windows
             .last()
-            .or(workspace.float_windows.last())
-            .map(|&w| Child::Window(w))
+            .copied()
+            .or(workspace.float_windows.last().map(|&(id, _)| id))
+            .map(Child::Window)
             .or_else(|| match workspace.root {
                 Some(root) => Some(match root {
                     Child::Window(_) => root,

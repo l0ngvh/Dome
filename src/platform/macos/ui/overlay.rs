@@ -119,7 +119,7 @@ impl FloatOverlay {
         placement: &WindowPlacement,
         cocoa_frame: NSRect,
         scale: f64,
-        visible_content_dim: Option<Dimension>,
+        content_dim: Dimension,
     ) {
         self.placement = Some(*placement);
         self.scale = scale;
@@ -135,10 +135,13 @@ impl FloatOverlay {
             self.renderer.clear_mirror();
         }
 
-        self.visible_content_bounds = visible_content_dim.map(|mr| {
-            let v = placement.visible_frame;
-            [mr.x - v.x, mr.y - v.y, mr.width, mr.height]
-        });
+        // Content area offset by the border inset within the frame
+        self.visible_content_bounds = Some([
+            content_dim.x - placement.frame.x,
+            content_dim.y - placement.frame.y,
+            content_dim.width,
+            content_dim.height,
+        ]);
 
         let config = &self.config;
         let mr = self.visible_content_bounds;

@@ -1,6 +1,6 @@
 use crate::core::{
     Child, Hub, WindowId,
-    node::{DisplayMode, Parent, WorkspaceId},
+    node::{Dimension, DisplayMode, Parent, WorkspaceId},
 };
 
 impl Hub {
@@ -8,18 +8,24 @@ impl Hub {
         let window = self.windows.get_mut(id);
         window.parent = Parent::Workspace(workspace_id);
         window.workspace = workspace_id;
+        let dim = self.windows.get(id).dimension;
         let workspace = self.workspaces.get_mut(workspace_id);
-        workspace.float_windows.push(id);
+        workspace.float_windows.push((id, dim));
         self.set_workspace_focus(Child::Window(id));
     }
 
-    pub(super) fn attach_split_as_float(&mut self, workspace_id: WorkspaceId, id: WindowId) {
+    pub(super) fn attach_split_as_float(
+        &mut self,
+        workspace_id: WorkspaceId,
+        id: WindowId,
+        dim: Dimension,
+    ) {
         let window = self.windows.get_mut(id);
         window.mode = DisplayMode::Float;
         window.parent = Parent::Workspace(workspace_id);
         window.workspace = workspace_id;
         let workspace = self.workspaces.get_mut(workspace_id);
-        workspace.float_windows.push(id);
+        workspace.float_windows.push((id, dim));
         self.set_workspace_focus(Child::Window(id));
     }
 
@@ -28,13 +34,14 @@ impl Hub {
         let ws_id = window.workspace;
 
         let workspace = self.workspaces.get_mut(ws_id);
-        workspace.float_windows.retain(|&f| f != id);
+        workspace.float_windows.retain(|&(f, _)| f != id);
 
         let new_focus = workspace
             .fullscreen_windows
             .last()
-            .or(workspace.float_windows.last())
-            .map(|&f| Child::Window(f))
+            .copied()
+            .or(workspace.float_windows.last().map(|&(id, _)| id))
+            .map(Child::Window)
             .or_else(|| match workspace.root {
                 Some(root) => Some(match root {
                     Child::Window(_) => root,

@@ -130,33 +130,34 @@ impl Dome {
                 let mut float_shows = Vec::new();
 
                 for wp in windows {
-                    let content_dim = apply_inset(wp.frame, border_size);
-                    // Clip to visible_frame bounds — macOS doesn't reliably allow
-                    // placing windows partially off-screen (especially above menu bar)
-                    let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
-
-                    if wp.is_float && !wp.is_focused {
-                        self.move_window_offscreen(wp.id);
+                    if wp.is_float {
+                        // Float dimensions are screen-absolute. The OS clips at screen
+                        // edges, so we use wp.frame for everything (no visible_frame).
+                        let content_dim = apply_inset(wp.frame, border_size);
+                        if !wp.is_focused {
+                            self.move_window_offscreen(wp.id);
+                        } else {
+                            self.place_window(wp.id, content_dim);
+                        }
+                        let entry = self.registry.by_id(wp.id);
+                        float_shows.push(FloatShow {
+                            cg_id: entry.cg_id,
+                            placement: *wp,
+                            cocoa_frame: to_ns_rect(self.primary_full_height, wp.frame),
+                            scale,
+                            content_dim,
+                        });
                     } else {
+                        let content_dim = apply_inset(wp.frame, border_size);
+                        // Clip to visible_frame bounds -- macOS doesn't reliably allow
+                        // placing windows partially off-screen (especially above menu bar)
+                        let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
                         let Some(target) = visible_content else {
                             let _span = tracing::debug_span!("empty_visible_content", ?content_dim, visible_frame = ?wp.visible_frame).entered();
                             self.move_window_offscreen(wp.id);
                             continue;
                         };
                         self.place_window(wp.id, target);
-                    }
-
-                    if wp.is_float {
-                        let entry = self.registry.by_id(wp.id);
-                        float_shows.push(FloatShow {
-                            cg_id: entry.cg_id,
-                            placement: *wp,
-                            cocoa_frame: to_ns_rect(self.primary_full_height, wp.visible_frame),
-                            scale,
-                            content_dim,
-                            visible_content,
-                        });
-                    } else {
                         tiling_windows.push(*wp);
                     }
                 }

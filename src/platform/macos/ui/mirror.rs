@@ -27,26 +27,25 @@ pub(super) struct WindowCapture {
 unsafe impl Send for WindowCapture {}
 
 impl WindowCapture {
-    /// `content_dim` is the unclipped dimension of the captured window without the border, used to
-    /// calculate where in the window to start capturing
-    /// `visible_content` is the only visible section of the captured window
+    /// Only used for float windows, where the entire content is visible (no viewport clipping).
+    /// `content_dim` is the window content area (frame minus border).
     /// `scale` is passed separately because the original window may be hidden on a different monitor.
-    pub(super) fn start(
-        &mut self,
-        cg_id: CGWindowID,
-        content_dim: Dimension,
-        visible_content: Dimension,
-        scale: f64,
-    ) {
-        let source_rect = compute_source_rect(content_dim, visible_content);
-        let width = (visible_content.width as f64 * scale) as usize;
-        let height = (visible_content.height as f64 * scale) as usize;
+    pub(super) fn start(&mut self, cg_id: CGWindowID, content_dim: Dimension, scale: f64) {
+        let width = (content_dim.width as f64 * scale) as usize;
+        let height = (content_dim.height as f64 * scale) as usize;
 
         let config = unsafe { SCStreamConfiguration::new() };
         unsafe {
             config.setWidth(width);
             config.setHeight(height);
-            config.setSourceRect(source_rect);
+            // Full content, no sub-rect clipping needed for floats
+            config.setSourceRect(CGRect {
+                origin: CGPoint { x: 0.0, y: 0.0 },
+                size: CGSize {
+                    width: content_dim.width as f64,
+                    height: content_dim.height as f64,
+                },
+            });
             config.setPixelFormat(u32::from_be_bytes(*b"BGRA"));
             config.setColorSpaceName(kCGColorSpaceSRGB);
             config.setCapturesAudio(false);
@@ -60,10 +59,6 @@ impl WindowCapture {
                     cg_id,
                     width,
                     height,
-                    source_x = source_rect.origin.x,
-                    source_y = source_rect.origin.y,
-                    source_w = source_rect.size.width,
-                    source_h = source_rect.size.height,
                     %error,
                     "capture config update failed"
                 );
@@ -81,10 +76,6 @@ impl WindowCapture {
                         cg_id,
                         width,
                         height,
-                        source_x = source_rect.origin.x,
-                        source_y = source_rect.origin.y,
-                        source_w = source_rect.size.width,
-                        source_h = source_rect.size.height,
                         %error,
                         "capture start failed"
                     );
@@ -247,19 +238,6 @@ fn app_delegate() -> &'static AppDelegate {
         let app = NSApplication::sharedApplication(mtm);
         let delegate = app.delegate().unwrap();
         &*(Retained::as_ptr(&delegate) as *const AppDelegate)
-    }
-}
-
-fn compute_source_rect(original: Dimension, clipped: Dimension) -> CGRect {
-    CGRect {
-        origin: CGPoint {
-            x: (clipped.x - original.x) as f64,
-            y: (clipped.y - original.y) as f64,
-        },
-        size: CGSize {
-            width: clipped.width as f64,
-            height: clipped.height as f64,
-        },
     }
 }
 

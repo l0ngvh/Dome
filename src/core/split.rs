@@ -1,6 +1,6 @@
 use crate::core::{
     Child, Container, ContainerId, Hub, SpawnMode, WindowId,
-    node::{Direction, DisplayMode, Parent, WorkspaceId},
+    node::{Dimension, Direction, DisplayMode, Parent, WorkspaceId},
 };
 
 impl Hub {
@@ -209,11 +209,27 @@ impl Hub {
         self.attach_split_child_to_workspace(Child::Window(window_id), ws);
     }
 
-    pub(super) fn detach_split_child_from_workspace(&mut self, child: Child) {
+    /// Detach a tiling child from its workspace. Returns the child's dimension
+    /// translated to screen-absolute coordinates. The translation must happen before
+    /// detach because detach triggers adjust_workspace, which can change viewport_offset.
+    pub(super) fn detach_split_child_from_workspace(&mut self, child: Child) -> Dimension {
+        let (child_dim, workspace_id) = match child {
+            Child::Window(id) => {
+                let w = self.windows.get(id);
+                (w.dimension, w.workspace)
+            }
+            Child::Container(id) => {
+                let c = self.containers.get(id);
+                (c.dimension, c.workspace)
+            }
+        };
+        let ws = self.workspaces.get(workspace_id);
+        let (offset_x, offset_y) = ws.viewport_offset;
+        let screen = self.monitors.get(ws.monitor).dimension;
+
         let parent = self.get_parent(child);
         match parent {
             Parent::Container(parent_id) => {
-                let workspace_id = self.containers.get(parent_id).workspace;
                 self.detach_split_child_from_container(parent_id, child);
                 self.adjust_workspace(workspace_id);
             }
@@ -225,12 +241,22 @@ impl Hub {
                 let new_focus = ws
                     .fullscreen_windows
                     .last()
-                    .or(ws.float_windows.last())
-                    .map(|&f| Child::Window(f));
+                    .copied()
+                    .or(ws.float_windows.last().map(|&(id, _)| id))
+                    .map(Child::Window);
                 self.workspaces.get_mut(workspace_id).focused = new_focus;
 
                 self.adjust_workspace(workspace_id);
             }
+        }
+
+        // Convert layout-space coordinates to screen-absolute. Layout positions are
+        // relative to workspace origin (0,0) plus viewport offset; screen-absolute
+        // includes the monitor's origin.
+        Dimension {
+            x: child_dim.x - offset_x + screen.x,
+            y: child_dim.y - offset_y + screen.y,
+            ..child_dim
         }
     }
 

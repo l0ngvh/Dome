@@ -203,7 +203,7 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
             if let Some(root) = workspace.root() {
                 fmt_child_str(hub, &mut s, root, 2);
             }
-            for &float_id in workspace.float_windows() {
+            for &(float_id, _) in workspace.float_windows() {
                 fmt_float_str(hub, &mut s, float_id, 2);
             }
             for &fs_id in workspace.fullscreen_windows() {
@@ -430,8 +430,14 @@ fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
 
 fn fmt_float_str(hub: &Hub, s: &mut String, float_id: WindowId, indent: usize) {
     let prefix = "  ".repeat(indent);
-    let f = hub.get_window(float_id);
-    let dim = f.dimension;
+    let ws_id = hub.get_window(float_id).workspace;
+    let dim = hub
+        .get_workspace(ws_id)
+        .float_windows()
+        .iter()
+        .find(|&&(id, _)| id == float_id)
+        .map(|&(_, d)| d)
+        .expect("float not found in workspace");
     s.push_str(&format!(
         "{}Float(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
         prefix, float_id, dim.x, dim.y, dim.width, dim.height
@@ -494,7 +500,7 @@ fn validate_workspace_focus(hub: &Hub, workspace_id: WorkspaceId, workspace: &Wo
     if let Child::Window(wid) = focused {
         if hub.get_window(wid).is_float() {
             assert!(
-                workspace.float_windows().contains(&wid),
+                workspace.float_windows().iter().any(|&(id, _)| id == wid),
                 "Workspace {workspace_id} focused on float {wid} but float not in workspace"
             );
             return;
@@ -528,7 +534,7 @@ fn validate_workspace_focus(hub: &Hub, workspace_id: WorkspaceId, workspace: &Wo
 }
 
 fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
-    for &fid in workspace.float_windows() {
+    for &(fid, _) in workspace.float_windows() {
         let float = hub.get_window(fid);
         assert_eq!(
             float.workspace, workspace_id,

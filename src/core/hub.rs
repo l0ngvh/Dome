@@ -242,9 +242,12 @@ impl Hub {
                     }
                 }
 
-                for &id in &ws.float_windows {
+                for &(id, dim) in &ws.float_windows {
                     let window = self.windows.get(id);
-                    let frame = translate(window.dimension, offset_x, offset_y, screen);
+                    // Float dimensions are already screen-absolute (stored in the workspace
+                    // tuple), so no translate() call needed. clip() works because both dim
+                    // and screen are in absolute screen coordinates.
+                    let frame = dim;
                     if let Some(visible_frame) = clip(frame, screen) {
                         windows.push(WindowPlacement {
                             id,
@@ -311,7 +314,9 @@ impl Hub {
         match window.mode {
             DisplayMode::Float => self.detach_float_from_workspace(id),
             DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
-            DisplayMode::Tiling => self.detach_split_child_from_workspace(Child::Window(id)),
+            DisplayMode::Tiling => {
+                self.detach_split_child_from_workspace(Child::Window(id));
+            }
         }
         self.prune_workspace(ws);
         self.windows.delete(id);

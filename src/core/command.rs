@@ -268,8 +268,9 @@ impl Hub {
                 tracing::debug!(%window_id, "Window is now tiling");
             }
             DisplayMode::Tiling => {
-                self.detach_split_child_from_workspace(Child::Window(window_id));
-                self.attach_split_as_float(current_ws, window_id);
+                let dim = self.detach_split_child_from_workspace(Child::Window(window_id));
+                self.windows.get_mut(window_id).dimension = dim;
+                self.attach_split_as_float(current_ws, window_id, dim);
                 tracing::debug!(%window_id, "Window is now floating");
             }
         }

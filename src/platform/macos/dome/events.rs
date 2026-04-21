@@ -126,5 +126,4 @@ pub(in crate::platform::macos) struct FloatShow {
     pub(in crate::platform::macos) cocoa_frame: NSRect,
     pub(in crate::platform::macos) scale: f64,
     pub(in crate::platform::macos) content_dim: Dimension,
-    pub(in crate::platform::macos) visible_content: Option<Dimension>,
 }

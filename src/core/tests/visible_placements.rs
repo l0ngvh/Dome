@@ -204,7 +204,7 @@ fn no_scroll_when_focus_already_in_view() {
 }
 
 #[test]
-fn float_scrolls_with_viewport() {
+fn float_does_not_scroll_with_viewport() {
     let mut hub = setup();
     let w0 = hub.insert_tiling();
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
@@ -213,25 +213,57 @@ fn float_scrolls_with_viewport() {
     let w2 = hub.insert_tiling();
     hub.set_window_constraint(w2, Some(100.0), None, None, None);
 
+    // Focus w1 (viewport offset becomes 50), then toggle to float.
+    // Layout x=100, offset=50, screen.x=0 => screen-absolute x = 100 - 50 + 0 = 50.
     hub.set_focus(w1);
-    hub.toggle_float(); // w1 becomes float, stays at its tiling position
+    hub.toggle_float();
+
+    let get_float_x = |hub: &Hub| {
+        normal_windows(&placements(hub))
+            .iter()
+            .find(|wp| wp.id == w1)
+            .map(|wp| wp.frame.x)
+    };
+
+    let x_after_toggle = get_float_x(&hub);
 
     // Scroll viewport left by focusing w0
     hub.set_focus(w0);
-    let float_x_before = normal_windows(&placements(&hub))
-        .iter()
-        .find(|wp| wp.id == w1)
-        .unwrap()
-        .frame
-        .x;
+    let x_after_focus_w0 = get_float_x(&hub);
 
-    // Scroll right — float should move with viewport
+    // Scroll viewport right by focusing w2
     hub.set_focus(w2);
-    let float_x_after = normal_windows(&placements(&hub))
-        .iter()
-        .find(|wp| wp.id == w1)
-        .map(|wp| wp.frame.x);
+    let x_after_focus_w2 = get_float_x(&hub);
 
-    // Float moved left (or scrolled out) due to viewport shift
-    assert!(float_x_after.is_none() || float_x_after.unwrap() < float_x_before);
+    // Float stays at the same screen position regardless of viewport scroll
+    assert_eq!(x_after_toggle, x_after_focus_w0);
+    assert_eq!(x_after_toggle, x_after_focus_w2);
+    assert!(
+        x_after_toggle.is_some(),
+        "float should be visible in placements"
+    );
+}
+
+#[test]
+fn partially_offscreen_float_still_in_placements() {
+    let mut hub = setup();
+    hub.insert_tiling();
+    // Float extends 20px past the right edge of the 150px screen
+    let f0 = hub.insert_float(crate::core::Dimension {
+        x: 130.0,
+        y: 5.0,
+        width: 40.0,
+        height: 20.0,
+    });
+
+    let p = placements(&hub);
+    let fp = normal_windows(&p)
+        .iter()
+        .find(|wp| wp.id == f0)
+        .expect("partially offscreen float should be in placements");
+
+    assert_eq!(fp.frame.x, 130.0);
+    assert_eq!(fp.frame.width, 40.0);
+    // visible_frame is clipped to screen bounds (0..150)
+    assert_eq!(fp.visible_frame.width, 20.0);
 }

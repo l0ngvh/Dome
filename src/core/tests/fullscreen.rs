@@ -1206,7 +1206,7 @@ fn block_all_on_unfocused_window_does_not_block() {
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
       )
       Workspace(id=WorkspaceId(1), name=second, focused=WindowId(0),
-        Float(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Float(id=WindowId(0), x=150.00, y=0.00, w=150.00, h=30.00)
       )
     )
 

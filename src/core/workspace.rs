@@ -1,6 +1,6 @@
 use crate::core::{
     Child, ContainerId, Dimension, Hub, SpawnMode,
-    node::{Direction, Parent, WorkspaceId},
+    node::{Direction, DisplayMode, Parent, WorkspaceId},
 };
 
 impl Hub {
@@ -207,7 +207,15 @@ impl Hub {
         let (mut offset_x, mut offset_y) = current_offset;
 
         let focused_dim = match focused {
-            Some(Child::Window(id)) => self.windows.get(id).dimension,
+            Some(Child::Window(id)) => {
+                if self.windows.get(id).mode == DisplayMode::Float {
+                    // Float dimensions are screen-absolute and stored in the workspace
+                    // tuple (Workspace.float_windows), not in window.dimension. Skipping
+                    // here avoids using the stale window.dimension for viewport math.
+                    return;
+                }
+                self.windows.get(id).dimension
+            }
             Some(Child::Container(id)) => self.containers.get(id).dimension,
             None => return,
         };

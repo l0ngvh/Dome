@@ -254,7 +254,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         &show.placement,
                         show.cocoa_frame,
                         show.scale,
-                        show.visible_content,
+                        show.content_dim,
                     );
 
                     if is_new {
@@ -262,15 +262,8 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     }
 
                     if let Some(capture) = captures.get_mut(&show.cg_id) {
-                        if !show.placement.is_focused
-                            && let Some(visible_content) = show.visible_content
-                        {
-                            capture.start(
-                                show.cg_id,
-                                show.content_dim,
-                                visible_content,
-                                show.scale,
-                            );
+                        if !show.placement.is_focused {
+                            capture.start(show.cg_id, show.content_dim, show.scale);
                         } else {
                             capture.stop();
                         }

@@ -35,8 +35,9 @@ pub(crate) struct Workspace {
     pub(super) monitor: MonitorId,
     pub(super) root: Option<Child>,
     pub(super) focused: Option<Child>,
-    /// All floats in this workspace. Source of truth for rendering.
-    pub(super) float_windows: Vec<WindowId>,
+    /// All floats in this workspace, with their screen-absolute dimensions.
+    /// This is the authoritative source for float screen position -- not window.dimension.
+    pub(super) float_windows: Vec<(WindowId, Dimension)>,
     /// All fullscreen windows in this workspace. Last element is topmost (highest z-order).
     pub(super) fullscreen_windows: Vec<WindowId>,
     pub(super) viewport_offset: (f32, f32),
@@ -69,7 +70,7 @@ impl Workspace {
     }
 
     #[cfg(test)]
-    pub(crate) fn float_windows(&self) -> &[WindowId] {
+    pub(crate) fn float_windows(&self) -> &[(WindowId, Dimension)] {
         &self.float_windows
     }
 
