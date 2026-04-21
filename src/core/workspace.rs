@@ -1,6 +1,6 @@
 use crate::core::{
     Child, ContainerId, Dimension, Hub, SpawnMode,
-    node::{Direction, DisplayMode, Parent, WorkspaceId},
+    node::{Direction, Parent, WorkspaceId},
 };
 
 impl Hub {
@@ -66,7 +66,9 @@ impl Hub {
         self.prune_workspace(current_ws);
     }
 
-    /// Update primary focus, i.e. focus of the whole workspace
+    /// Update tiling focus. Walks up from child to workspace root, setting
+    /// container.focused and activating tabs along the way. At the workspace
+    /// level, sets focused_tiling and clears is_float_focused.
     pub(super) fn set_workspace_focus(&mut self, child: Child) {
         let mut current = child;
         for _ in super::bounded_loop() {
@@ -80,23 +82,9 @@ impl Hub {
                     current = Child::Container(cid);
                 }
                 Parent::Workspace(ws) => {
-                    let focused = if let Child::Window(wid) = child {
-                        let fs = &mut self.workspaces.get_mut(ws).fullscreen_windows;
-                        if let Some(pos) = fs.iter().position(|&w| w == wid) {
-                            fs.remove(pos);
-                            fs.push(wid);
-                            Some(child)
-                        } else if let Some(&top) = fs.last() {
-                            Some(Child::Window(top))
-                        } else {
-                            Some(child)
-                        }
-                    } else if let Some(&top) = self.workspaces.get(ws).fullscreen_windows.last() {
-                        Some(Child::Window(top))
-                    } else {
-                        Some(child)
-                    };
-                    self.workspaces.get_mut(ws).focused = focused;
+                    let workspace = self.workspaces.get_mut(ws);
+                    workspace.focused_tiling = Some(child);
+                    workspace.is_float_focused = false;
                     self.scroll_into_view(ws);
                     break;
                 }
@@ -201,21 +189,13 @@ impl Hub {
 
         let (monitor_id, current_offset, focused) = {
             let ws = self.workspaces.get(workspace_id);
-            (ws.monitor, ws.viewport_offset, ws.focused)
+            (ws.monitor, ws.viewport_offset, ws.focused_tiling)
         };
         let screen = self.monitors.get(monitor_id).dimension;
         let (mut offset_x, mut offset_y) = current_offset;
 
         let focused_dim = match focused {
-            Some(Child::Window(id)) => {
-                if self.windows.get(id).mode == DisplayMode::Float {
-                    // Float dimensions are screen-absolute and stored in the workspace
-                    // tuple (Workspace.float_windows), not in window.dimension. Skipping
-                    // here avoids using the stale window.dimension for viewport math.
-                    return;
-                }
-                self.windows.get(id).dimension
-            }
+            Some(Child::Window(id)) => self.windows.get(id).dimension,
             Some(Child::Container(id)) => self.containers.get(id).dimension,
             None => return,
         };

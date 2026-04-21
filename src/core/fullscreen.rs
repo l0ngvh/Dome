@@ -31,7 +31,7 @@ impl Hub {
         window.mode = DisplayMode::Fullscreen;
         window.restrictions = restrictions;
         self.attach_fullscreen_to_workspace(ws, window_id);
-        self.workspaces.get_mut(ws).focused = Some(Child::Window(window_id));
+        self.workspaces.get_mut(ws).is_float_focused = false;
         self.workspaces.get_mut(ws).viewport_offset = (0.0, 0.0);
         tracing::info!(%window_id, "Fullscreen set");
     }
@@ -50,9 +50,6 @@ impl Hub {
         self.windows.get_mut(window_id).mode = DisplayMode::Tiling;
         self.attach_split_child_to_workspace(Child::Window(window_id), ws);
 
-        if let Some(&top) = self.workspaces.get(ws).fullscreen_windows.last() {
-            self.workspaces.get_mut(ws).focused = Some(Child::Window(top));
-        }
         tracing::info!(%window_id, "Fullscreen unset");
     }
 
@@ -66,24 +63,24 @@ impl Hub {
     pub(super) fn detach_fullscreen_from_workspace(&mut self, id: WindowId) {
         let ws_id = self.windows.get(id).workspace;
         let workspace = self.workspaces.get_mut(ws_id);
+
+        let was_topmost = workspace.fullscreen_windows.last() == Some(&id);
         workspace.fullscreen_windows.retain(|&w| w != id);
 
-        if workspace.focused != Some(Child::Window(id)) {
+        if !was_topmost {
             return;
         }
 
-        workspace.focused = workspace
-            .fullscreen_windows
-            .last()
-            .copied()
-            .or(workspace.float_windows.last().map(|&(id, _)| id))
-            .map(Child::Window)
-            .or_else(|| match workspace.root {
-                Some(root) => Some(match root {
-                    Child::Window(_) => root,
-                    Child::Container(c) => self.containers.get(c).focused,
-                }),
-                None => None,
-            });
+        // Topmost was removed. If more fullscreen windows remain, focused() picks
+        // the new topmost implicitly. Otherwise fall back to float or tiling.
+        if !workspace.fullscreen_windows.is_empty() {
+            return;
+        }
+        // Rarely do people focus float, so there is no need to fallback to float
+        workspace.focused_tiling = match workspace.root {
+            Some(Child::Window(_)) => workspace.root,
+            Some(Child::Container(c)) => Some(self.containers.get(c).focused),
+            None => None,
+        };
     }
 }

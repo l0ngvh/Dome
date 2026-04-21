@@ -236,15 +236,9 @@ impl Hub {
             Parent::Workspace(workspace_id) => {
                 self.workspaces.get_mut(workspace_id).root = None;
 
-                // Set focus to fullscreen, then float, otherwise None
-                let ws = self.workspaces.get(workspace_id);
-                let new_focus = ws
-                    .fullscreen_windows
-                    .last()
-                    .copied()
-                    .or(ws.float_windows.last().map(|&(id, _)| id))
-                    .map(Child::Window);
-                self.workspaces.get_mut(workspace_id).focused = new_focus;
+                let ws = self.workspaces.get_mut(workspace_id);
+                ws.focused_tiling = None;
+                ws.is_float_focused = !ws.float_windows.is_empty();
 
                 self.adjust_workspace(workspace_id);
             }
@@ -528,11 +522,7 @@ impl Hub {
 
     /// Returns the focused split child in the given workspace.
     fn focused_split_child_in(&self, ws_id: WorkspaceId) -> Option<Child> {
-        let ws = self.workspaces.get(ws_id);
-        match ws.focused {
-            Some(Child::Window(id)) if self.windows.get(id).mode != DisplayMode::Tiling => None,
-            focused => focused,
-        }
+        self.workspaces.get(ws_id).focused_tiling
     }
 
     /// Replace all references of old_child, but don't take primary focus unless old_child was the
@@ -577,8 +567,8 @@ impl Hub {
                 }
                 Parent::Workspace(ws) => {
                     let workspace = self.workspaces.get_mut(ws);
-                    if workspace.focused == Some(old_child) {
-                        workspace.focused = Some(new_child);
+                    if workspace.focused_tiling == Some(old_child) {
+                        workspace.focused_tiling = Some(new_child);
                         tracing::debug!(?old_child, ?new_child, "Workspace focus replaced");
                     }
                     break;

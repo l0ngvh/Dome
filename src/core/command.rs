@@ -24,7 +24,7 @@ enum RestrictedAction {
 impl Hub {
     fn is_restricted(&self, action: RestrictedAction) -> bool {
         let ws = self.workspaces.get(self.current_workspace());
-        let Some(Child::Window(id)) = ws.focused else {
+        let Some(Child::Window(id)) = ws.focused() else {
             return false;
         };
         let restrictions = self.windows.get(id).restrictions;
@@ -158,7 +158,7 @@ impl Hub {
             return;
         }
         let current_ws = self.current_workspace();
-        let Some(focused) = self.workspaces.get(current_ws).focused else {
+        let Some(focused) = self.workspaces.get(current_ws).focused() else {
             return;
         };
         let target_ws = self.get_or_create_workspace(target_workspace);
@@ -179,7 +179,7 @@ impl Hub {
         let target_ws = self.monitors.get(target_id).active_workspace;
         tracing::debug!(?target, "Moving to monitor");
         let current_ws = self.current_workspace();
-        let Some(focused) = self.workspaces.get(current_ws).focused else {
+        let Some(focused) = self.workspaces.get(current_ws).focused() else {
             return;
         };
         self.move_child_to_workspace_with_id(focused, target_ws);
@@ -191,7 +191,7 @@ impl Hub {
             return;
         }
         let current_ws = self.current_workspace();
-        let Some(focused) = self.workspaces.get(current_ws).focused else {
+        let Some(focused) = self.workspaces.get(current_ws).focused() else {
             return;
         };
 
@@ -229,7 +229,7 @@ impl Hub {
             return;
         }
         let current_ws = self.current_workspace();
-        let Some(focused) = self.workspaces.get(current_ws).focused else {
+        let Some(focused) = self.workspaces.get(current_ws).focused() else {
             return;
         };
         let container_id = match focused {
@@ -255,7 +255,7 @@ impl Hub {
             return;
         }
         let current_ws = self.current_workspace();
-        let Some(Child::Window(window_id)) = self.workspaces.get(current_ws).focused else {
+        let Some(Child::Window(window_id)) = self.workspaces.get(current_ws).focused() else {
             return;
         };
 
@@ -282,7 +282,7 @@ impl Hub {
             return;
         }
         let current_ws = self.current_workspace();
-        let Some(Child::Window(window_id)) = self.workspaces.get(current_ws).focused else {
+        let Some(Child::Window(window_id)) = self.workspaces.get(current_ws).focused() else {
             return;
         };
 

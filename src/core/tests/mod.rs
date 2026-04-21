@@ -26,7 +26,8 @@ use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig, MonitorLayout};
 use crate::core::node::{
-    Child, Container, ContainerId, Dimension, Direction, Parent, WindowId, Workspace, WorkspaceId,
+    Child, Container, ContainerId, Dimension, Direction, DisplayMode, Parent, WindowId, Workspace,
+    WorkspaceId,
 };
 
 const ASCII_WIDTH: usize = 150;
@@ -182,7 +183,7 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
         screen.height
     );
     for (workspace_id, workspace) in hub.all_workspaces() {
-        let focused = if let Some(current) = workspace.focused {
+        let focused = if let Some(current) = workspace.focused() {
             format!(", focused={}", current)
         } else {
             String::new()
@@ -492,45 +493,45 @@ fn validate_monitors(hub: &Hub) {
 }
 
 fn validate_workspace_focus(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
-    let focused = match workspace.focused() {
-        Some(f) => f,
-        None => return,
-    };
-
-    if let Child::Window(wid) = focused {
-        if hub.get_window(wid).is_float() {
-            assert!(
-                workspace.float_windows().iter().any(|&(id, _)| id == wid),
-                "Workspace {workspace_id} focused on float {wid} but float not in workspace"
-            );
-            return;
-        }
-        if hub.get_window(wid).is_fullscreen() {
-            assert!(
-                workspace.fullscreen_windows().contains(&wid),
-                "Workspace {workspace_id} focused on fullscreen {wid} but fullscreen not in workspace"
-            );
-            return;
-        }
-    }
-
-    let Some(root) = workspace.root() else {
-        panic!("Workspace {workspace_id} focused on {focused:?} but root is None")
-    };
-    if let Child::Container(_) = focused {
+    // is_float_focused must be false when float_windows is empty
+    if workspace.is_float_focused() {
         assert!(
-            matches!(root, Child::Container(_)),
-            "Workspace {workspace_id} focus is container {focused:?} but root is window"
+            !workspace.float_windows().is_empty(),
+            "Workspace {workspace_id}: is_float_focused is true but float_windows is empty"
         );
     }
-    let root_focus = match root {
-        Child::Window(_) => root,
-        Child::Container(cid) => hub.get_container(cid).focused,
-    };
-    assert!(
-        focused == root || focused == root_focus,
-        "Workspace {workspace_id} focus ({focused:?}) doesn't match root ({root:?}) or root's focus ({root_focus:?})"
-    );
+
+    // focused_tiling must point to a tiling window or container
+    if let Some(Child::Window(wid)) = workspace.focused_tiling() {
+        assert_eq!(
+            hub.get_window(wid).mode,
+            DisplayMode::Tiling,
+            "Workspace {workspace_id}: focused_tiling points to non-tiling window {wid}"
+        );
+    }
+
+    // focused_tiling must be reachable from root
+    if let Some(child) = workspace.focused_tiling() {
+        let root = workspace.root().unwrap_or_else(|| {
+            panic!("Workspace {workspace_id}: focused_tiling is {child:?} but root is None")
+        });
+        let root_focus = match root {
+            Child::Window(_) => root,
+            Child::Container(cid) => hub.get_container(cid).focused,
+        };
+        assert!(
+            child == root || child == root_focus,
+            "Workspace {workspace_id}: focused_tiling ({child:?}) not reachable from root ({root:?}, root_focus={root_focus:?})"
+        );
+    }
+
+    // If root exists, focused_tiling must be set
+    if workspace.root().is_some() {
+        assert!(
+            workspace.focused_tiling().is_some(),
+            "Workspace {workspace_id}: root is Some but focused_tiling is None"
+        );
+    }
 }
 
 fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {

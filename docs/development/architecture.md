@@ -55,6 +55,22 @@ Checks run at the top of each user-facing command against the *focused* window o
 
 Getters and tree helpers are pure. Lifecycle operations (`insert_tiling`, `delete_window`, `set_focus`, etc.) are never restricted.
 
+### Focus Model
+
+Focus is split into three independent mechanisms, one per window mode:
+
+1. **Fullscreen focus** is implicit. If `fullscreen_windows` is non-empty, the last element is the focused fullscreen window. Focusing a fullscreen window moves it to the end of the vec.
+2. **Float focus** uses z-order. `float_windows` is z-ordered (last = topmost = focused). Focusing a float moves it to the end of the vec. A separate `is_float_focused` bool on Workspace tracks whether float mode has focus.
+3. **Tiling focus** uses a dedicated `focused_tiling: Option<Child>` pointer on Workspace. Only set by tiling operations (`set_workspace_focus`).
+
+The `focused()` accessor on Workspace computes effective focus by checking in priority order: fullscreen > float > tiling. All external reads go through this accessor. The three mechanisms are independent -- `focused_tiling` persists even when fullscreen or float windows are active, serving as "tiling focus memory." When fullscreen is unset or float is unfocused, tiling focus is restored without recomputing.
+
+**Invariant:** `is_float_focused` must be false when `float_windows` is empty. The test validator enforces this. The `focused()` accessor also handles it gracefully as defense-in-depth, falling through to `focused_tiling`.
+
+**Write paths.** `set_workspace_focus` is purely tiling: it walks up the container tree updating `container.focused` and active tabs, sets `focused_tiling`, and clears `is_float_focused`. `set_focus` (the entry point from the platform layer when the OS reports a focus change) branches by display mode: fullscreen promotes to top of the z-order stack, float sets `is_float_focused` and moves to end of `float_windows`, tiling calls `set_workspace_focus`.
+
+**Detach cleanup.** Each detach function only cleans up its own mode's focus state. Cross-mode priority resolution happens at read time via `focused()`. For example, detaching the last float sets `is_float_focused = false` and `focused()` falls through to `focused_tiling`. Detaching the last tiling child with floats present sets `is_float_focused = true`. Detaching the last fullscreen window falls back directly to `focused_tiling`, skipping float. Users rarely focus float windows explicitly, so falling back to float would be surprising. There's no cross-mode fallback chain from fullscreen to float.
+
 ### Hub
 
 Hub is the single entry point for all tree mutations, preventing scattered mutation sites that could violate invariants. The platform calls Hub operations, then `get_visible_placements()` for a flat list of `WindowPlacement` and `ContainerPlacement` with screen coordinates. The platform positions windows and renders overlays from those placements.

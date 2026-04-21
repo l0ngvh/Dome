@@ -81,9 +81,25 @@ impl Hub {
 
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
         tracing::debug!(%window_id, "Setting focus to window");
-        self.set_workspace_focus(Child::Window(window_id));
-        let workspace_id = self.windows.get(window_id).workspace;
-        self.focus_workspace_with_id(workspace_id);
+        let window = self.windows.get(window_id);
+        let ws = window.workspace;
+        match window.mode {
+            DisplayMode::Fullscreen => {
+                let fs = &mut self.workspaces.get_mut(ws).fullscreen_windows;
+                if let Some(pos) = fs.iter().position(|&w| w == window_id) {
+                    fs.remove(pos);
+                    fs.push(window_id);
+                }
+                self.workspaces.get_mut(ws).is_float_focused = false;
+            }
+            DisplayMode::Float => {
+                self.focus_float(ws, window_id);
+            }
+            DisplayMode::Tiling => {
+                self.set_workspace_focus(Child::Window(window_id));
+            }
+        }
+        self.focus_workspace_with_id(ws);
     }
 
     pub(crate) fn focused_monitor(&self) -> MonitorId {
@@ -182,7 +198,7 @@ impl Hub {
                 let screen = self.monitors.get(ws.monitor).dimension;
                 let (offset_x, offset_y) = ws.viewport_offset;
                 let focused = if ws_id == current_ws {
-                    ws.focused
+                    ws.focused()
                 } else {
                     None
                 };
@@ -393,7 +409,7 @@ impl Hub {
             Child::Window(id) if self.windows.get(id).mode == DisplayMode::Fullscreen => {
                 self.detach_fullscreen_from_workspace(id);
                 self.attach_fullscreen_to_workspace(target_ws, id);
-                self.workspaces.get_mut(target_ws).focused = Some(Child::Window(id));
+                self.workspaces.get_mut(target_ws).is_float_focused = false;
             }
             Child::Window(id) if self.windows.get(id).is_float() => {
                 self.detach_float_from_workspace(id);

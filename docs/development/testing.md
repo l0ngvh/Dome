@@ -19,6 +19,15 @@ fn two_windows_split_evenly() {
 
 `setup()` creates a Hub with a 150×30 screen. `snapshot()` validates tree invariants, then renders the tree as text + ASCII art. Leave the snapshot string empty (`@""`) — run the test once, review the output, then confirm with a human before accepting.
 
+**Validators.** `snapshot()` runs a set of validators that check structural invariants on every workspace. The workspace focus validator (`validate_workspace_focus`) checks:
+
+- `is_float_focused` is false when `float_windows` is empty.
+- `focused_tiling` points to a `Tiling`-mode window (not float or fullscreen).
+- `focused_tiling` is reachable from the workspace root.
+- If root exists, `focused_tiling` is `Some`.
+
+These run on every snapshot, so invariant violations are caught immediately rather than causing subtle downstream bugs.
+
 The smoke test (`smoke.rs`) runs thousands of random operation sequences to catch panics and invariant violations. Update it when adding new Hub operations.
 
 ## Platform Tests

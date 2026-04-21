@@ -34,7 +34,12 @@ pub(crate) struct Workspace {
     pub(super) name: String,
     pub(super) monitor: MonitorId,
     pub(super) root: Option<Child>,
-    pub(super) focused: Option<Child>,
+    /// Tiling focus pointer. Tracks focus independently of fullscreen/float state,
+    /// serving as "tiling focus memory" that persists across mode transitions.
+    pub(super) focused_tiling: Option<Child>,
+    /// When true, the focused window is float_windows.last() (z-ordered, last = topmost).
+    /// Must be false when float_windows is empty.
+    pub(super) is_float_focused: bool,
     /// All floats in this workspace, with their screen-absolute dimensions.
     /// This is the authoritative source for float screen position -- not window.dimension.
     pub(super) float_windows: Vec<(WindowId, Dimension)>,
@@ -51,7 +56,8 @@ impl Workspace {
     pub(super) fn new(name: String, monitor: MonitorId) -> Self {
         Self {
             root: None,
-            focused: None,
+            focused_tiling: None,
+            is_float_focused: false,
             name,
             monitor,
             float_windows: Vec::new(),
@@ -65,8 +71,31 @@ impl Workspace {
         self.root
     }
 
+    /// Computes effective focus using priority: fullscreen > float > tiling.
+    /// Fullscreen focus is implicit from fullscreen_windows.last().
+    /// Float focus uses z-order (float_windows.last() when is_float_focused).
+    /// Falls through to focused_tiling as a safety net if is_float_focused
+    /// is true but float_windows is empty (the validator catches this bug).
     pub(crate) fn focused(&self) -> Option<Child> {
-        self.focused
+        if let Some(&id) = self.fullscreen_windows.last() {
+            return Some(Child::Window(id));
+        }
+        if self.is_float_focused
+            && let Some(&(id, _)) = self.float_windows.last()
+        {
+            return Some(Child::Window(id));
+        }
+        self.focused_tiling
+    }
+
+    #[cfg(test)]
+    pub(crate) fn focused_tiling(&self) -> Option<Child> {
+        self.focused_tiling
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_float_focused(&self) -> bool {
+        self.is_float_focused
     }
 
     #[cfg(test)]
