@@ -285,6 +285,9 @@ impl Dome {
             }
         };
         self.set_constraints(id, constraints);
+        if let Some(title) = &title {
+            self.hub.set_window_title(id, title.clone());
+        }
         self.recovery.track(&ext);
 
         self.registry.insert(
@@ -459,13 +462,8 @@ impl Dome {
                         if !cp.is_tabbed && !cp.is_focused {
                             continue;
                         }
-                        let children = if cp.is_tabbed {
-                            self.hub.get_container(cp.id).children().to_vec()
-                        } else {
-                            vec![]
-                        };
-                        let titles = self.registry.resolve_tab_titles(&children);
-                        container_data.push((*cp, titles));
+                        let titles = cp.titles.clone();
+                        container_data.push((cp.clone(), titles));
                     }
 
                     per_monitor.push(MonitorPositionData {
@@ -603,6 +601,11 @@ impl Dome {
     pub(super) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
         for (hwnd_id, title) in &titles {
             self.registry.set_title(*hwnd_id, title.clone());
+            if let (Some(window_id), Some(title)) =
+                (self.registry.get_id(*hwnd_id), title)
+            {
+                self.hub.set_window_title(window_id, title.clone());
+            }
         }
         // TODO: full re-layout on every title change is expensive — we should
         // selectively re-render only the affected tiling overlay instead.

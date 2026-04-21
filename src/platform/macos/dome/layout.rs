@@ -2,11 +2,10 @@ use std::collections::HashSet;
 
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-use crate::core::{Child, Container, Dimension, MonitorLayout, MonitorPlacements, WindowId};
+use crate::core::{Child, Dimension, MonitorLayout, MonitorPlacements, WindowId};
 
 use super::Dome;
 use super::events::{FloatShow, HubMessage, MonitorTilingData, RenderFrame};
-use super::registry::Registry;
 use super::window::{apply_inset, clip_to_bounds};
 
 impl Dome {
@@ -164,13 +163,8 @@ impl Dome {
 
                 let mut container_data = Vec::new();
                 for cp in containers {
-                    let tab_titles = if cp.is_tabbed {
-                        let container = self.hub.get_container(cp.id);
-                        collect_tab_titles(container, &self.registry)
-                    } else {
-                        Vec::new()
-                    };
-                    container_data.push((*cp, tab_titles));
+                    let tab_titles = cp.titles.clone();
+                    container_data.push((cp.clone(), tab_titles));
                 }
 
                 (
@@ -187,22 +181,6 @@ impl Dome {
             }
         }
     }
-}
-
-fn collect_tab_titles(container: &Container, registry: &Registry) -> Vec<String> {
-    container
-        .children()
-        .iter()
-        .map(|c| match c {
-            Child::Window(wid) => registry
-                .by_id(*wid)
-                .title
-                .as_deref()
-                .unwrap_or("Unknown")
-                .to_owned(),
-            Child::Container(_) => "Container".to_owned(),
-        })
-        .collect()
 }
 
 // Quartz uses top-left origin, Cocoa uses bottom-left origin

@@ -225,9 +225,17 @@ pub(crate) fn show_container(
                 .layout(Layout::left_to_right(Align::Center)),
         );
         tab_ui.add(
-            egui::Label::new(RichText::new(title).color(Color32::WHITE).size(12.0))
-                .truncate()
-                .halign(Align::Center),
+            egui::Label::new(
+                RichText::new(if title.is_empty() {
+                    "Untitled"
+                } else {
+                    title.as_str()
+                })
+                .color(Color32::WHITE)
+                .size(12.0),
+            )
+            .truncate()
+            .halign(Align::Center),
         );
     }
 

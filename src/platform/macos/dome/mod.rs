@@ -238,8 +238,12 @@ impl Dome {
         cg_id: CGWindowID,
         title: Option<String>,
     ) {
-        if let Some(entry) = self.registry.get_mut(cg_id) {
-            entry.title = title;
+        if let Some(entry) = self.registry.get_mut(cg_id)
+            && let Some(title) = title
+        {
+            entry.title = Some(title.clone());
+
+            self.hub.set_window_title(entry.window_id, title);
             tracing::trace!(%entry, "Title changed");
         }
         self.flush_layout();
@@ -456,6 +460,9 @@ impl Dome {
             let window_id = self
                 .hub
                 .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
+            if let Some(title) = title.clone() {
+                self.hub.set_window_title(window_id, title);
+            }
             self.registry.insert(
                 ax.clone(),
                 window_id,
@@ -469,6 +476,9 @@ impl Dome {
             window_id
         } else {
             let window_id = self.hub.insert_tiling();
+            if let Some(title) = title.clone() {
+                self.hub.set_window_title(window_id, title);
+            }
             self.registry.insert(
                 ax.clone(),
                 window_id,
@@ -493,6 +503,9 @@ impl Dome {
         let window_id = self
             .hub
             .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
+        if let Some(ref title) = title {
+            self.hub.set_window_title(window_id, title.clone());
+        }
         self.registry.insert(
             ax,
             window_id,

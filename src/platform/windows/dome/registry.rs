@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::core::{Child, WindowId};
+use crate::core::WindowId;
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd};
 
 use super::window::WindowState;
@@ -73,20 +73,5 @@ impl WindowRegistry {
         {
             entry.title = title;
         }
-    }
-
-    pub(super) fn resolve_tab_titles(&self, children: &[Child]) -> Vec<String> {
-        children
-            .iter()
-            .map(|c| match c {
-                Child::Window(wid) => self
-                    .get(*wid)
-                    .title
-                    .as_deref()
-                    .unwrap_or("<no title>")
-                    .to_owned(),
-                Child::Container(_) => "Container".to_owned(),
-            })
-            .collect()
     }
 }

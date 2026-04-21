@@ -484,6 +484,7 @@ pub(crate) struct Window {
     pub(super) dimension: Dimension,
     pub(super) mode: DisplayMode,
     pub(super) restrictions: WindowRestrictions,
+    pub(super) title: String,
     spawn_mode: SpawnMode,
     pub(super) min_width: f32,
     pub(super) min_height: f32,
@@ -503,6 +504,7 @@ impl Window {
             dimension: Dimension::default(),
             mode: DisplayMode::Tiling,
             restrictions: WindowRestrictions::None,
+            title: String::new(),
             spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
@@ -518,6 +520,7 @@ impl Window {
             dimension,
             mode: DisplayMode::Float,
             restrictions: WindowRestrictions::None,
+            title: String::new(),
             spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
@@ -533,6 +536,7 @@ impl Window {
             dimension: Dimension::default(),
             mode: DisplayMode::Fullscreen,
             restrictions,
+            title: String::new(),
             spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
@@ -547,6 +551,10 @@ impl Window {
 
     pub(crate) fn max_size(&self) -> (f32, f32) {
         (self.max_width, self.max_height)
+    }
+
+    pub(crate) fn title(&self) -> &str {
+        &self.title
     }
 
     pub(crate) fn spawn_mode(&self) -> SpawnMode {

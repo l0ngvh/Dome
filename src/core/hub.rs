@@ -16,7 +16,7 @@ pub(crate) struct WindowPlacement {
     pub(crate) spawn_mode: SpawnMode,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
     pub(crate) frame: Dimension,
@@ -25,6 +25,7 @@ pub(crate) struct ContainerPlacement {
     pub(crate) spawn_mode: SpawnMode,
     pub(crate) is_tabbed: bool,
     pub(crate) active_tab_index: usize,
+    pub(crate) titles: Vec<String>,
 }
 
 pub(crate) struct MonitorPlacements {
@@ -180,12 +181,17 @@ impl Hub {
         self.workspaces.get(id)
     }
 
+    #[cfg_attr(not(test), expect(dead_code, reason = "used in test validators"))]
     pub(crate) fn get_container(&self, id: ContainerId) -> &Container {
         self.containers.get(id)
     }
 
     pub(crate) fn get_window(&self, id: WindowId) -> &Window {
         self.windows.get(id)
+    }
+
+    pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) {
+        self.windows.get_mut(window_id).title = title;
     }
 
     pub(crate) fn get_visible_placements(&self) -> Vec<MonitorPlacements> {
@@ -246,6 +252,16 @@ impl Hub {
                                 spawn_mode: container.spawn_mode(),
                                 is_tabbed: container.is_tabbed(),
                                 active_tab_index: container.active_tab_index(),
+                                titles: container
+                                    .children()
+                                    .iter()
+                                    .map(|c| match c {
+                                        Child::Window(wid) => {
+                                            self.windows.get(*wid).title().to_owned()
+                                        }
+                                        Child::Container(_) => "Container".to_string(),
+                                    })
+                                    .collect(),
                             });
                             if let Some(active) = container.active_tab() {
                                 stack.push(active);

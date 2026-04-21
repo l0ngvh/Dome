@@ -1,6 +1,9 @@
 use super::setup;
 
-use crate::core::hub::{Hub, MonitorLayout, MonitorPlacements};
+use crate::core::{
+    ContainerPlacement, WindowPlacement,
+    hub::{Hub, MonitorLayout, MonitorPlacements},
+};
 
 fn placements(hub: &Hub) -> MonitorPlacements {
     let mut all = hub.get_visible_placements();
@@ -8,9 +11,16 @@ fn placements(hub: &Hub) -> MonitorPlacements {
     all.remove(0)
 }
 
-fn normal_windows(p: &MonitorPlacements) -> &[crate::core::hub::WindowPlacement] {
+fn normal_windows(p: &MonitorPlacements) -> &[WindowPlacement] {
     match &p.layout {
         MonitorLayout::Normal { windows, .. } => windows,
+        MonitorLayout::Fullscreen(_) => panic!("expected Normal layout"),
+    }
+}
+
+fn normal_containers(p: &MonitorPlacements) -> &[ContainerPlacement] {
+    match &p.layout {
+        MonitorLayout::Normal { containers, .. } => containers,
         MonitorLayout::Fullscreen(_) => panic!("expected Normal layout"),
     }
 }
@@ -266,4 +276,71 @@ fn partially_offscreen_float_still_in_placements() {
     assert_eq!(fp.frame.width, 40.0);
     // visible_frame is clipped to screen bounds (0..150)
     assert_eq!(fp.visible_frame.width, 20.0);
+}
+
+#[test]
+fn tabbed_container_placement_includes_titles() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+    let w2 = hub.insert_tiling();
+    hub.set_window_title(w0, "A".to_string());
+    hub.set_window_title(w1, "B".to_string());
+    hub.set_window_title(w2, "C".to_string());
+    hub.toggle_container_layout();
+
+    let p = placements(&hub);
+    let containers = normal_containers(&p);
+    assert_eq!(containers.len(), 1);
+    assert_eq!(containers[0].titles, vec!["A", "B", "C"]);
+}
+
+#[test]
+fn split_container_placement_has_titles() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+    hub.set_window_title(w0, "A".to_string());
+    hub.set_window_title(w1, "B".to_string());
+
+    let p = placements(&hub);
+    let containers = normal_containers(&p);
+    assert_eq!(containers.len(), 1);
+    assert_eq!(containers[0].titles, vec!["A", "B"]);
+}
+
+#[test]
+fn container_child_shows_container_label() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+    let w2 = hub.insert_tiling();
+    hub.set_window_title(w0, "A".to_string());
+    hub.set_window_title(w1, "B".to_string());
+    hub.set_window_title(w2, "C".to_string());
+    hub.toggle_container_layout();
+    // Insert a new window that creates a nested container inside the tabbed one
+    let w3 = hub.insert_tiling();
+    hub.set_window_title(w3, "D".to_string());
+
+    let p = placements(&hub);
+    let containers = normal_containers(&p);
+    let tabbed = containers.iter().find(|c| c.is_tabbed).unwrap();
+    assert_eq!(tabbed.titles, vec!["A", "B", "Container"]);
+}
+
+#[test]
+fn title_update_reflected_in_placements() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+    hub.set_window_title(w0, "Old".to_string());
+    hub.set_window_title(w1, "B".to_string());
+    hub.toggle_container_layout();
+    hub.set_window_title(w0, "New".to_string());
+
+    let p = placements(&hub);
+    let containers = normal_containers(&p);
+    let tabbed = containers.iter().find(|c| c.is_tabbed).unwrap();
+    assert_eq!(tabbed.titles, vec!["New", "B"]);
 }

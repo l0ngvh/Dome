@@ -37,6 +37,7 @@ enum Op {
     MoveToMonitor,
     SetFocus,
     SetWindowConstraint,
+    SetWindowTitle,
     // Note: Exec is not included because it's a platform-specific action
     // that spawns external processes, not a core hub operation.
 }
@@ -72,6 +73,7 @@ const ALL_OPS: &[Op] = &[
     Op::MoveToMonitor,
     Op::SetFocus,
     Op::SetWindowConstraint,
+    Op::SetWindowTitle,
 ];
 
 fn run_smoke_iteration(seed: u64, ops_per_run: usize) {
@@ -294,6 +296,16 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize) {
                     format!(
                         "SetWindowConstraint({id}, min=({min_w:?}, {min_h:?}), max=({max_w:?}, {max_h:?}))"
                     )
+                }
+                Op::SetWindowTitle => {
+                    if windows.is_empty() {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..windows.len());
+                    let id = windows[idx];
+                    let title = format!("title-{}", rng.random_range(0..100u32));
+                    hub.set_window_title(id, title.clone());
+                    format!("SetWindowTitle({id}, {title:?})")
                 }
             };
 
