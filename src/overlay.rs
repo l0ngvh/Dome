@@ -33,6 +33,7 @@ pub(crate) fn paint_tiling_overlay(
         let vf = cp.visible_frame;
         let origin = vec2(vf.x - monitor.x, vf.y - monitor.y);
         egui::Area::new(egui::Id::new(("container", cp.id)))
+            .order(egui::Order::Foreground)
             .fixed_pos(origin.to_pos2())
             .fade_in(false)
             .show(ctx, |ui| {
