@@ -165,6 +165,21 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     s
 }
 
+/// Resolves the focused workspace's focus to a leaf WindowId.
+/// Workspace.focused() may return Child::Container when focus_parent is active;
+/// this walks Container.focused until it reaches a window.
+fn resolve_focused_window(hub: &Hub, workspace_id: WorkspaceId) -> Option<WindowId> {
+    let workspace = hub.workspaces.get(workspace_id);
+    let mut current = workspace.focused()?;
+    for _ in 0..10_000 {
+        match current {
+            Child::Window(id) => return Some(id),
+            Child::Container(id) => current = hub.containers.get(id).focused,
+        }
+    }
+    panic!("resolve_focused_window: container chain exceeded 10,000 depth");
+}
+
 pub(super) fn snapshot_text(hub: &Hub) -> String {
     let monitors = hub.all_monitors();
     let monitor_info = if monitors.len() > 1 {
@@ -173,33 +188,27 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
         String::new()
     };
     let screen = hub.monitors.get(hub.focused_monitor()).dimension;
+    let focused_display = match resolve_focused_window(hub, hub.current_workspace()) {
+        Some(id) => format!("focused={id}"),
+        None => "focused=None".to_string(),
+    };
     let mut s = format!(
-        "Hub(focused={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
-        hub.current_workspace(),
-        monitor_info,
-        screen.x,
-        screen.y,
-        screen.width,
-        screen.height
+        "Hub({focused_display}{monitor_info}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
+        screen.x, screen.y, screen.width, screen.height
     );
     for (workspace_id, workspace) in hub.all_workspaces() {
-        let focused = if let Some(current) = workspace.focused() {
-            format!(", focused={}", current)
-        } else {
-            String::new()
-        };
         let has_content = workspace.root().is_some()
             || !workspace.float_windows().is_empty()
             || !workspace.fullscreen_windows().is_empty();
         if !has_content {
             s.push_str(&format!(
-                "  Workspace(id={}, name={}{})\n",
-                workspace_id, workspace.name, focused
+                "  Workspace(id={}, name={})\n",
+                workspace_id, workspace.name
             ));
         } else {
             s.push_str(&format!(
-                "  Workspace(id={}, name={}{},\n",
-                workspace_id, workspace.name, focused
+                "  Workspace(id={}, name={},\n",
+                workspace_id, workspace.name
             ));
             if let Some(root) = workspace.root() {
                 fmt_child_str(hub, &mut s, root, 2);

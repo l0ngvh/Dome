@@ -10,11 +10,11 @@ fn move_window_to_empty_workspace() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
+      Workspace(id=WorkspaceId(1), name=1,
         Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -64,11 +64,11 @@ fn move_window_to_workspace_with_windows() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(2), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -117,9 +117,9 @@ fn move_only_window_to_workspace() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(0),
+      Workspace(id=WorkspaceId(1), name=1,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -135,8 +135,8 @@ fn move_to_same_workspace_does_nothing() {
     hub.move_focused_to_workspace("0");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -189,11 +189,11 @@ fn move_container_to_workspace() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=1, focused=ContainerId(1),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(2), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -250,9 +250,9 @@ fn move_container_to_workspace_with_matching_direction() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=ContainerId(0),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(2), x=0.00, y=0.00, w=50.00, h=30.00)
           Window(id=WindowId(3), x=50.00, y=0.00, w=50.00, h=30.00)
@@ -281,9 +281,9 @@ fn move_horizontal_container_to_workspace_with_one_window() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=ContainerId(0),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(2), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -312,9 +312,9 @@ fn move_vertical_container_to_workspace_with_one_window() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=ContainerId(0),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(2), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -345,9 +345,9 @@ fn move_container_to_workspace_with_container_direction_matching_workspace_spawn
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=ContainerId(0),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(2), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -370,7 +370,7 @@ fn move_focused_to_workspace_on_empty_workspace() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
     )
     ");
@@ -398,9 +398,9 @@ fn move_container_to_tabbed_workspace() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=ContainerId(0),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
           Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
           Window(id=WindowId(3), x=0.00, y=2.00, w=150.00, h=28.00)
@@ -427,11 +427,11 @@ fn move_to_empty_workspace_resets_spawn_mode_based_on_screen_size() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(2),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -486,8 +486,8 @@ fn move_container_to_empty_workspace_resets_spawn_mode_based_on_screen_size() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
             Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
@@ -554,8 +554,8 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
     hub.focus_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,

@@ -13,8 +13,8 @@ fn set_min_size_respects_minimum_width() {
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
           Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=30.00)
@@ -65,8 +65,8 @@ fn set_min_size_respects_minimum_height() {
     hub.set_window_constraint(w0, None, Some(20.0), None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=20.00)
           Window(id=WindowId(1), x=0.00, y=20.00, w=150.00, h=10.00)
@@ -117,8 +117,8 @@ fn set_min_size_distributes_remaining_space_equally() {
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
           Window(id=WindowId(1), x=100.00, y=0.00, w=25.00, h=30.00)
@@ -171,8 +171,8 @@ fn set_min_size_propagates_to_parent_container() {
     hub.set_window_constraint(w2, Some(100.0), None, None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), x=50.00, y=0.00, w=100.00, h=30.00, direction=Vertical,
@@ -226,8 +226,8 @@ fn set_min_size_exceeds_screen_size() {
     hub.set_window_constraint(w1, Some(100.0), None, None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
           Window(id=WindowId(1), x=100.00, y=0.00, w=100.00, h=30.00)
@@ -282,8 +282,8 @@ fn set_min_size_exceeds_container_size() {
     hub.set_window_constraint(w3, Some(100.0), None, None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=0.00, h=30.00)
           Container(id=ContainerId(1), x=0.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
@@ -346,8 +346,8 @@ fn set_min_size_exceeds_container_size_focus_first() {
     hub.set_focus(w0);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=250.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), x=50.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
@@ -407,8 +407,8 @@ fn set_min_size_global_exceeds_screen_size() {
     });
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
           Window(id=WindowId(1), x=100.00, y=0.00, w=100.00, h=30.00)
@@ -460,8 +460,8 @@ fn set_min_size_exceeds_screen_height() {
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=40.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=20.00)
           Window(id=WindowId(1), x=0.00, y=20.00, w=150.00, h=20.00)
@@ -514,8 +514,8 @@ fn set_min_size_exceeds_screen_height_scroll_to_focus() {
     hub.set_focus(w0);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=40.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=20.00)
           Window(id=WindowId(1), x=0.00, y=20.00, w=150.00, h=20.00)
@@ -569,8 +569,8 @@ fn set_min_size_tabbed_child_container() {
     hub.set_window_constraint(w3, Some(100.0), Some(20.0), None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), x=50.00, y=0.00, w=100.00, h=30.00, tabbed=true, active_tab=1,
@@ -633,8 +633,8 @@ fn scroll_into_view_with_focused_container() {
     hub.focus_parent();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
           Container(id=ContainerId(1), x=100.00, y=0.00, w=100.00, h=30.00, direction=Vertical,
@@ -695,8 +695,8 @@ fn delete_window_with_min_size_shrinks_parent_container() {
 
     // Container min_width = 300 (w1 + w2 + w3), exceeds screen width 150
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=300.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=300.00, h=15.00)
           Container(id=ContainerId(1), x=0.00, y=15.00, w=300.00, h=15.00, direction=Horizontal,
@@ -744,8 +744,8 @@ fn delete_window_with_min_size_shrinks_parent_container() {
 
     // After deleting w1, container min_width drops to 200 (w2 + w3)
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=200.00, h=15.00)
           Container(id=ContainerId(1), x=0.00, y=15.00, w=200.00, h=15.00, direction=Horizontal,
@@ -798,8 +798,8 @@ fn delete_window_with_min_size_allows_siblings_to_expand() {
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
           Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=30.00)
@@ -843,8 +843,8 @@ fn delete_window_with_min_size_allows_siblings_to_expand() {
 
     // After deleting w0, w1 expands to full screen width
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -899,8 +899,8 @@ fn scroll_window_into_view_in_vertical_child_container() {
     hub.focus_left();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=60.00, direction=Horizontal,
           Container(id=ContainerId(0), x=0.00, y=0.00, w=100.00, h=60.00, direction=Vertical,
             Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=20.00)
@@ -948,8 +948,8 @@ fn scroll_window_into_view_in_vertical_child_container() {
 
     // After deleting w0, w1 expands to full screen width
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=40.00, direction=Horizontal,
           Container(id=ContainerId(0), x=0.00, y=0.00, w=100.00, h=40.00, direction=Vertical,
             Window(id=WindowId(1), x=0.00, y=0.00, w=100.00, h=20.00)
@@ -1002,8 +1002,8 @@ fn max_height_centers_window_vertically_in_horizontal_split() {
     hub.set_window_constraint(w0, None, None, None, Some(15.0));
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=7.50, w=75.00, h=15.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -1054,8 +1054,8 @@ fn max_width_centers_window_horizontally_in_vertical_split() {
     hub.set_window_constraint(w0, None, None, Some(50.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=50.00, y=0.00, w=50.00, h=15.00)
           Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -1105,8 +1105,8 @@ fn max_width_limits_window_in_horizontal_split() {
     hub.set_window_constraint(w0, None, None, Some(30.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=30.00, h=30.00)
           Window(id=WindowId(1), x=30.00, y=0.00, w=120.00, h=30.00)
@@ -1157,8 +1157,8 @@ fn both_windows_at_max_centered_collectively() {
     hub.set_window_constraint(w1, None, None, Some(30.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=45.00, y=0.00, w=30.00, h=30.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=30.00, h=30.00)
@@ -1210,8 +1210,8 @@ fn tabbed_window_with_max_size_is_centered() {
     hub.set_window_constraint(w1, None, None, Some(60.0), Some(10.0));
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
           Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Window(id=WindowId(1), x=45.00, y=11.00, w=60.00, h=10.00)
@@ -1257,8 +1257,8 @@ fn nested_window_center_due_to_max_constraints() {
     hub.set_window_constraint(w2, None, Some(10.0), None, Some(10.0));
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=10.00, w=75.00, h=10.00)
           Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -1306,8 +1306,8 @@ fn new_max_clamps_existing_min() {
     hub.set_window_constraint(w0, Some(100.0), None, Some(50.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Window(id=WindowId(1), x=50.00, y=0.00, w=100.00, h=30.00)
@@ -1361,8 +1361,8 @@ fn global_max_applies_to_all_windows() {
     });
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=15.00, y=0.00, w=60.00, h=30.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=60.00, h=30.00)
@@ -1417,8 +1417,8 @@ fn per_window_max_overrides_global() {
     hub.set_window_constraint(w0, None, None, Some(30.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=30.00, y=0.00, w=30.00, h=30.00)
           Window(id=WindowId(1), x=60.00, y=0.00, w=60.00, h=30.00)
@@ -1467,8 +1467,8 @@ fn single_window_with_max_size_centered() {
     hub.set_window_constraint(w0, None, None, Some(60.0), Some(15.0));
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=45.00, y=7.50, w=60.00, h=15.00)
       )
     )
@@ -1507,8 +1507,8 @@ fn single_window_with_max_larger_than_screen_fills_screen() {
     hub.set_window_constraint(w0, None, None, Some(200.0), Some(50.0));
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1579,8 +1579,8 @@ fn clearing_constraint_allows_window_to_resize() {
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
           Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=30.00)
@@ -1623,8 +1623,8 @@ fn clearing_constraint_allows_window_to_resize() {
     hub.set_window_constraint(w0, Some(0.0), None, None, None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -1707,8 +1707,8 @@ fn max_height_larger_than_container_fills_height_in_horizontal_split() {
     hub.set_window_constraint(w0, None, None, None, Some(50.0));
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -1760,8 +1760,8 @@ fn max_width_larger_than_container_fills_width_in_vertical_split() {
     hub.set_window_constraint(w0, None, None, Some(200.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -1814,8 +1814,8 @@ fn tabbed_window_with_max_larger_than_container_fills_space() {
     hub.set_window_constraint(w1, None, None, Some(200.0), Some(50.0));
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
           Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
@@ -1870,8 +1870,8 @@ fn window_max_smaller_than_global_min_width() {
     hub.set_window_constraint(w0, None, None, Some(50.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=50.00, y=0.00, w=50.00, h=30.00)
       )
     )
@@ -1923,8 +1923,8 @@ fn window_max_smaller_than_global_min_height() {
     hub.set_window_constraint(w0, None, None, None, Some(10.0));
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=10.00, w=150.00, h=10.00)
       )
     )
@@ -1967,8 +1967,8 @@ fn window_max_smaller_than_global_min_multiple_windows() {
     hub.set_window_constraint(w0, None, None, Some(50.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Window(id=WindowId(1), x=50.00, y=0.00, w=100.00, h=30.00)

@@ -23,11 +23,11 @@ fn add_monitor_creates_workspace_on_new_monitor() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=monitor-1, focused=WindowId(1),
+      Workspace(id=WorkspaceId(1), name=monitor-1,
         Window(id=WindowId(1), x=0.00, y=0.00, w=100.00, h=30.00)
       )
     )
@@ -88,11 +88,11 @@ fn remove_monitor_migrates_workspaces_to_fallback() {
     hub.remove_monitor(m1, primary);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=monitor-1, focused=WindowId(2),
+      Workspace(id=WorkspaceId(1), name=monitor-1,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -151,7 +151,7 @@ fn remove_non_focused_monitor() {
     hub.remove_monitor(m1, primary);
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
       Workspace(id=WorkspaceId(1), name=external)
     )
@@ -202,8 +202,8 @@ fn update_monitor_dimension_adjusts_workspaces() {
     );
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=200.00 h=50.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=200.00 h=50.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=50.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=50.00)
           Window(id=WindowId(1), x=100.00, y=0.00, w=100.00, h=50.00)
@@ -245,8 +245,8 @@ fn focus_monitor_by_direction() {
 
     hub.focus_monitor(&MonitorTarget::Right);
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=None, monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=right-monitor)
@@ -256,8 +256,8 @@ fn focus_monitor_by_direction() {
 
     hub.focus_monitor(&MonitorTarget::Left);
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=right-monitor)
@@ -267,8 +267,8 @@ fn focus_monitor_by_direction() {
 
     hub.focus_monitor(&MonitorTarget::Down);
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(2), monitor=MonitorId(2), screen=(x=0.00 y=30.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=None, monitor=MonitorId(2), screen=(x=0.00 y=30.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=right-monitor)
@@ -278,8 +278,8 @@ fn focus_monitor_by_direction() {
 
     hub.focus_monitor(&MonitorTarget::Up);
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=right-monitor)
@@ -307,7 +307,7 @@ fn focus_monitor_noop_when_already_focused() {
     hub.focus_monitor(&MonitorTarget::Name("external".to_string())); // no-op
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+    Hub(focused=None, monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
       Workspace(id=WorkspaceId(1), name=external)
     )
@@ -334,8 +334,8 @@ fn focus_monitor_by_name() {
     hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=None, monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=external)
@@ -364,11 +364,11 @@ fn move_to_monitor_moves_focused_window() {
     hub.move_focused_to_monitor(&MonitorTarget::Right);
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=right-monitor, focused=WindowId(1),
+      Workspace(id=WorkspaceId(1), name=right-monitor,
         Window(id=WindowId(1), x=0.00, y=0.00, w=100.00, h=30.00)
       )
     )
@@ -395,9 +395,9 @@ fn move_to_monitor_by_name() {
     hub.move_focused_to_monitor(&MonitorTarget::Name("external".to_string()));
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=external, focused=WindowId(0),
+      Workspace(id=WorkspaceId(1), name=external,
         Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
       )
     )
@@ -430,9 +430,9 @@ fn move_float_to_monitor() {
     hub.move_focused_to_monitor(&MonitorTarget::Name("external".to_string()));
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=external, focused=WindowId(0),
+      Workspace(id=WorkspaceId(1), name=external,
         Float(id=WindowId(0), x=10.00, y=10.00, w=50.00, h=20.00)
       )
     )
@@ -449,8 +449,8 @@ fn focus_monitor_noop_when_no_monitor_in_direction() {
     hub.focus_monitor(&MonitorTarget::Right);
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -467,8 +467,8 @@ fn move_to_monitor_noop_when_no_monitor_in_direction() {
     hub.move_focused_to_monitor(&MonitorTarget::Right);
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -495,8 +495,8 @@ fn move_to_monitor_noop_when_same_monitor() {
     hub.move_focused_to_monitor(&MonitorTarget::Name("primary".to_string()));
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=external)
@@ -523,7 +523,7 @@ fn move_to_monitor_noop_when_no_focused_window() {
     hub.move_focused_to_monitor(&MonitorTarget::Right);
 
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
       Workspace(id=WorkspaceId(1), name=right-monitor)
     )
@@ -553,11 +553,11 @@ fn move_to_monitor_does_not_change_focus() {
 
     assert_eq!(hub.focused_monitor(), original_monitor);
     assert_snapshot!(snapshot_text(&hub), @r"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=external, focused=WindowId(1),
+      Workspace(id=WorkspaceId(1), name=external,
         Window(id=WindowId(1), x=0.00, y=0.00, w=100.00, h=30.00)
       )
     )

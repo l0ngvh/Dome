@@ -11,8 +11,8 @@ fn toggle_direction_on_focused_container() {
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -62,8 +62,8 @@ fn toggle_direction_on_window() {
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -115,8 +115,8 @@ fn toggle_direction_on_window_nested() {
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
           Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, direction=Horizontal,
@@ -176,8 +176,8 @@ fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
     hub.insert_tiling();
     hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(7),
+    Hub(focused=WindowId(7), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
@@ -230,8 +230,8 @@ fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(7),
+    Hub(focused=WindowId(7), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
@@ -298,8 +298,8 @@ fn toggle_direction_skips_nested_tabbed_container() {
     hub.set_focus(w1);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
@@ -350,8 +350,8 @@ fn toggle_direction_skips_nested_tabbed_container() {
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
           Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=10.00)
@@ -426,8 +426,8 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     hub.set_focus(w6);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(6),
+    Hub(focused=WindowId(6), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=3,
@@ -488,8 +488,8 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(6),
+    Hub(focused=WindowId(6), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=3,
@@ -555,7 +555,7 @@ fn toggle_direction_on_empty_workspace() {
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
     )
     ");
@@ -575,8 +575,8 @@ fn toggle_direction_with_float_focused() {
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
       )
     )
@@ -617,8 +617,8 @@ fn toggle_direction_on_single_window() {
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )

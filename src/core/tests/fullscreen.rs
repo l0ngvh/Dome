@@ -13,8 +13,8 @@ fn insert_fullscreen_sets_focus() {
     hub.insert_fullscreen(WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
       )
@@ -63,8 +63,8 @@ fn set_fullscreen_from_tiling() {
     hub.set_fullscreen(w1, WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
       )
@@ -117,8 +117,8 @@ fn set_fullscreen_from_float() {
     hub.set_fullscreen(w2, WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(1), x=10.00, y=5.00, w=40.00, h=10.00)
       )
@@ -164,8 +164,8 @@ fn set_fullscreen_already_fullscreen() {
     hub.set_fullscreen(w1, WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -203,8 +203,8 @@ fn set_fullscreen_already_fullscreen() {
     ");
     hub.set_fullscreen(w1, WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -250,8 +250,8 @@ fn set_fullscreen_doesnt_change_focus() {
     hub.set_fullscreen(w0, WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
       )
@@ -300,8 +300,8 @@ fn unset_fullscreen_to_tiling() {
     hub.unset_fullscreen(w1);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -353,8 +353,8 @@ fn fullscreen_only_topmost_in_placements() {
     hub.set_fullscreen(w2, WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(2), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
@@ -404,8 +404,8 @@ fn delete_fullscreen_window() {
     hub.delete_window(w1);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -452,8 +452,8 @@ fn toggle_fullscreen_on_off() {
 
     hub.toggle_fullscreen();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
       )
@@ -493,8 +493,8 @@ fn toggle_fullscreen_on_off() {
 
     hub.toggle_fullscreen();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -544,8 +544,8 @@ fn insert_tiling_doesnt_steal_focus_from_fullscreen() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
@@ -598,8 +598,8 @@ fn insert_float_doesnt_steal_focus_from_fullscreen() {
     });
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Float(id=WindowId(1), x=10.00, y=5.00, w=40.00, h=10.00)
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
@@ -647,9 +647,9 @@ fn move_fullscreen_to_workspace_sets_focus() {
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(0),
+      Workspace(id=WorkspaceId(1), name=1,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -665,8 +665,8 @@ fn block_all_blocks_user_commands() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -742,8 +742,8 @@ fn block_all_allows_lifecycle_ops() {
     hub.insert_fullscreen(WindowRestrictions::BlockAll);
 
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
       )
@@ -783,8 +783,8 @@ fn block_all_allows_lifecycle_ops() {
 
     let w2 = hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -827,8 +827,8 @@ fn block_all_allows_lifecycle_ops() {
 
     hub.delete_window(w2);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
       )
@@ -876,8 +876,8 @@ fn block_all_cleared_by_unset_fullscreen() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
       )
@@ -920,8 +920,8 @@ fn block_all_cleared_by_unset_fullscreen() {
 
     hub.unset_fullscreen(w1);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -964,8 +964,8 @@ fn block_all_cleared_by_unset_fullscreen() {
     hub.set_focus(w1);
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Float(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
       )
@@ -1012,8 +1012,8 @@ fn block_all_does_not_persist_after_delete() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
       )
@@ -1056,8 +1056,8 @@ fn block_all_does_not_persist_after_delete() {
 
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1096,8 +1096,8 @@ fn block_all_does_not_persist_after_delete() {
 
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Float(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1158,11 +1158,11 @@ fn block_all_on_unfocused_window_does_not_block() {
     hub.set_focus(w0);
 
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(0), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
       )
-      Workspace(id=WorkspaceId(1), name=second, focused=WindowId(0),
+      Workspace(id=WorkspaceId(1), name=second,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1201,11 +1201,11 @@ fn block_all_on_unfocused_window_does_not_block() {
 
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(1), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(0), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
       )
-      Workspace(id=WorkspaceId(1), name=second, focused=WindowId(0),
+      Workspace(id=WorkspaceId(1), name=second,
         Float(id=WindowId(0), x=150.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1262,8 +1262,8 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WorkspaceId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
       )
@@ -1319,8 +1319,8 @@ fn protect_fullscreen_allows_workspace_move_and_navigation() {
     hub.set_fullscreen(w0, WindowRestrictions::ProtectFullscreen);
 
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1359,8 +1359,8 @@ fn protect_fullscreen_allows_workspace_move_and_navigation() {
 
     hub.focus_workspace("1");
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
       Workspace(id=WorkspaceId(1), name=1)
@@ -1369,8 +1369,8 @@ fn protect_fullscreen_allows_workspace_move_and_navigation() {
 
     hub.focus_workspace("0");
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1409,9 +1409,9 @@ fn protect_fullscreen_allows_workspace_move_and_navigation() {
 
     hub.move_focused_to_workspace("1");
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(2), name=1, focused=WindowId(0),
+      Workspace(id=WorkspaceId(2), name=1,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1425,8 +1425,8 @@ fn upgrade_protect_to_block_all() {
     hub.set_fullscreen(w0, WindowRestrictions::ProtectFullscreen);
 
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1465,9 +1465,9 @@ fn upgrade_protect_to_block_all() {
 
     hub.move_focused_to_workspace("1");
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(0),
+      Workspace(id=WorkspaceId(1), name=1,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1475,9 +1475,9 @@ fn upgrade_protect_to_block_all() {
 
     hub.move_focused_to_workspace("0");
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(0),
+      Workspace(id=WorkspaceId(1), name=1,
         Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -1498,8 +1498,8 @@ fn downgrade_block_all_to_protect() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
       )
@@ -1544,11 +1544,11 @@ fn downgrade_block_all_to_protect() {
 
     hub.move_focused_to_workspace("1");
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(1),
+      Workspace(id=WorkspaceId(1), name=1,
         Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
       )
     )

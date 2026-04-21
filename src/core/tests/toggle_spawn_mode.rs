@@ -11,8 +11,8 @@ fn toggle_spawn_mode_creates_new_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -65,8 +65,8 @@ fn delete_window_after_orientation_change() {
     hub.toggle_spawn_mode();
     let w2 = hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -111,8 +111,8 @@ fn delete_window_after_orientation_change() {
     hub.delete_window(w2);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -162,8 +162,8 @@ fn toggle_spawn_mode_in_single_window_workspace_creates_vertical_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -216,8 +216,8 @@ fn toggle_spawn_mode_in_vertical_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -276,8 +276,8 @@ fn toggle_spawn_mode_to_tab_inserts_to_parent_tabbed_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
           Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
@@ -334,8 +334,8 @@ fn toggle_spawn_mode_to_tab_inserts_to_ancestor_tabbed_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
+    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
           Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, direction=Horizontal,
@@ -394,8 +394,8 @@ fn toggle_spawn_mode_to_tab_creates_tabbed_container_if_no_ancestor() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
@@ -450,8 +450,8 @@ fn toggle_spawn_mode_horizontal_when_focused_is_tabbed_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
             Window(id=WindowId(0), x=0.00, y=2.00, w=75.00, h=28.00)
@@ -507,8 +507,8 @@ fn toggle_spawn_mode_vertical_when_focused_is_tabbed_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=15.00, tabbed=true, active_tab=1,
             Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=13.00)
@@ -565,8 +565,8 @@ fn toggle_spawn_mode_tab_when_focused_is_tabbed_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
           Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
@@ -622,8 +622,8 @@ fn toggle_spawn_mode_tab_when_focused_is_split_container_creates_parent() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
@@ -680,8 +680,8 @@ fn spawn_non_tab_in_tabbed_parent_creates_child_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
           Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, direction=Horizontal,
@@ -738,8 +738,8 @@ fn spawn_non_tab_in_tabbed_parent_with_focused_container() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
           Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
@@ -791,7 +791,7 @@ fn toggle_spawn_mode_on_empty_workspace() {
     hub.toggle_spawn_mode();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
     )
     ");
@@ -811,8 +811,8 @@ fn toggle_spawn_mode_with_float_focused() {
     hub.toggle_spawn_mode();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
       )
     )

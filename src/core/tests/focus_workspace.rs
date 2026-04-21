@@ -18,15 +18,15 @@ fn switch_workspace_attaches_windows_correctly() {
     hub.insert_tiling();
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(4),
+    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
           Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00)
         )
       )
-      Workspace(id=WorkspaceId(1), name=1, focused=WindowId(3),
+      Workspace(id=WorkspaceId(1), name=1,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(2), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(3), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -77,8 +77,8 @@ fn focus_same_workspace() {
 
     assert_eq!(hub.current_workspace(), initial_workspace);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -123,7 +123,7 @@ fn focus_workspace_prune_previous_workspace() {
     hub.focus_workspace("2");
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(1), name=2)
     )
     ");

@@ -9,8 +9,8 @@ fn delete_window_removes_from_container() {
     hub.insert_tiling();
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -58,8 +58,8 @@ fn delete_window_removes_parent_container() {
     let w1 = hub.insert_tiling();
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -107,7 +107,7 @@ fn delete_all_windows() {
     hub.delete_window(w1);
     hub.delete_window(w2);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(0), name=0)
     )
     ");
@@ -122,7 +122,7 @@ fn delete_all_windows_cleanup_unfocused_workspace() {
     hub.delete_window(w0);
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
       Workspace(id=WorkspaceId(1), name=1)
     )
     ");
@@ -143,8 +143,8 @@ fn clean_up_parent_container_when_only_child_is_container() {
     hub.delete_window(w0);
     hub.delete_window(w3);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(2), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -194,8 +194,8 @@ fn delete_focused_window_change_focus_to_previous_window() {
     hub.focus_left();
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -246,8 +246,8 @@ fn delete_focused_window_change_focus_to_next_window() {
     hub.focus_left();
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
           Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
@@ -298,8 +298,8 @@ fn delete_focused_window_focus_last_window_of_preceding_container() {
     hub.toggle_spawn_mode();
     let w2 = hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
             Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
@@ -343,8 +343,8 @@ fn delete_focused_window_focus_last_window_of_preceding_container() {
     ");
     hub.delete_window(w2);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -394,8 +394,8 @@ fn delete_focused_window_focus_following_container_focused_node() {
     hub.insert_tiling();
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(0),
+    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -439,8 +439,8 @@ fn delete_focused_window_focus_following_container_focused_node() {
     ");
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(2), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -489,8 +489,8 @@ fn delete_window_when_parent_focused_gives_focus_to_last_child() {
     hub.focus_parent();
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(1),
+    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
       )
     )
@@ -541,8 +541,8 @@ fn container_replaced_by_child_keeps_position_in_parent() {
     hub.insert_tiling();
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
           Window(id=WindowId(2), x=50.00, y=0.00, w=50.00, h=30.00)
@@ -596,8 +596,8 @@ fn delete_window_focus_sibling_containers_last_window() {
     // Delete W0, container collapses, should focus W2 (last window of sibling container)
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(2), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -650,8 +650,8 @@ fn delete_window_focus_sibling_container_if_last_focused_container() {
 
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(1),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(2), x=0.00, y=15.00, w=150.00, h=15.00)
@@ -704,8 +704,8 @@ fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     hub.toggle_spawn_mode();
     hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
           Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, direction=Horizontal,
@@ -754,8 +754,8 @@ fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     hub.delete_window(w1);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(3),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
           Container(id=ContainerId(2), x=0.00, y=15.00, w=150.00, h=15.00, direction=Horizontal,
@@ -818,8 +818,8 @@ fn promote_child_to_tabbed_grandparent() {
     hub.focus_parent();
     hub.toggle_container_layout();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
           Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
@@ -869,8 +869,8 @@ fn promote_child_to_tabbed_grandparent() {
     hub.delete_window(w1);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(0),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
           Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
           Container(id=ContainerId(2), x=0.00, y=2.00, w=150.00, h=28.00, direction=Horizontal,
@@ -936,8 +936,8 @@ fn promote_child_from_tabbed_parent_to_split_grandparent_does_nothing_when_direc
     hub.set_focus(w2);
     hub.toggle_direction();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
@@ -987,8 +987,8 @@ fn promote_child_from_tabbed_parent_to_split_grandparent_does_nothing_when_direc
     hub.delete_window(w1);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -1049,8 +1049,8 @@ fn promote_tabbed_child_to_split_grandparent() {
     hub.focus_parent();
     hub.toggle_container_layout();
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(2),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
@@ -1100,8 +1100,8 @@ fn promote_tabbed_child_to_split_grandparent() {
     hub.delete_window(w1);
 
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=ContainerId(2),
+    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
           Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
           Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
@@ -1158,8 +1158,8 @@ fn promote_child_of_tabbed_to_workspace_root_expand_child_to_full_screen() {
     hub.toggle_container_layout();
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WorkspaceId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0, focused=WindowId(2),
+    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+      Workspace(id=WorkspaceId(0), name=0,
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
           Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
           Window(id=WindowId(2), x=0.00, y=15.00, w=150.00, h=15.00)
