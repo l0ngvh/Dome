@@ -70,8 +70,7 @@ fn float_window_moved_by_user() {
     macos.settle(&mut dome, 10);
 
     // User drags the float to a new position
-    macos.move_window(cg2, 200, 150, 600, 400);
-    macos.simulate_external_move(&mut dome, cg2);
+    macos.simulate_external_move(&mut dome, cg2, 200, 150, 600, 400);
     macos.settle(&mut dome, 10);
 
     // Float should stay at the user-chosen position, not be corrected

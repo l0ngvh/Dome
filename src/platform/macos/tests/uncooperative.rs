@@ -31,8 +31,7 @@ fn drift_exhausts_retries_dome_gives_up() {
 
     // Window resists placement — always snaps to (100, 100, 800, 600)
     macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
-    macos.move_window(cg1, 100, 100, 800, 600);
-    macos.simulate_external_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1, 100, 100, 800, 600);
     macos.settle(&mut dome, 20);
 
     // After MAX_ENFORCEMENT_RETRIES (5), Dome gives up — window stays at its chosen position
@@ -45,8 +44,7 @@ fn drift_retries_reset_on_new_target() {
 
     // Exhaust retries
     macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
-    macos.move_window(cg1, 100, 100, 800, 600);
-    macos.simulate_external_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1, 100, 100, 800, 600);
     macos.settle(&mut dome, 20);
     assert_eq!(macos.window_frame(cg1), (100, 100, 800, 600));
 
@@ -68,8 +66,7 @@ fn drift_to_fullscreen_triggers_borderless_detection() {
 
     // Window auto-zooms to fullscreen in response to set_frame
     macos.set_override_frame(cg1, Some((0, 0, 1920, 1080)));
-    macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.simulate_external_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
     macos.settle(&mut dome, 10);
 
     // Should be detected as borderless fullscreen, not treated as drift
@@ -87,8 +84,7 @@ fn offscreen_window_fights_hide() {
 
     // Window fights back — keeps snapping to visible position
     macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
-    macos.move_window(cg1, 100, 100, 800, 600);
-    macos.simulate_external_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1, 100, 100, 800, 600);
 
     // Dome retries hiding up to MAX_ENFORCEMENT_RETRIES times, then gives up.
     // report_move incremented retries to 1 and issued hide_at.
@@ -121,8 +117,7 @@ fn hide_retries_reset_on_fresh_hide() {
 
     // cg1 fights back — exhaust retries
     macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
-    macos.move_window(cg1, 100, 100, 800, 600);
-    macos.simulate_external_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1, 100, 100, 800, 600);
     for _ in 0..5 {
         macos.flush_moves(&mut dome);
     }
@@ -140,8 +135,7 @@ fn hide_retries_reset_on_fresh_hide() {
 
     // Now set override and start fighting again
     macos.set_override_frame(cg1, Some((100, 100, 800, 600)));
-    macos.move_window(cg1, 100, 100, 800, 600);
-    macos.simulate_external_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1, 100, 100, 800, 600);
     for _ in 0..4 {
         assert!(!macos.moves.borrow().is_empty(), "should still be retrying");
         macos.flush_moves(&mut dome);
@@ -159,16 +153,14 @@ fn constraint_changes_over_time() {
 
     // First constraint: cg2 reports min width 1000 (right-edge aligned)
     let (x2, y2, _, h2) = macos.window_frame(cg2);
-    macos.move_window(cg2, x2, y2, 1000, h2);
-    macos.simulate_external_move(&mut dome, cg2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1000, h2);
     macos.settle(&mut dome, 10);
     let (_, _, w2, _) = macos.window_frame(cg2);
     assert!(w2 >= 1000, "First constraint: expected >= 1000, got {w2}");
 
     // Second constraint: cg2 now reports even larger min width
     let (x2, y2, _, h2) = macos.window_frame(cg2);
-    macos.move_window(cg2, x2, y2, 1200, h2);
-    macos.simulate_external_move(&mut dome, cg2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1200, h2);
     macos.settle(&mut dome, 10);
     let (_, _, w2, _) = macos.window_frame(cg2);
     assert!(w2 >= 1200, "Updated constraint: expected >= 1200, got {w2}");
@@ -180,8 +172,7 @@ fn drift_correction_repositions_window() {
 
     let expected = macos.window_frame(cg1);
 
-    macos.move_window(cg1, 50, 50, 1916, 1076);
-    macos.simulate_external_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1, 50, 50, 1916, 1076);
     macos.settle(&mut dome, 10);
 
     assert_eq!(macos.window_frame(cg1), expected);
@@ -238,8 +229,7 @@ fn size_constraint_from_external_move() {
 
     // App reports larger size than Dome requested (min width constraint)
     let (x2, y2, _, h2) = macos.window_frame(cg2);
-    macos.move_window(cg2, x2, y2, 1000, h2);
-    macos.simulate_external_move(&mut dome, cg2);
+    macos.simulate_external_move(&mut dome, cg2, x2, y2, 1000, h2);
     macos.settle(&mut dome, 10);
 
     let (_, _, w2_width, _) = macos.window_frame(cg2);
@@ -419,7 +409,6 @@ fn late_event_consumes_retry_budget() {
     // Window resists set_frame by always snapping to a drifted position.
     let drifted = (target.0 + 200, target.1 + 200, target.2, target.3);
     macos.set_override_frame(cg1, Some(drifted));
-    macos.move_window(cg1, drifted.0, drifted.1, drifted.2, drifted.3);
 
     // Fire 6 late events. The first 5 consume the retry budget and each
     // issues a correcting set_frame (the window snaps back each time).
@@ -427,7 +416,7 @@ fn late_event_consumes_retry_budget() {
     for i in 0..6u64 {
         macos.moves.borrow_mut().clear();
         let late = Instant::now() + Duration::from_secs(60) + Duration::from_millis(i);
-        let frame = macos.window_frame(cg1);
+        let frame = drifted;
         dome.windows_moved(vec![WindowMove {
             cg_id: cg1,
             x: frame.0,

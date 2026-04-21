@@ -74,8 +74,9 @@ fn is_moving_suppresses_placement() {
     let full_frame = macos.window_frame(cg1);
 
     // User starts dragging cg1 to a different position
-    dome.set_pid_moving(100, true);
-    macos.move_window(cg1, 500, 300, 400, 400);
+    start_drag(&mut dome, 100);
+    macos.window(cg1).position.set((500, 300));
+    macos.window(cg1).size.set((400, 400));
 
     // Add cg2 — triggers relayout (cg1 should go from full to half), but
     // cg1 should NOT be repositioned because it's being dragged
@@ -86,8 +87,7 @@ fn is_moving_suppresses_placement() {
 
     // User stops dragging — in production, this triggers check_positions
     // which reads the window's current position and calls windows_moved
-    dome.set_pid_moving(100, false);
-    macos.simulate_external_move(&mut dome, cg1);
+    end_drag(&mut dome, &macos, 100, cg1, 500, 300, 400, 400);
     macos.settle(&mut dome, 10);
     let new_frame = macos.window_frame(cg1);
     assert_ne!(new_frame, (500, 300, 400, 400));
@@ -146,8 +146,7 @@ fn remove_borderless_fullscreen_window_restores_siblings() {
     macos.settle(&mut dome, 10);
 
     // Zoom cg1 → borderless fullscreen, cg2 hidden
-    macos.move_window(cg1, 0, 0, 1920, 1080);
-    macos.simulate_external_move(&mut dome, cg1);
+    macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg2));
 

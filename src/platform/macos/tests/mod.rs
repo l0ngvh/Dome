@@ -216,6 +216,23 @@ impl MacOS {
         cg_id
     }
 
+    fn spawn_window_at(
+        &mut self,
+        pid: i32,
+        app: &str,
+        title: &str,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    ) -> CGWindowID {
+        let cg_id = self.spawn_window(pid, app, title);
+        let ax = self.window(cg_id);
+        ax.position.set((x, y));
+        ax.size.set((w, h));
+        cg_id
+    }
+
     fn window(&self, cg_id: CGWindowID) -> &MockAXWindow {
         &self.windows[&cg_id]
     }
@@ -230,13 +247,6 @@ impl MacOS {
     fn is_offscreen(&self, cg_id: CGWindowID) -> bool {
         let (x, y, _, _) = self.window_frame(cg_id);
         x >= SCREEN_WIDTH as i32 - 1 || y >= SCREEN_HEIGHT as i32 - 1
-    }
-
-    /// Simulate macOS/app moving a window to a new position.
-    fn move_window(&self, cg_id: CGWindowID, x: i32, y: i32, w: i32, h: i32) {
-        let ax = self.window(cg_id);
-        ax.position.set((x, y));
-        ax.size.set((w, h));
     }
 
     fn enter_native_fullscreen(&self, cg_id: CGWindowID) {
@@ -280,11 +290,20 @@ impl MacOS {
     // sees observed_at.first well within 1s of placed_at.
 
     /// Simulate an external move (app/macOS moved the window) and feed it to Dome.
-    fn simulate_external_move(&self, dome: &mut Dome, cg_id: CGWindowID) {
+    /// Sets mock state and notifies Dome in one step.
+    fn simulate_external_move(
+        &self,
+        dome: &mut Dome,
+        cg_id: CGWindowID,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    ) {
         let observed_at = Instant::now();
         let ax = self.window(cg_id);
-        let (x, y) = ax.position.get();
-        let (w, h) = ax.size.get();
+        ax.position.set((x, y));
+        ax.size.set((w, h));
         dome.windows_moved(vec![WindowMove {
             cg_id,
             x,
@@ -425,6 +444,39 @@ fn new_window(macos: &MacOS, cg_id: CGWindowID) -> NewWindow {
         h: size.1,
         is_native_fullscreen: false,
     }
+}
+
+fn start_drag(dome: &mut Dome, pid: i32) {
+    dome.set_pid_moving(pid, true);
+}
+
+fn end_drag(
+    dome: &mut Dome,
+    macos: &MacOS,
+    pid: i32,
+    cg_id: CGWindowID,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+) {
+    let ax = macos.window(cg_id);
+    ax.position.set((x, y));
+    ax.size.set((w, h));
+    dome.set_pid_moving(pid, false);
+    let observed_at = Instant::now();
+    dome.windows_moved(vec![WindowMove {
+        cg_id,
+        x,
+        y,
+        w,
+        h,
+        observed_at: DebounceBurst {
+            first: observed_at,
+            last: observed_at,
+        },
+        is_native_fullscreen: ax.native_fullscreen.get(),
+    }]);
 }
 
 fn actions(s: &str) -> Actions {
