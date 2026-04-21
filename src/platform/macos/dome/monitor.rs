@@ -99,6 +99,15 @@ impl MonitorRegistry {
         }
     }
 
+    /// Whether any monitor currently tracks this window as visible on screen.
+    /// Used to decide if a window exiting native fullscreen should stay visible
+    /// or be minimized (unfocused workspace means not displayed).
+    pub(super) fn is_displayed(&self, window_id: WindowId) -> bool {
+        self.map
+            .values()
+            .any(|entry| entry.displayed_windows.contains(&window_id))
+    }
+
     fn remove_by_id(&mut self, monitor_id: MonitorId) {
         if let Some(display_id) = self.reverse.remove(&monitor_id) {
             self.map.remove(&display_id);

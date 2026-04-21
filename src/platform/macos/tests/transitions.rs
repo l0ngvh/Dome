@@ -511,3 +511,63 @@ fn borderless_fullscreen_allows_move_workspace() {
     macos.settle(&mut dome, 10);
     assert_eq!(macos.minimize_count(cg1), 1);
 }
+
+#[test]
+fn native_fullscreen_exit_to_borderless_on_unfocused_workspace() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    macos.settle(&mut dome, 10);
+
+    // Enter native fullscreen
+    macos.enter_native_fullscreen(cg1);
+    macos.simulate_external_move(&mut dome, cg1);
+    macos.settle(&mut dome, 10);
+
+    // Switch to workspace 1
+    dome.run_hub_actions(&actions("focus workspace 1"));
+    macos.settle(&mut dome, 10);
+    assert!(!macos.is_offscreen(cg1));
+
+    // Exit native fullscreen while on unfocused workspace, window still covers screen
+    macos.exit_native_fullscreen(cg1);
+    macos.move_window(cg1, 0, 0, 1920, 1080);
+    macos.simulate_external_move(&mut dome, cg1);
+    macos.settle(&mut dome, 10);
+
+    // Window should be minimized because its workspace is not focused
+    assert_eq!(macos.minimize_count(cg1), 1);
+}
+
+#[test]
+fn native_fullscreen_exit_to_borderless_unfocused_then_switch_back() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    macos.settle(&mut dome, 10);
+
+    // Enter native fullscreen, switch away, exit native fullscreen
+    macos.enter_native_fullscreen(cg1);
+    macos.simulate_external_move(&mut dome, cg1);
+    macos.settle(&mut dome, 10);
+
+    dome.run_hub_actions(&actions("focus workspace 1"));
+    macos.settle(&mut dome, 10);
+
+    macos.exit_native_fullscreen(cg1);
+    macos.move_window(cg1, 0, 0, 1920, 1080);
+    macos.simulate_external_move(&mut dome, cg1);
+    macos.settle(&mut dome, 10);
+    assert_eq!(macos.minimize_count(cg1), 1);
+
+    // Switch back to workspace 0 — window should be restored
+    dome.run_hub_actions(&actions("focus workspace 0"));
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg1), (0, 0, 1920, 1080));
+    assert_eq!(macos.unminimize_count(cg1), 1);
+}

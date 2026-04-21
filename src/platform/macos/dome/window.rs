@@ -515,9 +515,17 @@ impl Dome {
                 }
             }
             WindowState::NativeFullscreen => {
-                // No longer native fullscreen
                 if is_borderless_fullscreen {
-                    window.state = WindowState::BorderlessFullscreen;
+                    if self.monitor_registry.is_displayed(window_id) {
+                        window.state = WindowState::BorderlessFullscreen;
+                    } else {
+                        // Window exited native fullscreen on an unfocused workspace.
+                        // Minimize it so it doesn't stay visible over the active workspace.
+                        window.state = WindowState::Minimized;
+                        if let Err(e) = window.ax.minimize() {
+                            tracing::trace!("Failed to minimize window: {e:#}");
+                        }
+                    }
                 } else {
                     window.state = WindowState::Positioned(PositionedState::Offscreen(
                         OffscreenPlacement::new(new_placement),
