@@ -149,12 +149,17 @@ impl OverlayRenderer {
         let painter = egui_glow::Painter::new(Arc::clone(&gl), "", None, false)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
 
+        // Disable selectable labels so clicks on tab bars register as tab switches
+        // instead of triggering egui's text selection behavior.
+        let egui_ctx = egui::Context::default();
+        egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
+
         Ok(Self {
             surface,
             gl_context,
             gl,
             painter,
-            egui_ctx: egui::Context::default(),
+            egui_ctx,
         })
     }
 

@@ -125,10 +125,15 @@ impl OverlayRenderer {
             height: logical_h * scale,
         });
 
+        // Disable selectable labels so clicks on tab bars register as tab switches
+        // instead of triggering egui's text selection behavior.
+        let egui_ctx = egui::Context::default();
+        egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
+
         Self {
             backend,
             layer,
-            egui_ctx: egui::Context::default(),
+            egui_ctx,
             egui_textures: HashMap::new(),
             mirror_texture: None,
         }
