@@ -2,7 +2,7 @@ use insta::assert_snapshot;
 
 use crate::core::node::Dimension;
 
-use super::{setup, snapshot, snapshot_text};
+use crate::core::tests::{setup, snapshot, snapshot_text};
 
 #[test]
 fn add_monitor_creates_workspace_on_new_monitor() {
@@ -270,31 +270,12 @@ fn focus_monitor_by_direction() {
       Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00))
       Monitor(id=MonitorId(2), screen=(x=0.00 y=30.00 w=150.00 h=30.00))
     ");
-}
 
-#[test]
-fn focus_monitor_noop_when_already_focused() {
-    use crate::action::MonitorTarget;
-
-    let mut hub = setup();
-    hub.add_monitor(
-        "external".to_string(),
-        Dimension {
-            x: 150.0,
-            y: 0.0,
-            width: 100.0,
-            height: 30.0,
-        },
-    );
-
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string()));
-    hub.focus_monitor(&MonitorTarget::Name("external".to_string())); // no-op
-
-    assert_snapshot!(snapshot_text(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00))
-    ");
+    // Focus by name twice: second call is no-op
+    hub.focus_monitor(&MonitorTarget::Name("right-monitor".to_string()));
+    let after_name = snapshot_text(&hub);
+    hub.focus_monitor(&MonitorTarget::Name("right-monitor".to_string()));
+    assert_eq!(snapshot_text(&hub), after_name);
 }
 
 #[test]
@@ -351,7 +332,7 @@ fn move_to_monitor_moves_focused_window() {
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
       Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
-        Window(id=WindowId(1), x=150.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(1), x=150.00, y=0.00, w=100.00, h=30.00)
       )
     ");
 }
@@ -417,90 +398,61 @@ fn move_float_to_monitor() {
 }
 
 #[test]
-fn focus_monitor_noop_when_no_monitor_in_direction() {
+fn monitor_noop_cases() {
     use crate::action::MonitorTarget;
 
-    let mut hub = setup();
-    hub.insert_tiling();
+    // Single monitor: focus_monitor is no-op
+    {
+        let mut hub = setup();
+        hub.insert_tiling();
+        let before = snapshot_text(&hub);
+        hub.focus_monitor(&MonitorTarget::Right);
+        assert_eq!(snapshot_text(&hub), before);
+    }
 
-    hub.focus_monitor(&MonitorTarget::Right);
+    // Single monitor with tiling: move_focused_to_monitor is no-op
+    {
+        let mut hub = setup();
+        hub.insert_tiling();
+        let before = snapshot_text(&hub);
+        hub.move_focused_to_monitor(&MonitorTarget::Right);
+        assert_eq!(snapshot_text(&hub), before);
+    }
 
-    assert_snapshot!(snapshot_text(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
-      )
-    ");
-}
+    // Two monitors, move to same monitor: no-op
+    {
+        let mut hub = setup();
+        hub.insert_tiling();
+        hub.add_monitor(
+            "external".to_string(),
+            Dimension {
+                x: 150.0,
+                y: 0.0,
+                width: 100.0,
+                height: 30.0,
+            },
+        );
+        let before = snapshot_text(&hub);
+        hub.move_focused_to_monitor(&MonitorTarget::Name("primary".to_string()));
+        assert_eq!(snapshot_text(&hub), before);
+    }
 
-#[test]
-fn move_to_monitor_noop_when_no_monitor_in_direction() {
-    use crate::action::MonitorTarget;
-
-    let mut hub = setup();
-    hub.insert_tiling();
-
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
-
-    assert_snapshot!(snapshot_text(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
-      )
-    ");
-}
-
-#[test]
-fn move_to_monitor_noop_when_same_monitor() {
-    use crate::action::MonitorTarget;
-
-    let mut hub = setup();
-    hub.insert_tiling();
-
-    hub.add_monitor(
-        "external".to_string(),
-        Dimension {
-            x: 150.0,
-            y: 0.0,
-            width: 100.0,
-            height: 30.0,
-        },
-    );
-
-    hub.move_focused_to_monitor(&MonitorTarget::Name("primary".to_string()));
-
-    assert_snapshot!(snapshot_text(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
-      )
-      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00))
-    ");
-}
-
-#[test]
-fn move_to_monitor_noop_when_no_focused_window() {
-    use crate::action::MonitorTarget;
-
-    let mut hub = setup();
-
-    hub.add_monitor(
-        "right-monitor".to_string(),
-        Dimension {
-            x: 150.0,
-            y: 0.0,
-            width: 100.0,
-            height: 30.0,
-        },
-    );
-
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
-
-    assert_snapshot!(snapshot_text(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00))
-    ");
+    // Two monitors, no windows: move_focused_to_monitor is no-op
+    {
+        let mut hub = setup();
+        hub.add_monitor(
+            "right-monitor".to_string(),
+            Dimension {
+                x: 150.0,
+                y: 0.0,
+                width: 100.0,
+                height: 30.0,
+            },
+        );
+        let before = snapshot_text(&hub);
+        hub.move_focused_to_monitor(&MonitorTarget::Right);
+        assert_eq!(snapshot_text(&hub), before);
+    }
 }
 
 #[test]
@@ -531,7 +483,7 @@ fn move_to_monitor_does_not_change_focus() {
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
       Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
-        Window(id=WindowId(1), x=150.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(1), x=150.00, y=0.00, w=100.00, h=30.00)
       )
     ");
 }

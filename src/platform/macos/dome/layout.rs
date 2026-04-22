@@ -19,9 +19,15 @@ impl Dome {
             .monitors
             .iter()
             .flat_map(|mp| match &mp.layout {
-                MonitorLayout::Normal { windows, .. } => {
-                    windows.iter().map(|p| p.id).collect::<Vec<_>>()
-                }
+                MonitorLayout::Normal {
+                    tiling_windows,
+                    float_windows,
+                    ..
+                } => tiling_windows
+                    .iter()
+                    .map(|p| p.id)
+                    .chain(float_windows.iter().map(|p| p.id))
+                    .collect::<Vec<_>>(),
                 MonitorLayout::Fullscreen(wid) => vec![*wid],
             })
             .collect();
@@ -45,7 +51,15 @@ impl Dome {
         for mp in result.monitors {
             let displayed: HashSet<WindowId> = match &mp.layout {
                 MonitorLayout::Fullscreen(window_id) => HashSet::from([*window_id]),
-                MonitorLayout::Normal { windows, .. } => windows.iter().map(|p| p.id).collect(),
+                MonitorLayout::Normal {
+                    tiling_windows,
+                    float_windows,
+                    ..
+                } => tiling_windows
+                    .iter()
+                    .map(|p| p.id)
+                    .chain(float_windows.iter().map(|p| p.id))
+                    .collect(),
             };
             self.monitor_registry
                 .get_entry_mut(mp.monitor_id)
@@ -111,7 +125,8 @@ impl Dome {
                 )
             }
             MonitorLayout::Normal {
-                windows,
+                tiling_windows,
+                float_windows,
                 containers,
             } => {
                 let border_size = self.config.border_size;
@@ -119,40 +134,40 @@ impl Dome {
                 let monitor_dim = screen.dimension;
                 let scale = screen.scale;
 
-                let mut tiling_windows = Vec::new();
+                let mut placed_tiling = Vec::new();
                 let mut float_shows = Vec::new();
 
-                for wp in windows {
-                    if wp.is_float {
-                        // Float dimensions are screen-absolute. The OS clips at screen
-                        // edges, so we use wp.frame for everything (no visible_frame).
-                        let content_dim = apply_inset(wp.frame, border_size);
-                        if focused_window != Some(wp.id) {
-                            self.move_window_offscreen(wp.id);
-                        } else {
-                            self.place_window(wp.id, content_dim);
-                        }
-                        let entry = self.registry.by_id(wp.id);
-                        float_shows.push(FloatShow {
-                            cg_id: entry.cg_id,
-                            placement: *wp,
-                            cocoa_frame: to_ns_rect(self.primary_full_height, wp.frame),
-                            scale,
-                            content_dim,
-                        });
+                for wp in tiling_windows {
+                    let content_dim = apply_inset(wp.frame, border_size);
+                    // Clip to visible_frame bounds -- macOS doesn't reliably allow
+                    // placing windows partially off-screen (especially above menu bar)
+                    let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
+                    let Some(target) = visible_content else {
+                        let _span = tracing::debug_span!("empty_visible_content", ?content_dim, visible_frame = ?wp.visible_frame).entered();
+                        self.move_window_offscreen(wp.id);
+                        continue;
+                    };
+                    self.place_window(wp.id, target);
+                    placed_tiling.push(*wp);
+                }
+
+                for wp in float_windows {
+                    // Float dimensions are screen-absolute. The OS clips at screen
+                    // edges, so we use wp.frame for everything (no visible_frame).
+                    let content_dim = apply_inset(wp.frame, border_size);
+                    if focused_window != Some(wp.id) {
+                        self.move_window_offscreen(wp.id);
                     } else {
-                        let content_dim = apply_inset(wp.frame, border_size);
-                        // Clip to visible_frame bounds -- macOS doesn't reliably allow
-                        // placing windows partially off-screen (especially above menu bar)
-                        let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
-                        let Some(target) = visible_content else {
-                            let _span = tracing::debug_span!("empty_visible_content", ?content_dim, visible_frame = ?wp.visible_frame).entered();
-                            self.move_window_offscreen(wp.id);
-                            continue;
-                        };
-                        self.place_window(wp.id, target);
-                        tiling_windows.push(*wp);
+                        self.place_window(wp.id, content_dim);
                     }
+                    let entry = self.registry.by_id(wp.id);
+                    float_shows.push(FloatShow {
+                        cg_id: entry.cg_id,
+                        placement: *wp,
+                        cocoa_frame: to_ns_rect(self.primary_full_height, wp.frame),
+                        scale,
+                        content_dim,
+                    });
                 }
 
                 let mut container_data = Vec::new();
@@ -167,7 +182,7 @@ impl Dome {
                         monitor_dim,
                         cocoa_frame: to_ns_rect(self.primary_full_height, monitor_dim),
                         scale,
-                        windows: tiling_windows,
+                        windows: placed_tiling,
                         containers: container_data,
                     },
                     float_shows,

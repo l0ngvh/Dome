@@ -1,7 +1,7 @@
-use super::{setup, snapshot};
 use crate::action::MonitorTarget;
 use crate::core::node::Dimension;
 use crate::core::node::WindowRestrictions;
+use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
 #[test]
@@ -481,13 +481,13 @@ fn toggle_fullscreen_on_off() {
 }
 
 #[test]
-fn insert_tiling_doesnt_steal_focus_from_fullscreen() {
+fn insert_doesnt_steal_focus_from_fullscreen() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.toggle_fullscreen();
 
+    // Insert tiling: fullscreen still focused
     hub.insert_tiling();
-
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -525,21 +525,14 @@ fn insert_tiling_doesnt_steal_focus_from_fullscreen() {
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
-}
 
-#[test]
-fn insert_float_doesnt_steal_focus_from_fullscreen() {
-    let mut hub = setup();
-    hub.insert_tiling();
-    hub.toggle_fullscreen();
-
+    // Insert float: fullscreen still focused
     hub.insert_float(Dimension {
         x: 10.0,
         y: 5.0,
         width: 40.0,
         height: 10.0,
     });
-
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

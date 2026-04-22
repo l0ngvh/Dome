@@ -8,11 +8,11 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::action::{Actions, FocusTarget, HubAction, MoveTarget, ToggleTarget};
+use crate::action::{Actions, FocusTarget, HubAction, MasterTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, Hub, MonitorId, MonitorLayout, WindowId,
-    WindowPlacement, WindowRestrictions,
+    ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, MonitorId,
+    MonitorLayout, TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 
 use self::overlay::{FloatOverlayApi, TilingOverlayApi};
@@ -52,7 +52,7 @@ struct DisplayedMonitor {
 struct MonitorPositionData {
     monitor_id: MonitorId,
     dimension: Dimension,
-    tiling_windows: Vec<WindowPlacement>,
+    tiling_windows: Vec<TilingWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
 }
 
@@ -376,31 +376,74 @@ impl Dome {
     pub(super) fn execute_hub_action(&mut self, action: &HubAction) {
         match action {
             HubAction::Focus { target } => match target {
-                FocusTarget::Up => self.hub.focus_up(),
-                FocusTarget::Down => self.hub.focus_down(),
-                FocusTarget::Left => self.hub.focus_left(),
-                FocusTarget::Right => self.hub.focus_right(),
-                FocusTarget::Parent => self.hub.focus_parent(),
-                FocusTarget::NextTab => self.hub.focus_next_tab(),
-                FocusTarget::PrevTab => self.hub.focus_prev_tab(),
+                FocusTarget::Up => self.hub.handle_tiling_action(TilingAction::FocusDirection {
+                    direction: Direction::Vertical,
+                    forward: false,
+                }),
+                FocusTarget::Down => self.hub.handle_tiling_action(TilingAction::FocusDirection {
+                    direction: Direction::Vertical,
+                    forward: true,
+                }),
+                FocusTarget::Left => self.hub.handle_tiling_action(TilingAction::FocusDirection {
+                    direction: Direction::Horizontal,
+                    forward: false,
+                }),
+                FocusTarget::Right => self.hub.handle_tiling_action(TilingAction::FocusDirection {
+                    direction: Direction::Horizontal,
+                    forward: true,
+                }),
+                FocusTarget::Parent => self.hub.handle_tiling_action(TilingAction::FocusParent),
+                FocusTarget::NextTab => self
+                    .hub
+                    .handle_tiling_action(TilingAction::FocusTab { forward: true }),
+                FocusTarget::PrevTab => self
+                    .hub
+                    .handle_tiling_action(TilingAction::FocusTab { forward: false }),
                 FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
                 FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
             },
             HubAction::Move { target } => match target {
-                MoveTarget::Up => self.hub.move_up(),
-                MoveTarget::Down => self.hub.move_down(),
-                MoveTarget::Left => self.hub.move_left(),
-                MoveTarget::Right => self.hub.move_right(),
+                MoveTarget::Up => self.hub.handle_tiling_action(TilingAction::MoveDirection {
+                    direction: Direction::Vertical,
+                    forward: false,
+                }),
+                MoveTarget::Down => self.hub.handle_tiling_action(TilingAction::MoveDirection {
+                    direction: Direction::Vertical,
+                    forward: true,
+                }),
+                MoveTarget::Left => self.hub.handle_tiling_action(TilingAction::MoveDirection {
+                    direction: Direction::Horizontal,
+                    forward: false,
+                }),
+                MoveTarget::Right => self.hub.handle_tiling_action(TilingAction::MoveDirection {
+                    direction: Direction::Horizontal,
+                    forward: true,
+                }),
                 MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
                 MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
             },
             HubAction::Toggle { target } => match target {
-                ToggleTarget::SpawnDirection => self.hub.toggle_spawn_mode(),
-                ToggleTarget::Direction => self.hub.toggle_direction(),
-                ToggleTarget::Layout => self.hub.toggle_container_layout(),
+                ToggleTarget::SpawnDirection => {
+                    self.hub.handle_tiling_action(TilingAction::ToggleSpawnMode)
+                }
+                ToggleTarget::Direction => {
+                    self.hub.handle_tiling_action(TilingAction::ToggleDirection)
+                }
+                ToggleTarget::Layout => self
+                    .hub
+                    .handle_tiling_action(TilingAction::ToggleContainerLayout),
                 ToggleTarget::Float => self.hub.toggle_float(),
                 ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
             },
+            HubAction::Master { target } => {
+                let action = match target {
+                    MasterTarget::IncreaseMasterRatio => TilingAction::IncreaseMasterRatio,
+                    MasterTarget::DecreaseMasterRatio => TilingAction::DecreaseMasterRatio,
+                    MasterTarget::IncrementMasterCount => TilingAction::IncrementMasterCount,
+                    MasterTarget::DecrementMasterCount => TilingAction::DecrementMasterCount,
+                };
+                self.hub.handle_tiling_action(action);
+            }
         }
     }
 
@@ -413,7 +456,7 @@ impl Dome {
         let focused_monitor = result.focused_monitor;
         let focused = focused_window;
 
-        let mut float_windows: Vec<WindowPlacement> = Vec::new();
+        let mut float_windows: Vec<FloatWindowPlacement> = Vec::new();
         let mut per_monitor: Vec<MonitorPositionData> = Vec::new();
         let mut new_displayed: HashMap<MonitorId, DisplayedMonitor> = HashMap::new();
 
@@ -426,19 +469,20 @@ impl Dome {
 
             let mut window_ids = HashSet::new();
 
-            match mp.layout {
+            match &mp.layout {
                 MonitorLayout::Fullscreen(id) => {
-                    window_ids.insert(id);
-                    self.show_fullscreen_window(id, dimension);
+                    window_ids.insert(*id);
+                    self.show_fullscreen_window(*id, dimension);
                 }
                 MonitorLayout::Normal {
-                    windows,
+                    tiling_windows,
+                    float_windows: fw,
                     containers,
                 } => {
-                    let mut tiling_windows = Vec::new();
+                    let mut placed_tiling = Vec::new();
                     let mut container_data = Vec::new();
 
-                    for wp in windows {
+                    for wp in tiling_windows {
                         window_ids.insert(wp.id);
                         if self
                             .placement_tracker
@@ -446,13 +490,19 @@ impl Dome {
                         {
                             continue;
                         }
-                        if wp.is_float {
-                            float_windows.push(wp);
-                        } else {
-                            tiling_windows.push(wp);
-                        }
+                        placed_tiling.push(*wp);
                     }
-                    for cp in &containers {
+                    for wp in fw {
+                        window_ids.insert(wp.id);
+                        if self
+                            .placement_tracker
+                            .is_moving(self.registry.get(wp.id).ext.id())
+                        {
+                            continue;
+                        }
+                        float_windows.push(*wp);
+                    }
+                    for cp in containers {
                         if !cp.is_tabbed && !cp.is_highlighted {
                             continue;
                         }
@@ -463,7 +513,7 @@ impl Dome {
                     per_monitor.push(MonitorPositionData {
                         monitor_id: mp.monitor_id,
                         dimension,
-                        tiling_windows,
+                        tiling_windows: placed_tiling,
                         containers: container_data,
                     });
                 }
@@ -543,7 +593,7 @@ impl Dome {
     #[tracing::instrument(skip_all)]
     fn position_windows(
         &mut self,
-        float_windows: &[WindowPlacement],
+        float_windows: &[FloatWindowPlacement],
         per_monitor: &[MonitorPositionData],
         focused: Option<WindowId>,
     ) {

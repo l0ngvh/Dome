@@ -255,8 +255,10 @@ fn render_frame_focused_container_after_focus_parent() {
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
     dome.run_hub_actions(&actions("focus parent"));
 
+    // After focus_parent, focused_tiling_window() returns None (container highlighted),
+    // so the platform receives focused_window: None and focuses the overlay.
     let state = macos.last_frame_state();
-    assert_eq!(state.focused_window, None);
+    assert!(state.focused_window.is_none());
 }
 
 #[test]

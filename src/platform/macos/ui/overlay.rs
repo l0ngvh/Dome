@@ -18,7 +18,7 @@ use objc2_quartz_core::CAMetalLayer;
 use super::super::dome::HubEvent;
 use super::renderer::{MetalBackend, OverlayRenderer};
 use crate::config::Config;
-use crate::core::{ContainerPlacement, Dimension, WindowPlacement};
+use crate::core::{ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement};
 use crate::overlay;
 
 define_class!(
@@ -56,7 +56,7 @@ const FLOAT_OVERLAY_LEVEL: NSWindowLevel = NSFloatingWindowLevel;
 pub(super) struct FloatOverlay {
     window: Retained<NSWindow>,
     renderer: OverlayRenderer,
-    placement: Option<WindowPlacement>,
+    placement: Option<FloatWindowPlacement>,
     visible_content_bounds: Option<[f32; 4]>,
     scale: f64,
     config: Config,
@@ -116,7 +116,7 @@ impl FloatOverlay {
 
     pub(super) fn render(
         &mut self,
-        placement: &WindowPlacement,
+        placement: &FloatWindowPlacement,
         cocoa_frame: NSRect,
         scale: f64,
         content_dim: Dimension,
@@ -151,7 +151,15 @@ impl FloatOverlay {
                 .fixed_pos(egui::pos2(0.0, 0.0))
                 .fade_in(false)
                 .show(ctx, |ui| {
-                    overlay::paint_window_border(ui.painter(), placement, config, egui::Vec2::ZERO);
+                    overlay::paint_window_border(
+                        ui.painter(),
+                        placement.frame,
+                        placement.visible_frame,
+                        placement.is_highlighted,
+                        None,
+                        config,
+                        egui::Vec2::ZERO,
+                    );
                 });
         });
         self.window.setIsVisible(true);
@@ -170,7 +178,10 @@ impl FloatOverlay {
                         .show(ctx, |ui| {
                             overlay::paint_window_border(
                                 ui.painter(),
-                                &placement,
+                                placement.frame,
+                                placement.visible_frame,
+                                placement.is_highlighted,
+                                None,
                                 config,
                                 egui::Vec2::ZERO,
                             );
@@ -192,7 +203,10 @@ impl FloatOverlay {
                         .show(ctx, |ui| {
                             overlay::paint_window_border(
                                 ui.painter(),
-                                &placement,
+                                placement.frame,
+                                placement.visible_frame,
+                                placement.is_highlighted,
+                                None,
                                 config,
                                 egui::Vec2::ZERO,
                             );
@@ -249,7 +263,7 @@ impl TilingOverlay {
         cocoa_frame: NSRect,
         scale: f64,
         monitor: Dimension,
-        windows: &[WindowPlacement],
+        windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
     ) {
         self.window.setFrame_display(cocoa_frame, false);
@@ -357,7 +371,7 @@ pub(super) struct TilingOverlayViewIvars {
     events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<OverlayRenderer>,
     monitor: Cell<Dimension>,
-    windows: RefCell<Vec<WindowPlacement>>,
+    windows: RefCell<Vec<TilingWindowPlacement>>,
     containers: RefCell<Vec<(ContainerPlacement, Vec<String>)>>,
     config: RefCell<Config>,
     scale: Cell<f64>,
@@ -461,7 +475,7 @@ impl TilingOverlayView {
     fn update(
         &self,
         monitor: Dimension,
-        windows: &[WindowPlacement],
+        windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
         scale: f64,
     ) {

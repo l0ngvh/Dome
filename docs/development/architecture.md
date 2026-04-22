@@ -21,7 +21,7 @@ src/
 Monitor
   └── Workspace (one visible per monitor, created lazily by name)
         ├── root: Container tree (tiling)
-        ├── float_windows: [WindowId]
+        ├── float_windows: [(WindowId, Dimension)]
         └── fullscreen_windows: [WindowId]
 
 Container (split horizontal | split vertical | tabbed)
@@ -31,6 +31,8 @@ Container (split horizontal | split vertical | tabbed)
 Windows are always leaves. Workspaces are created on demand by name — no fixed set.
 
 Nodes are stored in a hash map with monotonically increasing typed IDs (`WindowId`, `ContainerId`, `MonitorId`, `WorkspaceId`). Hash map over Vec because nodes are frequently deleted (windows close, containers merge) and IDs must remain stable. Typed IDs prevent mixing at compile time. IDs are never reused, so a stale ID can't refer to a new node.
+
+The shared `Window` struct holds only mode, workspace, restrictions, title, and size constraints. Tiling-specific per-window state (parent, dimension, spawn_mode) lives in `PartitionTreeStrategy`'s `HashMap<WindowId, TilingWindowData>`, not on `Window`. This parallels how containers store their state in the strategy's `Allocator<Container>`. Float and fullscreen windows have no tiling data.
 
 **Direction invariance.** A split container never has the same direction as its parent split container. Without this, the same visual layout maps to multiple trees, making "move right" ambiguous. Enforced during toggle and restructure by walking child containers and flipping any that match their parent's direction.
 
@@ -61,13 +63,15 @@ Focus is split into three independent mechanisms, one per window mode:
 
 1. **Fullscreen focus** is implicit. If `fullscreen_windows` is non-empty, the last element is the focused fullscreen window. Focusing a fullscreen window moves it to the end of the vec.
 2. **Float focus** uses z-order. `float_windows` is z-ordered (last = topmost = focused). Focusing a float moves it to the end of the vec. A separate `is_float_focused` bool on Workspace tracks whether float mode has focus.
-3. **Tiling focus** uses a dedicated `focused_tiling: Option<Child>` pointer on Workspace. Only set by tiling operations (`set_workspace_focus`).
+3. **Tiling focus** uses a dedicated `focused_tiling: Option<Child>` pointer on Workspace. Only set by the strategy's `set_focus` method.
 
 The `focused()` accessor on Workspace computes effective focus by checking in priority order: fullscreen > float > tiling. All external reads go through this accessor. The three mechanisms are independent -- `focused_tiling` persists even when fullscreen or float windows are active, serving as "tiling focus memory." When fullscreen is unset or float is unfocused, tiling focus is restored without recomputing.
 
+**Container highlight.** When `focused_tiling` is `Child::Container` (after `focus_parent`), `focused_tiling_window()` returns `None` rather than walking to a leaf. This means `hub.focused_window()` returns `None` when a container is highlighted (assuming no fullscreen/float focus), which makes `toggle_float` and `toggle_fullscreen` no-ops and causes the platform to receive `focused_window: None` in placements, focusing the tiling overlay. Move-to-workspace and move-to-monitor bypass `focused_window()` in this case and call the strategy directly to move the whole container.
+
 **Invariant:** `is_float_focused` must be false when `float_windows` is empty. The test validator enforces this. The `focused()` accessor also handles it gracefully as defense-in-depth, falling through to `focused_tiling`.
 
-**Write paths.** `set_workspace_focus` is purely tiling: it walks up the container tree updating `container.focused` and active tabs, sets `focused_tiling`, and clears `is_float_focused`. `set_focus` (the entry point from the platform layer when the OS reports a focus change) branches by display mode: fullscreen promotes to top of the z-order stack, float sets `is_float_focused` and moves to end of `float_windows`, tiling calls `set_workspace_focus`.
+**Write paths.** The strategy's `set_focus` is purely tiling: it walks up the container tree updating `container.focused` and active tabs, sets `focused_tiling`, and clears `is_float_focused`. `set_focus` (the entry point from the platform layer when the OS reports a focus change) branches by display mode: fullscreen promotes to top of the z-order stack, float sets `is_float_focused` and moves to end of `float_windows`, tiling delegates to `strategy.set_focus`.
 
 **Detach cleanup.** Each detach function only cleans up its own mode's focus state. Cross-mode priority resolution happens at read time via `focused()`. For example, detaching the last float sets `is_float_focused = false` and `focused()` falls through to `focused_tiling`. Detaching the last tiling child with floats present sets `is_float_focused = true`. Detaching the last fullscreen window falls back directly to `focused_tiling`, skipping float. Users rarely focus float windows explicitly, so falling back to float would be surprising. There's no cross-mode fallback chain from fullscreen to float.
 
@@ -76,6 +80,18 @@ The `focused()` accessor on Workspace computes effective focus by checking in pr
 Hub is the single entry point for all tree mutations, preventing scattered mutation sites that could violate invariants. The platform calls Hub operations, then `get_visible_placements()` for a flat list of `WindowPlacement` and `ContainerPlacement` with screen coordinates. The platform positions windows and renders overlays from those placements.
 
 Hub never knows about OS handles, AX elements, or HWNDs — state changes are deterministic and testable.
+
+### Tiling Strategy
+
+Hub delegates all tiling-specific operations to a `TilingStrategy` trait (`src/core/strategy.rs`). This separates generic window management (monitors, workspaces, float, fullscreen, focus priority) from tiling behavior (container tree, spawn modes, split directions, layout).
+
+The trait has a minimal surface: `attach_child`, `detach_child`, `handle_action`, `layout_workspace`, `set_focus`, `collect_tiling_placements`, `focused_tiling_child`, and `validate_tree` (test-only). Everything else (scroll, viewport clamping, container parent lookups, tree restructuring) is private to the strategy implementation.
+
+`PartitionTreeStrategy` (`src/core/partition_tree/`) is the default and currently only implementation. It owns the container allocator and per-window tiling state (`HashMap<WindowId, TilingWindowData>` for parent, dimension, spawn_mode), and implements i3-style manual tiling: container tree with split horizontal/vertical/tabbed layout, spawn mode routing, direction invariance. All logic that was previously in `split.rs` (deleted) and the layout portion of `workspace.rs` now lives here.
+
+Hub holds `access: HubAccess` (monitors, focused_monitor, workspaces, windows, config) and `strategy: Box<dyn TilingStrategy>` as disjoint fields. Strategy methods receive `&mut HubAccess` so they can read/write shared state without borrowing Hub. This solves the split-borrow problem.
+
+`TilingAction` is an enum of tiling-specific commands (focus/move direction, toggle spawn mode, toggle direction, toggle layout, focus parent, focus tab). Hub's `command.rs` does restriction checks then delegates to `strategy.handle_action`. Float and fullscreen management stay on Hub.
 
 ### Layout
 

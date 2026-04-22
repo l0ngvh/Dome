@@ -1,6 +1,9 @@
 use super::{hub_debug_text, setup_hub, setup_logger_with_level, validate_hub};
 use crate::action::MonitorTarget;
+use crate::core::hub::{Hub, HubConfig};
+use crate::core::master_stack::MasterStackStrategy;
 use crate::core::node::{Dimension, MonitorId, WindowId, WindowRestrictions};
+use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
@@ -38,6 +41,10 @@ enum Op {
     SetFocus,
     SetWindowConstraint,
     SetWindowTitle,
+    IncreaseMasterRatio,
+    DecreaseMasterRatio,
+    IncrementMasterCount,
+    DecrementMasterCount,
     // Note: Exec is not included because it's a platform-specific action
     // that spawns external processes, not a core hub operation.
 }
@@ -74,11 +81,15 @@ const ALL_OPS: &[Op] = &[
     Op::SetFocus,
     Op::SetWindowConstraint,
     Op::SetWindowTitle,
+    Op::IncreaseMasterRatio,
+    Op::DecreaseMasterRatio,
+    Op::IncrementMasterCount,
+    Op::DecrementMasterCount,
 ];
 
-fn run_smoke_iteration(seed: u64, ops_per_run: usize) {
+fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let mut hub = setup_hub();
+    let mut hub = make_hub();
     let mut windows: Vec<WindowId> = Vec::new();
     let mut monitors: Vec<MonitorId> = vec![hub.focused_monitor()];
     let mut history: Vec<String> = Vec::new();
@@ -307,6 +318,22 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize) {
                     hub.set_window_title(id, title.clone());
                     format!("SetWindowTitle({id}, {title:?})")
                 }
+                Op::IncreaseMasterRatio => {
+                    hub.handle_tiling_action(TilingAction::IncreaseMasterRatio);
+                    "IncreaseMasterRatio".into()
+                }
+                Op::DecreaseMasterRatio => {
+                    hub.handle_tiling_action(TilingAction::DecreaseMasterRatio);
+                    "DecreaseMasterRatio".into()
+                }
+                Op::IncrementMasterCount => {
+                    hub.handle_tiling_action(TilingAction::IncrementMasterCount);
+                    "IncrementMasterCount".into()
+                }
+                Op::DecrementMasterCount => {
+                    hub.handle_tiling_action(TilingAction::DecrementMasterCount);
+                    "DecrementMasterCount".into()
+                }
             };
 
             history.push(op_str);
@@ -346,7 +373,7 @@ fn smoke_test() {
     let completed = AtomicUsize::new(0);
 
     (0..runs).into_par_iter().for_each(|run| {
-        run_smoke_iteration(seed.wrapping_add(run as u64), ops_per_run);
+        run_smoke_iteration(seed.wrapping_add(run as u64), ops_per_run, setup_hub);
         let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
         if done.is_multiple_of(10) {
             tracing::info!("Completed {done}/{runs}");
@@ -359,5 +386,80 @@ fn smoke_test() {
 fn reproduce_smoke_failure() {
     setup_logger_with_level("info");
     let seed = 167; // paste failing seed here
-    run_smoke_iteration(seed, 10000);
+    run_smoke_iteration(seed, 10000, setup_hub);
+}
+
+/// Confirms trait dispatch and placement collection work end-to-end:
+/// insert a tiling window, get placements, verify the window appears
+/// with correct dimensions.
+#[test]
+fn strategy_smoke_test() {
+    use super::setup;
+    use crate::core::hub::MonitorLayout;
+
+    let mut hub = setup();
+    let id = hub.insert_tiling();
+    let placements = hub.get_visible_placements();
+
+    assert_eq!(placements.monitors.len(), 1);
+    let mp = &placements.monitors[0];
+    let MonitorLayout::Normal {
+        tiling_windows,
+        float_windows,
+        containers,
+    } = &mp.layout
+    else {
+        panic!("expected Normal layout, got Fullscreen");
+    };
+
+    assert_eq!(tiling_windows.len(), 1);
+    assert!(float_windows.is_empty());
+    assert!(containers.is_empty());
+
+    let wp = &tiling_windows[0];
+    assert_eq!(wp.id, id);
+    assert!(wp.is_highlighted);
+    // Single tiling window fills the 150x30 screen
+    assert_eq!(wp.frame.width, 150.0);
+    assert_eq!(wp.frame.height, 30.0);
+
+    let ws = hub.current_workspace();
+    assert_eq!(hub.focused_tiling_window(ws), Some(id));
+}
+
+fn setup_master_stack() -> Hub {
+    Hub::new_with_strategy(
+        Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: 150.0,
+            height: 30.0,
+        },
+        HubConfig::default(),
+        Box::new(MasterStackStrategy::new()),
+    )
+}
+
+#[test]
+fn master_stack_smoke_test() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    setup_logger_with_level("info");
+
+    let seed = 42u64;
+    let runs = 200;
+    let ops_per_run = 10000;
+    let completed = AtomicUsize::new(0);
+
+    (0..runs).into_par_iter().for_each(|run| {
+        run_smoke_iteration(
+            seed.wrapping_add(run as u64),
+            ops_per_run,
+            setup_master_stack,
+        );
+        let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+        if done.is_multiple_of(10) {
+            tracing::info!("Completed master-stack {done}/{runs}");
+        }
+    });
 }

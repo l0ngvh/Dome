@@ -1,31 +1,21 @@
-mod auto_tile;
-mod delete_window;
 mod float_window;
-mod focus_direction;
-mod focus_parent;
 mod focus_workspace;
 mod fullscreen;
-mod insert_window;
+mod master_stack;
 mod monitor;
-mod move_in_direction;
 mod move_to_workspace;
+mod partition_tree;
 mod set_focus;
-mod set_window_constraint;
 mod smoke;
-mod sync_config;
-mod tabbed;
-mod toggle_direction;
-mod toggle_spawn_mode;
 
 use std::collections::HashSet;
 
 use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig, MonitorLayout, SpawnIndicator};
-use crate::core::node::{
-    Child, Container, ContainerId, Dimension, Direction, DisplayMode, Parent, WindowId, Workspace,
-    WorkspaceId,
-};
+use crate::core::node::{Dimension, Direction, Workspace, WorkspaceId};
+use crate::core::partition_tree::Child;
+use crate::core::strategy::TilingAction;
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
@@ -40,13 +30,18 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     let all = hub.get_visible_placements();
     let mp = &all.monitors[0];
 
-    let (windows, containers) = match &mp.layout {
+    let (tiling_windows, float_windows, containers) = match &mp.layout {
         MonitorLayout::Normal {
-            windows,
+            tiling_windows,
+            float_windows,
             containers,
-        } => (windows.as_slice(), containers.as_slice()),
+        } => (
+            tiling_windows.as_slice(),
+            float_windows.as_slice(),
+            containers.as_slice(),
+        ),
         MonitorLayout::Fullscreen(id) => {
-            let screen = hub.monitors.get(mp.monitor_id).dimension;
+            let screen = hub.access.monitors.get(mp.monitor_id).dimension;
             draw_rect(
                 &mut grid,
                 screen.x,
@@ -69,28 +64,25 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     };
 
     // Draw tiling windows
-    for wp in windows {
-        if !wp.is_float {
-            let d = wp.visible_frame;
-            let clip = clip_edges(wp.frame, wp.visible_frame);
-            draw_rect(
-                &mut grid,
-                d.x,
-                d.y,
-                d.width,
-                d.height,
-                &format!("W{}", wp.id.get()),
-                clip,
-            );
-        }
+    for wp in tiling_windows {
+        let d = wp.visible_frame;
+        let clip = clip_edges(wp.frame, wp.visible_frame);
+        draw_rect(
+            &mut grid,
+            d.x,
+            d.y,
+            d.width,
+            d.height,
+            &format!("W{}", wp.id.get()),
+            clip,
+        );
     }
 
     // Draw tab bars
     for cp in containers {
         if cp.is_tabbed {
-            let container = hub.get_container(cp.id);
-            let labels: Vec<String> = container
-                .children()
+            let labels: Vec<String> = cp
+                .children
                 .iter()
                 .map(|child| match child {
                     Child::Window(wid) => format!("W{}", wid.get()),
@@ -103,9 +95,9 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     }
 
     // Draw focus border for non-float focused
-    let focused_float = windows.iter().find(|p| p.is_highlighted && p.is_float);
+    let focused_float = float_windows.iter().find(|p| p.is_highlighted);
     if focused_float.is_none() {
-        if let Some(wp) = windows.iter().find(|p| p.is_highlighted) {
+        if let Some(wp) = tiling_windows.iter().find(|p| p.is_highlighted) {
             let d = wp.visible_frame;
             let clip = clip_edges(wp.frame, wp.visible_frame);
             draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
@@ -117,31 +109,29 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     }
 
     // Draw float windows on top
-    for wp in windows {
-        if wp.is_float {
-            let d = wp.visible_frame;
-            let clip = clip_edges(wp.frame, wp.visible_frame);
-            let grid_w = grid[0].len() as isize;
-            let grid_h = grid.len() as isize;
-            let x1 = d.x.round() as isize;
-            let y1 = d.y.round() as isize;
-            let x2 = (d.x + d.width).round() as isize - 1;
-            let y2 = (d.y + d.height).round() as isize - 1;
-            for row in (y1 + 1).max(0)..y2.min(grid_h) {
-                for col in (x1 + 1).max(0)..x2.min(grid_w) {
-                    grid[row as usize][col as usize] = ' ';
-                }
+    for wp in float_windows {
+        let d = wp.visible_frame;
+        let clip = clip_edges(wp.frame, wp.visible_frame);
+        let grid_w = grid[0].len() as isize;
+        let grid_h = grid.len() as isize;
+        let x1 = d.x.round() as isize;
+        let y1 = d.y.round() as isize;
+        let x2 = (d.x + d.width).round() as isize - 1;
+        let y2 = (d.y + d.height).round() as isize - 1;
+        for row in (y1 + 1).max(0)..y2.min(grid_h) {
+            for col in (x1 + 1).max(0)..x2.min(grid_w) {
+                grid[row as usize][col as usize] = ' ';
             }
-            draw_rect(
-                &mut grid,
-                d.x,
-                d.y,
-                d.width,
-                d.height,
-                &format!("F{}", wp.id.get()),
-                clip,
-            );
         }
+        draw_rect(
+            &mut grid,
+            d.x,
+            d.y,
+            d.width,
+            d.height,
+            &format!("F{}", wp.id.get()),
+            clip,
+        );
     }
 
     // Draw focus border for float focused (on top of everything)
@@ -170,13 +160,14 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     };
     let mut s = format!("Hub({focused})\n");
     for mp in &vp.monitors {
-        let screen = hub.monitors.get(mp.monitor_id).dimension;
+        let screen = hub.access.monitors.get(mp.monitor_id).dimension;
         match &mp.layout {
             MonitorLayout::Normal {
-                windows,
+                tiling_windows,
+                float_windows,
                 containers,
             } => {
-                if windows.is_empty() && containers.is_empty() {
+                if tiling_windows.is_empty() && float_windows.is_empty() && containers.is_empty() {
                     s.push_str(&format!(
                         "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}))\n",
                         mp.monitor_id, screen.x, screen.y, screen.width, screen.height
@@ -186,8 +177,11 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
                         "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
                         mp.monitor_id, screen.x, screen.y, screen.width, screen.height
                     ));
-                    for wp in windows {
-                        s.push_str(&fmt_window_placement(wp));
+                    for wp in tiling_windows {
+                        s.push_str(&fmt_tiling_placement(wp));
+                    }
+                    for wp in float_windows {
+                        s.push_str(&fmt_float_placement(wp));
                     }
                     for cp in containers {
                         s.push_str(&fmt_container_placement(cp));
@@ -229,20 +223,31 @@ fn fmt_spawn(indicator: &SpawnIndicator) -> String {
     dirs.join("+")
 }
 
-fn fmt_window_placement(wp: &crate::core::hub::WindowPlacement) -> String {
+fn fmt_tiling_placement(wp: &crate::core::hub::TilingWindowPlacement) -> String {
     let d = wp.visible_frame;
     let mut parts = format!(
         "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         wp.id, d.x, d.y, d.width, d.height
     );
-    if wp.is_float {
-        parts.push_str(", float");
-    }
     if wp.is_highlighted {
         parts.push_str(", highlighted");
     }
     if let Some(ref si) = wp.spawn_indicator {
         parts.push_str(&format!(", spawn={}", fmt_spawn(si)));
+    }
+    parts.push_str(")\n");
+    parts
+}
+
+fn fmt_float_placement(wp: &crate::core::hub::FloatWindowPlacement) -> String {
+    let d = wp.visible_frame;
+    let mut parts = format!(
+        "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
+        wp.id, d.x, d.y, d.width, d.height
+    );
+    parts.push_str(", float");
+    if wp.is_highlighted {
+        parts.push_str(", highlighted");
     }
     parts.push_str(")\n");
     parts
@@ -459,12 +464,11 @@ fn validate_hub(hub: &Hub) {
             "Workspace {workspace_id} has invalid monitor {}",
             workspace.monitor
         );
-        validate_workspace_focus(hub, workspace_id, &workspace);
         validate_floats(hub, workspace_id, &workspace);
         validate_fullscreens(hub, workspace_id, &workspace);
-        validate_tree(hub, workspace_id, &workspace);
     }
 
+    hub.validate_tree();
     validate_visible_placements(hub);
 }
 
@@ -486,59 +490,12 @@ fn validate_monitors(hub: &Hub) {
     }
 }
 
-fn validate_workspace_focus(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
-    // is_float_focused must be false when float_windows is empty
-    if workspace.is_float_focused() {
-        assert!(
-            !workspace.float_windows().is_empty(),
-            "Workspace {workspace_id}: is_float_focused is true but float_windows is empty"
-        );
-    }
-
-    // focused_tiling must point to a tiling window or container
-    if let Some(Child::Window(wid)) = workspace.focused_tiling() {
-        assert_eq!(
-            hub.get_window(wid).mode,
-            DisplayMode::Tiling,
-            "Workspace {workspace_id}: focused_tiling points to non-tiling window {wid}"
-        );
-    }
-
-    // focused_tiling must be reachable from root
-    if let Some(child) = workspace.focused_tiling() {
-        let root = workspace.root().unwrap_or_else(|| {
-            panic!("Workspace {workspace_id}: focused_tiling is {child:?} but root is None")
-        });
-        let root_focus = match root {
-            Child::Window(_) => root,
-            Child::Container(cid) => hub.get_container(cid).focused,
-        };
-        assert!(
-            child == root || child == root_focus,
-            "Workspace {workspace_id}: focused_tiling ({child:?}) not reachable from root ({root:?}, root_focus={root_focus:?})"
-        );
-    }
-
-    // If root exists, focused_tiling must be set
-    if workspace.root().is_some() {
-        assert!(
-            workspace.focused_tiling().is_some(),
-            "Workspace {workspace_id}: root is Some but focused_tiling is None"
-        );
-    }
-}
-
 fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
     for &(fid, _) in workspace.float_windows() {
         let float = hub.get_window(fid);
         assert_eq!(
             float.workspace, workspace_id,
             "Float {fid} has wrong workspace"
-        );
-        assert_eq!(
-            float.parent,
-            Parent::Workspace(workspace_id),
-            "Float {fid} has wrong parent"
         );
         assert!(
             float.is_float(),
@@ -561,281 +518,11 @@ fn validate_fullscreens(hub: &Hub, workspace_id: WorkspaceId, workspace: &Worksp
     }
     if let Some(&top) = workspace.fullscreen_windows().last() {
         assert_eq!(
-            workspace.focused(),
-            Some(Child::Window(top)),
+            workspace.focused_non_tiling(),
+            Some(top),
             "Workspace {workspace_id} has fullscreen windows but focus is not on topmost fullscreen window {top}"
         );
     }
-}
-
-fn validate_tree(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
-    let Some(root) = workspace.root() else {
-        return;
-    };
-    let mut stack = vec![(root, Parent::Workspace(workspace_id))];
-    for _ in super::bounded_loop() {
-        let Some((child, expected_parent)) = stack.pop() else {
-            break;
-        };
-        match child {
-            Child::Window(wid) => validate_window(hub, wid, expected_parent, workspace_id),
-            Child::Container(cid) => {
-                validate_container(hub, cid, expected_parent, workspace_id, &mut stack)
-            }
-        }
-    }
-}
-
-fn validate_window(hub: &Hub, wid: WindowId, expected_parent: Parent, workspace_id: WorkspaceId) {
-    let window = hub.get_window(wid);
-    assert!(!window.is_float(), "Window {wid} in tree but mode is Float");
-    assert!(
-        !window.is_fullscreen(),
-        "Window {wid} in tree but mode is Fullscreen"
-    );
-    assert_eq!(
-        window.parent, expected_parent,
-        "Window {wid} has wrong parent"
-    );
-    assert_eq!(
-        window.workspace, workspace_id,
-        "Window {wid} has wrong workspace"
-    );
-
-    let dim = window.dimension;
-    let (min_w, min_h) = window.min_size();
-    let (max_w, max_h) = window.max_size();
-
-    assert!(
-        dim.width >= min_w - 0.01,
-        "Window {wid} width {:.2} < min_width {:.2}",
-        dim.width,
-        min_w
-    );
-    assert!(
-        dim.height >= min_h - 0.01,
-        "Window {wid} height {:.2} < min_height {:.2}",
-        dim.height,
-        min_h
-    );
-
-    if max_w > 0.0 {
-        assert!(
-            dim.width <= max_w + 0.01,
-            "Window {wid} width {:.2} > max_width {:.2}",
-            dim.width,
-            max_w
-        );
-        assert!(
-            max_w >= min_w,
-            "Window {wid} max_width {:.2} < min_width {:.2}",
-            max_w,
-            min_w
-        );
-    }
-    if max_h > 0.0 {
-        assert!(
-            dim.height <= max_h + 0.01,
-            "Window {wid} height {:.2} > max_height {:.2}",
-            dim.height,
-            max_h
-        );
-        assert!(
-            max_h >= min_h,
-            "Window {wid} max_height {:.2} < min_height {:.2}",
-            max_h,
-            min_h
-        );
-    }
-}
-
-fn validate_container(
-    hub: &Hub,
-    cid: ContainerId,
-    expected_parent: Parent,
-    workspace_id: WorkspaceId,
-    stack: &mut Vec<(Child, Parent)>,
-) {
-    let container = hub.get_container(cid);
-    assert_eq!(
-        container.parent, expected_parent,
-        "Container {cid} has wrong parent"
-    );
-    assert_eq!(
-        container.workspace, workspace_id,
-        "Container {cid} has wrong workspace"
-    );
-    assert!(
-        container.children.len() >= 2,
-        "Container {cid} has less than 2 children"
-    );
-
-    if let Child::Window(wid) = container.focused {
-        assert!(
-            !hub.get_window(wid).is_float(),
-            "Container {cid} focused on float {wid}"
-        );
-    }
-
-    validate_container_tabbed(hub, cid, container);
-    validate_container_direction(hub, cid, container, expected_parent);
-    validate_container_dimensions(hub, cid, container);
-    validate_container_focus(hub, cid, container);
-
-    for &c in container.children() {
-        stack.push((c, Parent::Container(cid)));
-    }
-}
-
-fn validate_container_tabbed(hub: &Hub, cid: ContainerId, container: &Container) {
-    if !container.is_tabbed() {
-        return;
-    }
-    assert!(
-        container.active_tab_index() < container.children().len(),
-        "Container {cid} active_tab out of bounds"
-    );
-    let active_tab = container.children()[container.active_tab_index()];
-    let expected_focus = match active_tab {
-        Child::Window(_) => active_tab,
-        Child::Container(child_cid) => hub.get_container(child_cid).focused,
-    };
-    assert!(
-        container.focused == expected_focus || container.focused == active_tab,
-        "Container {cid} focused {:?} doesn't match active_tab {:?} or its focused {:?}",
-        container.focused,
-        active_tab,
-        expected_focus
-    );
-}
-
-fn validate_container_direction(
-    hub: &Hub,
-    cid: ContainerId,
-    container: &Container,
-    expected_parent: Parent,
-) {
-    if let Parent::Container(parent_cid) = expected_parent
-        && let Some(parent_dir) = hub.get_container(parent_cid).direction()
-        && let Some(child_dir) = container.direction()
-    {
-        assert_ne!(
-            parent_dir, child_dir,
-            "Container {cid} has same direction as parent {parent_cid}"
-        );
-    }
-}
-
-fn child_constraints(hub: &Hub, child: Child) -> (Dimension, (f32, f32), (f32, f32)) {
-    match child {
-        Child::Window(wid) => {
-            let w = hub.get_window(wid);
-            (w.dimension, w.min_size(), w.max_size())
-        }
-        Child::Container(cid) => {
-            let c = hub.get_container(cid);
-            (c.dimension, c.min_size(), (0.0, 0.0))
-        }
-    }
-}
-
-fn validate_container_dimensions(hub: &Hub, cid: ContainerId, container: &Container) {
-    let dim = container.dimension;
-    let children = container.children();
-    let constraints: Vec<_> = children
-        .iter()
-        .map(|&c| child_constraints(hub, c))
-        .collect();
-
-    match container.direction() {
-        Some(dir) => {
-            let (split_label, split_limit) = match dir {
-                Direction::Horizontal => ("width", dim.width),
-                Direction::Vertical => ("height", dim.height),
-            };
-            let split_sum: f32 = match dir {
-                Direction::Horizontal => constraints.iter().map(|(d, _, _)| d.width).sum(),
-                Direction::Vertical => constraints.iter().map(|(d, _, _)| d.height).sum(),
-            };
-            assert!(
-                split_sum <= split_limit + 0.01,
-                "Container {cid} children total {split_label} {split_sum:.2} > container {split_label} {split_limit:.2}",
-            );
-
-            // Cross-axis: each child should fill the container (or be constrained by max)
-            for (i, (child_dim, child_min, child_max)) in constraints.iter().enumerate() {
-                let (cross_child, cross_container, cross_min, cross_max, label) = match dir {
-                    Direction::Horizontal => (
-                        child_dim.height,
-                        dim.height,
-                        child_min.1,
-                        child_max.1,
-                        "height",
-                    ),
-                    Direction::Vertical => (
-                        child_dim.width,
-                        dim.width,
-                        child_min.0,
-                        child_max.0,
-                        "width",
-                    ),
-                };
-                let allows_smaller = cross_max > 0.0 && cross_max < cross_container;
-                assert!(
-                    cross_child >= cross_container - 0.01
-                        || cross_child >= cross_min - 0.01
-                        || allows_smaller,
-                    "Container {cid} child {i} {label} {cross_child:.2} < container {label} {cross_container:.2} and < min_{label} {cross_min:.2}",
-                );
-            }
-        }
-        None => {
-            let expected_height = dim.height - TAB_BAR_HEIGHT;
-            for (i, (child_dim, _, child_max)) in constraints.iter().enumerate() {
-                let allows_smaller_w = child_max.0 > 0.0 && child_max.0 < dim.width;
-                let allows_smaller_h = child_max.1 > 0.0 && child_max.1 < expected_height;
-                assert!(
-                    (child_dim.width - dim.width).abs() < 0.01 || allows_smaller_w,
-                    "Container {cid} tabbed child {i} width {:.2} != container width {:.2}",
-                    child_dim.width,
-                    dim.width
-                );
-                assert!(
-                    (child_dim.height - expected_height).abs() < 0.01 || allows_smaller_h,
-                    "Container {cid} tabbed child {i} height {:.2} != expected {:.2}",
-                    child_dim.height,
-                    expected_height
-                );
-            }
-        }
-    }
-
-    let (min_w, min_h) = container.min_size();
-    assert!(
-        dim.width >= min_w - 0.01,
-        "Container {cid} width {:.2} < min_width {:.2}",
-        dim.width,
-        min_w
-    );
-    assert!(
-        dim.height >= min_h - 0.01,
-        "Container {cid} height {:.2} < min_height {:.2}",
-        dim.height,
-        min_h
-    );
-}
-
-fn validate_container_focus(hub: &Hub, cid: ContainerId, container: &Container) {
-    let focused = container.focused;
-    let is_direct_child = container.children().contains(&focused);
-    let matches_child_focus = container.children().iter().any(|&c| {
-        matches!(c, Child::Container(child_cid) if hub.get_container(child_cid).focused == focused)
-    });
-    assert!(
-        is_direct_child || matches_child_focus,
-        "Container {cid} focus {focused:?} is neither a direct child nor matches a child's focus"
-    );
-    validate_child_exists(hub, focused);
 }
 
 fn validate_visible_placements(hub: &Hub) {
@@ -859,15 +546,33 @@ fn validate_visible_placements(hub: &Hub) {
     let mut seen_window_ids = HashSet::new();
 
     for mp in &all_placements.monitors {
-        let screen = hub.monitors.get(mp.monitor_id).dimension;
-        let (windows, containers) = match &mp.layout {
+        let screen = hub.access.monitors.get(mp.monitor_id).dimension;
+        let (tiling_windows, float_windows, containers) = match &mp.layout {
             MonitorLayout::Normal {
-                windows,
+                tiling_windows,
+                float_windows,
                 containers,
-            } => (windows.as_slice(), containers.as_slice()),
+            } => (
+                tiling_windows.as_slice(),
+                float_windows.as_slice(),
+                containers.as_slice(),
+            ),
             MonitorLayout::Fullscreen(_) => continue,
         };
-        for wp in windows {
+        for wp in tiling_windows {
+            assert!(
+                seen_window_ids.insert(wp.id),
+                "Duplicate window {} in visible placements",
+                wp.id
+            );
+            assert_eq!(
+                clip(wp.frame, screen),
+                Some(wp.visible_frame),
+                "Window {} visible_frame doesn't match clip(frame, screen)",
+                wp.id
+            );
+        }
+        for wp in float_windows {
             assert!(
                 seen_window_ids.insert(wp.id),
                 "Duplicate window {} in visible placements",
@@ -891,19 +596,93 @@ fn validate_visible_placements(hub: &Hub) {
     }
 }
 
-fn validate_child_exists(hub: &Hub, child: Child) {
-    match child {
-        Child::Window(wid) => {
-            hub.get_window(wid);
-        }
-        Child::Container(cid) => {
-            hub.get_container(cid);
-        }
-    }
-}
-
 fn setup_logger() {
     setup_logger_with_level("warn");
+}
+
+/// Test convenience methods that wrap handle_tiling_action with the appropriate
+/// TilingAction variant. Keeps test call sites readable (e.g. hub.focus_left()
+/// instead of hub.handle_tiling_action(TilingAction::FocusDirection { ... })).
+impl Hub {
+    pub(crate) fn focus_left(&mut self) {
+        self.handle_tiling_action(TilingAction::FocusDirection {
+            direction: Direction::Horizontal,
+            forward: false,
+        });
+    }
+
+    pub(crate) fn focus_right(&mut self) {
+        self.handle_tiling_action(TilingAction::FocusDirection {
+            direction: Direction::Horizontal,
+            forward: true,
+        });
+    }
+
+    pub(crate) fn focus_up(&mut self) {
+        self.handle_tiling_action(TilingAction::FocusDirection {
+            direction: Direction::Vertical,
+            forward: false,
+        });
+    }
+
+    pub(crate) fn focus_down(&mut self) {
+        self.handle_tiling_action(TilingAction::FocusDirection {
+            direction: Direction::Vertical,
+            forward: true,
+        });
+    }
+
+    pub(crate) fn focus_parent(&mut self) {
+        self.handle_tiling_action(TilingAction::FocusParent);
+    }
+
+    pub(crate) fn focus_next_tab(&mut self) {
+        self.handle_tiling_action(TilingAction::FocusTab { forward: true });
+    }
+
+    pub(crate) fn focus_prev_tab(&mut self) {
+        self.handle_tiling_action(TilingAction::FocusTab { forward: false });
+    }
+
+    pub(crate) fn move_left(&mut self) {
+        self.handle_tiling_action(TilingAction::MoveDirection {
+            direction: Direction::Horizontal,
+            forward: false,
+        });
+    }
+
+    pub(crate) fn move_right(&mut self) {
+        self.handle_tiling_action(TilingAction::MoveDirection {
+            direction: Direction::Horizontal,
+            forward: true,
+        });
+    }
+
+    pub(crate) fn move_up(&mut self) {
+        self.handle_tiling_action(TilingAction::MoveDirection {
+            direction: Direction::Vertical,
+            forward: false,
+        });
+    }
+
+    pub(crate) fn move_down(&mut self) {
+        self.handle_tiling_action(TilingAction::MoveDirection {
+            direction: Direction::Vertical,
+            forward: true,
+        });
+    }
+
+    pub(crate) fn toggle_spawn_mode(&mut self) {
+        self.handle_tiling_action(TilingAction::ToggleSpawnMode);
+    }
+
+    pub(crate) fn toggle_direction(&mut self) {
+        self.handle_tiling_action(TilingAction::ToggleDirection);
+    }
+
+    pub(crate) fn toggle_container_layout(&mut self) {
+        self.handle_tiling_action(TilingAction::ToggleContainerLayout);
+    }
 }
 
 pub(super) fn setup_logger_with_level(level: &str) {

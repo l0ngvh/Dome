@@ -18,6 +18,10 @@ pub enum HubAction {
         #[command(subcommand)]
         target: ToggleTarget,
     },
+    Master {
+        #[command(subcommand)]
+        target: MasterTarget,
+    },
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -45,6 +49,7 @@ impl fmt::Display for HubAction {
             HubAction::Focus { target } => write!(f, "focus {target}"),
             HubAction::Move { target } => write!(f, "move {target}"),
             HubAction::Toggle { target } => write!(f, "toggle {target}"),
+            HubAction::Master { target } => write!(f, "master {target}"),
         }
     }
 }
@@ -207,6 +212,25 @@ impl fmt::Display for ToggleTarget {
     }
 }
 
+#[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
+pub enum MasterTarget {
+    IncreaseMasterRatio,
+    DecreaseMasterRatio,
+    IncrementMasterCount,
+    DecrementMasterCount,
+}
+
+impl fmt::Display for MasterTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MasterTarget::IncreaseMasterRatio => write!(f, "increase-master-ratio"),
+            MasterTarget::DecreaseMasterRatio => write!(f, "decrease-master-ratio"),
+            MasterTarget::IncrementMasterCount => write!(f, "increment-master-count"),
+            MasterTarget::DecrementMasterCount => write!(f, "decrement-master-count"),
+        }
+    }
+}
+
 impl FromStr for Action {
     type Err = anyhow::Error;
 
@@ -288,6 +312,18 @@ impl FromStr for Action {
             ["toggle", "fullscreen"] => Ok(Action::Hub(HubAction::Toggle {
                 target: ToggleTarget::Fullscreen,
             })),
+            ["master", "increase-master-ratio"] => Ok(Action::Hub(HubAction::Master {
+                target: MasterTarget::IncreaseMasterRatio,
+            })),
+            ["master", "decrease-master-ratio"] => Ok(Action::Hub(HubAction::Master {
+                target: MasterTarget::DecreaseMasterRatio,
+            })),
+            ["master", "increment-master-count"] => Ok(Action::Hub(HubAction::Master {
+                target: MasterTarget::IncrementMasterCount,
+            })),
+            ["master", "decrement-master-count"] => Ok(Action::Hub(HubAction::Master {
+                target: MasterTarget::DecrementMasterCount,
+            })),
             ["exit"] => Ok(Action::Exit),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
@@ -314,6 +350,7 @@ enum FlatAction {
     Focus { target: FocusTarget },
     Move { target: MoveTarget },
     Toggle { target: ToggleTarget },
+    Master { target: MasterTarget },
     Exec { command: String },
     Exit,
 }
@@ -324,6 +361,7 @@ impl From<Action> for FlatAction {
             Action::Hub(HubAction::Focus { target }) => FlatAction::Focus { target },
             Action::Hub(HubAction::Move { target }) => FlatAction::Move { target },
             Action::Hub(HubAction::Toggle { target }) => FlatAction::Toggle { target },
+            Action::Hub(HubAction::Master { target }) => FlatAction::Master { target },
             Action::Exec { command } => FlatAction::Exec { command },
             Action::Exit => FlatAction::Exit,
         }
@@ -336,6 +374,7 @@ impl From<FlatAction> for Action {
             FlatAction::Focus { target } => Action::Hub(HubAction::Focus { target }),
             FlatAction::Move { target } => Action::Hub(HubAction::Move { target }),
             FlatAction::Toggle { target } => Action::Hub(HubAction::Toggle { target }),
+            FlatAction::Master { target } => Action::Hub(HubAction::Master { target }),
             FlatAction::Exec { command } => Action::Exec { command },
             FlatAction::Exit => Action::Exit,
         }
@@ -384,6 +423,12 @@ mod tests {
                     target: ToggleTarget::Float,
                 }),
                 r#"{"Toggle":{"target":"Float"}}"#,
+            ),
+            (
+                Action::Hub(HubAction::Master {
+                    target: MasterTarget::IncreaseMasterRatio,
+                }),
+                r#"{"Master":{"target":"IncreaseMasterRatio"}}"#,
             ),
             (
                 Action::Exec {

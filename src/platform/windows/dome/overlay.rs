@@ -31,7 +31,7 @@ use windows::core::PCWSTR;
 
 use super::HubEvent;
 use crate::config::Config;
-use crate::core::{ContainerPlacement, Dimension, WindowPlacement};
+use crate::core::{ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement};
 use crate::overlay;
 use crate::platform::windows::external::{HwndId, ZOrder};
 
@@ -244,9 +244,13 @@ fn enable_blur_behind(hwnd: HWND) {
     unsafe { DwmExtendFrameIntoClientArea(hwnd, &margins).ok() };
 }
 
-pub(super) fn build_window_border_region(placement: &WindowPlacement, config: &Config) -> HRGN {
-    let vf = placement.visible_frame;
-    let f = placement.frame;
+pub(super) fn build_window_border_region(
+    frame: Dimension,
+    visible_frame: Dimension,
+    config: &Config,
+) -> HRGN {
+    let vf = visible_frame;
+    let f = frame;
     let ox = (f.x - vf.x) as i32;
     let oy = (f.y - vf.y) as i32;
     let fw = f.width as i32;
@@ -362,7 +366,7 @@ pub(in crate::platform::windows) struct TilingOverlay {
     renderer: OverlayRenderer,
     events: Vec<egui::Event>,
     monitor: Dimension,
-    windows: Vec<WindowPlacement>,
+    windows: Vec<TilingWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
     config: Config,
     hub_sender: HubSender,
@@ -419,7 +423,7 @@ impl TilingOverlayApi for TilingOverlay {
     fn update(
         &mut self,
         monitor: Dimension,
-        windows: &[WindowPlacement],
+        windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
     ) {
         let w = monitor.width.max(1.0) as u32;
@@ -433,7 +437,7 @@ impl TilingOverlayApi for TilingOverlay {
         // Build combined region covering all border strips and tab bar rects
         let region = unsafe { CreateRectRgn(0, 0, 0, 0) };
         for wp in windows {
-            let wr = build_window_border_region(wp, &self.config);
+            let wr = build_window_border_region(wp.frame, wp.visible_frame, &self.config);
             let ox = (wp.visible_frame.x - monitor.x) as i32;
             let oy = (wp.visible_frame.y - monitor.y) as i32;
             unsafe {
@@ -581,7 +585,7 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
 
 pub(in crate::platform::windows) trait FloatOverlayApi {
     fn id(&self) -> HwndId;
-    fn update(&mut self, wp: &WindowPlacement, config: &Config, z: ZOrder);
+    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder);
     fn hide(&mut self);
 }
 
@@ -590,7 +594,7 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     fn update(
         &mut self,
         monitor: Dimension,
-        windows: &[WindowPlacement],
+        windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
     );
     fn clear(&mut self);
@@ -632,7 +636,7 @@ impl FloatOverlayApi for FloatOverlay {
         HwndId::from(self.window.hwnd())
     }
 
-    fn update(&mut self, wp: &WindowPlacement, config: &Config, z: ZOrder) {
+    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder) {
         let vf = wp.visible_frame;
         let w = vf.width.max(1.0) as u32;
         let h = vf.height.max(1.0) as u32;
@@ -653,11 +657,19 @@ impl FloatOverlayApi for FloatOverlay {
                         origin.to_pos2(),
                         egui::vec2(vf.width, vf.height),
                     ));
-                    overlay::paint_window_border(ui.painter(), wp, config, origin);
+                    overlay::paint_window_border(
+                        ui.painter(),
+                        wp.frame,
+                        wp.visible_frame,
+                        wp.is_highlighted,
+                        None,
+                        config,
+                        origin,
+                    );
                 });
         });
 
-        let region = build_window_border_region(wp, config);
+        let region = build_window_border_region(wp.frame, wp.visible_frame, config);
         unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
 
         let z_after: Option<HWND> = z.into();

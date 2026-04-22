@@ -33,10 +33,6 @@ impl Node for Monitor {
 pub(crate) struct Workspace {
     pub(super) name: String,
     pub(super) monitor: MonitorId,
-    pub(super) root: Option<Child>,
-    /// Tiling focus pointer. Tracks focus independently of fullscreen/float state,
-    /// serving as "tiling focus memory" that persists across mode transitions.
-    pub(super) focused_tiling: Option<Child>,
     /// When true, the focused window is float_windows.last() (z-ordered, last = topmost).
     /// Must be false when float_windows is empty.
     pub(super) is_float_focused: bool,
@@ -45,7 +41,6 @@ pub(crate) struct Workspace {
     pub(super) float_windows: Vec<(WindowId, Dimension)>,
     /// All fullscreen windows in this workspace. Last element is topmost (highest z-order).
     pub(super) fullscreen_windows: Vec<WindowId>,
-    pub(super) viewport_offset: (f32, f32),
 }
 
 impl Node for Workspace {
@@ -55,42 +50,27 @@ impl Node for Workspace {
 impl Workspace {
     pub(super) fn new(name: String, monitor: MonitorId) -> Self {
         Self {
-            root: None,
-            focused_tiling: None,
             is_float_focused: false,
             name,
             monitor,
             float_windows: Vec::new(),
             fullscreen_windows: Vec::new(),
-            viewport_offset: (0.0, 0.0),
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn root(&self) -> Option<Child> {
-        self.root
-    }
-
-    /// Computes effective focus using priority: fullscreen > float > tiling.
-    /// Fullscreen focus is implicit from fullscreen_windows.last().
-    /// Float focus uses z-order (float_windows.last() when is_float_focused).
-    /// Falls through to focused_tiling as a safety net if is_float_focused
-    /// is true but float_windows is empty (the validator catches this bug).
-    pub(crate) fn focused(&self) -> Option<Child> {
+    /// Computes effective non-tiling focus: fullscreen > float.
+    /// Returns None if neither fullscreen nor float is focused, meaning
+    /// tiling focus should be consulted via the strategy.
+    pub(crate) fn focused_non_tiling(&self) -> Option<WindowId> {
         if let Some(&id) = self.fullscreen_windows.last() {
-            return Some(Child::Window(id));
+            return Some(id);
         }
         if self.is_float_focused
             && let Some(&(id, _)) = self.float_windows.last()
         {
-            return Some(Child::Window(id));
+            return Some(id);
         }
-        self.focused_tiling
-    }
-
-    #[cfg(test)]
-    pub(crate) fn focused_tiling(&self) -> Option<Child> {
-        self.focused_tiling
+        None
     }
 
     #[cfg(test)]
@@ -109,201 +89,6 @@ impl Workspace {
     }
 }
 
-/// Contain the windows
-/// Must maintain these invariants:
-/// 1. All containers must have at least 2 children.
-/// 2. Parent container and child container must differ in direction, unless one of them are tabbed
-/// 3. A container's focus must either match a child's focus or point directly to a child.
-#[derive(Debug, Clone)]
-pub(crate) struct Container {
-    pub(super) parent: Parent,
-    pub(super) workspace: WorkspaceId,
-    pub(super) children: Vec<Child>,
-    /// The focused descendant
-    pub(super) focused: Child,
-    pub(super) dimension: Dimension,
-    direction: Direction,
-    // Don't allow directly set spawn_mode, otherwise that spawn mode will carry over other
-    // spawn mode history
-    spawn_mode: SpawnMode,
-    pub(super) is_tabbed: bool,
-    pub(super) active_tab_index: usize,
-    pub(super) min_width: f32,
-    pub(super) min_height: f32,
-}
-
-impl Node for Container {
-    type Id = ContainerId;
-}
-
-impl Container {
-    pub(super) fn split(
-        parent: Parent,
-        workspace: WorkspaceId,
-        children: Vec<Child>,
-        focused: Child,
-        dimension: Dimension,
-        direction: Direction,
-    ) -> Self {
-        let spawn_mode = match direction {
-            Direction::Horizontal => SpawnMode::horizontal(),
-            Direction::Vertical => SpawnMode::vertical(),
-        };
-        Self {
-            children,
-            focused,
-            parent,
-            workspace,
-            dimension,
-            direction,
-            spawn_mode,
-            is_tabbed: false,
-            active_tab_index: 0,
-            min_width: 0.0,
-            min_height: 0.0,
-        }
-    }
-
-    pub(super) fn tabbed(
-        parent: Parent,
-        workspace: WorkspaceId,
-        children: Vec<Child>,
-        focused: Child,
-        dimension: Dimension,
-    ) -> Self {
-        Self {
-            children,
-            focused,
-            parent,
-            workspace,
-            dimension,
-            direction: Direction::Horizontal,
-            spawn_mode: SpawnMode::tabbed(),
-            is_tabbed: true,
-            active_tab_index: 0,
-            min_width: 0.0,
-            min_height: 0.0,
-        }
-    }
-
-    pub(crate) fn is_tabbed(&self) -> bool {
-        self.is_tabbed
-    }
-
-    pub(crate) fn active_tab_index(&self) -> usize {
-        self.active_tab_index
-    }
-
-    pub(crate) fn active_tab(&self) -> Option<Child> {
-        if self.is_tabbed {
-            Some(self.children[self.active_tab_index])
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn set_active_tab(&mut self, tab: Child) {
-        if !self.is_tabbed {
-            panic!("Calling set_active_tab on split container");
-        }
-        self.active_tab_index = self.children.iter().position(|c| *c == tab).unwrap();
-    }
-
-    pub(super) fn switch_tab(&mut self, forward: bool) -> Option<Child> {
-        if !self.is_tabbed {
-            return None;
-        }
-        let len = self.children.len();
-        let current = self.active_tab_index;
-        let new_tab = if forward {
-            (current + 1) % len
-        } else {
-            (current + len - 1) % len
-        };
-        self.active_tab_index = new_tab;
-        Some(self.children[new_tab])
-    }
-
-    pub(super) fn set_active_tab_by_index(&mut self, index: usize) -> Option<Child> {
-        if !self.is_tabbed || index >= self.children.len() {
-            return None;
-        }
-        self.active_tab_index = index;
-        Some(self.children[index])
-    }
-
-    pub(crate) fn children(&self) -> &[Child] {
-        &self.children
-    }
-
-    pub(crate) fn min_size(&self) -> (f32, f32) {
-        (self.min_width, self.min_height)
-    }
-
-    pub(super) fn direction(&self) -> Option<Direction> {
-        if self.is_tabbed {
-            None
-        } else {
-            Some(self.direction)
-        }
-    }
-
-    pub(super) fn can_accomodate(&self, spawn_mode: SpawnMode) -> bool {
-        spawn_mode
-            .as_direction()
-            .is_some_and(|d| self.has_direction(d))
-            || (spawn_mode.is_tab() && self.is_tabbed())
-    }
-
-    pub(super) fn has_direction(&self, direction: Direction) -> bool {
-        if self.is_tabbed {
-            false
-        } else {
-            self.direction == direction
-        }
-    }
-
-    pub(crate) fn spawn_mode(&self) -> SpawnMode {
-        self.spawn_mode
-    }
-
-    // Reset spawn mode
-    pub(super) fn set_spawn_mode(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = SpawnMode::clean(spawn_mode)
-    }
-
-    /// Keep history
-    pub(crate) fn switch_spawn_mode(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = self.spawn_mode.switch_to(spawn_mode)
-    }
-
-    pub(super) fn position_of(&self, child: Child) -> usize {
-        self.children.iter().position(|c| *c == child).unwrap()
-    }
-
-    pub(super) fn remove_child(&mut self, child: Child) {
-        let pos = self.children.iter().position(|c| *c == child).unwrap();
-        self.children.remove(pos);
-        if self.is_tabbed && pos <= self.active_tab_index {
-            self.active_tab_index = self.active_tab_index.saturating_sub(1);
-        }
-    }
-
-    pub(super) fn replace_child(&mut self, old: Child, new: Child) {
-        if let Some(pos) = self.children.iter().position(|c| *c == old) {
-            self.children[pos] = new;
-        }
-    }
-
-    pub(super) fn toggle_direction(&mut self) -> Direction {
-        self.direction = match self.direction {
-            Direction::Horizontal => Direction::Vertical,
-            Direction::Vertical => Direction::Horizontal,
-        };
-        self.direction
-    }
-}
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Direction {
     #[default]
@@ -318,122 +103,6 @@ impl std::fmt::Display for Direction {
             Direction::Vertical => write!(f, "Vertical"),
         }
     }
-}
-
-/// After toggling spawn mode of one descendant to tab, all descendants of a tabbed container must
-/// also have spawn mode of tabbed, except from descendants of type tabbed container. The same also
-/// applies to when toggling spawn mode from tabbed to split.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SpawnMode {
-    current: SpawnState,
-    previous: SpawnState,
-}
-
-impl SpawnMode {
-    pub(crate) fn horizontal() -> Self {
-        Self {
-            current: SpawnState::Horizontal,
-            previous: SpawnState::Horizontal,
-        }
-    }
-
-    pub(crate) fn vertical() -> Self {
-        Self {
-            current: SpawnState::Vertical,
-            previous: SpawnState::Vertical,
-        }
-    }
-
-    pub(crate) fn tabbed() -> Self {
-        Self {
-            current: SpawnState::Tab,
-            previous: SpawnState::Tab,
-        }
-    }
-
-    pub(crate) fn from_direction(direction: Direction) -> Self {
-        match direction {
-            Direction::Horizontal => Self::horizontal(),
-            Direction::Vertical => Self::vertical(),
-        }
-    }
-
-    pub(crate) fn is_tab(&self) -> bool {
-        self.current == SpawnState::Tab
-    }
-
-    pub(crate) fn is_horizontal(&self) -> bool {
-        self.current == SpawnState::Horizontal
-    }
-
-    pub(crate) fn is_vertical(&self) -> bool {
-        self.current == SpawnState::Vertical
-    }
-
-    pub(crate) fn as_direction(&self) -> Option<Direction> {
-        match self.current {
-            SpawnState::Horizontal => Some(Direction::Horizontal),
-            SpawnState::Vertical => Some(Direction::Vertical),
-            SpawnState::Tab => None,
-        }
-    }
-
-    pub(crate) fn switch_to(&self, other: SpawnMode) -> Self {
-        Self {
-            current: other.current,
-            previous: self.current,
-        }
-    }
-
-    pub(crate) fn toggle(self) -> Self {
-        use SpawnState::*;
-        let next = match self.current {
-            Horizontal => {
-                if matches!(self.previous, Vertical) {
-                    Tab
-                } else {
-                    Vertical
-                }
-            }
-            Vertical => {
-                if matches!(self.previous, Horizontal) {
-                    Tab
-                } else {
-                    Horizontal
-                }
-            }
-            Tab => match self.previous {
-                Horizontal => Vertical,
-                Vertical => Horizontal,
-                Tab => Horizontal,
-            },
-        };
-        Self {
-            current: next,
-            previous: self.current,
-        }
-    }
-
-    fn clean(other: SpawnMode) -> Self {
-        Self {
-            current: other.current,
-            previous: other.current,
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SpawnState {
-    #[default]
-    Horizontal,
-    Vertical,
-    Tab,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Parent {
-    Container(ContainerId),
-    Workspace(WorkspaceId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -454,15 +123,6 @@ impl std::fmt::Display for DisplayMode {
     }
 }
 
-impl std::fmt::Display for Parent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Parent::Container(id) => write!(f, "{}", id),
-            Parent::Workspace(id) => write!(f, "{}", id),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum WindowRestrictions {
     #[default]
@@ -478,14 +138,10 @@ pub(crate) enum WindowRestrictions {
 /// Represents a single application window
 #[derive(Debug, Clone)]
 pub(crate) struct Window {
-    /// Parent in the tiling tree for split windows, the containing workspace for floating windows
-    pub(super) parent: Parent,
     pub(super) workspace: WorkspaceId,
-    pub(super) dimension: Dimension,
     pub(super) mode: DisplayMode,
     pub(super) restrictions: WindowRestrictions,
     pub(super) title: String,
-    spawn_mode: SpawnMode,
     pub(super) min_width: f32,
     pub(super) min_height: f32,
     pub(super) max_width: f32,
@@ -499,13 +155,10 @@ impl Node for Window {
 impl Window {
     pub(super) fn tiling(workspace: WorkspaceId) -> Self {
         Self {
-            parent: Parent::Workspace(workspace),
             workspace,
-            dimension: Dimension::default(),
             mode: DisplayMode::Tiling,
             restrictions: WindowRestrictions::None,
             title: String::new(),
-            spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
             max_width: 0.0,
@@ -513,15 +166,12 @@ impl Window {
         }
     }
 
-    pub(super) fn float(workspace: WorkspaceId, dimension: Dimension) -> Self {
+    pub(super) fn float(workspace: WorkspaceId) -> Self {
         Self {
-            parent: Parent::Workspace(workspace),
             workspace,
-            dimension,
             mode: DisplayMode::Float,
             restrictions: WindowRestrictions::None,
             title: String::new(),
-            spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
             max_width: 0.0,
@@ -531,13 +181,10 @@ impl Window {
 
     pub(super) fn fullscreen(workspace: WorkspaceId, restrictions: WindowRestrictions) -> Self {
         Self {
-            parent: Parent::Workspace(workspace),
             workspace,
-            dimension: Dimension::default(),
             mode: DisplayMode::Fullscreen,
             restrictions,
             title: String::new(),
-            spawn_mode: SpawnMode::default(),
             min_width: 0.0,
             min_height: 0.0,
             max_width: 0.0,
@@ -557,26 +204,12 @@ impl Window {
         &self.title
     }
 
-    pub(crate) fn spawn_mode(&self) -> SpawnMode {
-        self.spawn_mode
-    }
-
     pub(crate) fn is_float(&self) -> bool {
         self.mode == DisplayMode::Float
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "used in test validators"))]
     pub(crate) fn is_fullscreen(&self) -> bool {
         self.mode == DisplayMode::Fullscreen
-    }
-
-    // Reset spawn mode
-    pub(super) fn set_spawn_mode(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = SpawnMode::clean(spawn_mode)
-    }
-
-    pub(crate) fn switch_spawn_mode(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = self.spawn_mode.switch_to(spawn_mode)
     }
 }
 
@@ -586,21 +219,6 @@ pub(crate) struct Dimension {
     pub(crate) height: f32,
     pub(crate) x: f32,
     pub(crate) y: f32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Child {
-    Window(WindowId),
-    Container(ContainerId),
-}
-
-impl std::fmt::Display for Child {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Child::Window(id) => write!(f, "{}", id),
-            Child::Container(id) => write!(f, "{}", id),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

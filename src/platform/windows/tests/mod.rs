@@ -478,7 +478,7 @@ impl FloatOverlayApi for NoopFloatOverlay {
     fn id(&self) -> HwndId {
         HwndId::test(0)
     }
-    fn update(&mut self, _: &crate::core::WindowPlacement, _: &Config, _: ZOrder) {}
+    fn update(&mut self, _: &crate::core::FloatWindowPlacement, _: &Config, _: ZOrder) {}
     fn hide(&mut self) {}
 }
 
@@ -493,7 +493,7 @@ impl TilingOverlayApi for NoopTilingOverlay {
     fn update(
         &mut self,
         _: Dimension,
-        _: &[crate::core::WindowPlacement],
+        _: &[crate::core::TilingWindowPlacement],
         _: &[(crate::core::ContainerPlacement, Vec<String>)],
     ) {
     }

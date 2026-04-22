@@ -19,12 +19,14 @@ fn two_windows_split_evenly() {
 
 `setup()` creates a Hub with a 150×30 screen. `snapshot()` validates tree invariants, then renders the tree as text + ASCII art. Leave the snapshot string empty (`@""`) — run the test once, review the output, then confirm with a human before accepting.
 
-**Validators.** `snapshot()` runs a set of validators that check structural invariants on every workspace. The workspace focus validator (`validate_workspace_focus`) checks:
+**Validators.** `snapshot()` runs a set of validators that check structural invariants on every workspace. Structural validators (container tree checks: direction invariance, focus chain correctness, parent-child consistency, dimension validation, children count >= 2) live inside `PartitionTreeStrategy::validate_tree`, called via `hub.validate_tree()`. Each strategy implements its own invariant checks. The workspace focus validator checks:
 
 - `is_float_focused` is false when `float_windows` is empty.
 - `focused_tiling` points to a `Tiling`-mode window (not float or fullscreen).
-- `focused_tiling` is reachable from the workspace root.
+- `focused_tiling` is reachable from the workspace root via the focus chain.
 - If root exists, `focused_tiling` is `Some`.
+
+Generic validators (float/fullscreen consistency, monitor validity, visible placement correctness) stay in `src/core/tests/mod.rs`. Snapshot and format functions work with `WindowPlacement` and `ContainerPlacement` from `get_visible_placements()`. `snapshot()` reads `cp.children` for tab bar labels instead of accessing container internals directly.
 
 These run on every snapshot, so invariant violations are caught immediately rather than causing subtle downstream bugs.
 

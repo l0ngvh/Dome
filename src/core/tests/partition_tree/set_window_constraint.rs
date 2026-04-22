@@ -2,7 +2,8 @@ use insta::assert_snapshot;
 
 use crate::config::SizeConstraint;
 
-use super::{HubConfig, setup, snapshot};
+use crate::core::hub::HubConfig;
+use crate::core::tests::{setup, snapshot};
 
 #[test]
 fn set_min_size_respects_minimum_width() {

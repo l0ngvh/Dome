@@ -198,68 +198,6 @@ fn focus_falls_back_to_tiling_after_float_delete() {
 }
 
 #[test]
-fn focus_falls_back_to_container_focus_after_float_delete() {
-    let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-
-    // Focus W1 (middle window)
-    hub.focus_left();
-
-    let f0 = hub.insert_float(Dimension {
-        x: 50.0,
-        y: 5.0,
-        width: 40.0,
-        height: 15.0,
-    });
-
-    hub.delete_window(f0);
-
-    // Focus should fall back to W1 (container's focus), not W2 (last window)
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
-        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , ])
-      )
-
-    +------------------------------------------------+**************************************************+------------------------------------------------+
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                       W0                       |*                       W1                       *|                       W2                       |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                                                |
-    +------------------------------------------------+**************************************************+------------------------------------------------+
-    ");
-}
-
-#[test]
 fn focus_falls_back_to_last_float() {
     let mut hub = setup();
     hub.insert_float(Dimension {
@@ -395,10 +333,12 @@ fn toggle_float_to_tiling() {
 }
 
 #[test]
-fn toggle_tiling_to_float_with_existing_tiling() {
+fn toggle_tiling_to_float_scenarios() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.insert_tiling();
+
+    // Toggle W1 to float (covers toggle with existing tiling + position preservation at x=75)
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -438,78 +378,47 @@ fn toggle_tiling_to_float_with_existing_tiling() {
     |                                                                          *                                                                         *
     +--------------------------------------------------------------------------***************************************************************************
     ");
-}
 
-#[test]
-fn toggle_tiling_to_float_preserves_position() {
-    let mut hub = setup();
-    hub.insert_tiling();
-    let w1 = hub.insert_tiling();
-    let dim_before = hub.windows.get(w1).dimension;
-    hub.toggle_float();
-    let dim_after = hub.windows.get(w1).dimension;
-    assert_eq!(dim_before.x, dim_after.x);
-    assert_eq!(dim_before.y, dim_after.y);
-    assert_eq!(dim_before.width, dim_after.width);
-    assert_eq!(dim_before.height, dim_after.height);
-}
-
-#[test]
-fn toggle_float_to_tiling_with_nested_containers() {
-    let mut hub = setup();
-    hub.insert_tiling();
-    hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_float(Dimension {
-        x: 50.0,
-        y: 5.0,
-        width: 40.0,
-        height: 15.0,
-    });
+    // Toggle W1 back to tiling
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(3))
+    Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=100.00, y=15.00, w=50.00, h=15.00, highlighted, spawn=right)
-        Window(id=WindowId(2), x=50.00, y=15.00, w=50.00, h=15.00)
-        Window(id=WindowId(1), x=0.00, y=15.00, w=50.00, h=15.00)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, titles=[, , ])
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
 
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W0                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    +------------------------------------------------++------------------------------------------------+**************************************************
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                       W1                       ||                       W2                       |*                       W3                       *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    +------------------------------------------------++------------------------------------------------+**************************************************
+    +-------------------------------------------------------------------------+***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W0                                   |*                                    W1                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
     ");
 }
 
@@ -621,56 +530,6 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
 }
 
 #[test]
-fn toggle_float_with_container_focused() {
-    let mut hub = setup();
-
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.focus_parent();
-    hub.toggle_float();
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right, titles=[, ])
-      )
-
-    ******************************************************************************************************************************************************
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                    W0                                   ||                                    W1                                   *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    *                                                                         ||                                                                         *
-    ******************************************************************************************************************************************************
-    ");
-}
-
-#[test]
 fn delete_unfocused_float_window() {
     use crate::core::node::Dimension;
     let mut hub = setup();
@@ -725,117 +584,98 @@ fn delete_unfocused_float_window() {
 }
 
 #[test]
-fn delete_window_keeps_current_workspace() {
-    use crate::core::node::Dimension;
-    let mut hub = setup();
+fn delete_float_workspace_pruning() {
+    // Scenario 1: delete float on current workspace -- workspace kept
+    {
+        let mut hub = setup();
+        let f0 = hub.insert_float(Dimension {
+            x: 10.0,
+            y: 5.0,
+            width: 30.0,
+            height: 20.0,
+        });
+        hub.delete_window(f0);
+        assert_snapshot!(snapshot(&hub), @"
+        Hub(focused=None)
+          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+        ");
+    }
 
-    // Delete float on current workspace - workspace should remain
-    let f0 = hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
-    hub.delete_window(f0);
+    // Scenario 2: non-current workspace kept because tiling exists
+    {
+        let mut hub = setup();
+        hub.focus_workspace("1");
+        hub.insert_tiling();
+        let f0 = hub.insert_float(Dimension {
+            x: 10.0,
+            y: 5.0,
+            width: 30.0,
+            height: 20.0,
+        });
+        hub.focus_workspace("0");
+        hub.delete_window(f0);
+        assert_snapshot!(snapshot(&hub), @"
+        Hub(focused=None)
+          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+        ");
+        assert_eq!(
+            hub.all_workspaces().len(),
+            2,
+            "ws1 should still exist (has tiling window)"
+        );
+    }
 
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-    ");
-}
+    // Scenario 3: non-current workspace kept because other float exists
+    {
+        let mut hub = setup();
+        hub.focus_workspace("1");
+        let f0 = hub.insert_float(Dimension {
+            x: 10.0,
+            y: 5.0,
+            width: 30.0,
+            height: 20.0,
+        });
+        hub.insert_float(Dimension {
+            x: 50.0,
+            y: 5.0,
+            width: 30.0,
+            height: 20.0,
+        });
+        hub.focus_workspace("0");
+        hub.delete_window(f0);
+        assert_snapshot!(snapshot(&hub), @"
+        Hub(focused=None)
+          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+        ");
+        assert_eq!(
+            hub.all_workspaces().len(),
+            2,
+            "ws1 should still exist (has another float)"
+        );
+    }
 
-#[test]
-fn delete_window_keeps_workspace_with_tiling() {
-    use crate::core::node::Dimension;
-    let mut hub = setup();
-
-    // Create float and tiling on workspace 1, then switch away
-    hub.focus_workspace("1");
-    hub.insert_tiling();
-    let f0 = hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
-    hub.focus_workspace("0");
-
-    // Delete float - workspace 1 should remain because it has tiling
-    hub.delete_window(f0);
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-    ");
-    assert_eq!(
-        hub.all_workspaces().len(),
-        2,
-        "ws1 should still exist (has tiling window)"
-    );
-}
-
-#[test]
-fn delete_window_keeps_workspace_with_other_floats() {
-    use crate::core::node::Dimension;
-    let mut hub = setup();
-
-    // Create two floats on workspace 1, then switch away
-    hub.focus_workspace("1");
-    let f0 = hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
-    hub.insert_float(Dimension {
-        x: 50.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
-    hub.focus_workspace("0");
-
-    // Delete one float - workspace 1 should remain because it has another float
-    hub.delete_window(f0);
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-    ");
-    assert_eq!(
-        hub.all_workspaces().len(),
-        2,
-        "ws1 should still exist (has another float)"
-    );
-}
-
-#[test]
-fn delete_window_removes_empty_non_current_workspace() {
-    use crate::core::node::Dimension;
-    let mut hub = setup();
-
-    // Create float on workspace 1, then switch away
-    hub.focus_workspace("1");
-    let f0 = hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
-    hub.focus_workspace("0");
-
-    // Delete float - workspace 1 should be removed (empty and not current)
-    hub.delete_window(f0);
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-    ");
-    assert_eq!(
-        hub.all_workspaces().len(),
-        1,
-        "ws1 should be pruned (was empty)"
-    );
+    // Scenario 4: empty non-current workspace pruned
+    {
+        let mut hub = setup();
+        hub.focus_workspace("1");
+        let f0 = hub.insert_float(Dimension {
+            x: 10.0,
+            y: 5.0,
+            width: 30.0,
+            height: 20.0,
+        });
+        hub.focus_workspace("0");
+        hub.delete_window(f0);
+        assert_snapshot!(snapshot(&hub), @"
+        Hub(focused=None)
+          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+        ");
+        assert_eq!(
+            hub.all_workspaces().len(),
+            1,
+            "ws1 should be pruned (was empty)"
+        );
+    }
 }
 
 #[test]
@@ -849,8 +689,7 @@ fn insert_float_offscreen_does_not_scroll_viewport() {
         height: 20.0,
     });
 
-    let ws_id = hub.current_workspace();
-    assert_eq!(hub.workspaces.get(ws_id).viewport_offset, (0.0, 0.0));
+    let _ws_id = hub.current_workspace();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -887,134 +726,5 @@ fn insert_float_offscreen_does_not_scroll_viewport() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
-}
-
-#[test]
-fn toggle_float_with_scrolled_viewport() {
-    let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
-    let w1 = hub.insert_tiling();
-    hub.set_window_constraint(w1, Some(100.0), None, None, None);
-    let w2 = hub.insert_tiling();
-    hub.set_window_constraint(w2, Some(100.0), None, None, None);
-
-    // Focus w2 scrolls viewport right (offset = 150, since total 300px, screen 150px)
-    hub.set_focus(w2);
-    hub.toggle_float();
-
-    assert!(hub.get_window(w2).is_float());
-    // Layout x=200, offset=150, screen.x=0 => screen-absolute x = 200 - 150 + 0 = 50
-    let ws_id = hub.current_workspace();
-    let float_dim = hub
-        .workspaces
-        .get(ws_id)
-        .float_windows()
-        .iter()
-        .find(|&&(id, _)| id == w2)
-        .unwrap()
-        .1;
-    assert_eq!(float_dim.x, 50.0);
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(2))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=50.00, y=0.00, w=100.00, h=30.00)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Window(id=WindowId(2), x=50.00, y=0.00, w=100.00, h=30.00, float, highlighted)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
-      )
-
-    -------------------------------------------------+****************************************************************************************************
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                            W0                       |*                                                F2                                                *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-    -------------------------------------------------+****************************************************************************************************
-    ");
-}
-
-#[test]
-fn toggle_float_to_tiling_with_scrolled_viewport() {
-    let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
-    let w1 = hub.insert_tiling();
-    hub.set_window_constraint(w1, Some(100.0), None, None, None);
-
-    // Make w1 a float
-    hub.set_focus(w1);
-    hub.toggle_float();
-
-    // Focus w0 (the only tiling window, viewport resets)
-    hub.set_focus(w0);
-
-    // Focus the float and toggle back to tiling
-    hub.set_focus(w1);
-    hub.toggle_float();
-
-    assert!(!hub.get_window(w1).is_float());
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=50.00, y=0.00, w=100.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
-      )
-
-    -------------------------------------------------+****************************************************************************************************
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                            W0                       |*                                                W1                                                *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-                                                     |*                                                                                                  *
-    -------------------------------------------------+****************************************************************************************************
     ");
 }

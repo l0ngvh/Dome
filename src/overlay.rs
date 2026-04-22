@@ -1,14 +1,16 @@
 use egui::{Align, Color32, CornerRadius, Layout, Rect, RichText, Sense, pos2, vec2};
 
 use crate::config::{Color, Config};
-use crate::core::{ContainerId, ContainerPlacement, Dimension, SpawnIndicator, WindowPlacement};
+use crate::core::{
+    ContainerId, ContainerPlacement, Dimension, SpawnIndicator, TilingWindowPlacement,
+};
 
 /// Draws all tiling window borders and container overlays for a single monitor.
 /// Returns `(ContainerId, tab_index)` for each tab that was clicked.
 pub(crate) fn paint_tiling_overlay(
     ctx: &egui::Context,
     monitor: Dimension,
-    windows: &[WindowPlacement],
+    windows: &[TilingWindowPlacement],
     containers: &[(ContainerPlacement, Vec<String>)],
     config: &Config,
 ) -> Vec<(ContainerId, usize)> {
@@ -25,7 +27,15 @@ pub(crate) fn paint_tiling_overlay(
                     origin.to_pos2(),
                     vec2(vf.width, vf.height),
                 ));
-                paint_window_border(ui.painter(), wp, config, origin);
+                paint_window_border(
+                    ui.painter(),
+                    wp.frame,
+                    wp.visible_frame,
+                    wp.is_highlighted,
+                    wp.spawn_indicator,
+                    config,
+                    origin,
+                );
             });
     }
 
@@ -56,15 +66,18 @@ pub(crate) fn paint_tiling_overlay(
 /// For the tiling overlay, pass `vec2(vf.x - monitor.x, vf.y - monitor.y)`.
 pub(crate) fn paint_window_border(
     painter: &egui::Painter,
-    placement: &WindowPlacement,
+    frame: Dimension,
+    visible_frame: Dimension,
+    is_highlighted: bool,
+    spawn_indicator: Option<SpawnIndicator>,
     config: &Config,
     origin: egui::Vec2,
 ) {
-    let colors = border_colors(placement.is_highlighted, placement.spawn_indicator, config);
+    let colors = border_colors(is_highlighted, spawn_indicator, config);
     paint_border_edges(
         painter,
-        placement.frame,
-        placement.visible_frame,
+        frame,
+        visible_frame,
         config.border_size,
         colors,
         origin,

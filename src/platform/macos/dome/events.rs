@@ -8,7 +8,8 @@ use objc2_foundation::NSRect;
 use crate::action::Actions;
 use crate::config::Config;
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, MonitorId, WindowId, WindowPlacement,
+    ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, MonitorId,
+    TilingWindowPlacement, WindowId,
 };
 
 use super::super::MonitorInfo;
@@ -118,13 +119,13 @@ pub(in crate::platform::macos) struct MonitorTilingData {
     pub(in crate::platform::macos) monitor_dim: Dimension,
     pub(in crate::platform::macos) cocoa_frame: NSRect,
     pub(in crate::platform::macos) scale: f64,
-    pub(in crate::platform::macos) windows: Vec<WindowPlacement>,
+    pub(in crate::platform::macos) windows: Vec<TilingWindowPlacement>,
     pub(in crate::platform::macos) containers: Vec<(ContainerPlacement, Vec<String>)>,
 }
 
 pub(in crate::platform::macos) struct FloatShow {
     pub(in crate::platform::macos) cg_id: CGWindowID,
-    pub(in crate::platform::macos) placement: WindowPlacement,
+    pub(in crate::platform::macos) placement: FloatWindowPlacement,
     pub(in crate::platform::macos) cocoa_frame: NSRect,
     pub(in crate::platform::macos) scale: f64,
     pub(in crate::platform::macos) content_dim: Dimension,

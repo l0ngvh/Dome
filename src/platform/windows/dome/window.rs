@@ -1,4 +1,6 @@
-use crate::core::{Dimension, WindowId, WindowPlacement, WindowRestrictions};
+use crate::core::{
+    Dimension, FloatWindowPlacement, TilingWindowPlacement, WindowId, WindowRestrictions,
+};
 use crate::platform::windows::external::{ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
 
@@ -72,7 +74,7 @@ impl Dome {
     pub(super) fn show_float(
         &mut self,
         id: WindowId,
-        wp: &WindowPlacement,
+        wp: &FloatWindowPlacement,
         focus_changed: bool,
         is_focused: bool,
     ) {
@@ -138,7 +140,7 @@ impl Dome {
         }
     }
 
-    pub(super) fn show_tiling(&mut self, id: WindowId, wp: &WindowPlacement, z: ZOrder) {
+    pub(super) fn show_tiling(&mut self, id: WindowId, wp: &TilingWindowPlacement, z: ZOrder) {
         let entry = self.registry.get_mut(id);
         let border = self.config.border_size;
         let content = apply_inset(wp.frame, border);

@@ -1,13 +1,14 @@
 use crate::core::{
     Hub, WindowId,
-    node::{Dimension, DisplayMode, Parent, WorkspaceId},
+    hub::RestrictedAction,
+    node::{Dimension, DisplayMode, WorkspaceId},
 };
 
 impl Hub {
     /// Move the given float to the end of float_windows (making it topmost)
     /// and mark float as focused.
     pub(super) fn focus_float(&mut self, ws: WorkspaceId, window_id: WindowId) {
-        let workspace = self.workspaces.get_mut(ws);
+        let workspace = self.access.workspaces.get_mut(ws);
         if let Some(pos) = workspace
             .float_windows
             .iter()
@@ -19,47 +20,73 @@ impl Hub {
         workspace.is_float_focused = true;
     }
 
-    pub(super) fn attach_float_to_workspace(&mut self, workspace_id: WorkspaceId, id: WindowId) {
-        let window = self.windows.get_mut(id);
-        window.parent = Parent::Workspace(workspace_id);
-        window.workspace = workspace_id;
-        let dim = self.windows.get(id).dimension;
-        let workspace = self.workspaces.get_mut(workspace_id);
-        workspace.float_windows.push((id, dim));
-        self.focus_float(workspace_id, id);
-    }
-
-    pub(super) fn attach_split_as_float(
+    pub(super) fn attach_float_to_workspace(
         &mut self,
         workspace_id: WorkspaceId,
         id: WindowId,
         dim: Dimension,
     ) {
-        let window = self.windows.get_mut(id);
+        let window = self.access.windows.get_mut(id);
+        // Setting mode is idempotent for callers where the window is already Float.
         window.mode = DisplayMode::Float;
-        window.parent = Parent::Workspace(workspace_id);
         window.workspace = workspace_id;
-        let workspace = self.workspaces.get_mut(workspace_id);
+        let workspace = self.access.workspaces.get_mut(workspace_id);
         workspace.float_windows.push((id, dim));
         self.focus_float(workspace_id, id);
     }
 
-    pub(super) fn detach_float_from_workspace(&mut self, id: WindowId) {
-        let ws_id = self.windows.get(id).workspace;
-        let workspace = self.workspaces.get_mut(ws_id);
+    pub(super) fn detach_float_from_workspace(&mut self, id: WindowId) -> Dimension {
+        let ws_id = self.access.windows.get(id).workspace;
+        let workspace = self.access.workspaces.get_mut(ws_id);
 
         let was_focused = workspace.is_float_focused
             && workspace.float_windows.last().map(|&(fid, _)| fid) == Some(id);
-        workspace.float_windows.retain(|&(f, _)| f != id);
 
-        if !was_focused {
-            return;
+        let pos = workspace
+            .float_windows
+            .iter()
+            .position(|&(fid, _)| fid == id)
+            .expect("detach_float_from_workspace: window not in float_windows");
+        let (_id, dim) = workspace.float_windows.remove(pos);
+
+        if was_focused {
+            // Topmost focused float was removed. If more floats remain,
+            // is_float_focused stays true and focused() picks the new topmost.
+            if workspace.float_windows.is_empty() {
+                workspace.is_float_focused = false;
+            }
         }
 
-        // Topmost focused float was removed. If more floats remain,
-        // is_float_focused stays true and focused() picks the new topmost.
-        if workspace.float_windows.is_empty() {
-            workspace.is_float_focused = false;
+        dim
+    }
+
+    /// Toggle the focused window between tiling and floating mode.
+    /// Does nothing if no window is focused or a container is focused.
+    #[tracing::instrument(skip(self))]
+    pub(crate) fn toggle_float(&mut self) {
+        if self.is_restricted(RestrictedAction::DisplayModeChange) {
+            return;
+        }
+        let current_ws = self.current_workspace();
+        let Some(window_id) = self.focused_window(current_ws) else {
+            return;
+        };
+
+        match self.access.windows.get(window_id).mode {
+            DisplayMode::Fullscreen => (),
+            DisplayMode::Float => {
+                let _dim = self.detach_float_from_workspace(window_id);
+                self.access.windows.get_mut(window_id).mode = DisplayMode::Tiling;
+                self.strategy
+                    .attach_window(&mut self.access, window_id, current_ws);
+
+                tracing::debug!(%window_id, "Window is now tiling");
+            }
+            DisplayMode::Tiling => {
+                let dim = self.strategy.detach_window(&mut self.access, window_id);
+                self.attach_float_to_workspace(current_ws, window_id, dim);
+                tracing::debug!(%window_id, "Window is now floating");
+            }
         }
     }
 }
