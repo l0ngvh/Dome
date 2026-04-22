@@ -12,13 +12,11 @@ fn insert_fullscreen_sets_focus() {
 
     hub.insert_fullscreen(WindowRestrictions::None);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -62,13 +60,11 @@ fn set_fullscreen_from_tiling() {
 
     hub.set_fullscreen(w1, WindowRestrictions::None);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(0))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -116,13 +112,11 @@ fn set_fullscreen_from_float() {
 
     hub.set_fullscreen(w2, WindowRestrictions::None);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(1), x=10.00, y=5.00, w=40.00, h=10.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -163,12 +157,12 @@ fn set_fullscreen_already_fullscreen() {
     let w1 = hub.insert_tiling();
     hub.set_fullscreen(w1, WindowRestrictions::None);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    let before = snapshot(&hub);
+    assert_snapshot!(before, @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(0))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -202,44 +196,7 @@ fn set_fullscreen_already_fullscreen() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
     hub.set_fullscreen(w1, WindowRestrictions::None);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W0                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
+    assert_eq!(snapshot(&hub), before);
 }
 
 #[test]
@@ -249,13 +206,11 @@ fn set_fullscreen_doesnt_change_focus() {
     hub.insert_tiling();
     hub.set_fullscreen(w0, WindowRestrictions::None);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(0))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -299,15 +254,13 @@ fn unset_fullscreen_to_tiling() {
 
     hub.unset_fullscreen(w1);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -352,14 +305,11 @@ fn fullscreen_only_topmost_in_placements() {
     hub.set_fullscreen(w1, WindowRestrictions::None);
     hub.set_fullscreen(w2, WindowRestrictions::None);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(2), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -403,12 +353,11 @@ fn delete_fullscreen_window() {
 
     hub.delete_window(w1);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -451,13 +400,11 @@ fn toggle_fullscreen_on_off() {
     hub.set_focus(w1);
 
     hub.toggle_fullscreen();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(0))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -492,15 +439,13 @@ fn toggle_fullscreen_on_off() {
     ");
 
     hub.toggle_fullscreen();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -543,13 +488,11 @@ fn insert_tiling_doesnt_steal_focus_from_fullscreen() {
 
     hub.insert_tiling();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(0))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -597,13 +540,11 @@ fn insert_float_doesnt_steal_focus_from_fullscreen() {
         height: 10.0,
     });
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(1), x=10.00, y=5.00, w=40.00, h=10.00)
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(0))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -646,13 +587,9 @@ fn move_fullscreen_to_workspace_sets_focus() {
 
     hub.move_focused_to_workspace("1");
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 }
 
@@ -665,15 +602,10 @@ fn block_all_blocks_user_commands() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
-        Fullscreen(id=WindowId(2), x=0.00, y=0.00, w=0.00, h=0.00)
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(2))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -741,13 +673,12 @@ fn block_all_allows_lifecycle_ops() {
     hub.insert_tiling();
     hub.insert_fullscreen(WindowRestrictions::BlockAll);
 
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
+    let before = snapshot(&hub);
+    assert_snapshot!(before, @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -782,89 +713,10 @@ fn block_all_allows_lifecycle_ops() {
     ");
 
     let w2 = hub.insert_tiling();
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
-      )
-    )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W1                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
+    assert_eq!(snapshot(&hub), before);
 
     hub.delete_window(w2);
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
-      )
-    )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W1                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
+    assert_eq!(snapshot(&hub), before);
 }
 
 #[test]
@@ -876,12 +728,10 @@ fn block_all_cleared_by_unset_fullscreen() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -920,14 +770,12 @@ fn block_all_cleared_by_unset_fullscreen() {
 
     hub.unset_fullscreen(w1);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -964,12 +812,11 @@ fn block_all_cleared_by_unset_fullscreen() {
     hub.set_focus(w1);
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, float, highlighted)
       )
-    )
 
     +--------------------------------------------------------------------------***************************************************************************
     |                                                                          *                                                                         *
@@ -1012,12 +859,10 @@ fn block_all_does_not_persist_after_delete() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1056,11 +901,10 @@ fn block_all_does_not_persist_after_delete() {
 
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -1096,11 +940,10 @@ fn block_all_does_not_persist_after_delete() {
 
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, float, highlighted)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -1158,14 +1001,13 @@ fn block_all_on_unfocused_window_does_not_block() {
     hub.set_focus(w0);
 
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-      Workspace(id=WorkspaceId(1), name=second,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=150.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1201,14 +1043,13 @@ fn block_all_on_unfocused_window_does_not_block() {
 
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0), monitor=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-      Workspace(id=WorkspaceId(1), name=second,
-        Float(id=WindowId(0), x=150.00, y=0.00, w=150.00, h=30.00)
+      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=150.00, y=0.00, w=150.00, h=30.00, float, highlighted)
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1262,13 +1103,11 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WindowId(0), monitor=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(0))
       )
-      Workspace(id=WorkspaceId(1), name=second)
-    )
+      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=150.00 h=30.00))
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1318,12 +1157,12 @@ fn protect_fullscreen_allows_workspace_move_and_navigation() {
     let w0 = hub.insert_tiling();
     hub.set_fullscreen(w0, WindowRestrictions::ProtectFullscreen);
 
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    let fullscreen_state = snapshot(&hub);
+    assert_snapshot!(fullscreen_state, @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(0))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1358,64 +1197,17 @@ fn protect_fullscreen_allows_workspace_move_and_navigation() {
     ");
 
     hub.focus_workspace("1");
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-      Workspace(id=WorkspaceId(1), name=1)
-    )
+    let empty_state = snapshot(&hub);
+    assert_snapshot!(empty_state, @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 
     hub.focus_workspace("0");
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W0                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
+    assert_eq!(snapshot(&hub), fullscreen_state);
 
     hub.move_focused_to_workspace("1");
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(2), name=1,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
-    ");
+    assert_eq!(snapshot(&hub), empty_state);
 }
 
 #[test]
@@ -1425,11 +1217,10 @@ fn upgrade_protect_to_block_all() {
     hub.set_fullscreen(w0, WindowRestrictions::ProtectFullscreen);
 
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(0))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1465,22 +1256,14 @@ fn upgrade_protect_to_block_all() {
 
     hub.move_focused_to_workspace("1");
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 
     hub.move_focused_to_workspace("0");
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
-      Workspace(id=WorkspaceId(1), name=1,
-        Fullscreen(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 
     hub.set_fullscreen(w0, WindowRestrictions::BlockAll);
@@ -1498,12 +1281,10 @@ fn downgrade_block_all_to_protect() {
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1544,14 +1325,10 @@ fn downgrade_block_all_to_protect() {
 
     hub.move_focused_to_workspace("1");
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-      Workspace(id=WorkspaceId(1), name=1,
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
-      )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *

@@ -1,5 +1,3 @@
-#![allow(clippy::needless_range_loop)]
-
 mod auto_tile;
 mod delete_window;
 mod float_window;
@@ -18,13 +16,12 @@ mod sync_config;
 mod tabbed;
 mod toggle_direction;
 mod toggle_spawn_mode;
-mod visible_placements;
 
 use std::collections::HashSet;
 
 use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
-use crate::core::hub::{Hub, HubConfig, MonitorLayout};
+use crate::core::hub::{Hub, HubConfig, MonitorLayout, SpawnIndicator};
 use crate::core::node::{
     Child, Container, ContainerId, Dimension, Direction, DisplayMode, Parent, WindowId, Workspace,
     WorkspaceId,
@@ -165,67 +162,117 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     s
 }
 
-/// Resolves the focused workspace's focus to a leaf WindowId.
-/// Workspace.focused() may return Child::Container when focus_parent is active;
-/// this walks Container.focused until it reaches a window.
-fn resolve_focused_window(hub: &Hub, workspace_id: WorkspaceId) -> Option<WindowId> {
-    let workspace = hub.workspaces.get(workspace_id);
-    let mut current = workspace.focused()?;
-    for _ in 0..10_000 {
-        match current {
-            Child::Window(id) => return Some(id),
-            Child::Container(id) => current = hub.containers.get(id).focused,
-        }
-    }
-    panic!("resolve_focused_window: container chain exceeded 10,000 depth");
-}
-
 pub(super) fn snapshot_text(hub: &Hub) -> String {
-    let monitors = hub.all_monitors();
-    let monitor_info = if monitors.len() > 1 {
-        format!(", monitor={}", hub.focused_monitor())
-    } else {
-        String::new()
-    };
-    let screen = hub.monitors.get(hub.focused_monitor()).dimension;
-    let focused_display = match resolve_focused_window(hub, hub.current_workspace()) {
+    let vp = hub.get_visible_placements();
+    let focused = match vp.focused_window {
         Some(id) => format!("focused={id}"),
         None => "focused=None".to_string(),
     };
-    let mut s = format!(
-        "Hub({focused_display}{monitor_info}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
-        screen.x, screen.y, screen.width, screen.height
-    );
-    for (workspace_id, workspace) in hub.all_workspaces() {
-        let has_content = workspace.root().is_some()
-            || !workspace.float_windows().is_empty()
-            || !workspace.fullscreen_windows().is_empty();
-        if !has_content {
-            s.push_str(&format!(
-                "  Workspace(id={}, name={})\n",
-                workspace_id, workspace.name
-            ));
-        } else {
-            s.push_str(&format!(
-                "  Workspace(id={}, name={},\n",
-                workspace_id, workspace.name
-            ));
-            if let Some(root) = workspace.root() {
-                fmt_child_str(hub, &mut s, root, 2);
+    let mut s = format!("Hub({focused})\n");
+    for mp in &vp.monitors {
+        let screen = hub.monitors.get(mp.monitor_id).dimension;
+        match &mp.layout {
+            MonitorLayout::Normal {
+                windows,
+                containers,
+            } => {
+                if windows.is_empty() && containers.is_empty() {
+                    s.push_str(&format!(
+                        "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}))\n",
+                        mp.monitor_id, screen.x, screen.y, screen.width, screen.height
+                    ));
+                } else {
+                    s.push_str(&format!(
+                        "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
+                        mp.monitor_id, screen.x, screen.y, screen.width, screen.height
+                    ));
+                    for wp in windows {
+                        s.push_str(&fmt_window_placement(wp));
+                    }
+                    for cp in containers {
+                        s.push_str(&fmt_container_placement(cp));
+                    }
+                    s.push_str("  )\n");
+                }
             }
-            for &(float_id, _) in workspace.float_windows() {
-                fmt_float_str(hub, &mut s, float_id, 2);
+            MonitorLayout::Fullscreen(id) => {
+                s.push_str(&format!(
+                    "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
+                    mp.monitor_id, screen.x, screen.y, screen.width, screen.height
+                ));
+                s.push_str(&format!("    Fullscreen(id={})\n", id));
+                s.push_str("  )\n");
             }
-            for &fs_id in workspace.fullscreen_windows() {
-                fmt_fullscreen_str(hub, &mut s, fs_id, 2);
-            }
-            s.push_str("  )\n");
         }
     }
-    s.push_str(")\n");
     s
 }
 
+/// Formats the full Hub state using its Debug impl, for smoke test error diagnostics.
+/// Unlike snapshot_text (which only shows visible placements), this dumps everything
+/// including non-focused workspaces.
+pub(super) fn hub_debug_text(hub: &Hub) -> String {
+    format!("{:#?}", hub)
+}
+
+fn fmt_spawn(indicator: &SpawnIndicator) -> String {
+    let dirs: Vec<&str> = [
+        (indicator.top, "top"),
+        (indicator.right, "right"),
+        (indicator.bottom, "bottom"),
+        (indicator.left, "left"),
+    ]
+    .iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, name)| *name)
+    .collect();
+    dirs.join("+")
+}
+
+fn fmt_window_placement(wp: &crate::core::hub::WindowPlacement) -> String {
+    let d = wp.visible_frame;
+    let mut parts = format!(
+        "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
+        wp.id, d.x, d.y, d.width, d.height
+    );
+    if wp.is_float {
+        parts.push_str(", float");
+    }
+    if wp.is_highlighted {
+        parts.push_str(", highlighted");
+    }
+    if let Some(ref si) = wp.spawn_indicator {
+        parts.push_str(&format!(", spawn={}", fmt_spawn(si)));
+    }
+    parts.push_str(")\n");
+    parts
+}
+
+fn fmt_container_placement(cp: &crate::core::hub::ContainerPlacement) -> String {
+    let d = cp.visible_frame;
+    let mut parts = format!(
+        "    Container(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
+        cp.id, d.x, d.y, d.width, d.height
+    );
+    if cp.is_tabbed {
+        parts.push_str(&format!(", tabbed, active_tab={}", cp.active_tab_index));
+    }
+    if cp.is_highlighted {
+        parts.push_str(", highlighted");
+    }
+    if let Some(ref si) = cp.spawn_indicator {
+        parts.push_str(&format!(", spawn={}", fmt_spawn(si)));
+    }
+    let titles = cp.titles.join(", ");
+    parts.push_str(&format!(", titles=[{}]", titles));
+    parts.push_str(")\n");
+    parts
+}
+
+#[expect(
+    clippy::needless_range_loop,
+    reason = "grid indexing requires row/col indices"
+)]
 fn draw_tab_bar(
     grid: &mut [Vec<char>],
     x: f32,
@@ -400,68 +447,6 @@ fn draw_focused_border(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, c
             }
         }
     }
-}
-
-fn fmt_child_str(hub: &Hub, s: &mut String, child: Child, indent: usize) {
-    let prefix = "  ".repeat(indent);
-    match child {
-        Child::Window(id) => {
-            let w = hub.get_window(id);
-            let dim = w.dimension;
-            s.push_str(&format!(
-                "{}Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
-                prefix, id, dim.x, dim.y, dim.width, dim.height
-            ));
-        }
-        Child::Container(id) => {
-            let c = hub.get_container(id);
-            let layout_info = if let Some(dir) = c.direction() {
-                format!("direction={:?}", dir)
-            } else {
-                format!("tabbed=true, active_tab={}", c.active_tab_index())
-            };
-            s.push_str(&format!(
-                "{}Container(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}, {},\n",
-                prefix,
-                id,
-                c.dimension.x,
-                c.dimension.y,
-                c.dimension.width,
-                c.dimension.height,
-                layout_info,
-            ));
-            for &child in c.children() {
-                fmt_child_str(hub, s, child, indent + 1);
-            }
-            s.push_str(&format!("{})\n", prefix));
-        }
-    }
-}
-
-fn fmt_float_str(hub: &Hub, s: &mut String, float_id: WindowId, indent: usize) {
-    let prefix = "  ".repeat(indent);
-    let ws_id = hub.get_window(float_id).workspace;
-    let dim = hub
-        .get_workspace(ws_id)
-        .float_windows()
-        .iter()
-        .find(|&&(id, _)| id == float_id)
-        .map(|&(_, d)| d)
-        .expect("float not found in workspace");
-    s.push_str(&format!(
-        "{}Float(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
-        prefix, float_id, dim.x, dim.y, dim.width, dim.height
-    ));
-}
-
-fn fmt_fullscreen_str(hub: &Hub, s: &mut String, fs_id: WindowId, indent: usize) {
-    let prefix = "  ".repeat(indent);
-    let w = hub.get_window(fs_id);
-    let dim = w.dimension;
-    s.push_str(&format!(
-        "{}Fullscreen(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2})\n",
-        prefix, fs_id, dim.x, dim.y, dim.width, dim.height
-    ));
 }
 
 fn validate_hub(hub: &Hub) {

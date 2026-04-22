@@ -11,15 +11,13 @@ fn set_focus_same_workspace() {
     let w1 = hub.insert_tiling();
 
     hub.set_focus(w0);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     ***************************************************************************+-------------------------------------------------------------------------+
     *                                                                         *|                                                                         |
@@ -54,15 +52,13 @@ fn set_focus_same_workspace() {
     ");
 
     hub.set_focus(w1);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -106,15 +102,11 @@ fn set_focus_switches_workspace() {
     hub.insert_tiling();
 
     hub.set_focus(w0);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-      Workspace(id=WorkspaceId(1), name=1,
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -163,13 +155,12 @@ fn set_focus_float_same_workspace() {
 
     hub.set_focus(w0);
     hub.set_focus(f0);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=10.00)
+        Window(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=10.00, float, highlighted)
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -218,15 +209,11 @@ fn set_focus_float_switches_workspace() {
     hub.insert_tiling();
 
     hub.set_focus(f0);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=10.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=10.00, float, highlighted)
       )
-      Workspace(id=WorkspaceId(1), name=1,
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
 
                                                                                                                                                           
                                                                                                                                                           
@@ -254,12 +241,11 @@ fn set_focus_to_a_different_workspace_prune_previous_workspace() {
     hub.move_focused_to_workspace("2");
     hub.set_focus(w0);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(1), name=2,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -321,12 +307,11 @@ fn float_focus_changes_float_z_order() {
     // Now z-order from top to bottom should be [w1, w0, w2]
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(2), x=100.00, y=5.00, w=30.00, h=10.00)
-        Float(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=10.00)
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=100.00, y=5.00, w=30.00, h=10.00, float)
+        Window(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=10.00, float, highlighted)
       )
-    )
 
                                                                                                                                                           
                                                                                                                                                           
@@ -355,12 +340,10 @@ fn detach_topmost_fullscreen_focuses_next_fullscreen() {
 
     hub.delete_window(fs2);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -409,12 +392,11 @@ fn detach_only_fullscreen_focuses_tiling_even_in_presence_of_float() {
 
     hub.delete_window(fs);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=10.00)
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=10.00, float)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -463,11 +445,10 @@ fn detach_last_tiling_with_floats_focuses_float() {
     hub.set_focus(t);
     hub.delete_window(t);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=10.00)
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=10.00, float, highlighted)
       )
-    )
 
                                                                                                                                                           
                                                                                                                                                           
@@ -505,11 +486,10 @@ fn detach_non_topmost_float_keeps_topmost_focused() {
 
     hub.delete_window(a);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=10.00)
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=10.00, float, highlighted)
       )
-    )
 
                                                                                                                                                           
                                                                                                                                                           
@@ -537,11 +517,10 @@ fn detach_non_topmost_fullscreen_no_focus_change() {
 
     hub.delete_window(fs1);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Fullscreen(id=WindowId(1), x=0.00, y=0.00, w=0.00, h=0.00)
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |

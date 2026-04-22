@@ -12,16 +12,12 @@ fn toggle_tabbed_mode() {
     hub.insert_tiling();
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=2, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                       W0                        |                      W1                        |                     [W2]                        |
@@ -66,16 +62,12 @@ fn toggle_tabbed_mode_focus_currently_focused_node() {
     hub.focus_left();
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                       W0                        |                     [W1]                       |                      W2                         |
@@ -120,16 +112,12 @@ fn focus_prev_next_tab() {
     hub.toggle_container_layout();
     hub.focus_prev_tab();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                       W0                        |                     [W1]                       |                      W2                         |
@@ -163,16 +151,12 @@ fn focus_prev_next_tab() {
     ******************************************************************************************************************************************************
     ");
     hub.focus_next_tab();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=2, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                       W0                        |                      W1                        |                     [W2]                        |
@@ -217,16 +201,12 @@ fn focus_next_tab_wrapped() {
     hub.toggle_container_layout();
     hub.focus_next_tab();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                      [W0]                       |                      W1                        |                      W2                         |
@@ -273,16 +253,12 @@ fn focus_prev_tab_wraps() {
     hub.focus_prev_tab();
     hub.focus_prev_tab();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=2, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                       W0                        |                      W1                        |                     [W2]                        |
@@ -327,16 +303,12 @@ fn focus_tab_change_workspace_focus_to_active_tab_window() {
     hub.toggle_container_layout();
     hub.focus_prev_tab();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                       W0                        |                     [W1]                       |                      W2                         |
@@ -385,19 +357,15 @@ fn focus_tab_change_workspace_focus_to_active_tab_container_focused() {
     hub.toggle_container_layout();
     hub.focus_next_tab();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
-            Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=9.33)
-            Window(id=WindowId(2), x=0.00, y=11.33, w=150.00, h=9.33)
-            Window(id=WindowId(3), x=0.00, y=20.67, w=150.00, h=9.33)
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=0.00, y=20.67, w=150.00, h=9.33)
+        Window(id=WindowId(2), x=0.00, y=11.33, w=150.00, h=9.33, highlighted, spawn=bottom)
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=9.33)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[, Container])
+        Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                   W0                                     |                                 [C1]                                    |
@@ -447,19 +415,13 @@ fn focus_tab_change_workspace_focus_to_tabbed_container_active_tab_focused() {
     hub.toggle_container_layout();
     hub.focus_next_tab();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(1), x=0.00, y=4.00, w=150.00, h=26.00)
-            Window(id=WindowId(2), x=0.00, y=4.00, w=150.00, h=26.00)
-            Window(id=WindowId(3), x=0.00, y=4.00, w=150.00, h=26.00)
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=0.00, y=4.00, w=150.00, h=26.00, highlighted, spawn=bottom)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[, Container])
+        Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, tabbed, active_tab=1, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                   W0                                     |                                 [C1]                                    |
@@ -503,15 +465,13 @@ fn toggle_tabbed_off() {
     hub.toggle_container_layout();
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -558,19 +518,14 @@ fn tabbed_container_takes_one_slot() {
 
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(3), x=75.00, y=2.00, w=75.00, h=28.00)
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=75.00, y=2.00, w=75.00, h=28.00, highlighted, spawn=bottom)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=2, titles=[, , ])
       )
-    )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||          W1            |         W2            |         [W3]           |
@@ -617,17 +572,12 @@ fn vertical_to_tabbed() {
     hub.focus_parent();
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=3,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(3), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=0.00, y=2.00, w=150.00, h=28.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=3, highlighted, spawn=bottom, titles=[, , , ])
       )
-    )
 
     ******************************************************************************************************************************************************
     *                 W0                  |                W1                  |                W2                  |               [W3]                 *
@@ -680,22 +630,16 @@ fn container_in_tabbed_container() {
     hub.toggle_container_layout();
     hub.set_focus(w4);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=28.00)
-            Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
-              Window(id=WindowId(3), x=75.00, y=2.00, w=37.50, h=28.00)
-              Window(id=WindowId(4), x=112.50, y=2.00, w=37.50, h=28.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(4), x=112.50, y=2.00, w=37.50, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=75.00, y=2.00, w=37.50, h=28.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=2, titles=[, , Container])
+        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||          W1            |         W2            |         [C2]           |
@@ -731,22 +675,15 @@ fn container_in_tabbed_container() {
 
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=28.00)
-            Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, tabbed=true, active_tab=1,
-              Window(id=WindowId(3), x=75.00, y=4.00, w=75.00, h=26.00)
-              Window(id=WindowId(4), x=75.00, y=4.00, w=75.00, h=26.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(4), x=75.00, y=4.00, w=75.00, h=26.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=2, titles=[, , Container])
+        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, tabbed, active_tab=1, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||          W1            |         W2            |         [C2]           |
@@ -796,23 +733,17 @@ fn change_tab_shows_container_focus() {
     hub.insert_tiling();
 
     hub.focus_left();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=28.00)
-            Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
-              Window(id=WindowId(3), x=75.00, y=2.00, w=25.00, h=28.00)
-              Window(id=WindowId(4), x=100.00, y=2.00, w=25.00, h=28.00)
-              Window(id=WindowId(5), x=125.00, y=2.00, w=25.00, h=28.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(5), x=125.00, y=2.00, w=25.00, h=28.00)
+        Window(id=WindowId(4), x=100.00, y=2.00, w=25.00, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=75.00, y=2.00, w=25.00, h=28.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=2, titles=[, , Container])
+        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, titles=[, , ])
       )
-    )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||          W1            |         W2            |         [C2]           |
@@ -848,23 +779,14 @@ fn change_tab_shows_container_focus() {
 
     hub.focus_prev_tab();
     hub.focus_prev_tab();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=0,
-            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=28.00)
-            Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
-              Window(id=WindowId(3), x=75.00, y=2.00, w=25.00, h=28.00)
-              Window(id=WindowId(4), x=100.00, y=2.00, w=25.00, h=28.00)
-              Window(id=WindowId(5), x=125.00, y=2.00, w=25.00, h=28.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00, highlighted, spawn=bottom)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=0, titles=[, , Container])
       )
-    )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||         [W1]           |         W2            |          C2            |
@@ -901,23 +823,17 @@ fn change_tab_shows_container_focus() {
     hub.focus_next_tab();
     hub.focus_next_tab();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=2,
-            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=28.00)
-            Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
-              Window(id=WindowId(3), x=75.00, y=2.00, w=25.00, h=28.00)
-              Window(id=WindowId(4), x=100.00, y=2.00, w=25.00, h=28.00)
-              Window(id=WindowId(5), x=125.00, y=2.00, w=25.00, h=28.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(5), x=125.00, y=2.00, w=25.00, h=28.00)
+        Window(id=WindowId(4), x=100.00, y=2.00, w=25.00, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=75.00, y=2.00, w=25.00, h=28.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=2, titles=[, , Container])
+        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, titles=[, , ])
       )
-    )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||          W1            |         W2            |         [C2]           |
@@ -962,16 +878,12 @@ fn set_focus_updates_active_tab() {
 
     // Focus W0 should update active_tab to 0
     hub.set_focus(w0);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                      [W0]                       |                      W1                        |                      W2                         |
@@ -1016,15 +928,12 @@ fn delete_active_tab_updates_active_tab() {
 
     // W2 is active (index 2), delete it
     hub.delete_window(w2);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                   W0                                     |                                 [W1]                                    |
@@ -1076,23 +985,15 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent_and_children() {
 
     hub.toggle_direction();
     hub.set_focus(w3);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-          Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=10.00)
-          Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(2), x=0.00, y=22.00, w=150.00, h=8.00)
-            Window(id=WindowId(3), x=0.00, y=22.00, w=150.00, h=8.00)
-            Container(id=ContainerId(2), x=0.00, y=22.00, w=150.00, h=8.00, direction=Horizontal,
-              Window(id=WindowId(4), x=0.00, y=22.00, w=75.00, h=8.00)
-              Window(id=WindowId(5), x=75.00, y=22.00, w=75.00, h=8.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=0.00, y=22.00, w=150.00, h=8.00, highlighted, spawn=bottom)
+        Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=10.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
+        Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, tabbed, active_tab=1, titles=[, , Container])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1127,23 +1028,19 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent_and_children() {
     ");
 
     hub.toggle_container_layout();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-          Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=10.00)
-          Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, direction=Horizontal,
-            Window(id=WindowId(2), x=0.00, y=20.00, w=50.00, h=10.00)
-            Window(id=WindowId(3), x=50.00, y=20.00, w=50.00, h=10.00)
-            Container(id=ContainerId(2), x=100.00, y=20.00, w=50.00, h=10.00, direction=Vertical,
-              Window(id=WindowId(4), x=100.00, y=20.00, w=50.00, h=5.00)
-              Window(id=WindowId(5), x=100.00, y=25.00, w=50.00, h=5.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(5), x=100.00, y=25.00, w=50.00, h=5.00)
+        Window(id=WindowId(4), x=100.00, y=20.00, w=50.00, h=5.00)
+        Window(id=WindowId(3), x=50.00, y=20.00, w=50.00, h=10.00, highlighted, spawn=bottom)
+        Window(id=WindowId(2), x=0.00, y=20.00, w=50.00, h=10.00)
+        Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=10.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
+        Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, titles=[, , Container])
+        Container(id=ContainerId(2), x=100.00, y=20.00, w=50.00, h=10.00, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1197,25 +1094,15 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_children() {
     hub.toggle_direction();
     hub.set_focus(w3);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(2), x=100.00, y=2.00, w=50.00, h=28.00)
-            Window(id=WindowId(3), x=100.00, y=2.00, w=50.00, h=28.00)
-            Container(id=ContainerId(2), x=100.00, y=2.00, w=50.00, h=28.00, direction=Vertical,
-              Window(id=WindowId(4), x=100.00, y=2.00, w=50.00, h=7.00)
-              Window(id=WindowId(5), x=100.00, y=9.00, w=50.00, h=7.00)
-              Window(id=WindowId(6), x=100.00, y=16.00, w=50.00, h=7.00)
-              Window(id=WindowId(7), x=100.00, y=23.00, w=50.00, h=7.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=100.00, y=2.00, w=50.00, h=28.00, highlighted, spawn=bottom)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
+        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=1, titles=[, , Container])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     |                                                ||                                                ||      W2        |    [W3]       |     C2        |
@@ -1251,25 +1138,21 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_children() {
 
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=10.00)
-            Window(id=WindowId(3), x=100.00, y=10.00, w=50.00, h=10.00)
-            Container(id=ContainerId(2), x=100.00, y=20.00, w=50.00, h=10.00, direction=Horizontal,
-              Window(id=WindowId(4), x=100.00, y=20.00, w=12.50, h=10.00)
-              Window(id=WindowId(5), x=112.50, y=20.00, w=12.50, h=10.00)
-              Window(id=WindowId(6), x=125.00, y=20.00, w=12.50, h=10.00)
-              Window(id=WindowId(7), x=137.50, y=20.00, w=12.50, h=10.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(7), x=137.50, y=20.00, w=12.50, h=10.00)
+        Window(id=WindowId(6), x=125.00, y=20.00, w=12.50, h=10.00)
+        Window(id=WindowId(5), x=112.50, y=20.00, w=12.50, h=10.00)
+        Window(id=WindowId(4), x=100.00, y=20.00, w=12.50, h=10.00)
+        Window(id=WindowId(3), x=100.00, y=10.00, w=50.00, h=10.00, highlighted, spawn=bottom)
+        Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=10.00)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
+        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, titles=[, , Container])
+        Container(id=ContainerId(2), x=100.00, y=20.00, w=50.00, h=10.00, titles=[, , , ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     |                                                ||                                                ||                                                |
@@ -1330,33 +1213,22 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent() {
     hub.set_focus(w6);
     hub.toggle_direction();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(6), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=3,
-            Window(id=WindowId(1), x=50.00, y=2.00, w=50.00, h=28.00)
-            Window(id=WindowId(3), x=50.00, y=2.00, w=50.00, h=28.00)
-            Window(id=WindowId(4), x=50.00, y=2.00, w=50.00, h=28.00)
-            Container(id=ContainerId(2), x=50.00, y=2.00, w=50.00, h=28.00, direction=Vertical,
-              Window(id=WindowId(5), x=50.00, y=2.00, w=50.00, h=9.33)
-              Window(id=WindowId(6), x=50.00, y=11.33, w=50.00, h=9.33)
-              Container(id=ContainerId(3), x=50.00, y=20.67, w=50.00, h=9.33, tabbed=true, active_tab=2,
-                Window(id=WindowId(7), x=50.00, y=22.67, w=50.00, h=7.33)
-                Window(id=WindowId(8), x=50.00, y=22.67, w=50.00, h=7.33)
-                Container(id=ContainerId(4), x=50.00, y=22.67, w=50.00, h=7.33, direction=Horizontal,
-                  Window(id=WindowId(9), x=50.00, y=22.67, w=16.67, h=7.33)
-                  Window(id=WindowId(10), x=66.67, y=22.67, w=16.67, h=7.33)
-                  Window(id=WindowId(11), x=83.33, y=22.67, w=16.67, h=7.33)
-                )
-              )
-            )
-          )
-          Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(6))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(11), x=83.33, y=22.67, w=16.67, h=7.33)
+        Window(id=WindowId(10), x=66.67, y=22.67, w=16.67, h=7.33)
+        Window(id=WindowId(9), x=50.00, y=22.67, w=16.67, h=7.33)
+        Window(id=WindowId(6), x=50.00, y=11.33, w=50.00, h=9.33, highlighted, spawn=right)
+        Window(id=WindowId(5), x=50.00, y=2.00, w=50.00, h=9.33)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=3, titles=[, , , Container])
+        Container(id=ContainerId(2), x=50.00, y=2.00, w=50.00, h=28.00, titles=[, , Container])
+        Container(id=ContainerId(3), x=50.00, y=20.67, w=50.00, h=9.33, tabbed, active_tab=2, titles=[, , Container])
+        Container(id=ContainerId(4), x=50.00, y=22.67, w=50.00, h=7.33, titles=[, , ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     |                                                ||    W1      |   W3      |   W4      |  [C2]     ||                                                |
@@ -1392,33 +1264,25 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent() {
 
     hub.set_focus(w4);
     hub.toggle_container_layout();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=7.50)
-            Window(id=WindowId(3), x=50.00, y=7.50, w=50.00, h=7.50)
-            Window(id=WindowId(4), x=50.00, y=15.00, w=50.00, h=7.50)
-            Container(id=ContainerId(2), x=50.00, y=22.50, w=50.00, h=7.50, direction=Horizontal,
-              Window(id=WindowId(5), x=50.00, y=22.50, w=16.67, h=7.50)
-              Window(id=WindowId(6), x=66.67, y=22.50, w=16.67, h=7.50)
-              Container(id=ContainerId(3), x=83.33, y=22.50, w=16.67, h=7.50, tabbed=true, active_tab=2,
-                Window(id=WindowId(7), x=83.33, y=24.50, w=16.67, h=5.50)
-                Window(id=WindowId(8), x=83.33, y=24.50, w=16.67, h=5.50)
-                Container(id=ContainerId(4), x=83.33, y=24.50, w=16.67, h=5.50, direction=Horizontal,
-                  Window(id=WindowId(9), x=83.33, y=24.50, w=5.56, h=5.50)
-                  Window(id=WindowId(10), x=88.89, y=24.50, w=5.56, h=5.50)
-                  Window(id=WindowId(11), x=94.44, y=24.50, w=5.56, h=5.50)
-                )
-              )
-            )
-          )
-          Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(11), x=94.44, y=24.50, w=5.56, h=5.50)
+        Window(id=WindowId(10), x=88.89, y=24.50, w=5.56, h=5.50)
+        Window(id=WindowId(9), x=83.33, y=24.50, w=5.56, h=5.50)
+        Window(id=WindowId(6), x=66.67, y=22.50, w=16.67, h=7.50)
+        Window(id=WindowId(5), x=50.00, y=22.50, w=16.67, h=7.50)
+        Window(id=WindowId(4), x=50.00, y=15.00, w=50.00, h=7.50, highlighted, spawn=bottom)
+        Window(id=WindowId(3), x=50.00, y=7.50, w=50.00, h=7.50)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=7.50)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, titles=[, , , Container])
+        Container(id=ContainerId(2), x=50.00, y=22.50, w=50.00, h=7.50, titles=[, , Container])
+        Container(id=ContainerId(3), x=83.33, y=22.50, w=16.67, h=7.50, tabbed, active_tab=2, titles=[, , Container])
+        Container(id=ContainerId(4), x=83.33, y=24.50, w=16.67, h=5.50, titles=[, , ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     |                                                ||                                                ||                                                |
@@ -1476,19 +1340,16 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     hub.toggle_container_layout();
 
     // The nested container should stay vertical (not rotated) since it differs from parent
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
-            Window(id=WindowId(3), x=50.00, y=15.00, w=50.00, h=15.00)
-          )
-          Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(3), x=50.00, y=15.00, w=50.00, h=15.00)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right, titles=[, Container, ])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, titles=[, ])
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                ||                                                ||                                                *
@@ -1535,19 +1396,12 @@ fn replace_focus_should_not_change_active_tab_when_not_replacing_focused() {
     hub.toggle_spawn_mode();
     let w3 = hub.insert_tiling();
     hub.focus_prev_tab();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
-            Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=14.00)
-            Window(id=WindowId(3), x=0.00, y=16.00, w=150.00, h=14.00)
-          )
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[, Container, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                      [W0]                       |                      C1                        |                      W2                         |
@@ -1583,16 +1437,12 @@ fn replace_focus_should_not_change_active_tab_when_not_replacing_focused() {
 
     hub.delete_window(w3);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                      [W0]                       |                      W1                        |                      W2                         |
@@ -1632,17 +1482,15 @@ fn focus_tab_on_empty_workspace() {
     let mut hub = setup();
 
     hub.focus_next_tab();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 
     hub.focus_prev_tab();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 }
 
@@ -1659,12 +1507,11 @@ fn focus_tab_with_float_focused() {
     });
 
     hub.focus_next_tab();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
       )
-    )
 
                                                                                                                                                           
                                                                                                                                                           
@@ -1694,12 +1541,11 @@ fn focus_tab_with_float_focused() {
     ");
 
     hub.focus_prev_tab();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
       )
-    )
 
                                                                                                                                                           
                                                                                                                                                           
@@ -1737,15 +1583,13 @@ fn focus_tab_without_tabbed_ancestor() {
     hub.insert_tiling();
 
     hub.focus_next_tab();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -1780,15 +1624,13 @@ fn focus_tab_without_tabbed_ancestor() {
     ");
 
     hub.focus_prev_tab();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -1829,10 +1671,9 @@ fn toggle_container_layout_on_empty_workspace() {
 
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 }
 
@@ -1843,12 +1684,11 @@ fn toggle_container_layout_on_single_window() {
     hub.insert_tiling();
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -1896,12 +1736,11 @@ fn toggle_container_layout_with_float_focused() {
     });
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
       )
-    )
 
                                                                                                                                                           
                                                                                                                                                           
@@ -1950,21 +1789,15 @@ fn toggle_container_layout_in_nested_tabbed_maintain_direction_invariant() {
     hub.toggle_direction();
     // Now we have 3 containers where original orientation were horizontal, 2 of which got turned
     // into tabbed
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(1), x=0.00, y=4.00, w=150.00, h=26.00)
-            Container(id=ContainerId(2), x=0.00, y=4.00, w=150.00, h=26.00, direction=Horizontal,
-              Window(id=WindowId(2), x=0.00, y=4.00, w=75.00, h=26.00)
-              Window(id=WindowId(3), x=75.00, y=4.00, w=75.00, h=26.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=75.00, y=4.00, w=75.00, h=26.00)
+        Window(id=WindowId(2), x=0.00, y=4.00, w=75.00, h=26.00, highlighted, spawn=bottom)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[, Container])
+        Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, tabbed, active_tab=1, titles=[, Container])
+        Container(id=ContainerId(2), x=0.00, y=4.00, w=150.00, h=26.00, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                   W0                                     |                                 [C1]                                    |
@@ -2001,21 +1834,16 @@ fn toggle_container_layout_in_nested_tabbed_maintain_direction_invariant() {
     hub.set_focus(w1);
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=1,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, direction=Horizontal,
-            Window(id=WindowId(1), x=0.00, y=2.00, w=75.00, h=28.00)
-            Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, direction=Vertical,
-              Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=14.00)
-              Window(id=WindowId(3), x=75.00, y=16.00, w=75.00, h=14.00)
-            )
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=75.00, y=16.00, w=75.00, h=14.00)
+        Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=14.00)
+        Window(id=WindowId(1), x=0.00, y=2.00, w=75.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[, Container])
+        Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, titles=[, Container])
+        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                   W0                                     |                                 [C1]                                    |
@@ -2076,24 +1904,15 @@ fn toggle_tabbed_when_focused_is_inside_child_container() {
 
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(7), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=2,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
-            Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=9.33)
-            Window(id=WindowId(4), x=0.00, y=11.33, w=150.00, h=9.33)
-            Window(id=WindowId(5), x=0.00, y=20.67, w=150.00, h=9.33)
-          )
-          Container(id=ContainerId(2), x=0.00, y=2.00, w=150.00, h=28.00, direction=Vertical,
-            Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=9.33)
-            Window(id=WindowId(6), x=0.00, y=11.33, w=150.00, h=9.33)
-            Window(id=WindowId(7), x=0.00, y=20.67, w=150.00, h=9.33)
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(7), x=0.00, y=20.67, w=150.00, h=9.33)
+        Window(id=WindowId(6), x=0.00, y=11.33, w=150.00, h=9.33)
+        Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=9.33)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=2, highlighted, spawn=right, titles=[, Container, Container])
+        Container(id=ContainerId(2), x=0.00, y=2.00, w=150.00, h=28.00, titles=[, , ])
       )
-    )
 
     ******************************************************************************************************************************************************
     *                       W0                        |                      C1                        |                     [C2]                        *
@@ -2138,16 +1957,12 @@ fn focus_tab_index() {
     hub.toggle_container_layout();
 
     hub.focus_tab_index(ContainerId::new(0), 0);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                      [W0]                       |                      W1                        |                      W2                         |
@@ -2182,16 +1997,12 @@ fn focus_tab_index() {
     ");
 
     hub.focus_tab_index(ContainerId::new(0), 99);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed=true, active_tab=0,
-          Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00)
-          Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                      [W0]                       |                      W1                        |                      W2                         |

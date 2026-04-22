@@ -17,22 +17,14 @@ fn switch_workspace_attaches_windows_correctly() {
 
     hub.insert_tiling();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , ])
       )
-      Workspace(id=WorkspaceId(1), name=1,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(2), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(3), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
-      )
-    )
 
     +------------------------------------------------++------------------------------------------------+**************************************************
     |                                                ||                                                |*                                                *
@@ -76,12 +68,11 @@ fn focus_same_workspace() {
     hub.focus_workspace("0");
 
     assert_eq!(hub.current_workspace(), initial_workspace);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -122,9 +113,8 @@ fn focus_workspace_prune_previous_workspace() {
 
     hub.focus_workspace("2");
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(1), name=2)
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 }

@@ -11,19 +11,16 @@ fn move_left_from_vertical_container_to_horizontal_parent() {
     hub.insert_tiling();
 
     hub.move_left();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(3), x=50.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=15.00)
-            Window(id=WindowId(2), x=100.00, y=15.00, w=50.00, h=15.00)
-          )
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=100.00, y=15.00, w=50.00, h=15.00)
+        Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(3), x=50.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
+        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, titles=[, ])
       )
-    )
 
     +------------------------------------------------+**************************************************+------------------------------------------------+
     |                                                |*                                                *|                                                |
@@ -68,19 +65,16 @@ fn move_right_from_vertical_container_to_horizontal_parent() {
     hub.insert_tiling();
 
     hub.move_right();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
-            Window(id=WindowId(2), x=50.00, y=15.00, w=50.00, h=15.00)
-          )
-          Window(id=WindowId(3), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=50.00, y=15.00, w=50.00, h=15.00)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, titles=[, ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------+**************************************************
     |                                                ||                                                |*                                                *
@@ -126,19 +120,16 @@ fn move_up_from_horizontal_container_to_vertical_parent() {
     hub.insert_tiling();
 
     hub.move_up();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-          Window(id=WindowId(3), x=0.00, y=10.00, w=150.00, h=10.00)
-          Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, direction=Horizontal,
-            Window(id=WindowId(1), x=0.00, y=20.00, w=75.00, h=10.00)
-            Window(id=WindowId(2), x=75.00, y=20.00, w=75.00, h=10.00)
-          )
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=75.00, y=20.00, w=75.00, h=10.00)
+        Window(id=WindowId(1), x=0.00, y=20.00, w=75.00, h=10.00)
+        Window(id=WindowId(3), x=0.00, y=10.00, w=150.00, h=10.00, highlighted, spawn=bottom)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
+        Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -184,19 +175,16 @@ fn move_down_from_horizontal_container_to_vertical_parent() {
     hub.insert_tiling();
 
     hub.move_down();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-          Container(id=ContainerId(1), x=0.00, y=10.00, w=150.00, h=10.00, direction=Horizontal,
-            Window(id=WindowId(1), x=0.00, y=10.00, w=75.00, h=10.00)
-            Window(id=WindowId(2), x=75.00, y=10.00, w=75.00, h=10.00)
-          )
-          Window(id=WindowId(3), x=0.00, y=20.00, w=150.00, h=10.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=0.00, y=20.00, w=150.00, h=10.00, highlighted, spawn=bottom)
+        Window(id=WindowId(2), x=75.00, y=10.00, w=75.00, h=10.00)
+        Window(id=WindowId(1), x=0.00, y=10.00, w=75.00, h=10.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=0.00, y=10.00, w=150.00, h=10.00, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -241,19 +229,16 @@ fn move_left_from_vertical_container_creates_new_root_container() {
     hub.insert_tiling();
 
     hub.move_left();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(3), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=10.00)
-            Window(id=WindowId(1), x=75.00, y=10.00, w=75.00, h=10.00)
-            Window(id=WindowId(2), x=75.00, y=20.00, w=75.00, h=10.00)
-          )
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=75.00, y=20.00, w=75.00, h=10.00)
+        Window(id=WindowId(1), x=75.00, y=10.00, w=75.00, h=10.00)
+        Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=10.00)
+        Window(id=WindowId(3), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, , ])
       )
-    )
 
     ***************************************************************************+-------------------------------------------------------------------------+
     *                                                                         *|                                                                         |
@@ -296,15 +281,13 @@ fn move_left_from_vertical_container_replaces_new_root_container() {
     hub.insert_tiling();
 
     hub.move_left();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     ***************************************************************************+-------------------------------------------------------------------------+
     *                                                                         *|                                                                         |
@@ -348,18 +331,15 @@ fn move_right_from_vertical_container_creates_new_root_container() {
     hub.insert_tiling();
 
     hub.move_right();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
-            Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
-          )
-          Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -402,15 +382,13 @@ fn move_right_from_vertical_container_replaces_new_root_container() {
     hub.insert_tiling();
 
     hub.move_right();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -453,18 +431,15 @@ fn move_up_from_horizontal_container_creates_new_root_container() {
     hub.insert_tiling();
 
     hub.move_up();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(2), x=0.00, y=0.00, w=150.00, h=15.00)
-          Container(id=ContainerId(0), x=0.00, y=15.00, w=150.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(0), x=0.00, y=15.00, w=75.00, h=15.00)
-            Window(id=WindowId(1), x=75.00, y=15.00, w=75.00, h=15.00)
-          )
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=15.00, w=75.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=15.00, w=75.00, h=15.00)
+        Window(id=WindowId(2), x=0.00, y=0.00, w=150.00, h=15.00, highlighted, spawn=bottom)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(0), x=0.00, y=15.00, w=150.00, h=15.00, titles=[, ])
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -506,15 +481,13 @@ fn move_up_from_horizontal_container_replaces_new_root_container() {
     hub.insert_tiling();
 
     hub.move_up();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
-          Window(id=WindowId(0), x=0.00, y=15.00, w=150.00, h=15.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=15.00, w=150.00, h=15.00)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00, highlighted, spawn=bottom)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -557,18 +530,15 @@ fn move_down_from_horizontal_container_creates_new_root_container() {
     hub.insert_tiling();
 
     hub.move_down();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
-            Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
-          )
-          Window(id=WindowId(2), x=0.00, y=15.00, w=150.00, h=15.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=0.00, y=15.00, w=150.00, h=15.00, highlighted, spawn=bottom)
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=15.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||                                                                         |
@@ -610,15 +580,13 @@ fn move_down_from_horizontal_container_replaces_new_root_container() {
     hub.insert_tiling();
 
     hub.move_down();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-          Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00, highlighted, spawn=bottom)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -665,22 +633,18 @@ fn move_right_at_edge_goes_to_horizontal_grandparent() {
     hub.insert_tiling();
 
     hub.move_right();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
-            Container(id=ContainerId(2), x=50.00, y=15.00, w=50.00, h=15.00, direction=Horizontal,
-              Window(id=WindowId(2), x=50.00, y=15.00, w=25.00, h=15.00)
-              Window(id=WindowId(3), x=75.00, y=15.00, w=25.00, h=15.00)
-            )
-          )
-          Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=75.00, y=15.00, w=25.00, h=15.00)
+        Window(id=WindowId(2), x=50.00, y=15.00, w=25.00, h=15.00)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(2), x=50.00, y=15.00, w=50.00, h=15.00, titles=[, ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------+**************************************************
     |                                                ||                                                |*                                                *
@@ -729,22 +693,18 @@ fn move_left_at_edge_goes_to_horizontal_grandparent() {
     hub.focus_left();
 
     hub.move_left();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(2), x=50.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=15.00)
-            Container(id=ContainerId(2), x=100.00, y=15.00, w=50.00, h=15.00, direction=Horizontal,
-              Window(id=WindowId(3), x=100.00, y=15.00, w=25.00, h=15.00)
-              Window(id=WindowId(4), x=125.00, y=15.00, w=25.00, h=15.00)
-            )
-          )
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(4), x=125.00, y=15.00, w=25.00, h=15.00)
+        Window(id=WindowId(3), x=100.00, y=15.00, w=25.00, h=15.00)
+        Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(2), x=50.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
+        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(2), x=100.00, y=15.00, w=50.00, h=15.00, titles=[, ])
       )
-    )
 
     +------------------------------------------------+**************************************************+------------------------------------------------+
     |                                                |*                                                *|                                                |
@@ -792,22 +752,18 @@ fn move_down_at_edge_goes_to_vertical_grandparent() {
     hub.insert_tiling();
 
     hub.move_down();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-          Container(id=ContainerId(1), x=0.00, y=10.00, w=150.00, h=10.00, direction=Horizontal,
-            Window(id=WindowId(1), x=0.00, y=10.00, w=75.00, h=10.00)
-            Container(id=ContainerId(2), x=75.00, y=10.00, w=75.00, h=10.00, direction=Vertical,
-              Window(id=WindowId(2), x=75.00, y=10.00, w=75.00, h=5.00)
-              Window(id=WindowId(3), x=75.00, y=15.00, w=75.00, h=5.00)
-            )
-          )
-          Window(id=WindowId(4), x=0.00, y=20.00, w=150.00, h=10.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(4), x=0.00, y=20.00, w=150.00, h=10.00, highlighted, spawn=bottom)
+        Window(id=WindowId(3), x=75.00, y=15.00, w=75.00, h=5.00)
+        Window(id=WindowId(2), x=75.00, y=10.00, w=75.00, h=5.00)
+        Window(id=WindowId(1), x=0.00, y=10.00, w=75.00, h=10.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=0.00, y=10.00, w=150.00, h=10.00, titles=[, Container])
+        Container(id=ContainerId(2), x=75.00, y=10.00, w=75.00, h=10.00, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -857,22 +813,18 @@ fn move_up_at_edge_goes_to_vertical_grandparent() {
     hub.focus_up();
 
     hub.move_up();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-          Window(id=WindowId(2), x=0.00, y=10.00, w=150.00, h=10.00)
-          Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, direction=Horizontal,
-            Window(id=WindowId(1), x=0.00, y=20.00, w=75.00, h=10.00)
-            Container(id=ContainerId(2), x=75.00, y=20.00, w=75.00, h=10.00, direction=Vertical,
-              Window(id=WindowId(3), x=75.00, y=20.00, w=75.00, h=5.00)
-              Window(id=WindowId(4), x=75.00, y=25.00, w=75.00, h=5.00)
-            )
-          )
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(4), x=75.00, y=25.00, w=75.00, h=5.00)
+        Window(id=WindowId(3), x=75.00, y=20.00, w=75.00, h=5.00)
+        Window(id=WindowId(1), x=0.00, y=20.00, w=75.00, h=10.00)
+        Window(id=WindowId(2), x=0.00, y=10.00, w=150.00, h=10.00, highlighted, spawn=bottom)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
+        Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, titles=[, Container])
+        Container(id=ContainerId(2), x=75.00, y=20.00, w=75.00, h=10.00, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -926,15 +878,13 @@ fn swap_left_in_horizontal_container() {
     hub.insert_tiling();
 
     hub.move_left();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     ***************************************************************************+-------------------------------------------------------------------------+
     *                                                                         *|                                                                         |
@@ -977,15 +927,13 @@ fn swap_right_in_horizontal_container() {
     hub.focus_left();
 
     hub.move_right();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------+***************************************************************************
     |                                                                         |*                                                                         *
@@ -1028,15 +976,13 @@ fn swap_up_in_vertical_container() {
     hub.insert_tiling();
 
     hub.move_up();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
-          Window(id=WindowId(0), x=0.00, y=15.00, w=150.00, h=15.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=15.00, w=150.00, h=15.00)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00, highlighted, spawn=bottom)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -1080,15 +1026,13 @@ fn swap_down_in_vertical_container() {
     hub.focus_up();
 
     hub.move_down();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
-          Window(id=WindowId(0), x=0.00, y=15.00, w=150.00, h=15.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=15.00, w=150.00, h=15.00, highlighted, spawn=bottom)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1135,19 +1079,15 @@ fn move_from_tabbed_parent_goes_to_grandparent() {
     hub.focus_prev_tab();
 
     hub.move_right();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=0,
-            Window(id=WindowId(1), x=50.00, y=2.00, w=50.00, h=28.00)
-            Window(id=WindowId(3), x=50.00, y=2.00, w=50.00, h=28.00)
-          )
-          Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=50.00, y=2.00, w=50.00, h=28.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=0, titles=[, ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------+**************************************************
     |                                                ||         [W1]           |         W3            |*                                                *
@@ -1194,22 +1134,16 @@ fn move_from_nested_container_skip_tabbed_grandparent() {
     hub.focus_prev_tab();
     hub.toggle_spawn_mode();
     hub.insert_tiling();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
-            Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, direction=Horizontal,
-              Window(id=WindowId(2), x=75.00, y=2.00, w=37.50, h=28.00)
-              Window(id=WindowId(4), x=112.50, y=2.00, w=37.50, h=28.00)
-            )
-            Window(id=WindowId(3), x=75.00, y=2.00, w=75.00, h=28.00)
-          )
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(4), x=112.50, y=2.00, w=37.50, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=75.00, y=2.00, w=37.50, h=28.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[, Container, ])
+        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, titles=[, ])
       )
-    )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||          W1            |        [C2]           |          W3            |
@@ -1244,20 +1178,15 @@ fn move_from_nested_container_skip_tabbed_grandparent() {
     ");
 
     hub.move_right();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed=true, active_tab=1,
-            Window(id=WindowId(1), x=50.00, y=2.00, w=50.00, h=28.00)
-            Window(id=WindowId(2), x=50.00, y=2.00, w=50.00, h=28.00)
-            Window(id=WindowId(3), x=50.00, y=2.00, w=50.00, h=28.00)
-          )
-          Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=50.00, y=2.00, w=50.00, h=28.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=1, titles=[, , ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------+**************************************************
     |                                                ||      W1        |    [W2]       |     W3        |*                                                *
@@ -1306,22 +1235,18 @@ fn move_container_up_toggles_direction_when_matching_parent() {
     hub.focus_parent();
 
     hub.move_up();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-          Container(id=ContainerId(2), x=0.00, y=10.00, w=150.00, h=10.00, direction=Horizontal,
-            Window(id=WindowId(3), x=0.00, y=10.00, w=75.00, h=10.00)
-            Window(id=WindowId(4), x=75.00, y=10.00, w=75.00, h=10.00)
-          )
-          Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, direction=Horizontal,
-            Window(id=WindowId(1), x=0.00, y=20.00, w=75.00, h=10.00)
-            Window(id=WindowId(2), x=75.00, y=20.00, w=75.00, h=10.00)
-          )
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=75.00, y=20.00, w=75.00, h=10.00)
+        Window(id=WindowId(1), x=0.00, y=20.00, w=75.00, h=10.00)
+        Window(id=WindowId(4), x=75.00, y=10.00, w=75.00, h=10.00)
+        Window(id=WindowId(3), x=0.00, y=10.00, w=75.00, h=10.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, Container])
+        Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, titles=[, ])
+        Container(id=ContainerId(2), x=0.00, y=10.00, w=150.00, h=10.00, highlighted, spawn=bottom, titles=[, ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1369,22 +1294,18 @@ fn move_container_left_toggles_direction_when_matching_parent() {
     hub.focus_parent();
 
     hub.move_left();
-    insta::assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(2), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(3), x=50.00, y=0.00, w=50.00, h=15.00)
-            Window(id=WindowId(4), x=50.00, y=15.00, w=50.00, h=15.00)
-          )
-          Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=15.00)
-            Window(id=WindowId(2), x=100.00, y=15.00, w=50.00, h=15.00)
-          )
-        )
+    insta::assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=100.00, y=15.00, w=50.00, h=15.00)
+        Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(4), x=50.00, y=15.00, w=50.00, h=15.00)
+        Window(id=WindowId(3), x=50.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, Container])
+        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(2), x=50.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right, titles=[, ])
       )
-    )
 
     +------------------------------------------------+**************************************************+------------------------------------------------+
     |                                                |*                                                *|                                                |
@@ -1428,10 +1349,9 @@ fn move_in_direction_on_empty_workspace() {
     hub.move_up();
     hub.move_down();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 }
 
@@ -1452,12 +1372,11 @@ fn move_in_direction_with_float_focused() {
     hub.move_up();
     hub.move_down();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
       )
-    )
 
                                                                                                                                                           
                                                                                                                                                           

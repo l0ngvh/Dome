@@ -1,4 +1,4 @@
-use super::{setup_hub, setup_logger_with_level, snapshot_text, validate_hub};
+use super::{hub_debug_text, setup_hub, setup_logger_with_level, validate_hub};
 use crate::action::MonitorTarget;
 use crate::core::node::{Dimension, MonitorId, WindowId, WindowRestrictions};
 use rand::{Rng, SeedableRng};
@@ -329,7 +329,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize) {
         for (i, op) in history.iter().enumerate() {
             tracing::error!("  {i}: {op}");
         }
-        tracing::error!("\nHub state:\n{}", snapshot_text(&hub));
+        tracing::error!("\nHub state:\n{}", hub_debug_text(&hub));
         std::panic::resume_unwind(e);
     }
 }

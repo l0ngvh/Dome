@@ -11,12 +11,11 @@ fn insert_float_window() {
         width: 30.0,
         height: 20.0,
     });
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
       )
-    )
 
                                                                                                                                                           
                                                                                                                                                           
@@ -56,13 +55,12 @@ fn float_window_with_tiling() {
         width: 40.0,
         height: 15.0,
     });
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=WindowId(1), x=50.00, y=5.00, w=40.00, h=15.00)
+        Window(id=WindowId(1), x=50.00, y=5.00, w=40.00, h=15.00, float, highlighted)
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -98,57 +96,6 @@ fn float_window_with_tiling() {
 }
 
 #[test]
-fn delete_window_window() {
-    let mut hub = setup();
-    hub.insert_tiling();
-    let f0 = hub.insert_float(Dimension {
-        x: 50.0,
-        y: 5.0,
-        width: 40.0,
-        height: 15.0,
-    });
-    hub.delete_window(f0);
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
-
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
-    ");
-}
-
-#[test]
 fn move_float_to_workspace() {
     let mut hub = setup();
     hub.insert_tiling();
@@ -159,15 +106,11 @@ fn move_float_to_workspace() {
         height: 15.0,
     });
     hub.move_focused_to_workspace("1");
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-      Workspace(id=WorkspaceId(1), name=1,
-        Float(id=WindowId(1), x=50.00, y=5.00, w=40.00, h=15.00)
-      )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -215,12 +158,11 @@ fn focus_falls_back_to_tiling_after_float_delete() {
     // Float is focused after insert
     hub.delete_window(f0);
     // Focus should fall back to tiling window
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -275,16 +217,14 @@ fn focus_falls_back_to_container_focus_after_float_delete() {
     hub.delete_window(f0);
 
     // Focus should fall back to W1 (container's focus), not W2 (last window)
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
-          Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , ])
       )
-    )
 
     +------------------------------------------------+**************************************************+------------------------------------------------+
     |                                                |*                                                *|                                                |
@@ -337,12 +277,11 @@ fn focus_falls_back_to_last_float() {
     // f1 is focused
     hub.delete_window(f1);
     // Focus should fall back to f0
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=10.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=10.00, float, highlighted)
       )
-    )
 
                                                                                                                                                           
                                                                                                                                                           
@@ -367,12 +306,11 @@ fn toggle_tiling_to_float() {
     let mut hub = setup();
     hub.insert_tiling();
     hub.toggle_float();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Float(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, float, highlighted)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -417,12 +355,11 @@ fn toggle_float_to_tiling() {
         height: 15.0,
     });
     hub.toggle_float();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -463,13 +400,12 @@ fn toggle_tiling_to_float_with_existing_tiling() {
     hub.insert_tiling();
     hub.insert_tiling();
     hub.toggle_float();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, float, highlighted)
       )
-    )
 
     +--------------------------------------------------------------------------***************************************************************************
     |                                                                          *                                                                         *
@@ -533,19 +469,16 @@ fn toggle_float_to_tiling_with_nested_containers() {
         height: 15.0,
     });
     hub.toggle_float();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-          Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(1), x=0.00, y=15.00, w=50.00, h=15.00)
-            Window(id=WindowId(2), x=50.00, y=15.00, w=50.00, h=15.00)
-            Window(id=WindowId(3), x=100.00, y=15.00, w=50.00, h=15.00)
-          )
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=100.00, y=15.00, w=50.00, h=15.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=50.00, y=15.00, w=50.00, h=15.00)
+        Window(id=WindowId(1), x=0.00, y=15.00, w=50.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
+        Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, titles=[, , ])
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -598,16 +531,12 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     // Insert a tiling window on workspace 1
     let w1 = hub.insert_tiling();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00, float)
       )
-      Workspace(id=WorkspaceId(1), name=1,
-        Window(id=WindowId(2), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00)
-      )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -646,15 +575,12 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     // Delete the tiling window on workspace 1 (workspace 1 should NOT be deleted because it has a float)
     hub.delete_window(w1);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    let after_tiling_delete = snapshot(&hub);
+    assert_snapshot!(after_tiling_delete, @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-      Workspace(id=WorkspaceId(1), name=1,
-        Float(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00)
-      )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -691,44 +617,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     // Now delete the float - this should not panic
     hub.delete_window(f0);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-    )
-
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
-    ");
+    assert_eq!(snapshot(&hub), after_tiling_delete);
 }
 
 #[test]
@@ -740,15 +629,13 @@ fn toggle_float_with_container_focused() {
     hub.focus_parent();
     hub.toggle_float();
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-          Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right, titles=[, ])
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                         ||                                                                         *
@@ -798,12 +685,11 @@ fn delete_unfocused_float_window() {
 
     hub.delete_window(f0);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -852,10 +738,9 @@ fn delete_window_keeps_current_workspace() {
     });
     hub.delete_window(f0);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0)
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 }
 
@@ -878,14 +763,15 @@ fn delete_window_keeps_workspace_with_tiling() {
     // Delete float - workspace 1 should remain because it has tiling
     hub.delete_window(f0);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(1), name=1,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-      )
-      Workspace(id=WorkspaceId(2), name=0)
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
+    assert_eq!(
+        hub.all_workspaces().len(),
+        2,
+        "ws1 should still exist (has tiling window)"
+    );
 }
 
 #[test]
@@ -912,14 +798,15 @@ fn delete_window_keeps_workspace_with_other_floats() {
     // Delete one float - workspace 1 should remain because it has another float
     hub.delete_window(f0);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(1), name=1,
-        Float(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=20.00)
-      )
-      Workspace(id=WorkspaceId(2), name=0)
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
+    assert_eq!(
+        hub.all_workspaces().len(),
+        2,
+        "ws1 should still exist (has another float)"
+    );
 }
 
 #[test]
@@ -940,11 +827,15 @@ fn delete_window_removes_empty_non_current_workspace() {
     // Delete float - workspace 1 should be removed (empty and not current)
     hub.delete_window(f0);
 
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=None, screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(2), name=0)
-    )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
+    assert_eq!(
+        hub.all_workspaces().len(),
+        1,
+        "ws1 should be pruned (was empty)"
+    );
 }
 
 #[test]
@@ -961,12 +852,10 @@ fn insert_float_offscreen_does_not_scroll_viewport() {
     let ws_id = hub.current_workspace();
     assert_eq!(hub.workspaces.get(ws_id).viewport_offset, (0.0, 0.0));
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Float(id=WindowId(1), x=200.00, y=5.00, w=30.00, h=20.00)
       )
-    )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     |                                                                                                                                                    |
@@ -1028,15 +917,13 @@ fn toggle_float_with_scrolled_viewport() {
         .1;
     assert_eq!(float_dim.x, 50.0);
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(2), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), x=100.00, y=0.00, w=100.00, h=30.00)
-        )
-        Float(id=WindowId(2), x=50.00, y=0.00, w=100.00, h=30.00)
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=50.00, y=0.00, w=100.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(2), x=50.00, y=0.00, w=100.00, h=30.00, float, highlighted)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     -------------------------------------------------+****************************************************************************************************
                                                      |*                                                                                                  *
@@ -1092,14 +979,12 @@ fn toggle_float_to_tiling_with_scrolled_viewport() {
 
     assert!(!hub.get_window(w1).is_float());
     assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=200.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-          Window(id=WindowId(1), x=100.00, y=0.00, w=100.00, h=30.00)
-        )
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=50.00, y=0.00, w=100.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
       )
-    )
 
     -------------------------------------------------+****************************************************************************************************
                                                      |*                                                                                                  *

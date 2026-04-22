@@ -5,12 +5,11 @@ use insta::assert_snapshot;
 fn initial_window_cover_full_screen() {
     let mut hub = setup();
     hub.insert_tiling();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
       )
-    )
 
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -51,17 +50,15 @@ fn split_window_evenly() {
     for _ in 0..4 {
         hub.insert_tiling();
     }
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=37.50, h=30.00)
-          Window(id=WindowId(1), x=37.50, y=0.00, w=37.50, h=30.00)
-          Window(id=WindowId(2), x=75.00, y=0.00, w=37.50, h=30.00)
-          Window(id=WindowId(3), x=112.50, y=0.00, w=37.50, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=112.50, y=0.00, w=37.50, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=75.00, y=0.00, w=37.50, h=30.00)
+        Window(id=WindowId(1), x=37.50, y=0.00, w=37.50, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=37.50, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , , ])
       )
-    )
 
     +------------------------------------++-----------------------------------++------------------------------------+*************************************
     |                                    ||                                   ||                                    |*                                   *
@@ -107,19 +104,16 @@ fn new_container_preserves_wrapped_window_position() {
     hub.toggle_spawn_mode();
     hub.insert_tiling();
     // New container wrapping w1 should be in the middle position
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
-            Window(id=WindowId(3), x=50.00, y=15.00, w=50.00, h=15.00)
-          )
-          Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(3), x=50.00, y=15.00, w=50.00, h=15.00, highlighted, spawn=bottom)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, titles=[, ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     |                                                ||                                                ||                                                |
@@ -164,17 +158,15 @@ fn insert_window_after_focused_window() {
     hub.focus_left();
     hub.insert_tiling();
     // w3 should be inserted right after w1, not at the end
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=37.50, h=30.00)
-          Window(id=WindowId(1), x=37.50, y=0.00, w=37.50, h=30.00)
-          Window(id=WindowId(3), x=75.00, y=0.00, w=37.50, h=30.00)
-          Window(id=WindowId(2), x=112.50, y=0.00, w=37.50, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=112.50, y=0.00, w=37.50, h=30.00)
+        Window(id=WindowId(3), x=75.00, y=0.00, w=37.50, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=37.50, y=0.00, w=37.50, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=37.50, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , , ])
       )
-    )
 
     +------------------------------------++-----------------------------------+**************************************+-----------------------------------+
     |                                    ||                                   |*                                    *|                                   |
@@ -227,20 +219,17 @@ fn insert_window_after_focused_container_with_same_new_window_direction() {
     hub.toggle_spawn_mode();
     hub.insert_tiling();
     // w4 should be inserted right after the focused container, not at the end
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-          Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=10.00)
-            Window(id=WindowId(2), x=50.00, y=10.00, w=50.00, h=10.00)
-            Window(id=WindowId(4), x=50.00, y=20.00, w=50.00, h=10.00)
-          )
-          Window(id=WindowId(3), x=100.00, y=0.00, w=50.00, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=100.00, y=0.00, w=50.00, h=30.00)
+        Window(id=WindowId(4), x=50.00, y=20.00, w=50.00, h=10.00, highlighted, spawn=bottom)
+        Window(id=WindowId(2), x=50.00, y=10.00, w=50.00, h=10.00)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=10.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, titles=[, , ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     |                                                ||                                                ||                                                |
@@ -284,19 +273,16 @@ fn insert_to_new_container_when_focused_container_window_insert_direction_differ
     hub.focus_parent();
     hub.toggle_spawn_mode();
     hub.insert_tiling();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(3), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, direction=Vertical,
-          Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=15.00, direction=Horizontal,
-            Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=15.00)
-            Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
-            Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=15.00)
-          )
-          Window(id=WindowId(3), x=0.00, y=15.00, w=150.00, h=15.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(3), x=0.00, y=15.00, w=150.00, h=15.00, highlighted, spawn=bottom)
+        Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=15.00)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=15.00, titles=[, , ])
       )
-    )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     |                                                ||                                                ||                                                |
@@ -345,20 +331,17 @@ fn insert_to_parent_when_focused_container_window_insert_direction_differ_but_ha
     hub.toggle_spawn_mode();
     // Should be inserted in the root container
     hub.insert_tiling();
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-      Workspace(id=WorkspaceId(0), name=0,
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, direction=Horizontal,
-          Window(id=WindowId(0), x=0.00, y=0.00, w=37.50, h=30.00)
-          Container(id=ContainerId(1), x=37.50, y=0.00, w=37.50, h=30.00, direction=Vertical,
-            Window(id=WindowId(1), x=37.50, y=0.00, w=37.50, h=15.00)
-            Window(id=WindowId(3), x=37.50, y=15.00, w=37.50, h=15.00)
-          )
-          Window(id=WindowId(4), x=75.00, y=0.00, w=37.50, h=30.00)
-          Window(id=WindowId(2), x=112.50, y=0.00, w=37.50, h=30.00)
-        )
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=112.50, y=0.00, w=37.50, h=30.00)
+        Window(id=WindowId(4), x=75.00, y=0.00, w=37.50, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=37.50, y=15.00, w=37.50, h=15.00)
+        Window(id=WindowId(1), x=37.50, y=0.00, w=37.50, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=37.50, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, , ])
+        Container(id=ContainerId(1), x=37.50, y=0.00, w=37.50, h=30.00, titles=[, ])
       )
-    )
 
     +------------------------------------++-----------------------------------+**************************************+-----------------------------------+
     |                                    ||                                   |*                                    *|                                   |
