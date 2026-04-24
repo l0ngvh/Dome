@@ -43,6 +43,8 @@ use dome::overlay::{
 use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
 use external::HwndId;
+
+const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 use glutin::display::{Display as GlDisplay, DisplayApiPreference};
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use raw_window_handle::{RawDisplayHandle, WindowsDisplayHandle};
@@ -131,9 +133,25 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     ipc::start_server({
         let sender = hub_sender.clone();
-        move |actions| {
-            sender.send(HubEvent::Action(actions));
-            Ok(())
+        move |msg| {
+            use crate::action::IpcMessage;
+            match msg {
+                IpcMessage::Action(action) => {
+                    sender.send(HubEvent::Action(crate::action::Actions::new(vec![action])));
+                    Ok("ok".to_string())
+                }
+                IpcMessage::Query(query) => {
+                    let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(1);
+                    sender.send(HubEvent::Query {
+                        query,
+                        sender: resp_tx,
+                    });
+                    match resp_rx.recv_timeout(QUERY_TIMEOUT) {
+                        Ok(json) => Ok(json),
+                        Err(_) => Ok(r#"{"error":"query timed out"}"#.to_string()),
+                    }
+                }
+            }
         }
     })?;
 

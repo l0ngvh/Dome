@@ -95,51 +95,49 @@ impl Runner {
             HubEvent::Shutdown => {
                 tracing::info!("Shutdown requested");
                 unsafe { PostQuitMessage(0) };
-                return;
             }
             HubEvent::ConfigChanged(c) => {
                 self.dome.config_changed(*c);
+                self.dome.apply_layout();
             }
             HubEvent::WindowCreated(hwnd_id) => {
                 self.dispatch_window_created(hwnd_id);
-                return;
             }
             HubEvent::WindowDestroyed(hwnd_id) => {
                 self.dome.window_destroyed(hwnd_id);
+                self.dome.apply_layout();
             }
             HubEvent::WindowMinimized(hwnd_id) => {
                 self.dome.window_minimized(hwnd_id);
+                self.dome.apply_layout();
             }
             HubEvent::WindowFocused(hwnd_id) => match self.focus_throttle.submit(hwnd_id) {
                 ThrottleResult::Send(id) => {
                     self.dome.handle_focus(id);
+                    self.dome.apply_layout();
                 }
-                ThrottleResult::Pending => return,
+                ThrottleResult::Pending => {}
                 ThrottleResult::ScheduleFlush(delay) => {
                     self.focus_throttle.mark_timer_scheduled();
                     self.schedule_timer(TimerKind::FocusThrottle, delay);
-                    return;
                 }
             },
             HubEvent::MoveSizeStart(hwnd_id) => {
                 self.cancel_timer(&hwnd_id);
                 self.dome.move_size_started(hwnd_id);
                 self.schedule_timer(TimerKind::DragSafety(hwnd_id), DRAG_SAFETY_TIMEOUT);
-                return;
             }
             HubEvent::MoveSizeEnd(hwnd_id) => {
                 self.cancel_timer(&hwnd_id);
                 self.dome.move_size_ended(hwnd_id);
                 self.dome.placement_timeout(hwnd_id);
                 self.dispatch_placement_read(hwnd_id);
-                return;
             }
             HubEvent::LocationChanged(hwnd_id) => {
                 if self.dome.location_changed(hwnd_id) {
                     self.cancel_timer(&hwnd_id);
                     self.schedule_timer(TimerKind::PlacementDebounce(hwnd_id), DEBOUNCE_INTERVAL);
                 }
-                return;
             }
             HubEvent::WindowTitleChanged(hwnd_id) => {
                 if self.dome.registry_contains_hwnd(hwnd_id) {
@@ -156,23 +154,33 @@ impl Runner {
                 } else {
                     self.dispatch_window_created(hwnd_id);
                 }
-                return;
             }
             HubEvent::Action(a) => {
                 self.handle_actions(&a);
             }
+            HubEvent::Query { query, sender } => {
+                let json = match query {
+                    crate::action::Query::Workspaces => self.dome.query_workspaces_json(),
+                };
+                if sender.send(json).is_err() {
+                    tracing::debug!("Query response dropped -- receiver gone");
+                }
+            }
             HubEvent::TabClicked(id, idx) => {
                 self.dome.tab_clicked(id, idx);
+                self.dome.apply_layout();
             }
         }
-        self.dome.apply_layout();
     }
 
     #[tracing::instrument(skip(self))]
     fn handle_actions(&mut self, actions: &Actions) {
         for action in actions {
             match action {
-                Action::Hub(hub) => self.dome.execute_hub_action(hub),
+                Action::Hub(hub) => {
+                    self.dome.execute_hub_action(hub);
+                    self.dome.apply_layout();
+                }
                 Action::Exec { command } => {
                     if let Err(e) = std::process::Command::new("cmd")
                         .args(["/C", command])
@@ -220,14 +228,16 @@ impl Runner {
                 if runner.dome.registry_contains_hwnd(manage.id()) {
                     return;
                 }
-                if let Some(actions) =
+                let actions =
                     runner
                         .dome
-                        .try_manage_window(manage, title, process, constraints, observation)
-                {
+                        .try_manage_window(manage, title, process, constraints, observation);
+                // Flush unconditionally: try_manage_window may have inserted a
+                // window even when returning None (inserted but no on_open rules).
+                runner.dome.apply_layout();
+                if let Some(actions) = actions {
                     runner.handle_actions(&actions);
                 }
-                runner.dome.apply_layout();
             },
         );
     }

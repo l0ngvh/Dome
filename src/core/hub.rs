@@ -299,6 +299,31 @@ impl Hub {
             .collect()
     }
 
+    /// Returns metadata for all active workspaces, ordered by WorkspaceId
+    /// (creation order). Pruned workspaces (empty and not active on any
+    /// monitor) never appear because `prune_workspace` deletes them.
+    pub(crate) fn query_workspaces(&self) -> Vec<super::WorkspaceInfo> {
+        let focused_ws = self.current_workspace();
+        let visible: Vec<WorkspaceId> = self.visible_workspaces();
+        self.access
+            .workspaces
+            .all_active()
+            .into_iter()
+            .map(|(ws_id, ws)| super::WorkspaceInfo {
+                name: ws.name.clone(),
+                is_focused: ws_id == focused_ws,
+                is_visible: visible.contains(&ws_id),
+                window_count: self.count_workspace_windows(ws_id, &ws),
+            })
+            .collect()
+    }
+
+    fn count_workspace_windows(&self, ws_id: WorkspaceId, ws: &Workspace) -> usize {
+        self.strategy.tiling_window_count(&self.access, ws_id)
+            + ws.float_windows.len()
+            + ws.fullscreen_windows.len()
+    }
+
     #[cfg(test)]
     pub(super) fn all_monitors(&self) -> Vec<(MonitorId, Monitor)> {
         self.access.monitors.all_active()

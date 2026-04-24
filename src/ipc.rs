@@ -6,7 +6,7 @@ use interprocess::local_socket::{
     traits::{Listener, Stream},
 };
 
-use crate::action::{Action, Actions};
+use crate::action::IpcMessage;
 
 fn socket_path() -> PathBuf {
     #[cfg(unix)]
@@ -31,20 +31,28 @@ impl DomeClient {
         interprocess::local_socket::Stream::connect(socket_name()).is_ok()
     }
 
-    pub fn send_action(&self, action: &Action) -> std::io::Result<String> {
+    fn send(&self, msg: &IpcMessage) -> std::io::Result<String> {
         let mut stream = interprocess::local_socket::Stream::connect(socket_name())?;
-        let json = serde_json::to_string(action).map_err(std::io::Error::other)?;
+        let json = serde_json::to_string(msg).map_err(std::io::Error::other)?;
         writeln!(stream, "{json}")?;
 
         let mut response = String::new();
         BufReader::new(&stream).read_line(&mut response)?;
         Ok(response.trim().to_string())
     }
+
+    pub fn send_action(&self, action: &crate::action::Action) -> std::io::Result<String> {
+        self.send(&IpcMessage::Action(action.clone()))
+    }
+
+    pub fn send_query(&self, query: &crate::action::Query) -> std::io::Result<String> {
+        self.send(&IpcMessage::Query(query.clone()))
+    }
 }
 
-pub(crate) fn start_server<F>(on_action: F) -> anyhow::Result<()>
+pub(crate) fn start_server<F>(on_message: F) -> anyhow::Result<()>
 where
-    F: Fn(Actions) -> anyhow::Result<()> + Send + 'static,
+    F: Fn(IpcMessage) -> anyhow::Result<String> + Send + 'static,
 {
     let name = socket_name();
     let listener = match ListenerOptions::new().name(name.clone()).create_sync() {
@@ -66,7 +74,7 @@ where
         loop {
             match listener.accept() {
                 Ok(stream) => {
-                    if let Err(e) = handle_client(stream, &on_action) {
+                    if let Err(e) = handle_client(stream, &on_message) {
                         tracing::debug!("IPC client handler stopped: {e}");
                         break;
                     }
@@ -81,9 +89,12 @@ where
     Ok(())
 }
 
-fn handle_client<F>(stream: interprocess::local_socket::Stream, on_action: &F) -> anyhow::Result<()>
+fn handle_client<F>(
+    stream: interprocess::local_socket::Stream,
+    on_message: &F,
+) -> anyhow::Result<()>
 where
-    F: Fn(Actions) -> anyhow::Result<()>,
+    F: Fn(IpcMessage) -> anyhow::Result<String>,
 {
     let mut stream = stream;
     let mut reader = BufReader::new(&stream);
@@ -94,19 +105,30 @@ where
         if trimmed.is_empty() {
             return Ok(());
         }
-        let response = match serde_json::from_str::<Action>(trimmed) {
-            Ok(action) => {
-                tracing::debug!(?action, "IPC action");
-                let result = on_action(Actions::new(vec![action]));
-                let _ = stream.write_all(b"ok\n");
-                return result;
-            }
+        let msg = match serde_json::from_str::<IpcMessage>(trimmed) {
+            Ok(msg) => msg,
             Err(e) => {
-                tracing::warn!(message = trimmed, "Invalid IPC message: {e}");
-                "error\n"
+                tracing::debug!(message = trimmed, "Invalid IPC message: {e}");
+                if let Err(write_err) = writeln!(stream, "error") {
+                    tracing::debug!("Failed to write error response: {write_err}");
+                }
+                return Ok(());
             }
         };
-        let _ = stream.write_all(response.as_bytes());
+        tracing::debug!(?msg, "IPC message");
+        match on_message(msg) {
+            Ok(response) => {
+                if let Err(write_err) = writeln!(stream, "{response}") {
+                    tracing::debug!("Failed to write response: {write_err}");
+                }
+            }
+            Err(e) => {
+                if let Err(write_err) = writeln!(stream, "error") {
+                    tracing::debug!("Failed to write error response: {write_err}");
+                }
+                return Err(e);
+            }
+        }
     }
     Ok(())
 }

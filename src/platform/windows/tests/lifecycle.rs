@@ -343,3 +343,27 @@ fn monitor_switch_empty_to_empty_focuses_overlay() {
     env.run_actions("focus monitor right");
     assert_eq!(env.overlay_focus_count(), 1);
 }
+
+#[test]
+fn multi_action_sequence_applies_each_hub_action() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    let actions = Actions::new(vec![
+        "focus workspace 1".parse().unwrap(),
+        "focus workspace 0".parse().unwrap(),
+    ]);
+    for action in &actions {
+        if let Action::Hub(hub) = action {
+            env.dome.execute_hub_action(hub);
+            env.dome.apply_layout();
+        }
+    }
+
+    // After "focus ws 1, focus ws 0", workspace 0 is focused and windows are visible
+    assert!(!w1.is_offscreen());
+    assert!(!w2.is_offscreen());
+}

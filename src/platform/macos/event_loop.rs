@@ -110,8 +110,15 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         }
         HubEvent::Action(actions) => {
             tracing::debug!(%actions, "Executing actions");
-            runner.dome.run_hub_actions(&actions);
-            handle_system_actions(runner, &actions);
+            process_actions(runner, &actions);
+        }
+        HubEvent::Query { query, sender } => {
+            let json = match query {
+                crate::action::Query::Workspaces => runner.dome.query_workspaces_json(),
+            };
+            if sender.send(json).is_err() {
+                tracing::debug!("Query response dropped -- receiver gone");
+            }
         }
         HubEvent::ScreensChanged(screens) => {
             tracing::info!(count = screens.len(), "Screens changed");
@@ -135,20 +142,27 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
     });
 }
 
-fn handle_system_actions(runner: &mut DomeRunner, actions: &Actions) {
+fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
     for action in actions {
-        if let Action::Exec { command } = action {
-            if let Err(e) = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .process_group(0)
-                .spawn()
-            {
-                tracing::warn!(%command, "Failed to exec: {e}");
+        match action {
+            Action::Hub(hub) => {
+                runner.dome.execute_hub_action(hub);
+                runner.dome.flush_layout();
             }
-        } else if let Action::Exit = action {
-            tracing::debug!("Exit action received");
-            runner.signal.stop();
+            Action::Exec { command } => {
+                if let Err(e) = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(command)
+                    .process_group(0)
+                    .spawn()
+                {
+                    tracing::warn!(%command, "Failed to exec: {e}");
+                }
+            }
+            Action::Exit => {
+                tracing::debug!("Exit action received");
+                runner.signal.stop();
+            }
         }
     }
 }
@@ -202,8 +216,7 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
             if let Some((to_remove, to_add)) = result {
                 let on_open = runner.dome.reconcile_windows(&to_remove, to_add);
                 for actions in on_open {
-                    runner.dome.run_hub_actions(&actions);
-                    handle_system_actions(runner, &actions);
+                    process_actions(runner, &actions);
                 }
             }
         },
@@ -349,8 +362,7 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
                 .dome
                 .reconcile_windows(&result.to_remove, result.to_add);
             for actions in on_open {
-                runner.dome.run_hub_actions(&actions);
-                handle_system_actions(runner, &actions);
+                process_actions(runner, &actions);
             }
             // Periodic position check for all observed PIDs — compensates for
             // missed move/resize events during operation.

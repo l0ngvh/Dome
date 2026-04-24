@@ -78,7 +78,7 @@ fn offscreen_window_fights_hide() {
     let (macos, mut dome, cg1, _cg2) = two_windows();
 
     // Hide both
-    dome.run_hub_actions(&actions("focus workspace 1"));
+    send(&mut dome, "focus workspace 1");
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg1));
 
@@ -111,7 +111,7 @@ fn hide_retries_reset_on_fresh_hide() {
     let (macos, mut dome, cg1, _cg2) = two_windows();
 
     // Hide both by switching workspace
-    dome.run_hub_actions(&actions("focus workspace 1"));
+    send(&mut dome, "focus workspace 1");
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg1));
 
@@ -125,12 +125,12 @@ fn hide_retries_reset_on_fresh_hide() {
 
     // Switch back to workspace 0 — cg1 becomes InView
     macos.set_override_frame(cg1, None);
-    dome.run_hub_actions(&actions("focus workspace 0"));
+    send(&mut dome, "focus workspace 0");
     macos.settle(&mut dome, 10);
     assert!(!macos.is_offscreen(cg1));
 
     // Switch away again — fresh hide, retries reset to 0
-    dome.run_hub_actions(&actions("focus workspace 1"));
+    send(&mut dome, "focus workspace 1");
     macos.settle(&mut dome, 10);
 
     // Now set override and start fighting again
@@ -281,12 +281,12 @@ fn stale_burst_discarded() {
 fn offscreen_move_events_keep_windows_hidden() {
     let (macos, mut dome, cg1, cg2) = two_windows();
 
-    dome.run_hub_actions(&actions("focus workspace 1"));
+    send(&mut dome, "focus workspace 1");
     macos.settle(&mut dome, 10);
     assert!(macos.is_offscreen(cg1));
     assert!(macos.is_offscreen(cg2));
 
-    dome.run_hub_actions(&actions("focus workspace 0"));
+    send(&mut dome, "focus workspace 0");
     macos.settle(&mut dome, 10);
     assert!(!macos.is_offscreen(cg1));
     assert!(!macos.is_offscreen(cg2));

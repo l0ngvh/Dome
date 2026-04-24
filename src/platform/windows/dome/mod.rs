@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::action::Query;
 use crate::action::{Actions, FocusTarget, HubAction, MasterTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
@@ -40,6 +41,10 @@ pub(super) enum HubEvent {
     MoveSizeEnd(HwndId),
     LocationChanged(HwndId),
     Action(Actions),
+    Query {
+        query: Query,
+        sender: std::sync::mpsc::SyncSender<String>,
+    },
     ConfigChanged(Box<Config>),
     TabClicked(ContainerId, usize),
     Shutdown,
@@ -371,6 +376,11 @@ impl Dome {
             ObservedPosition::Fullscreen => self.window_entered_borderless_fullscreen(id),
             ObservedPosition::Visible(x, y, w, h) => self.window_drifted(id, x, y, w, h),
         }
+    }
+
+    pub(super) fn query_workspaces_json(&self) -> String {
+        serde_json::to_string(&self.hub.query_workspaces())
+            .expect("WorkspaceInfo is infallibly serializable")
     }
 
     pub(super) fn execute_hub_action(&mut self, action: &HubAction) {

@@ -15,9 +15,7 @@ use std::time::Instant;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{
-    Action, Actions, FocusTarget, HubAction, MasterTarget, MoveTarget, ToggleTarget,
-};
+use crate::action::{Actions, FocusTarget, HubAction, MasterTarget, MoveTarget, ToggleTarget};
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
     ContainerId, Dimension, Direction, Hub, TilingAction, WindowId, WindowRestrictions,
@@ -199,18 +197,6 @@ impl Dome {
 
     pub(in crate::platform::macos) fn app_terminated(&mut self, pid: i32) {
         self.remove_app_windows(pid);
-        self.flush_layout();
-    }
-
-    pub(in crate::platform::macos) fn run_hub_actions(&mut self, actions: &Actions) {
-        if actions.is_empty() {
-            return;
-        }
-        for action in actions {
-            if let Action::Hub(hub) = action {
-                self.execute_hub_action(hub);
-            }
-        }
         self.flush_layout();
     }
 
@@ -410,7 +396,12 @@ impl Dome {
         reconcile_monitors(&mut self.hub, &mut self.monitor_registry, &screens);
     }
 
-    fn execute_hub_action(&mut self, action: &HubAction) {
+    pub(in crate::platform::macos) fn query_workspaces_json(&self) -> String {
+        serde_json::to_string(&self.hub.query_workspaces())
+            .expect("WorkspaceInfo is infallibly serializable")
+    }
+
+    pub(in crate::platform::macos) fn execute_hub_action(&mut self, action: &HubAction) {
         match action {
             HubAction::Focus { target } => match target {
                 FocusTarget::Up => self.hub.handle_tiling_action(TilingAction::FocusDirection {

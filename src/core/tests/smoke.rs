@@ -45,6 +45,7 @@ enum Op {
     DecreaseMasterRatio,
     IncrementMasterCount,
     DecrementMasterCount,
+    QueryWorkspaces,
     // Note: Exec is not included because it's a platform-specific action
     // that spawns external processes, not a core hub operation.
 }
@@ -85,6 +86,7 @@ const ALL_OPS: &[Op] = &[
     Op::DecreaseMasterRatio,
     Op::IncrementMasterCount,
     Op::DecrementMasterCount,
+    Op::QueryWorkspaces,
 ];
 
 fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
@@ -333,6 +335,10 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
                 Op::DecrementMasterCount => {
                     hub.handle_tiling_action(TilingAction::DecrementMasterCount);
                     "DecrementMasterCount".into()
+                }
+                Op::QueryWorkspaces => {
+                    hub.query_workspaces();
+                    "QueryWorkspaces".into()
                 }
             };
 

@@ -408,6 +408,10 @@ impl TilingStrategy for MasterStackStrategy {
             .is_some_and(|s| !s.windows.is_empty())
     }
 
+    fn tiling_window_count(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> usize {
+        self.workspaces.get(&ws_id).map_or(0, |ws| ws.windows.len())
+    }
+
     fn prune_workspace(&mut self, ws_id: WorkspaceId) {
         if let Some(state) = self.workspaces.remove(&ws_id) {
             for wid in &state.windows {

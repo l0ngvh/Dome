@@ -416,6 +416,29 @@ impl TilingStrategy for PartitionTreeStrategy {
             .is_some_and(|s| s.root.is_some())
     }
 
+    /// Counts tiling windows by walking the container tree from root.
+    /// A tree walk is necessary because `self.tiling_windows` is a global map
+    /// across all workspaces and cannot be filtered by workspace without it.
+    fn tiling_window_count(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> usize {
+        let Some(root) = self.workspaces.get(&ws_id).and_then(|s| s.root) else {
+            return 0;
+        };
+        let mut count = 0;
+        let mut stack = vec![root];
+        for _ in crate::core::bounded_loop() {
+            let Some(child) = stack.pop() else { break };
+            match child {
+                Child::Window(_) => count += 1,
+                Child::Container(id) => {
+                    for &c in self.containers.get(id).children() {
+                        stack.push(c);
+                    }
+                }
+            }
+        }
+        count
+    }
+
     fn prune_workspace(&mut self, ws_id: WorkspaceId) {
         self.workspaces.remove(&ws_id);
     }

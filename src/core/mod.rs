@@ -1,4 +1,5 @@
 mod allocator;
+mod dto;
 mod float;
 mod fullscreen;
 mod hub;
@@ -18,6 +19,8 @@ pub(crate) use hub::{
 pub(crate) use node::Direction;
 pub(crate) use node::{ContainerId, Dimension, MonitorId, WindowId, WindowRestrictions};
 pub(crate) use strategy::TilingAction;
+
+pub(crate) use dto::WorkspaceInfo;
 
 const MAX_ITERATIONS: usize = 10000;
 

@@ -5,6 +5,7 @@ mod master_stack;
 mod monitor;
 mod move_to_workspace;
 mod partition_tree;
+mod query;
 mod set_focus;
 mod smoke;
 

@@ -74,6 +74,41 @@ These are not commands sent to a running instance — they control how Dome star
 | `dome launch` | Same as bare `dome`. |
 | `dome launch --config <path>` | Start Dome with a custom config file. |
 
+## Queries
+
+Queries read state from the hub without modifying it. Unlike fire-and-forget action commands, queries block until the hub responds with JSON.
+
+| Command | Description |
+|---------|-------------|
+| `dome query workspaces` | Returns a JSON array of workspace metadata. |
+
+### `dome query workspaces`
+
+Returns a JSON array with one entry per active workspace, ordered by creation order:
+
+```json
+[
+  {
+    "name": "0",
+    "is_focused": true,
+    "is_visible": true,
+    "window_count": 3
+  },
+  {
+    "name": "web",
+    "is_focused": false,
+    "is_visible": false,
+    "window_count": 1
+  }
+]
+```
+
+- `is_focused` — true for the workspace on the focused monitor.
+- `is_visible` — true for workspaces active on any monitor (one per monitor).
+- `window_count` — total windows (tiling + float + fullscreen), no double-counting.
+
+Empty workspaces that are not active on any monitor are pruned and never appear.
+
 ## CLI Examples
 
 ```bash

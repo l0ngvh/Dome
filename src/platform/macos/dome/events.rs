@@ -6,6 +6,7 @@ use objc2_core_graphics::CGWindowID;
 use objc2_foundation::NSRect;
 
 use crate::action::Actions;
+use crate::action::Query;
 use crate::config::Config;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, MonitorId,
@@ -39,6 +40,10 @@ pub(in crate::platform::macos) enum HubEvent {
         observed_at: Instant,
     },
     Action(Actions),
+    Query {
+        query: Query,
+        sender: std::sync::mpsc::SyncSender<String>,
+    },
     ConfigChanged(Box<Config>),
     /// Periodic sync to catch missed AX notifications, as AX notifications are unreliable. Only
     /// syncs window state, not focus, as focus changes should come from user interactions. Beside
@@ -71,6 +76,7 @@ impl fmt::Display for HubEvent {
                 write!(f, "WindowMovedOrResized(pid={pid})")
             }
             Self::Action(actions) => write!(f, "Action({actions})"),
+            Self::Query { query, .. } => write!(f, "Query({query:?})"),
             Self::ConfigChanged(_) => write!(f, "ConfigChanged"),
             Self::Sync => write!(f, "Sync"),
             Self::ScreensChanged(monitors) => {

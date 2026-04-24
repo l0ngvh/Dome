@@ -95,6 +95,9 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Returns true if the workspace has any tiling windows (root is Some).
     fn has_tiling_windows(&self, hub: &HubAccess, ws_id: WorkspaceId) -> bool;
 
+    /// Returns the number of tiling windows in the workspace.
+    fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize;
+
     /// Remove per-workspace tiling state. Called before workspace deletion.
     fn prune_workspace(&mut self, ws_id: WorkspaceId);
 

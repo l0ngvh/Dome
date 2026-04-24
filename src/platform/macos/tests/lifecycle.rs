@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::action::Actions;
+use crate::action::{Action, Actions};
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
 use crate::platform::macos::dome::NewWindow;
 
@@ -53,7 +53,12 @@ fn on_open_moves_window_to_other_workspace() {
     let cg2 = macos.spawn_window(200, "Slack", "General");
     let on_open = dome.reconcile_windows(&[], vec![new_window(&macos, cg2)]);
     for actions in on_open {
-        dome.run_hub_actions(&actions);
+        for action in &actions {
+            if let Action::Hub(hub) = action {
+                dome.execute_hub_action(hub);
+                dome.flush_layout();
+            }
+        }
     }
     macos.settle(&mut dome, 10);
 
@@ -104,7 +109,7 @@ fn monitor_change_rehides_offscreen_windows() {
     macos.settle(&mut dome, 10);
 
     // Hide window
-    dome.run_hub_actions(&actions("focus workspace 1"));
+    send(&mut dome, "focus workspace 1");
     macos.settle(&mut dome, 10);
     let offscreen_before = macos.window_frame(cg1);
     assert!(macos.is_offscreen(cg1));
@@ -253,7 +258,7 @@ fn render_frame_focused_container_after_focus_parent() {
     let cg2 = macos.spawn_window(1, "App2", "Win2");
     let mut dome = macos.setup_dome();
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
-    dome.run_hub_actions(&actions("focus parent"));
+    send(&mut dome, "focus parent");
 
     // After focus_parent, focused_tiling_window() returns None (container highlighted),
     // so the platform receives focused_window: None and focuses the overlay.
@@ -278,7 +283,7 @@ fn render_frame_focused_none_on_empty_workspace() {
     let cg1 = macos.spawn_window(1, "App1", "Win1");
     let mut dome = macos.setup_dome();
     dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
-    dome.run_hub_actions(&actions("focus workspace 1"));
+    send(&mut dome, "focus workspace 1");
 
     let state = macos.last_frame_state();
     assert_eq!(state.focused_window, None);
@@ -304,8 +309,34 @@ fn render_frame_focused_monitor_changes_on_focus_monitor() {
     dome.screens_changed(vec![default_screen(), second_monitor]);
 
     let before = macos.last_frame_state();
-    dome.run_hub_actions(&actions("focus monitor right"));
+    send(&mut dome, "focus monitor right");
     let after = macos.last_frame_state();
 
     assert_ne!(before.focused_monitor_id, after.focused_monitor_id);
+}
+
+#[test]
+fn multi_action_sequence_applies_each_hub_action() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    macos.settle(&mut dome, 10);
+
+    let actions = Actions::new(vec![
+        "focus workspace 1".parse().unwrap(),
+        "focus workspace 0".parse().unwrap(),
+    ]);
+    for action in &actions {
+        if let Action::Hub(hub) = action {
+            dome.execute_hub_action(hub);
+            dome.flush_layout();
+        }
+    }
+
+    // After "focus ws 1, focus ws 0", workspace 0 is focused and windows are visible
+    assert!(!macos.is_offscreen(cg1));
+    assert!(!macos.is_offscreen(cg2));
 }

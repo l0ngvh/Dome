@@ -329,9 +329,11 @@ The binary serves dual purpose: `dome`/`dome launch` starts the WM, `dome <actio
 
 - macOS: Unix domain socket (`/tmp/dome.sock`), stale socket auto-cleaned.
 - Windows: named pipe (`\\.\pipe\dome`).
-- Protocol: one JSON-serialized Action per line, text response.
+- Protocol: one JSON-serialized `IpcMessage` per line, text response. `IpcMessage` is an enum with `Action` and `Query` variants, separating mutations from reads on the wire.
 - Server on dedicated thread, forwards to hub thread.
 - Startup connects to existing socket to detect running instance.
+
+**Actions vs queries.** Actions (`&mut self` on Hub) are fire-and-forget: the IPC server sends them to the hub thread and returns `"ok"` immediately. Queries (`&self` on Hub) are synchronous round-trips: the IPC server sends a query to the hub thread via a `sync_channel(1)`, blocks on `recv_timeout(1s)`, and returns the JSON result. `dome query workspaces` is the first query, returning workspace metadata as JSON.
 
 ### Configuration
 

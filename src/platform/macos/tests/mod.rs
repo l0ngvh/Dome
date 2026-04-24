@@ -12,7 +12,7 @@ use std::time::Instant;
 use anyhow::Result;
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::Actions;
+use crate::action::Action;
 use crate::config::Config;
 use crate::core::{Dimension, MonitorId, WindowId};
 use crate::platform::macos::MonitorInfo;
@@ -479,6 +479,13 @@ fn end_drag(
     }]);
 }
 
-fn actions(s: &str) -> Actions {
-    Actions::new(vec![s.parse().unwrap()])
+fn send(dome: &mut Dome, s: &str) {
+    let action: Action = s.parse().unwrap();
+    match action {
+        Action::Hub(hub) => {
+            dome.execute_hub_action(&hub);
+            dome.flush_layout();
+        }
+        _ => panic!("send() only handles Hub actions"),
+    }
 }

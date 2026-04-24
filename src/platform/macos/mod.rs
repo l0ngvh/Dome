@@ -37,6 +37,8 @@ use keyboard::KeyboardListener;
 use listeners::EventListener;
 use ui::Ui;
 
+const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let config_path = config_path.unwrap_or_else(Config::default_path);
     let config = Config::load(&config_path).unwrap_or_else(|e| {
@@ -95,9 +97,27 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     ipc::start_server({
         let tx = event_tx.clone();
-        move |actions| {
-            tx.send(HubEvent::Action(actions))
-                .or(Err(anyhow::anyhow!("channel closed")))
+        move |msg| {
+            use crate::action::IpcMessage;
+            match msg {
+                IpcMessage::Action(action) => {
+                    tx.send(HubEvent::Action(crate::action::Actions::new(vec![action])))
+                        .or(Err(anyhow::anyhow!("channel closed")))?;
+                    Ok("ok".to_string())
+                }
+                IpcMessage::Query(query) => {
+                    let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(1);
+                    tx.send(HubEvent::Query {
+                        query,
+                        sender: resp_tx,
+                    })
+                    .or(Err(anyhow::anyhow!("channel closed")))?;
+                    match resp_rx.recv_timeout(QUERY_TIMEOUT) {
+                        Ok(json) => Ok(json),
+                        Err(_) => Ok(r#"{"error":"query timed out"}"#.to_string()),
+                    }
+                }
+            }
         }
     })?;
 

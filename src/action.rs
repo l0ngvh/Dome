@@ -4,6 +4,17 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IpcMessage {
+    Action(Action),
+    Query(Query),
+}
+
+#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
+pub enum Query {
+    Workspaces,
+}
+
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 pub enum HubAction {
     Focus {
@@ -446,6 +457,33 @@ mod tests {
                 &serde_json::to_string(&round_trip).unwrap(),
                 expected,
                 "round-trip {action}"
+            );
+        }
+    }
+
+    #[test]
+    fn ipc_message_serde() {
+        let cases = vec![
+            (IpcMessage::Action(Action::Exit), r#"{"Action":"Exit"}"#),
+            (
+                IpcMessage::Action(Action::Hub(HubAction::Focus {
+                    target: FocusTarget::Up,
+                })),
+                r#"{"Action":{"Focus":{"target":"Up"}}}"#,
+            ),
+            (
+                IpcMessage::Query(Query::Workspaces),
+                r#"{"Query":"Workspaces"}"#,
+            ),
+        ];
+        for (msg, expected) in &cases {
+            let json = serde_json::to_string(msg).unwrap();
+            assert_eq!(&json, expected, "serialize {msg:?}");
+            let round_trip: IpcMessage = serde_json::from_str(expected).unwrap();
+            assert_eq!(
+                &serde_json::to_string(&round_trip).unwrap(),
+                expected,
+                "round-trip {msg:?}"
             );
         }
     }

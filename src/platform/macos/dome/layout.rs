@@ -11,7 +11,7 @@ use super::window::{apply_inset, clip_to_bounds};
 impl Dome {
     /// All fullscreen -> normal and normal -> fullscreen must be resolved before this step
     #[tracing::instrument(skip_all)]
-    pub(super) fn flush_layout(&mut self) {
+    pub(in crate::platform::macos) fn flush_layout(&mut self) {
         let mut tiling = Vec::new();
         let mut float_shows = Vec::new();
         let result = self.hub.get_visible_placements();
