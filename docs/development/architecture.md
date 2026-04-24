@@ -319,7 +319,7 @@ POSIX signal handlers (SIGINT, SIGTERM, SIGHUP) + `catch_unwind` on both threads
 
 #### Windows
 
-Console control handler (Ctrl+C, Ctrl+Break, console close) + `catch_unwind` on dome thread. All tracked windows restored to (100, 100). Previously-maximized windows re-maximized. Taskbar tabs restored.
+Console control handler (Ctrl+C, Ctrl+Break, console close) posts `WM_QUIT` to the main thread, reusing the normal shutdown path rather than calling recovery directly from the handler thread. This avoids duplicating shutdown logic and needing thread-local global state in the handler. For `CTRL_CLOSE_EVENT`, the handler sleeps 2s after posting because Windows terminates the process shortly after the handler returns for close events. `catch_unwind` on dome thread. All tracked windows restored to (100, 100). Previously-maximized windows re-maximized. Taskbar tabs restored.
 
 ## Shared Subsystems
 

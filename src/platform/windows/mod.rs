@@ -22,6 +22,9 @@ use anyhow::Result;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+use windows::Win32::System::Console::{
+    CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::{
@@ -32,7 +35,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_ERASEBKGND,
     WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
-use windows::core::PCWSTR;
+use windows::core::{BOOL, PCWSTR};
 
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
@@ -62,6 +65,8 @@ pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
 pub(super) const WM_APP_DISPLAY_CHANGE: u32 = WM_APP + 1;
 pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 2;
 
+static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 #[derive(Clone)]
 struct HubSender {
     thread_id: u32,
@@ -73,6 +78,30 @@ impl HubSender {
         unsafe {
             PostThreadMessageW(self.thread_id, WM_APP_HUBEVENT, WPARAM(ptr), LPARAM(0)).ok();
         }
+    }
+}
+
+/// Handles Ctrl+C, Ctrl+Break, and console close by posting WM_QUIT to the main
+/// thread, triggering the existing graceful shutdown path (Dome drop -> recovery).
+/// Reinstated after accidental removal in commit efb409e.
+unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
+    match ctrl_type {
+        CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => {
+            tracing::info!(ctrl_type, "Received console control event");
+            let thread_id = MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Relaxed);
+            if thread_id != 0 {
+                // Result ignored: the handler can't meaningfully recover from a failure,
+                // and returning TRUE still prevents the default handler from killing the process.
+                unsafe { PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok() };
+            }
+            // Windows terminates the process shortly after the handler returns for
+            // CTRL_CLOSE_EVENT. Sleep to give the main thread time to shut down gracefully.
+            if ctrl_type == CTRL_CLOSE_EVENT {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            BOOL(1)
+        }
+        _ => BOOL(0),
     }
 }
 
@@ -99,6 +128,12 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     }));
 
     let main_thread_id = unsafe { GetCurrentThreadId() };
+
+    MAIN_THREAD_ID.store(main_thread_id, std::sync::atomic::Ordering::Release);
+    if unsafe { SetConsoleCtrlHandler(Some(console_ctrl_handler), true) }.is_err() {
+        tracing::warn!("Failed to install console control handler");
+    }
+
     let dome_thread_id = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let barrier = Arc::new(std::sync::Barrier::new(2));
 
