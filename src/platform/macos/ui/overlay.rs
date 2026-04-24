@@ -147,20 +147,28 @@ impl FloatOverlay {
         let config = &self.config;
         let mr = self.visible_content_bounds;
         self.renderer.render(scale as f32, Vec::new(), mr, |ctx| {
-            egui::Area::new(egui::Id::new("overlay"))
-                .fixed_pos(egui::pos2(0.0, 0.0))
-                .fade_in(false)
-                .show(ctx, |ui| {
-                    overlay::paint_window_border(
-                        ui.painter(),
-                        placement.frame,
-                        placement.visible_frame,
-                        placement.is_highlighted,
-                        None,
-                        config,
-                        egui::Vec2::ZERO,
-                    );
-                });
+            // layer_painter bypasses egui's Area sizing pass, avoiding
+            // black/invisible borders on the first frame.
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Middle,
+                egui::Id::new("border"),
+            ));
+            let clip = egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(
+                    placement.visible_frame.width,
+                    placement.visible_frame.height,
+                ),
+            );
+            overlay::paint_window_border(
+                &painter.with_clip_rect(clip),
+                placement.frame,
+                placement.visible_frame,
+                placement.is_highlighted,
+                None,
+                config,
+                egui::Vec2::ZERO,
+            );
         });
         self.window.setIsVisible(true);
     }
@@ -172,20 +180,26 @@ impl FloatOverlay {
             let mr = self.visible_content_bounds;
             self.renderer
                 .render(self.scale as f32, Vec::new(), mr, |ctx| {
-                    egui::Area::new(egui::Id::new("overlay"))
-                        .fixed_pos(egui::pos2(0.0, 0.0))
-                        .fade_in(false)
-                        .show(ctx, |ui| {
-                            overlay::paint_window_border(
-                                ui.painter(),
-                                placement.frame,
-                                placement.visible_frame,
-                                placement.is_highlighted,
-                                None,
-                                config,
-                                egui::Vec2::ZERO,
-                            );
-                        });
+                    let painter = ctx.layer_painter(egui::LayerId::new(
+                        egui::Order::Middle,
+                        egui::Id::new("border"),
+                    ));
+                    let clip = egui::Rect::from_min_size(
+                        egui::pos2(0.0, 0.0),
+                        egui::vec2(
+                            placement.visible_frame.width,
+                            placement.visible_frame.height,
+                        ),
+                    );
+                    overlay::paint_window_border(
+                        &painter.with_clip_rect(clip),
+                        placement.frame,
+                        placement.visible_frame,
+                        placement.is_highlighted,
+                        None,
+                        config,
+                        egui::Vec2::ZERO,
+                    );
                 });
         }
     }
@@ -197,20 +211,26 @@ impl FloatOverlay {
             let mr = self.visible_content_bounds;
             self.renderer
                 .render(self.scale as f32, Vec::new(), mr, |ctx| {
-                    egui::Area::new(egui::Id::new("overlay"))
-                        .fixed_pos(egui::pos2(0.0, 0.0))
-                        .fade_in(false)
-                        .show(ctx, |ui| {
-                            overlay::paint_window_border(
-                                ui.painter(),
-                                placement.frame,
-                                placement.visible_frame,
-                                placement.is_highlighted,
-                                None,
-                                config,
-                                egui::Vec2::ZERO,
-                            );
-                        });
+                    let painter = ctx.layer_painter(egui::LayerId::new(
+                        egui::Order::Middle,
+                        egui::Id::new("border"),
+                    ));
+                    let clip = egui::Rect::from_min_size(
+                        egui::pos2(0.0, 0.0),
+                        egui::vec2(
+                            placement.visible_frame.width,
+                            placement.visible_frame.height,
+                        ),
+                    );
+                    overlay::paint_window_border(
+                        &painter.with_clip_rect(clip),
+                        placement.frame,
+                        placement.visible_frame,
+                        placement.is_highlighted,
+                        None,
+                        config,
+                        egui::Vec2::ZERO,
+                    );
                 });
         }
     }

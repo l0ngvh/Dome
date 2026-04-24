@@ -674,25 +674,23 @@ impl FloatOverlayApi for FloatOverlay {
         self.window.show();
 
         self.renderer.render(w, h, 1.0, vec![], |ctx| {
-            let origin = egui::vec2(0.0, 0.0);
-            egui::Area::new(egui::Id::new(("border", wp.id)))
-                .fixed_pos(origin.to_pos2())
-                .fade_in(false)
-                .show(ctx, |ui| {
-                    ui.set_clip_rect(egui::Rect::from_min_size(
-                        origin.to_pos2(),
-                        egui::vec2(vf.width, vf.height),
-                    ));
-                    overlay::paint_window_border(
-                        ui.painter(),
-                        wp.frame,
-                        wp.visible_frame,
-                        wp.is_highlighted,
-                        None,
-                        config,
-                        origin,
-                    );
-                });
+            // layer_painter bypasses egui's Area sizing pass, avoiding
+            // black/invisible borders on the first frame.
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Middle,
+                egui::Id::new("border"),
+            ));
+            let clip =
+                egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(vf.width, vf.height));
+            overlay::paint_window_border(
+                &painter.with_clip_rect(clip),
+                wp.frame,
+                wp.visible_frame,
+                wp.is_highlighted,
+                None,
+                config,
+                egui::vec2(0.0, 0.0),
+            );
         });
     }
 

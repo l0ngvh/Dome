@@ -1,4 +1,6 @@
-use egui::{Align, Color32, CornerRadius, Layout, Rect, RichText, Sense, pos2, vec2};
+use egui::{
+    Align, Color32, CornerRadius, Id, LayerId, Layout, Order, Rect, RichText, Sense, pos2, vec2,
+};
 
 use crate::config::{Color, Config};
 use crate::core::{
@@ -19,24 +21,20 @@ pub(crate) fn paint_tiling_overlay(
     for wp in windows {
         let vf = wp.visible_frame;
         let origin = vec2(vf.x - monitor.x, vf.y - monitor.y);
-        egui::Area::new(egui::Id::new(("border", wp.id)))
-            .fixed_pos(origin.to_pos2())
-            .fade_in(false)
-            .show(ctx, |ui| {
-                ui.set_clip_rect(Rect::from_min_size(
-                    origin.to_pos2(),
-                    vec2(vf.width, vf.height),
-                ));
-                paint_window_border(
-                    ui.painter(),
-                    wp.frame,
-                    wp.visible_frame,
-                    wp.is_highlighted,
-                    wp.spawn_indicator,
-                    config,
-                    origin,
-                );
-            });
+        // layer_painter bypasses egui's Area sizing pass, which makes first-frame
+        // output invisible. Window borders are pure painting with no interaction,
+        // so Area is unnecessary.
+        let painter = ctx.layer_painter(LayerId::new(Order::Middle, Id::new(("border", wp.id))));
+        let clip = Rect::from_min_size(origin.to_pos2(), vec2(vf.width, vf.height));
+        paint_window_border(
+            &painter.with_clip_rect(clip),
+            wp.frame,
+            wp.visible_frame,
+            wp.is_highlighted,
+            wp.spawn_indicator,
+            config,
+            origin,
+        );
     }
 
     for (cp, titles) in containers {
@@ -47,6 +45,14 @@ pub(crate) fn paint_tiling_overlay(
             .fixed_pos(origin.to_pos2())
             .fade_in(false)
             .show(ctx, |ui| {
+                // Skip the sizing pass and request a discard so the container
+                // renders correctly on the first frame. Without this, egui's
+                // Area emits Shape::Noop during the sizing pass, producing a
+                // black/invisible first frame on Windows.
+                if ui.is_sizing_pass() {
+                    ctx.request_discard("container first frame");
+                    return;
+                }
                 ui.set_clip_rect(Rect::from_min_size(
                     origin.to_pos2(),
                     vec2(vf.width, vf.height),
