@@ -20,6 +20,7 @@ use crate::logging::Logger;
 use anyhow::Result;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -27,9 +28,9 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG,
-    PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_PAINT,
-    WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, IDC_ARROW, LoadCursorW, MSG,
+    PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_ERASEBKGND,
+    WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::PCWSTR;
 
@@ -205,6 +206,8 @@ unsafe extern "system" fn app_wnd_proc(
             };
             LRESULT(0)
         }
+        // App window is never shown (WS_POPUP + WS_EX_TOOLWINDOW, no ShowWindow); these arms are defensive only.
+        WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => LRESULT(0),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
@@ -216,37 +219,49 @@ unsafe extern "system" fn float_overlay_wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    match msg {
+        WM_ERASEBKGND => LRESULT(1),
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            unsafe { BeginPaint(hwnd, &mut ps) };
+            // EndPaint always succeeds; .ok().ok() silences the unused Result lint.
+            unsafe { EndPaint(hwnd, &ps).ok().ok() };
+            LRESULT(0)
+        }
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
 }
 
 fn run_dome(config: Config, main_thread_id: u32) {
     let hinstance = unsafe { GetModuleHandleW(None) }.expect("GetModuleHandleW failed");
+    // https://devblogs.microsoft.com/oldnewthing/20250424-00/?p=111114
+    let arrow = unsafe { LoadCursorW(None, IDC_ARROW) }.expect("LoadCursorW failed");
 
     const APP_CLASS: PCWSTR = windows::core::w!("DomeApp");
 
     let wc = WNDCLASSW {
-        style: CS_HREDRAW | CS_VREDRAW,
         lpfnWndProc: Some(app_wnd_proc),
         hInstance: hinstance.into(),
         lpszClassName: APP_CLASS,
+        hCursor: arrow,
         ..Default::default()
     };
     unsafe { RegisterClassW(&wc) };
 
     let wc_window = WNDCLASSW {
-        style: CS_HREDRAW | CS_VREDRAW,
         lpfnWndProc: Some(float_overlay_wnd_proc),
         hInstance: hinstance.into(),
         lpszClassName: FLOAT_OVERLAY_CLASS,
+        hCursor: arrow,
         ..Default::default()
     };
     unsafe { RegisterClassW(&wc_window) };
 
     let wc_tiling = WNDCLASSW {
-        style: CS_HREDRAW | CS_VREDRAW,
         lpfnWndProc: Some(tiling_overlay_wnd_proc),
         hInstance: hinstance.into(),
         lpszClassName: TILING_OVERLAY_CLASS,
+        hCursor: arrow,
         ..Default::default()
     };
     unsafe { RegisterClassW(&wc_tiling) };

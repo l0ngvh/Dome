@@ -543,3 +543,104 @@ fn borderless_fullscreen_exit_unblocks_commands() {
     env.run_actions("toggle float");
     assert!(w1.is_topmost());
 }
+
+#[test]
+fn float_overlay_updates_on_focus_away() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+    env.run_actions("toggle float");
+    env.focus_window(&w1);
+    env.run_actions("toggle float");
+    env.focus_window(&w2);
+
+    let baseline = env.overlay_update_count();
+    env.focus_window(&w1);
+    assert!(env.overlay_update_count() - baseline >= 2);
+}
+
+#[test]
+fn float_overlay_updates_on_focus_to_tiling() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+    env.run_actions("toggle float");
+
+    let baseline = env.overlay_update_count();
+    env.focus_window(&w1);
+    assert!(env.overlay_update_count() - baseline >= 1);
+}
+
+#[test]
+fn float_overlay_updates_on_focus_from_tiling() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+    env.run_actions("toggle float");
+    env.focus_window(&w1);
+
+    let baseline = env.overlay_update_count();
+    env.focus_window(&w2);
+    assert!(env.overlay_update_count() - baseline >= 1);
+}
+
+#[test]
+fn float_settled_skips_update_without_focus_change() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.run_actions("toggle float");
+
+    let baseline = env.overlay_update_count();
+    env.dome.apply_layout();
+    assert_eq!(env.overlay_update_count() - baseline, 0);
+}
+
+#[test]
+fn float_refocus_same_window_is_noop() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.run_actions("toggle float");
+
+    let baseline = env.overlay_update_count();
+    env.focus_window(&w1);
+    assert_eq!(env.overlay_update_count() - baseline, 0);
+}
+
+#[test]
+fn float_focus_away_does_not_change_topmost() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+    env.run_actions("toggle float");
+    env.focus_window(&w1);
+    env.run_actions("toggle float");
+
+    env.focus_window(&w2);
+    assert!(w1.is_topmost());
+    assert!(w2.is_topmost());
+}
+
+#[test]
+fn float_overlay_updates_on_position_change() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.run_actions("toggle float");
+
+    let baseline = env.overlay_update_count();
+    let mut new_config = env.config.clone();
+    new_config.border_size = env.config.border_size + 2.0;
+    env.dome.config_changed(new_config);
+    env.dome.apply_layout();
+    assert!(env.overlay_update_count() - baseline >= 1);
+}

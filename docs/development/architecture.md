@@ -297,7 +297,19 @@ ScreenCaptureKit captures IOSurface for mirroring, rendered as textured quad. Ca
 
 #### Windows
 
-Win32 layered windows, egui_glow (OpenGL via glutin). Tab bars use DWM blur-behind for frosted glass. Dome thread manages overlays directly — no cross-thread dispatch.
+Win32 layered windows, egui_glow (OpenGL via glutin). Tab bars use DWM blur-behind for frosted glass. Dome thread manages overlays directly -- no cross-thread dispatch.
+
+#### Windows Rendering Model
+
+**DWM + OpenGL.** With DWM (always on since Windows 8), each window renders to an offscreen surface. `SwapBuffers` copies the GL front buffer to a DWM-managed D3D surface. DWM composites all surfaces to screen at vsync. `WM_PAINT`/`BeginPaint`/`EndPaint` are irrelevant to actual screen content -- DWM picks up content from `SwapBuffers`, not from the GDI paint cycle.
+
+**Render-last invariant.** All overlay updates follow this sequence: data assignments, `SetWindowRgn(FALSE)`, `SetWindowPos(SWP_NOREDRAW)`, `ShowWindow` (first show only), GL render + `SwapBuffers`. Positioning calls (`SetWindowPos`, `SetWindowRgn` with `bRedraw=TRUE`) can trigger synchronous quick-repaints (WM_NCPAINT + WM_ERASEBKGND) that overwrite GL content. Rendering last ensures the GL content goes straight to DWM without being clobbered.
+
+**WM_ERASEBKGND / WM_PAINT handlers.** All three window classes (app, float overlay, tiling overlay) handle `WM_ERASEBKGND` by returning `LRESULT(1)` to suppress background erase. `WM_PAINT` handlers only call `BeginPaint`/`EndPaint` to validate dirty regions as a safety net. Neither handler renders GL content. Removing `WM_PAINT` entirely could cause infinite WM_PAINT loops if something unexpected invalidates the window.
+
+**No CS_HREDRAW|CS_VREDRAW.** GL windows don't use these class styles. They cause full-client invalidation on any size change, which is counterproductive when the application controls all rendering via `SwapBuffers`.
+
+**Float overlay focus update.** In `show_float`, the `settled` check skips both positioning and overlay update when position is unchanged and no topmost change is needed. A separate `focus_changed` branch re-renders the overlay (without repositioning) when focus changes, so the border color updates even when the float's position hasn't moved.
 
 ### Recovery
 

@@ -13,8 +13,8 @@ use raw_window_handle::{RawWindowHandle, Win32WindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CombineRgn, CreateRectRgn, DeleteObject, EndPaint, HRGN, InvalidateRect, OffsetRgn,
-    PAINTSTRUCT, RGN_OR, SetWindowRgn,
+    BeginPaint, CombineRgn, CreateRectRgn, DeleteObject, EndPaint, HRGN, OffsetRgn, PAINTSTRUCT,
+    RGN_OR, SetWindowRgn,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::MARGINS;
@@ -23,9 +23,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetForegroundWindow,
-    GetWindowLongPtrW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_PAINT, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
+    GetWindowLongPtrW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOREDRAW, SWP_NOZORDER,
+    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE,
+    WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::PCWSTR;
 
@@ -225,13 +226,6 @@ impl Drop for OverlayRenderer {
         self.gl_context.make_current(&self.surface).ok();
         self.painter.destroy();
     }
-}
-
-/// MSDN says InvalidateRect "returns zero if the function fails" but
-/// documents no specific failure conditions. We have no actionable
-/// recovery path, so we discard the result.
-fn invalidate_rect(hwnd: HWND) {
-    unsafe { InvalidateRect(Some(hwnd), None, false).ok().ok() };
 }
 
 fn enable_blur_behind(hwnd: HWND) {
@@ -434,6 +428,10 @@ impl TilingOverlayApi for TilingOverlay {
             self.monitor = monitor;
         }
 
+        // ORDERING INVARIANT: data assignments MUST come before SetWindowRgn and rerender().
+        self.windows = windows.to_vec();
+        self.containers = containers.to_vec();
+
         // Build combined region covering all border strips and tab bar rects
         let region = unsafe { CreateRectRgn(0, 0, 0, 0) };
         for wp in windows {
@@ -456,11 +454,7 @@ impl TilingOverlayApi for TilingOverlay {
                 DeleteObject(cr.into()).ok().ok();
             }
         }
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
-
-        self.windows = windows.to_vec();
-        self.containers = containers.to_vec();
-        self.rerender();
+        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
 
         unsafe {
             SetWindowPos(
@@ -470,18 +464,22 @@ impl TilingOverlayApi for TilingOverlay {
                 monitor.y as i32,
                 w as i32,
                 h as i32,
-                SWP_NOACTIVATE | SWP_NOZORDER,
+                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW,
             )
             .ok();
         }
+        // Show before render: the GL pixel ownership test fails for hidden windows,
+        // so SwapBuffers content is discarded. WM_ERASEBKGND and WM_PAINT handlers
+        // prevent GDI interference between show and render.
         self.window.show();
+        self.rerender();
     }
 
     fn clear(&mut self) {
         self.windows.clear();
         self.containers.clear();
         let region = unsafe { CreateRectRgn(0, 0, 0, 0) };
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
+        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
     }
 
     fn focus(&self) {
@@ -533,6 +531,9 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if msg == WM_ERASEBKGND {
+        return LRESULT(1);
+    }
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut TilingOverlay;
     if ptr.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
@@ -567,14 +568,13 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
                 pressed: false,
                 modifiers: egui::Modifiers::NONE,
             });
-            invalidate_rect(hwnd);
+            overlay.rerender();
             LRESULT(0)
         }
         WM_PAINT => {
             unsafe {
-                let mut ps = std::mem::zeroed::<PAINTSTRUCT>();
+                let mut ps = PAINTSTRUCT::default();
                 BeginPaint(hwnd, &mut ps);
-                overlay.rerender();
                 EndPaint(hwnd, &ps).ok().ok();
             }
             LRESULT(0)
@@ -647,6 +647,32 @@ impl FloatOverlayApi for FloatOverlay {
             self.height = h;
         }
 
+        let region = build_window_border_region(wp.frame, wp.visible_frame, config);
+        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
+
+        let z_after: Option<HWND> = z.into();
+        let mut flags = SWP_NOACTIVATE | SWP_NOREDRAW;
+        if z_after.is_none() {
+            flags |= SWP_NOZORDER;
+        }
+        unsafe {
+            SetWindowPos(
+                self.window.hwnd(),
+                z_after,
+                vf.x as i32,
+                vf.y as i32,
+                w as i32,
+                h as i32,
+                flags,
+            )
+            .ok();
+        }
+
+        // Show before render: the GL pixel ownership test fails for hidden windows,
+        // so SwapBuffers content is discarded. WM_ERASEBKGND and WM_PAINT handlers
+        // prevent GDI interference between show and render.
+        self.window.show();
+
         self.renderer.render(w, h, 1.0, vec![], |ctx| {
             let origin = egui::vec2(0.0, 0.0);
             egui::Area::new(egui::Id::new(("border", wp.id)))
@@ -668,29 +694,6 @@ impl FloatOverlayApi for FloatOverlay {
                     );
                 });
         });
-
-        let region = build_window_border_region(wp.frame, wp.visible_frame, config);
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), true) };
-
-        let z_after: Option<HWND> = z.into();
-        let mut flags = SWP_NOACTIVATE;
-        if z_after.is_none() {
-            flags |= SWP_NOZORDER;
-        }
-        unsafe {
-            SetWindowPos(
-                self.window.hwnd(),
-                z_after,
-                vf.x as i32,
-                vf.y as i32,
-                w as i32,
-                h as i32,
-                flags,
-            )
-            .ok();
-        }
-
-        self.window.show();
     }
 
     fn hide(&mut self) {

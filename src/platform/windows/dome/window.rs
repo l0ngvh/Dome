@@ -118,16 +118,20 @@ impl Dome {
             ZOrder::Unchanged
         };
 
-        if let Some(overlay) = self.float_overlays.get_mut(&id)
-            && !settled
-        {
-            overlay.update(wp, &self.config, z);
-            if needs_topmost {
-                entry.ext.set_position(ZOrder::Topmost, x, y, w, h);
-            } else {
-                entry
-                    .ext
-                    .set_position(ZOrder::After(overlay.id()), x, y, w, h);
+        if let Some(overlay) = self.float_overlays.get_mut(&id) {
+            if !settled {
+                overlay.update(wp, &self.config, z);
+                if needs_topmost {
+                    entry.ext.set_position(ZOrder::Topmost, x, y, w, h);
+                } else {
+                    entry
+                        .ext
+                        .set_position(ZOrder::After(overlay.id()), x, y, w, h);
+                }
+            } else if focus_changed {
+                // Full overlay update is acceptable here: typically 1-3 floats, each a single GL draw.
+                // Matches macOS which unconditionally re-renders every float overlay every frame.
+                overlay.update(wp, &self.config, ZOrder::Unchanged);
             }
         }
 

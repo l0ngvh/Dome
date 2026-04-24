@@ -150,7 +150,6 @@ impl Runner {
                         move |title, runner| {
                             if runner.dome.registry_contains_hwnd(hwnd_id) {
                                 runner.dome.update_titles(vec![(hwnd_id, title)]);
-                                runner.dome.apply_layout();
                             }
                         },
                     );

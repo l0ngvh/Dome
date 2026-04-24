@@ -72,6 +72,7 @@ struct TestEnv {
     exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
     config: Config,
     overlay_focus_count: Rc<Cell<u32>>,
+    overlay_update_count: Rc<Cell<u32>>,
 }
 
 impl TestEnv {
@@ -87,11 +88,13 @@ impl TestEnv {
             exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
         };
         let overlay_focus_count = Rc::new(Cell::new(0));
+        let overlay_update_count = Rc::new(Cell::new(0));
         let dome = Dome::new(
             config.clone(),
             Rc::new(NoopTaskbar),
             Box::new(NoopOverlays {
                 focus_count: overlay_focus_count.clone(),
+                overlay_update_count: overlay_update_count.clone(),
             }),
             Box::new(display),
         )
@@ -102,6 +105,7 @@ impl TestEnv {
             exclusive_fullscreen_hwnd,
             config,
             overlay_focus_count,
+            overlay_update_count,
         }
     }
 
@@ -247,6 +251,10 @@ impl TestEnv {
 
     fn reset_overlay_focus(&self) {
         self.overlay_focus_count.set(0);
+    }
+
+    fn overlay_update_count(&self) -> u32 {
+        self.overlay_update_count.get()
     }
 
     fn add_screen(&mut self, screen: ScreenInfo) {
@@ -473,12 +481,17 @@ impl ManageTaskbar for NoopTaskbar {
     fn delete_tab(&self, _: HwndId) {}
 }
 
-struct NoopFloatOverlay;
+struct NoopFloatOverlay {
+    overlay_update_count: Rc<Cell<u32>>,
+}
 impl FloatOverlayApi for NoopFloatOverlay {
     fn id(&self) -> HwndId {
         HwndId::test(0)
     }
-    fn update(&mut self, _: &crate::core::FloatWindowPlacement, _: &Config, _: ZOrder) {}
+    fn update(&mut self, _: &crate::core::FloatWindowPlacement, _: &Config, _: ZOrder) {
+        self.overlay_update_count
+            .set(self.overlay_update_count.get() + 1);
+    }
     fn hide(&mut self) {}
 }
 
@@ -506,6 +519,7 @@ impl TilingOverlayApi for NoopTilingOverlay {
 
 struct NoopOverlays {
     focus_count: Rc<Cell<u32>>,
+    overlay_update_count: Rc<Cell<u32>>,
 }
 
 impl CreateOverlay for NoopOverlays {
@@ -515,6 +529,8 @@ impl CreateOverlay for NoopOverlays {
         }))
     }
     fn create_float_overlay(&self) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
-        Ok(Box::new(NoopFloatOverlay))
+        Ok(Box::new(NoopFloatOverlay {
+            overlay_update_count: self.overlay_update_count.clone(),
+        }))
     }
 }
