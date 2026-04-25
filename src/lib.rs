@@ -4,6 +4,7 @@ mod core;
 mod ipc;
 mod logging;
 mod overlay;
+pub(crate) mod picker;
 mod platform;
 
 pub use action::{Action, FocusTarget, HubAction, IpcMessage, MoveTarget, Query, ToggleTarget};

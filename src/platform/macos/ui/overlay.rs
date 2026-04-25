@@ -16,7 +16,7 @@ use objc2_io_surface::IOSurface;
 use objc2_quartz_core::CAMetalLayer;
 
 use super::super::dome::HubEvent;
-use super::renderer::{MetalBackend, OverlayRenderer};
+use super::renderer::{MetalBackend, Renderer};
 use crate::config::Config;
 use crate::core::{ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement};
 use crate::overlay;
@@ -55,7 +55,7 @@ const FLOAT_OVERLAY_LEVEL: NSWindowLevel = NSFloatingWindowLevel;
 
 pub(super) struct FloatOverlay {
     window: Retained<NSWindow>,
-    renderer: OverlayRenderer,
+    renderer: Renderer,
     placement: Option<FloatWindowPlacement>,
     visible_content_bounds: Option<[f32; 4]>,
     scale: f64,
@@ -94,7 +94,7 @@ impl FloatOverlay {
         unsafe { window.setReleasedWhenClosed(false) };
 
         let scale = window.backingScaleFactor();
-        let renderer = OverlayRenderer::new(backend, scale, frame.size.width, frame.size.height);
+        let renderer = Renderer::new(backend, scale, frame.size.width, frame.size.height, false);
         let view = FloatOverlayView::new(
             mtm,
             NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
@@ -389,7 +389,7 @@ pub(super) struct TilingOverlayViewIvars {
     #[expect(dead_code, reason = "retains CAMetalLayer to prevent deallocation")]
     layer: Retained<CAMetalLayer>,
     events: RefCell<Vec<egui::Event>>,
-    renderer: RefCell<OverlayRenderer>,
+    renderer: RefCell<Renderer>,
     monitor: Cell<Dimension>,
     windows: RefCell<Vec<TilingWindowPlacement>>,
     containers: RefCell<Vec<(ContainerPlacement, Vec<String>)>>,
@@ -471,7 +471,7 @@ impl TilingOverlayView {
         scale: f64,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Retained<Self> {
-        let renderer = OverlayRenderer::new(backend, scale, 0.0, 0.0);
+        let renderer = Renderer::new(backend, scale, 0.0, 0.0, false);
         let layer = renderer.layer();
         let ivars = TilingOverlayViewIvars {
             layer: layer.clone(),

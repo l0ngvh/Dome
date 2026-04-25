@@ -57,6 +57,43 @@ fn window_minimized_removes_from_tiling() {
         default_screen().dimension,
         env.config.border_size,
     );
+    // w2 should be in the minimize picker, not deleted
+    env.run_actions("toggle minimize_picker");
+    assert_eq!(env.picker_entries.borrow().len(), 1);
+}
+
+#[test]
+fn user_minimize_then_restore() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "App1",
+        "app1.exe",
+        env.moves.clone(),
+    ));
+    let w2 = Arc::new(MockExternalHwnd::with_title(
+        2,
+        "App2",
+        "app2.exe",
+        env.moves.clone(),
+    ));
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    env.minimize_window(&w2);
+    env.run_actions("toggle minimize_picker");
+    assert_eq!(env.picker_entries.borrow().len(), 1);
+    env.run_actions("toggle minimize_picker"); // hide
+
+    env.restore_window(&w2);
+    env.run_actions("toggle minimize_picker"); // show again with fresh entries
+    assert_eq!(env.picker_entries.borrow().len(), 0);
+    // Both windows should be tiled again
+    assert_h_tiled(
+        &[w1.get_dim(), w2.get_dim()],
+        default_screen().dimension,
+        env.config.border_size,
+    );
 }
 
 #[test]

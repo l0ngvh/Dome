@@ -54,6 +54,7 @@ Toggle window or container properties.
 | `toggle layout` | Toggle the parent container between split and tabbed layout. |
 | `toggle float` | Toggle the focused window between tiling and floating. Floating windows are not part of the tiling tree and can be freely positioned. Has no effect on fullscreen windows. |
 | `toggle fullscreen` | Toggle the focused window between normal and fullscreen. A fullscreen window covers the entire monitor. Works from both tiling and floating states. |
+| `toggle minimize_picker` | Open or close the minimized window picker. Shows a list of all minimized windows; select one to restore it to the current workspace. No default keybinding. |
 
 Fullscreen integrates with each platform's native fullscreen behavior — macOS Spaces and Windows borderless/exclusive fullscreen are detected and respected rather than overridden.
 
@@ -126,6 +127,9 @@ dome toggle spawn-direction
 
 # Toggle floating mode
 dome toggle float
+
+# Open minimized window picker (CLI uses kebab-case)
+dome toggle minimize-picker
 
 # Launch a terminal
 dome exec open -a Terminal

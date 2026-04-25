@@ -88,11 +88,11 @@ unsafe extern "system" fn event_hook_proc(
         let Some(sender) = s.get() else { return };
         let hwnd_id = HwndId::from(hwnd);
         match event {
-            EVENT_OBJECT_CREATE
-            | EVENT_OBJECT_SHOW
-            | EVENT_SYSTEM_MINIMIZEEND
-            | EVENT_OBJECT_UNCLOAKED => {
+            EVENT_OBJECT_CREATE | EVENT_OBJECT_SHOW | EVENT_OBJECT_UNCLOAKED => {
                 sender.send(HubEvent::WindowCreated(hwnd_id));
+            }
+            EVENT_SYSTEM_MINIMIZEEND => {
+                sender.send(HubEvent::WindowRestored(hwnd_id));
             }
             EVENT_OBJECT_NAMECHANGE => {
                 sender.send(HubEvent::WindowTitleChanged(hwnd_id));

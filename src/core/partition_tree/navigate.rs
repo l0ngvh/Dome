@@ -77,7 +77,7 @@ impl PartitionTreeStrategy {
                     tracing::debug!(
                         ?child, from = %direct_parent_id, to = %container_id, insert_pos, "Moving child to ancestor"
                     );
-                    self.detach_split_child_from_container(hub, direct_parent_id, child);
+                    self.detach_split_child_from_container(direct_parent_id, child);
                     self.attach_split_child_to_container(
                         hub,
                         child,
@@ -90,7 +90,7 @@ impl PartitionTreeStrategy {
                 }
                 Parent::Workspace(workspace_id) => {
                     tracing::debug!(?child, %workspace_id, "Moving child to new root container");
-                    self.detach_split_child_from_container(hub, direct_parent_id, child);
+                    self.detach_split_child_from_container(direct_parent_id, child);
                     let root = self.ws_state(workspace_id).root.unwrap();
 
                     let children = if forward {
@@ -312,6 +312,11 @@ impl PartitionTreeStrategy {
         self.set_focus_child(hub, focus_target);
     }
 
+    /// Move tiling focus from the current child to its parent container. Sets
+    /// `focused_tiling` to `Child::Container`, entering container-highlight mode.
+    /// In this mode, `focused_tiling_window()` returns `None`, which makes
+    /// `toggle_float`/`toggle_fullscreen` no-ops and causes the platform to focus
+    /// the tiling overlay. Move-to-workspace operates on the whole container.
     pub(super) fn focus_parent(&mut self, hub: &mut HubAccess) {
         let Some(focused) = self.focused_split_child(hub) else {
             return;

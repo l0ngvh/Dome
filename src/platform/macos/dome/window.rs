@@ -20,8 +20,11 @@ pub(super) enum WindowState {
     BorderlessFullscreen,
     /// Window is minimized by Dome because it can't be moved offscreen
     /// (e.g. borderless fullscreen windows). Windows minimized by users are
-    /// untracked and removed from Dome.
+    /// tracked via `UserMinimized` instead.
     Minimized,
+    /// Window was minimized by the user (Cmd+M or minimize button).
+    /// Tracked in hub.minimized_windows for the picker.
+    UserMinimized,
 }
 
 #[derive(Clone, Copy)]
@@ -309,7 +312,7 @@ impl Dome {
         let monitor = self.monitor_registry.get_entry_mut(monitor_id);
         let screen_dim = monitor.screen.dimension;
         match &mut window.state {
-            WindowState::Minimized => {
+            WindowState::Minimized | WindowState::UserMinimized => {
                 if let Err(err) = window.ax.unminimize() {
                     tracing::trace!("Failed to unminimize window: {err:#}");
                 }
@@ -533,6 +536,8 @@ impl Dome {
                     self.hub.unset_fullscreen(window_id);
                 }
             }
+            // User-minimized windows should not trigger move logic.
+            WindowState::UserMinimized => {}
         }
     }
 
@@ -549,7 +554,9 @@ impl Dome {
                 window.state = WindowState::Minimized;
                 window.ax.minimize()
             }
-            WindowState::NativeFullscreen | WindowState::Minimized => Ok(()),
+            WindowState::NativeFullscreen | WindowState::Minimized | WindowState::UserMinimized => {
+                Ok(())
+            }
             WindowState::Positioned(positioned_state) => match positioned_state {
                 PositionedState::InView(placement) => {
                     let offscreen = OffscreenPlacement::new(placement.actual);

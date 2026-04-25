@@ -87,6 +87,7 @@ impl Hub {
                 self.attach_float_to_workspace(current_ws, window_id, dim);
                 tracing::debug!(%window_id, "Window is now floating");
             }
+            DisplayMode::Minimized => (),
         }
     }
 }

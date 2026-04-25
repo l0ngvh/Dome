@@ -193,7 +193,7 @@ impl Dome {
 }
 
 // Quartz uses top-left origin, Cocoa uses bottom-left origin
-fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
+pub(super) fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
     NSRect::new(
         NSPoint::new(
             dim.x as f64,

@@ -163,6 +163,13 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
                 tracing::debug!("Exit action received");
                 runner.signal.stop();
             }
+            Action::ToggleMinimizePicker => {
+                runner.dome.toggle_picker();
+            }
+            Action::UnminimizeWindow(id) => {
+                runner.dome.picker_unminimize_window(*id);
+                runner.dome.flush_layout();
+            }
         }
     }
 }
@@ -213,8 +220,13 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
             ))
         },
         |result, runner| {
-            if let Some((to_remove, to_add)) = result {
-                let on_open = runner.dome.reconcile_windows(&to_remove, to_add);
+            if let Some(result) = result {
+                let on_open = runner.dome.reconcile_windows(
+                    &result.to_remove,
+                    &result.to_minimize,
+                    &result.to_unminimize,
+                    result.to_add,
+                );
                 for actions in on_open {
                     process_actions(runner, &actions);
                 }
@@ -358,9 +370,12 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
             // windows are inserted. So we gives these newly inserted windows extra synthetic
             // movement notification so constraint detection can work.
             let added_pids: HashSet<i32> = result.to_add.iter().map(|w| w.ax.pid()).collect();
-            let on_open = runner
-                .dome
-                .reconcile_windows(&result.to_remove, result.to_add);
+            let on_open = runner.dome.reconcile_windows(
+                &result.to_remove,
+                &result.to_minimize,
+                &result.to_unminimize,
+                result.to_add,
+            );
             for actions in on_open {
                 process_actions(runner, &actions);
             }

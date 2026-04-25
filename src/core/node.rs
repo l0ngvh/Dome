@@ -111,6 +111,7 @@ pub(crate) enum DisplayMode {
     Tiling,
     Float,
     Fullscreen,
+    Minimized,
 }
 
 impl std::fmt::Display for DisplayMode {
@@ -119,6 +120,7 @@ impl std::fmt::Display for DisplayMode {
             Self::Tiling => write!(f, "tiling"),
             Self::Float => write!(f, "float"),
             Self::Fullscreen => write!(f, "fullscreen"),
+            Self::Minimized => write!(f, "minimized"),
         }
     }
 }
@@ -211,6 +213,10 @@ impl Window {
     pub(crate) fn is_fullscreen(&self) -> bool {
         self.mode == DisplayMode::Fullscreen
     }
+
+    pub(crate) fn is_minimized(&self) -> bool {
+        self.mode == DisplayMode::Minimized
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -221,8 +227,10 @@ pub(crate) struct Dimension {
     pub(crate) y: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct WindowId(usize);
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub struct WindowId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ContainerId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

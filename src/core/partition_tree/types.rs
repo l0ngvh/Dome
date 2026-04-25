@@ -6,12 +6,18 @@ use crate::core::node::{ContainerId, Dimension, Direction, WindowId, WorkspaceId
 /// 1. All containers must have at least 2 children.
 /// 2. Parent container and child container must differ in direction, unless one of them are tabbed
 /// 3. A container's focus must either match a child's focus or point directly to a child.
+///    Because `set_focus_child` writes the same target to every ancestor, all containers on
+///    the path from root to the focused node share the same `focused` value.
 #[derive(Debug, Clone)]
 pub(crate) struct Container {
     pub(super) parent: Parent,
     pub(super) workspace: WorkspaceId,
     pub(super) children: Vec<Child>,
-    /// The focused descendant
+    /// The last focused node in this subtree. Can be a `Child::Window` or
+    /// `Child::Container` (e.g. after `focus_parent`). Not the immediate child --
+    /// `set_focus_child` writes the same target to every ancestor container.
+    /// Walking `container.focused` from root reaches the focused node directly
+    /// without needing to recurse through intermediate containers.
     pub(super) focused: Child,
     pub(super) dimension: Dimension,
     direction: Direction,

@@ -111,6 +111,10 @@ impl Runner {
                 self.dome.window_minimized(hwnd_id);
                 self.dome.apply_layout();
             }
+            HubEvent::WindowRestored(hwnd_id) => {
+                self.dome.window_restored(hwnd_id);
+                self.dome.apply_layout();
+            }
             HubEvent::WindowFocused(hwnd_id) => match self.focus_throttle.submit(hwnd_id) {
                 ThrottleResult::Send(id) => {
                     self.dome.handle_focus(id);
@@ -194,6 +198,13 @@ impl Runner {
                         PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
                     };
                     unsafe { PostQuitMessage(0) };
+                }
+                Action::ToggleMinimizePicker => {
+                    self.dome.toggle_picker();
+                }
+                Action::UnminimizeWindow(id) => {
+                    self.dome.picker_unminimize_window(*id);
+                    self.dome.apply_layout();
                 }
             }
         }

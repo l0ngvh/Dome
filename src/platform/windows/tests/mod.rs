@@ -3,7 +3,7 @@ mod lifecycle;
 mod placement;
 mod transitions;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,10 +11,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::action::{Action, Actions};
 use crate::config::Config;
-use crate::core::Dimension;
+use crate::core::{Dimension, WindowId};
 use crate::platform::windows::ScreenInfo;
 use crate::platform::windows::dome::ObservedPosition;
-use crate::platform::windows::dome::overlay::{FloatOverlayApi, TilingOverlayApi};
+use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
 use crate::platform::windows::dome::{CreateOverlay, Dome, QueryDisplay};
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
@@ -73,6 +73,7 @@ struct TestEnv {
     config: Config,
     overlay_focus_count: Rc<Cell<u32>>,
     overlay_update_count: Rc<Cell<u32>>,
+    picker_entries: Rc<RefCell<Vec<(WindowId, String)>>>,
 }
 
 impl TestEnv {
@@ -89,12 +90,14 @@ impl TestEnv {
         };
         let overlay_focus_count = Rc::new(Cell::new(0));
         let overlay_update_count = Rc::new(Cell::new(0));
+        let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let dome = Dome::new(
             config.clone(),
             Rc::new(NoopTaskbar),
             Box::new(NoopOverlays {
                 focus_count: overlay_focus_count.clone(),
                 overlay_update_count: overlay_update_count.clone(),
+                picker_entries: picker_entries.clone(),
             }),
             Box::new(display),
         )
@@ -106,6 +109,7 @@ impl TestEnv {
             config,
             overlay_focus_count,
             overlay_update_count,
+            picker_entries,
         }
     }
 
@@ -225,6 +229,11 @@ impl TestEnv {
         self.dome.apply_layout();
     }
 
+    fn restore_window(&mut self, ext: &Arc<MockExternalHwnd>) {
+        self.dome.window_restored(ext.hwnd_id);
+        self.dome.apply_layout();
+    }
+
     fn focus_window(&mut self, ext: &Arc<MockExternalHwnd>) {
         self.dome.handle_focus(ext.hwnd_id);
         self.dome.apply_layout();
@@ -232,8 +241,10 @@ impl TestEnv {
 
     fn run_actions(&mut self, s: &str) {
         let action: Action = s.parse().unwrap();
-        if let Action::Hub(hub_action) = action {
-            self.dome.execute_hub_action(&hub_action);
+        match action {
+            Action::Hub(hub_action) => self.dome.execute_hub_action(&hub_action),
+            Action::ToggleMinimizePicker => self.dome.toggle_picker(),
+            _ => {}
         }
         self.dome.apply_layout();
     }
@@ -517,9 +528,30 @@ impl TilingOverlayApi for NoopTilingOverlay {
     fn set_config(&mut self, _: Config) {}
 }
 
+struct NoopPicker {
+    visible: bool,
+    entries: Rc<RefCell<Vec<(WindowId, String)>>>,
+}
+
+impl PickerApi for NoopPicker {
+    fn show(&mut self, entries: Vec<(WindowId, String)>, _monitor_dim: Dimension) {
+        self.entries.borrow_mut().clone_from(&entries);
+        self.visible = true;
+    }
+
+    fn hide(&mut self) {
+        self.visible = false;
+    }
+
+    fn is_visible(&self) -> bool {
+        self.visible
+    }
+}
+
 struct NoopOverlays {
     focus_count: Rc<Cell<u32>>,
     overlay_update_count: Rc<Cell<u32>>,
+    picker_entries: Rc<RefCell<Vec<(WindowId, String)>>>,
 }
 
 impl CreateOverlay for NoopOverlays {
@@ -532,5 +564,17 @@ impl CreateOverlay for NoopOverlays {
         Ok(Box::new(NoopFloatOverlay {
             overlay_update_count: self.overlay_update_count.clone(),
         }))
+    }
+    fn create_picker(
+        &self,
+        entries: Vec<(WindowId, String)>,
+        monitor_dim: Dimension,
+    ) -> anyhow::Result<Box<dyn PickerApi>> {
+        let mut picker = NoopPicker {
+            visible: false,
+            entries: self.picker_entries.clone(),
+        };
+        picker.show(entries, monitor_dim);
+        Ok(Box::new(picker))
     }
 }

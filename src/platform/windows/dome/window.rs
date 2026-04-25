@@ -38,9 +38,11 @@ pub(super) enum WindowState {
     /// `handle_display_change`.
     FullscreenExclusive,
     /// Minimized by Dome to hide a borderless fullscreen window (e.g. on
-    /// workspace switch). Not user-initiated — when a user minimizes a
-    /// window, Dome removes it from the tree instead.
+    /// workspace switch). Not user-initiated.
     Minimized,
+    /// Window was minimized by the user (minimize button, taskbar, etc.).
+    /// Tracked in hub.minimized_windows for the picker.
+    UserMinimized,
 }
 
 #[derive(Clone, Copy)]
@@ -66,6 +68,7 @@ impl std::fmt::Display for WindowState {
             Self::FullscreenBorderless => write!(f, "fullscreen-borderless"),
             Self::FullscreenExclusive => write!(f, "fullscreen-exclusive"),
             Self::Minimized => write!(f, "minimized"),
+            Self::UserMinimized => write!(f, "user_minimized"),
         }
     }
 }
@@ -92,7 +95,7 @@ impl Dome {
                 debug_assert!(false, "show_float called on fullscreen window {id}");
                 return;
             }
-            WindowState::Minimized => {
+            WindowState::Minimized | WindowState::UserMinimized => {
                 entry.ext.show_cmd(ShowCmd::Restore);
                 (true, false, new_target)
             }
@@ -162,7 +165,7 @@ impl Dome {
             WindowState::Positioned(PositionedState::Tiling(d)) if d.target == new_target => {
                 return;
             }
-            WindowState::Minimized => {
+            WindowState::Minimized | WindowState::UserMinimized => {
                 entry.ext.show_cmd(ShowCmd::Restore);
                 new_target
             }
@@ -189,7 +192,7 @@ impl Dome {
         let entry = self.registry.get_mut(id);
         match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {}
-            WindowState::Minimized => {
+            WindowState::Minimized | WindowState::UserMinimized => {
                 entry.ext.show_cmd(ShowCmd::Restore);
                 entry.state = WindowState::FullscreenBorderless;
             }
@@ -239,7 +242,9 @@ impl Dome {
                     entry.ext.move_offscreen();
                 }
             }
-            WindowState::FullscreenExclusive | WindowState::Minimized => {}
+            WindowState::FullscreenExclusive
+            | WindowState::Minimized
+            | WindowState::UserMinimized => {}
         }
     }
 
@@ -252,7 +257,9 @@ impl Dome {
                     .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
             }
             WindowState::FullscreenExclusive | WindowState::FullscreenBorderless => {}
-            WindowState::Minimized => window.ext.show_cmd(ShowCmd::Restore),
+            WindowState::Minimized | WindowState::UserMinimized => {
+                window.ext.show_cmd(ShowCmd::Restore)
+            }
         }
     }
 
@@ -260,7 +267,7 @@ impl Dome {
         let visible_rect = (x, y, w, h);
         let entry = self.registry.get_mut(id);
         match &mut entry.state {
-            WindowState::FullscreenExclusive => {}
+            WindowState::FullscreenExclusive | WindowState::UserMinimized => {}
             WindowState::FullscreenBorderless | WindowState::Minimized => {
                 if matches!(entry.state, WindowState::Minimized) {
                     entry.ext.show_cmd(ShowCmd::Restore);

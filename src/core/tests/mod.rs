@@ -2,6 +2,7 @@ mod float_window;
 mod focus_workspace;
 mod fullscreen;
 mod master_stack;
+mod minimize;
 mod monitor;
 mod move_to_workspace;
 mod partition_tree;
@@ -14,7 +15,7 @@ use std::collections::HashSet;
 use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig, MonitorLayout, SpawnIndicator};
-use crate::core::node::{Dimension, Direction, Workspace, WorkspaceId};
+use crate::core::node::{Dimension, Direction, WindowId, Workspace, WorkspaceId};
 use crate::core::partition_tree::Child;
 use crate::core::strategy::TilingAction;
 
@@ -199,6 +200,12 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
                 s.push_str("  )\n");
             }
         }
+    }
+    if !hub.minimized_windows().is_empty() {
+        let mut ids: Vec<WindowId> = hub.minimized_windows().to_vec();
+        ids.sort();
+        let id_strs: Vec<String> = ids.iter().map(|id| format!("{id}")).collect();
+        s.push_str(&format!("  Minimized: [{}]\n", id_strs.join(", ")));
     }
     s
 }
@@ -471,6 +478,7 @@ fn validate_hub(hub: &Hub) {
 
     hub.validate_tree();
     validate_visible_placements(hub);
+    validate_minimized(hub);
 }
 
 fn validate_monitors(hub: &Hub) {
@@ -592,6 +600,29 @@ fn validate_visible_placements(hub: &Hub) {
                 Some(cp.visible_frame),
                 "Container {} visible_frame doesn't match clip(frame, screen)",
                 cp.id
+            );
+        }
+    }
+}
+
+fn validate_minimized(hub: &Hub) {
+    for &id in hub.minimized_windows() {
+        let w = hub.get_window(id);
+        assert!(
+            w.is_minimized(),
+            "Window {id} in minimized_windows but mode is {:?}",
+            w.mode
+        );
+    }
+    for (ws_id, ws) in hub.all_workspaces() {
+        for &id in hub.minimized_windows() {
+            assert!(
+                !ws.float_windows().iter().any(|&(fid, _)| fid == id),
+                "Minimized {id} in workspace {ws_id} float list"
+            );
+            assert!(
+                !ws.fullscreen_windows().contains(&id),
+                "Minimized {id} in workspace {ws_id} fullscreen list"
             );
         }
     }

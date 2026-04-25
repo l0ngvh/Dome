@@ -23,10 +23,27 @@ pub(in crate::platform::macos) struct ExistingWindow {
     pub(in crate::platform::macos) is_native_fullscreen: bool,
 }
 
+pub(in crate::platform::macos) struct ReconcileResult {
+    pub(in crate::platform::macos) to_remove: Vec<CGWindowID>,
+    pub(in crate::platform::macos) to_minimize: Vec<CGWindowID>,
+    pub(in crate::platform::macos) to_unminimize: Vec<UnminimizedWindow>,
+    pub(in crate::platform::macos) to_add: Vec<NewWindow>,
+}
+
+pub(in crate::platform::macos) struct UnminimizedWindow {
+    pub(in crate::platform::macos) cg_id: CGWindowID,
+    pub(in crate::platform::macos) x: i32,
+    pub(in crate::platform::macos) y: i32,
+    pub(in crate::platform::macos) w: i32,
+    pub(in crate::platform::macos) h: i32,
+}
+
 pub(in crate::platform::macos) struct ReconcileAllResult {
     pub(in crate::platform::macos) terminated_pids: Vec<i32>,
     pub(in crate::platform::macos) hidden_pids: Vec<i32>,
     pub(in crate::platform::macos) to_remove: Vec<CGWindowID>,
+    pub(in crate::platform::macos) to_minimize: Vec<CGWindowID>,
+    pub(in crate::platform::macos) to_unminimize: Vec<UnminimizedWindow>,
     pub(in crate::platform::macos) to_add: Vec<NewWindow>,
 }
 
@@ -35,18 +52,32 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     tracked: &HashMap<CGWindowID, WindowEntry>,
     ignore_rules: &[MacosWindow],
     marker: &DispatcherMarker,
-) -> (Vec<CGWindowID>, Vec<NewWindow>) {
+) -> ReconcileResult {
     let pid = app.pid();
     let cg_window_ids = list_cg_window_ids();
 
     let mut to_remove = Vec::new();
+    let mut to_minimize = Vec::new();
+    let mut to_unminimize = Vec::new();
     for (&cg_id, entry) in tracked.iter().filter(|(_, e)| e.ax.pid() == pid) {
-        if !cg_window_ids.contains(&cg_id)
-            || !entry.ax.is_valid(marker)
-        // Skip minimized check for windows Dome minimized (borderless fullscreen hiding)
-            || (!matches!(entry.state, WindowState::Minimized) && entry.ax.is_minimized(marker))
-        {
+        if !cg_window_ids.contains(&cg_id) || !entry.ax.is_valid(marker) {
             to_remove.push(cg_id);
+        } else if !matches!(
+            entry.state,
+            WindowState::Minimized | WindowState::UserMinimized
+        ) && entry.ax.is_minimized(marker)
+        {
+            to_minimize.push(cg_id);
+        } else if matches!(entry.state, WindowState::UserMinimized)
+            && !entry.ax.is_minimized(marker)
+        {
+            // Window was unminimized by user (e.g. clicked Dock icon).
+            // Read position/size now (we're on a background thread with DispatcherMarker).
+            if let (Ok((x, y)), Ok((w, h))) =
+                (entry.ax.get_position(marker), entry.ax.get_size(marker))
+            {
+                to_unminimize.push(UnminimizedWindow { cg_id, x, y, w, h });
+            }
         }
     }
 
@@ -56,7 +87,12 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         Ok(ax_windows) => ax_windows,
         Err(e) => {
             tracing::trace!("Failed to retrieve list of windows for {app}: {e}");
-            return (to_remove, Vec::new());
+            return ReconcileResult {
+                to_remove,
+                to_minimize,
+                to_unminimize,
+                to_add: Vec::new(),
+            };
         }
     };
     for ax in ax_windows {
@@ -96,7 +132,12 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         });
     }
 
-    (to_remove, to_add)
+    ReconcileResult {
+        to_remove,
+        to_minimize,
+        to_unminimize,
+        to_add,
+    }
 }
 
 pub(in crate::platform::macos) fn compute_window_positions(
@@ -151,15 +192,19 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
 
     let mut hidden_pids = Vec::new();
     let mut to_remove = Vec::new();
+    let mut to_minimize = Vec::new();
+    let mut to_unminimize = Vec::new();
     let mut to_add = Vec::new();
     for app in &running {
         if app.is_hidden() {
             hidden_pids.push(app.pid());
         } else {
             let ax_app = app.ax_app();
-            let (removed, added) = compute_reconciliation(&ax_app, &tracked, &ignore_rules, marker);
-            to_remove.extend(removed);
-            to_add.extend(added);
+            let result = compute_reconciliation(&ax_app, &tracked, &ignore_rules, marker);
+            to_remove.extend(result.to_remove);
+            to_minimize.extend(result.to_minimize);
+            to_unminimize.extend(result.to_unminimize);
+            to_add.extend(result.to_add);
         }
     }
 
@@ -176,6 +221,8 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
         terminated_pids,
         hidden_pids,
         to_remove,
+        to_minimize,
+        to_unminimize,
         to_add,
     }
 }

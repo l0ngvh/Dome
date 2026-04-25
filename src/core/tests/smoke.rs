@@ -46,6 +46,8 @@ enum Op {
     IncrementMasterCount,
     DecrementMasterCount,
     QueryWorkspaces,
+    MinimizeWindow,
+    UnminimizeWindow,
     // Note: Exec is not included because it's a platform-specific action
     // that spawns external processes, not a core hub operation.
 }
@@ -87,6 +89,8 @@ const ALL_OPS: &[Op] = &[
     Op::IncrementMasterCount,
     Op::DecrementMasterCount,
     Op::QueryWorkspaces,
+    Op::MinimizeWindow,
+    Op::UnminimizeWindow,
 ];
 
 fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
@@ -339,6 +343,24 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
                 Op::QueryWorkspaces => {
                     hub.query_workspaces();
                     "QueryWorkspaces".into()
+                }
+                Op::MinimizeWindow => {
+                    if windows.is_empty() {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..windows.len());
+                    let id = windows[idx];
+                    hub.minimize_window(id);
+                    format!("MinimizeWindow({id})")
+                }
+                Op::UnminimizeWindow => {
+                    if windows.is_empty() {
+                        continue;
+                    }
+                    let idx = rng.random_range(0..windows.len());
+                    let id = windows[idx];
+                    hub.unminimize_window(id);
+                    format!("UnminimizeWindow({id})")
                 }
             };
 

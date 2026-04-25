@@ -78,8 +78,9 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
         highlighted: bool,
     ) -> TilingPlacements;
 
-    /// Return the focused tiling window for a workspace, walking the focus
-    /// chain from root to a leaf. Returns the leaf WindowId directly.
+    /// Return the focused tiling window for a workspace. Returns `None` if
+    /// `focused_tiling` is a `Child::Container` (container-highlight mode) or
+    /// if the workspace is empty.
     fn focused_tiling_window(&self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WindowId>;
 
     /// Move the focused tiling child (window or container) from one workspace

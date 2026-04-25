@@ -25,7 +25,7 @@ fn discover_native_fullscreen_window() {
         h: 1080,
         is_native_fullscreen: true,
     };
-    dome.reconcile_windows(&[], vec![nw]);
+    dome.reconcile_windows(&[], &[], &[], vec![nw]);
     macos.settle(&mut dome, 10);
 
     assert!(dome.tracked_window(cg1).is_some());
@@ -46,12 +46,12 @@ fn on_open_moves_window_to_other_workspace() {
     let mut dome = macos.setup_dome_with_config(config);
 
     let cg1 = macos.spawn_window(100, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // on_open rule moves Slack to workspace 3; hide_window called while Offscreen
     let cg2 = macos.spawn_window(200, "Slack", "General");
-    let on_open = dome.reconcile_windows(&[], vec![new_window(&macos, cg2)]);
+    let on_open = dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg2)]);
     for actions in on_open {
         for action in &actions {
             if let Action::Hub(hub) = action {
@@ -72,7 +72,7 @@ fn is_moving_suppresses_placement() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // cg1 is full-screen tiled
@@ -86,7 +86,7 @@ fn is_moving_suppresses_placement() {
     // Add cg2 — triggers relayout (cg1 should go from full to half), but
     // cg1 should NOT be repositioned because it's being dragged
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg2)]);
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg2)]);
     macos.settle(&mut dome, 10);
     assert_eq!(macos.window_frame(cg1), (500, 300, 400, 400));
 
@@ -105,7 +105,7 @@ fn monitor_change_rehides_offscreen_windows() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // Hide window
@@ -147,7 +147,12 @@ fn remove_borderless_fullscreen_window_restores_siblings() {
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+    );
     macos.settle(&mut dome, 10);
 
     // Zoom cg1 → borderless fullscreen, cg2 hidden
@@ -156,7 +161,7 @@ fn remove_borderless_fullscreen_window_restores_siblings() {
     assert!(macos.is_offscreen(cg2));
 
     // Close the fullscreen window
-    dome.reconcile_windows(&[cg1], vec![]);
+    dome.reconcile_windows(&[cg1], &[], &[], vec![]);
     macos.settle(&mut dome, 10);
 
     // Sibling should be restored to full tiling
@@ -173,6 +178,8 @@ fn app_terminated_removes_windows() {
     let cg2 = macos.spawn_window(100, "Safari", "Tab 2");
     let cg3 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
+        &[],
+        &[],
         &[],
         vec![
             new_window(&macos, cg1),
@@ -196,10 +203,15 @@ fn window_removed_fills_screen() {
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+    );
     macos.settle(&mut dome, 10);
 
-    dome.reconcile_windows(&[cg1], vec![]);
+    dome.reconcile_windows(&[cg1], &[], &[], vec![]);
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg2));
@@ -213,10 +225,15 @@ fn delete_currently_displayed_window() {
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+    );
     macos.settle(&mut dome, 10);
 
-    dome.reconcile_windows(&[cg1], vec![]);
+    dome.reconcile_windows(&[cg1], &[], &[], vec![]);
     macos.settle(&mut dome, 10);
 
     // Remaining window fills screen
@@ -233,7 +250,7 @@ fn render_frame_focused_window() {
     let mut macos = MacOS::new();
     let cg1 = macos.spawn_window(1, "App1", "Win1");
     let mut dome = macos.setup_dome();
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
 
     let state = macos.last_frame_state();
     assert!(state.focused_window.is_some());
@@ -244,8 +261,8 @@ fn render_frame_focused_none_after_last_window_removed() {
     let mut macos = MacOS::new();
     let cg1 = macos.spawn_window(1, "App1", "Win1");
     let mut dome = macos.setup_dome();
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
-    dome.reconcile_windows(&[cg1], vec![]);
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[cg1], &[], &[], vec![]);
 
     let state = macos.last_frame_state();
     assert_eq!(state.focused_window, None);
@@ -257,7 +274,12 @@ fn render_frame_focused_container_after_focus_parent() {
     let cg1 = macos.spawn_window(1, "App1", "Win1");
     let cg2 = macos.spawn_window(1, "App2", "Win2");
     let mut dome = macos.setup_dome();
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+    );
     send(&mut dome, "focus parent");
 
     // After focus_parent, focused_tiling_window() returns None (container highlighted),
@@ -271,7 +293,7 @@ fn render_frame_focused_monitor_id() {
     let mut macos = MacOS::new();
     let cg1 = macos.spawn_window(1, "App1", "Win1");
     let mut dome = macos.setup_dome();
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
 
     let state = macos.last_frame_state();
     assert!(state.focused_monitor_id.is_some());
@@ -282,7 +304,7 @@ fn render_frame_focused_none_on_empty_workspace() {
     let mut macos = MacOS::new();
     let cg1 = macos.spawn_window(1, "App1", "Win1");
     let mut dome = macos.setup_dome();
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
     send(&mut dome, "focus workspace 1");
 
     let state = macos.last_frame_state();
@@ -322,7 +344,12 @@ fn multi_action_sequence_applies_each_hub_action() {
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], vec![new_window(&macos, cg1), new_window(&macos, cg2)]);
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+    );
     macos.settle(&mut dome, 10);
 
     let actions = Actions::new(vec![

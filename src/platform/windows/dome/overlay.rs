@@ -32,7 +32,9 @@ use windows::core::PCWSTR;
 
 use super::HubEvent;
 use crate::config::Config;
-use crate::core::{ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement};
+use crate::core::{
+    ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement, WindowId,
+};
 use crate::overlay;
 use crate::platform::windows::external::{HwndId, ZOrder};
 
@@ -52,7 +54,11 @@ pub(super) struct OwnedHwnd {
 }
 
 impl OwnedHwnd {
-    pub(super) fn new(class: PCWSTR, ex_style: WINDOW_EX_STYLE) -> anyhow::Result<Self> {
+    pub(super) fn new(
+        class: PCWSTR,
+        ex_style: WINDOW_EX_STYLE,
+        opaque: bool,
+    ) -> anyhow::Result<Self> {
         let hwnd = unsafe {
             CreateWindowExW(
                 ex_style,
@@ -69,7 +75,9 @@ impl OwnedHwnd {
                 None,
             )?
         };
-        enable_blur_behind(hwnd);
+        if !opaque {
+            enable_blur_behind(hwnd);
+        }
         Ok(Self {
             hwnd,
             is_visible: false,
@@ -95,6 +103,10 @@ impl OwnedHwnd {
             self.is_visible = false;
         }
     }
+
+    pub(super) fn is_visible(&self) -> bool {
+        self.is_visible
+    }
 }
 
 impl Drop for OwnedHwnd {
@@ -103,24 +115,30 @@ impl Drop for OwnedHwnd {
     }
 }
 
-pub(super) struct OverlayRenderer {
+pub(super) struct Renderer {
     surface: Surface<WindowSurface>,
     gl_context: PossiblyCurrentContext,
     gl: Arc<glow::Context>,
     painter: egui_glow::Painter,
     egui_ctx: egui::Context,
+    opaque: bool,
 }
 
-impl OverlayRenderer {
+impl Renderer {
     pub(super) fn new(
         display: &Display,
         hwnd: HWND,
         width: u32,
         height: u32,
+        opaque: bool,
     ) -> anyhow::Result<Self> {
         let raw_window = raw_window_handle(hwnd);
 
-        let config_template = ConfigTemplateBuilder::new().with_alpha_size(8).build();
+        let mut builder = ConfigTemplateBuilder::new();
+        if !opaque {
+            builder = builder.with_alpha_size(8);
+        }
+        let config_template = builder.build();
         let gl_config = unsafe { display.find_configs(config_template) }?
             .next()
             .ok_or_else(|| anyhow::anyhow!("no suitable GL config"))?;
@@ -161,6 +179,7 @@ impl OverlayRenderer {
             gl,
             painter,
             egui_ctx,
+            opaque,
         })
     }
 
@@ -168,6 +187,10 @@ impl OverlayRenderer {
         let w = NonZeroU32::new(width.max(1)).unwrap();
         let h = NonZeroU32::new(height.max(1)).unwrap();
         self.surface.resize(&self.gl_context, w, h);
+    }
+
+    pub(super) fn set_visuals(&self, visuals: egui::Visuals) {
+        self.egui_ctx.set_visuals(visuals);
     }
 
     pub(super) fn render<R>(
@@ -180,7 +203,8 @@ impl OverlayRenderer {
     ) -> R {
         self.gl_context.make_current(&self.surface).ok();
         unsafe {
-            self.gl.clear_color(0.0, 0.0, 0.0, 0.0);
+            self.gl
+                .clear_color(0.0, 0.0, 0.0, if self.opaque { 1.0 } else { 0.0 });
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
@@ -221,7 +245,7 @@ impl OverlayRenderer {
     }
 }
 
-impl Drop for OverlayRenderer {
+impl Drop for Renderer {
     fn drop(&mut self) {
         self.gl_context.make_current(&self.surface).ok();
         self.painter.destroy();
@@ -357,7 +381,7 @@ pub(in crate::platform::windows) const TILING_OVERLAY_CLASS: PCWSTR =
 /// Per-monitor overlay that draws all tiling window borders and container tab bars.
 /// `renderer` is declared before `window` so it drops first.
 pub(in crate::platform::windows) struct TilingOverlay {
-    renderer: OverlayRenderer,
+    renderer: Renderer,
     events: Vec<egui::Event>,
     monitor: Dimension,
     windows: Vec<TilingWindowPlacement>,
@@ -373,9 +397,9 @@ impl TilingOverlay {
         config: Config,
         hub_sender: HubSender,
     ) -> anyhow::Result<Box<Self>> {
-        let window = OwnedHwnd::new(TILING_OVERLAY_CLASS, WS_EX_TOOLWINDOW)?;
+        let window = OwnedHwnd::new(TILING_OVERLAY_CLASS, WS_EX_TOOLWINDOW, false)?;
         let hwnd = window.hwnd();
-        let renderer = OverlayRenderer::new(display, hwnd, 1, 1)?;
+        let renderer = Renderer::new(display, hwnd, 1, 1, false)?;
         let mut boxed = Box::new(Self {
             renderer,
             events: Vec::new(),
@@ -602,6 +626,12 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     fn set_config(&mut self, config: Config);
 }
 
+pub(in crate::platform::windows) trait PickerApi {
+    fn show(&mut self, entries: Vec<(WindowId, String)>, monitor_dim: Dimension);
+    fn hide(&mut self);
+    fn is_visible(&self) -> bool;
+}
+
 pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =
     windows::core::w!("DomeFloatOverlay");
 
@@ -612,7 +642,7 @@ pub(in crate::platform::windows) fn create_float_overlay(
 }
 
 struct FloatOverlay {
-    renderer: OverlayRenderer,
+    renderer: Renderer,
     width: u32,
     height: u32,
     window: OwnedHwnd,
@@ -620,8 +650,12 @@ struct FloatOverlay {
 
 impl FloatOverlay {
     fn new(display: &Display) -> anyhow::Result<Self> {
-        let window = OwnedHwnd::new(FLOAT_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
-        let renderer = OverlayRenderer::new(display, window.hwnd(), 1, 1)?;
+        let window = OwnedHwnd::new(
+            FLOAT_OVERLAY_CLASS,
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            false,
+        )?;
+        let renderer = Renderer::new(display, window.hwnd(), 1, 1, false)?;
         Ok(Self {
             renderer,
             width: 1,

@@ -226,20 +226,18 @@ impl PartitionTreeStrategy {
         self.ws_state_mut(workspace_id).root = Some(Child::Container(new_container_id));
     }
 
-    /// Replace all focus references from old_child to new_child. Walks up
-    /// from old_child to find the highest container focusing it, then walks
-    /// up from new_child updating focus pointers and active tabs.
+    /// Replace all focus references from old_child to new_child. Two-walk algorithm:
     ///
-    /// Always checks focused_tiling even if the container focus
-    /// chain stops early. focused_tiling can point to old_child even when
-    /// the focus chain from root doesn't lead to it (e.g., after
-    /// focus_parent changes the chain without clearing focused_tiling).
-    fn replace_split_child_focus(
-        &mut self,
-        hub: &mut HubAccess,
-        old_child: Child,
-        new_child: Child,
-    ) {
+    /// Walk 1 (scope): walks up from old_child. Every ancestor with `focused == old_child`
+    /// is in scope. Stops at the first ancestor that doesn't focus old_child, recording
+    /// the highest in-scope container. If the walk reaches the workspace, scope is the
+    /// entire path (and `focused_tiling` will also be checked in walk 2).
+    ///
+    /// Walk 2 (replace): walks up from new_child, replacing `focused = new_child` and
+    /// updating active tabs on every ancestor that still has `focused == old_child`.
+    /// Stops at the scope boundary from walk 1. If the scope reached the workspace,
+    /// also replaces `focused_tiling` if it pointed to old_child.
+    fn replace_split_child_focus(&mut self, old_child: Child, new_child: Child) {
         let mut current = old_child;
         let mut highest_focusing_container = None;
         for _ in crate::core::bounded_loop() {
@@ -260,7 +258,6 @@ impl PartitionTreeStrategy {
         }
 
         let mut current = new_child;
-        let mut reached_workspace = false;
         for _ in crate::core::bounded_loop() {
             match self.get_parent(current) {
                 Parent::Container(cid) => {
@@ -278,7 +275,6 @@ impl PartitionTreeStrategy {
                     current = Child::Container(cid);
                 }
                 Parent::Workspace(ws) => {
-                    reached_workspace = true;
                     if self.ws_state(ws).focused_tiling == Some(old_child) {
                         self.ws_state_mut(ws).focused_tiling = Some(new_child);
                         tracing::debug!(?old_child, ?new_child, "Workspace focus replaced");
@@ -287,34 +283,12 @@ impl PartitionTreeStrategy {
                 }
             }
         }
-
-        // The container focus chain can diverge from focused_tiling when
-        // focus_parent sets focused_tiling to a container, then set_focus
-        // on a different subtree changes the chain without touching the
-        // original leaf. When that happens the second loop stops at
-        // highest_focusing_container and never reaches the workspace.
-        // Patch up focused_tiling directly.
-        if !reached_workspace {
-            let ws_id = match old_child {
-                Child::Window(id) => hub.windows.get(id).workspace,
-                Child::Container(id) => self.containers.get(id).workspace,
-            };
-            if self.ws_state(ws_id).focused_tiling == Some(old_child) {
-                self.ws_state_mut(ws_id).focused_tiling = Some(new_child);
-                tracing::debug!(
-                    ?old_child,
-                    ?new_child,
-                    "Workspace focus replaced (fallback)"
-                );
-            }
-        }
     }
 
     /// Detach child from container and replace focus to sibling.
     /// Deletes container if only one child remains.
     pub(super) fn detach_split_child_from_container(
         &mut self,
-        hub: &mut HubAccess,
         container_id: ContainerId,
         child: Child,
     ) {
@@ -330,17 +304,17 @@ impl PartitionTreeStrategy {
             Child::Window(_) => sibling,
             Child::Container(c) => self.containers.get(c).focused,
         };
-        self.replace_split_child_focus(hub, child, new_focus);
+        self.replace_split_child_focus(child, new_focus);
 
         self.containers.get_mut(container_id).remove_child(child);
         if self.containers.get(container_id).children.len() == 1 {
-            self.delete_container(hub, container_id);
+            self.delete_container(container_id);
         }
     }
 
     /// Delete a container with exactly one child remaining. Promotes the last
     /// child to grandparent.
-    fn delete_container(&mut self, hub: &mut HubAccess, container_id: ContainerId) {
+    fn delete_container(&mut self, container_id: ContainerId) {
         debug_assert_eq!(self.containers.get(container_id).children.len(), 1);
         let grandparent = self.containers.get(container_id).parent;
         let last_child = self
@@ -360,7 +334,7 @@ impl PartitionTreeStrategy {
             Parent::Workspace(ws) => self.ws_state_mut(ws).root = Some(last_child),
         }
 
-        self.replace_split_child_focus(hub, Child::Container(container_id), last_child);
+        self.replace_split_child_focus(Child::Container(container_id), last_child);
 
         self.containers.delete(container_id);
         self.maintain_direction_invariance(grandparent);

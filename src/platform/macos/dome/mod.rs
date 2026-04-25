@@ -71,7 +71,7 @@ pub(in crate::platform::macos) trait FrameSender: Send {
 /// by the time results arrive the window may have been removed, so resolution to
 /// `WindowId` happens here where the registry can be checked.
 pub(in crate::platform::macos) struct Dome {
-    hub: Hub,
+    pub(in crate::platform::macos) hub: Hub,
     registry: Registry,
     monitor_registry: MonitorRegistry,
     config: Config,
@@ -81,7 +81,7 @@ pub(in crate::platform::macos) struct Dome {
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
     observed_pids: HashSet<i32>,
-    sender: Box<dyn FrameSender>,
+    pub(in crate::platform::macos) sender: Box<dyn FrameSender>,
     last_focused: Option<WindowId>,
     recovery: Recovery,
     pending_created: Vec<WindowId>,
@@ -123,12 +123,38 @@ impl Dome {
     pub(in crate::platform::macos) fn reconcile_windows(
         &mut self,
         removed: &[CGWindowID],
+        minimized: &[CGWindowID],
+        unminimized: &[inspect::UnminimizedWindow],
         added: Vec<NewWindow>,
     ) -> Vec<Actions> {
         for &cg_id in removed {
             if let Some(entry) = self.registry.get(cg_id) {
                 self.remove_window(entry.window_id);
             }
+        }
+        for &cg_id in minimized {
+            let wid = match self.registry.get(cg_id).map(|e| e.window_id) {
+                Some(wid) => wid,
+                None => continue,
+            };
+            self.hub.minimize_window(wid);
+            self.registry.by_id_mut(wid).state = WindowState::UserMinimized;
+        }
+        for unmin in unminimized {
+            let wid = match self.registry.get(unmin.cg_id).map(|e| e.window_id) {
+                Some(wid) => wid,
+                None => continue,
+            };
+            self.hub.unminimize_window(wid);
+            let actual = RoundedDimension {
+                x: unmin.x,
+                y: unmin.y,
+                width: unmin.w,
+                height: unmin.h,
+            };
+            self.registry.by_id_mut(wid).state = WindowState::Positioned(
+                PositionedState::Offscreen(OffscreenPlacement::new(actual)),
+            );
         }
         let mut on_open = Vec::new();
         for new in added {
@@ -399,6 +425,48 @@ impl Dome {
     pub(in crate::platform::macos) fn query_workspaces_json(&self) -> String {
         serde_json::to_string(&self.hub.query_workspaces())
             .expect("WorkspaceInfo is infallibly serializable")
+    }
+
+    /// Sends picker data to the UI thread, which toggles the picker window:
+    /// creates it if absent, closes it if already open.
+    pub(in crate::platform::macos) fn toggle_picker(&mut self) {
+        let entries = self.hub.minimized_window_entries();
+        let focused_monitor = self.hub.focused_monitor();
+        let screen = &self.monitor_registry.get_entry(focused_monitor).screen;
+        let monitor_dim = screen.dimension;
+        let scale = screen.scale;
+        let cocoa_frame = layout::to_ns_rect(self.primary_full_height, monitor_dim);
+        self.sender.send(HubMessage::PickerToggle {
+            entries,
+            monitor_dim,
+            cocoa_frame,
+            scale,
+        });
+    }
+
+    /// Unminimize a window selected via the picker. Unlike the reconcile path
+    /// (where the user clicks the Dock icon and macOS unminimizes first), the
+    /// picker path must drive both the core state and the OS/platform state:
+    /// 1. Tell the hub the window is back in tiling.
+    /// 2. Ask macOS to actually show the window (it is still OS-minimized).
+    /// 3. Transition the registry state to Positioned(Offscreen) so that
+    ///    flush_layout's place_window can move it into view.
+    pub(in crate::platform::macos) fn picker_unminimize_window(&mut self, window_id: WindowId) {
+        self.hub.unminimize_window(window_id);
+        let window = self.registry.by_id_mut(window_id);
+        if let WindowState::UserMinimized = window.state {
+            if let Err(e) = window.ax.unminimize() {
+                tracing::debug!(%window_id, "Failed to unminimize window from picker: {e:#}");
+            }
+            window.state = WindowState::Positioned(PositionedState::Offscreen(
+                OffscreenPlacement::new(RoundedDimension {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                }),
+            ));
+        }
     }
 
     pub(in crate::platform::macos) fn execute_hub_action(&mut self, action: &HubAction) {

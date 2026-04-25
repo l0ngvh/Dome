@@ -1,4 +1,5 @@
 pub(super) mod overlay;
+pub(super) mod picker;
 mod placement_tracker;
 mod recovery;
 mod registry;
@@ -28,13 +29,14 @@ pub(super) enum ObservedPosition {
     Visible(i32, i32, i32, i32),
 }
 use super::ScreenInfo;
-use super::external::{HwndId, ManageExternalHwnd, ZOrder};
+use super::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
 use super::taskbar::ManageTaskbar;
 
 pub(super) enum HubEvent {
     WindowCreated(HwndId),
     WindowDestroyed(HwndId),
     WindowMinimized(HwndId),
+    WindowRestored(HwndId),
     WindowFocused(HwndId),
     WindowTitleChanged(HwndId),
     MoveSizeStart(HwndId),
@@ -64,6 +66,11 @@ struct MonitorPositionData {
 pub(super) trait CreateOverlay {
     fn create_tiling_overlay(&self, config: Config) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
     fn create_float_overlay(&self) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
+    fn create_picker(
+        &self,
+        entries: Vec<(WindowId, String)>,
+        monitor_dim: Dimension,
+    ) -> anyhow::Result<Box<dyn overlay::PickerApi>>;
 }
 
 pub(super) trait QueryDisplay {
@@ -94,6 +101,7 @@ pub(super) struct Dome {
     pending_created: Vec<WindowId>,
     placement_tracker: PlacementTracker,
     recovery: Recovery,
+    picker: Option<Box<dyn overlay::PickerApi>>,
 }
 
 impl Drop for Dome {
@@ -163,6 +171,7 @@ impl Dome {
             pending_created: Vec::new(),
             placement_tracker: PlacementTracker::new(),
             recovery: Recovery::new(taskbar),
+            picker: None,
         })
     }
 
@@ -182,15 +191,32 @@ impl Dome {
 
     #[tracing::instrument(skip_all)]
     pub(super) fn window_minimized(&mut self, id_key: HwndId) {
-        let dominated_by_dome = self.registry.get_id(id_key).is_some_and(|id| {
-            matches!(
-                self.registry.get(id).state,
-                WindowState::Minimized | WindowState::FullscreenExclusive
-            )
-        });
-        if !dominated_by_dome {
-            self.remove_window(id_key);
+        let Some(id) = self.registry.get_id(id_key) else {
+            return;
+        };
+        match self.registry.get(id).state {
+            // Dome-initiated minimize or exclusive fullscreen -- ignore.
+            WindowState::Minimized | WindowState::FullscreenExclusive => {}
+            _ => {
+                self.hub.minimize_window(id);
+                self.registry.get_mut(id).state = WindowState::UserMinimized;
+            }
         }
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(super) fn window_restored(&mut self, id_key: HwndId) {
+        let Some(id) = self.registry.get_id(id_key) else {
+            return;
+        };
+        if !matches!(self.registry.get(id).state, WindowState::UserMinimized) {
+            return;
+        }
+        self.hub.unminimize_window(id);
+        self.registry.get_mut(id).state = WindowState::Positioned(PositionedState::Offscreen {
+            retries: 0,
+            actual: (0, 0, 0, 0),
+        });
     }
 
     pub(super) fn move_size_started(&mut self, id_key: HwndId) {
@@ -456,6 +482,49 @@ impl Dome {
             }
         }
     }
+    pub(super) fn toggle_picker(&mut self) {
+        match &mut self.picker {
+            Some(pw) if pw.is_visible() => {
+                pw.hide();
+            }
+            Some(pw) => {
+                let entries = self.hub.minimized_window_entries();
+                let focused_monitor = self.hub.focused_monitor();
+                let monitor_dim = self.monitor_dimensions[&focused_monitor];
+                pw.show(entries, monitor_dim);
+            }
+            None => {
+                let entries = self.hub.minimized_window_entries();
+                let focused_monitor = self.hub.focused_monitor();
+                let monitor_dim = self.monitor_dimensions[&focused_monitor];
+                match self.overlay_factory.create_picker(entries, monitor_dim) {
+                    Ok(pw) => {
+                        self.picker = Some(pw);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to create picker window: {e:#}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Unminimize a window selected via the picker. Unlike `window_restored`
+    /// (driven by a Win32 event after the user clicks the taskbar), the picker
+    /// path must drive both the core state and the OS state: tell the hub the
+    /// window is back, ask Windows to restore it, and transition the registry
+    /// state to Positioned(Offscreen) so apply_layout can place it.
+    pub(super) fn picker_unminimize_window(&mut self, id: WindowId) {
+        self.hub.unminimize_window(id);
+        let entry = self.registry.get_mut(id);
+        if let WindowState::UserMinimized = entry.state {
+            entry.ext.show_cmd(ShowCmd::Restore);
+            entry.state = WindowState::Positioned(PositionedState::Offscreen {
+                retries: 0,
+                actual: (0, 0, 0, 0),
+            });
+        }
+    }
 
     #[tracing::instrument(skip_all)]
     pub(super) fn apply_layout(&mut self) {
@@ -471,11 +540,7 @@ impl Dome {
         let mut new_displayed: HashMap<MonitorId, DisplayedMonitor> = HashMap::new();
 
         for mp in result.monitors {
-            let dimension = self
-                .monitor_dimensions
-                .get(&mp.monitor_id)
-                .copied()
-                .unwrap_or_default();
+            let dimension = self.monitor_dimensions[&mp.monitor_id];
 
             let mut window_ids = HashSet::new();
 
@@ -557,7 +622,11 @@ impl Dome {
 
         // Hide
         for &id in &to_hide {
-            self.taskbar.delete_tab(self.registry.get(id).ext.id());
+            // Keep taskbar tab for user-minimized windows so the user can
+            // click it to restore. Dome-hidden windows get their tab removed.
+            if !matches!(self.registry.get(id).state, WindowState::UserMinimized) {
+                self.taskbar.delete_tab(self.registry.get(id).ext.id());
+            }
             self.hide_window(id);
         }
 

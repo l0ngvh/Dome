@@ -100,6 +100,12 @@ pub(in crate::platform::macos) enum HubMessage {
     Frame(RenderFrame),
     RefreshObservers,
     ConfigChanged(Config),
+    PickerToggle {
+        entries: Vec<(WindowId, String)>,
+        monitor_dim: Dimension,
+        cocoa_frame: NSRect,
+        scale: f64,
+    },
     Shutdown,
 }
 

@@ -38,11 +38,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PCWSTR};
 
 use crate::config::{Config, start_config_watcher};
-use crate::core::Dimension;
+use crate::core::{Dimension, WindowId};
 use crate::ipc;
 use dome::overlay::{
     FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, raw_window_handle, tiling_overlay_wnd_proc,
 };
+use dome::picker::{PICKER_OVERLAY_CLASS, picker_wnd_proc};
 use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
 use external::HwndId;
@@ -238,6 +239,18 @@ impl dome::CreateOverlay for GlOverlayFactory {
     fn create_float_overlay(&self) -> anyhow::Result<Box<dyn dome::overlay::FloatOverlayApi>> {
         dome::overlay::create_float_overlay(&self.display)
     }
+    fn create_picker(
+        &self,
+        entries: Vec<(WindowId, String)>,
+        monitor_dim: Dimension,
+    ) -> anyhow::Result<Box<dyn dome::overlay::PickerApi>> {
+        Ok(dome::picker::PickerWindow::new(
+            &self.display,
+            entries,
+            monitor_dim,
+            self.hub_sender.clone(),
+        )?)
+    }
 }
 
 unsafe extern "system" fn app_wnd_proc(
@@ -319,6 +332,15 @@ fn run_dome(config: Config, main_thread_id: u32) {
     };
     unsafe { RegisterClassW(&wc_tiling) };
 
+    let wc_picker = WNDCLASSW {
+        lpfnWndProc: Some(picker_wnd_proc),
+        hInstance: hinstance.into(),
+        lpszClassName: PICKER_OVERLAY_CLASS,
+        hCursor: arrow,
+        ..Default::default()
+    };
+    unsafe { RegisterClassW(&wc_picker) };
+
     let app_hwnd = unsafe {
         CreateWindowExW(
             WS_EX_TOOLWINDOW,
@@ -349,11 +371,11 @@ fn run_dome(config: Config, main_thread_id: u32) {
         thread_id: unsafe { GetCurrentThreadId() },
     };
     let overlays = GlOverlayFactory {
-        display,
-        hub_sender,
+        display: display.clone(),
+        hub_sender: hub_sender.clone(),
     };
 
-    let dome = Dome::new(
+    let mut dome = Dome::new(
         config.clone(),
         Rc::new(taskbar),
         Box::new(overlays),

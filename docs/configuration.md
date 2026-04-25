@@ -153,7 +153,7 @@ This would move the focused window to workspace 1, then switch to it.
 |-----|---------|
 | `cmd+shift+q` | `exit` |
 
-Note: the default keybindings do not include `exec` or `toggle fullscreen` bindings. The example config at `examples/config.toml` includes both as examples: `"cmd+return" = ["exec open -a Terminal"]` (macOS) and `"cmd+shift+return" = ["toggle fullscreen"]`. Users who want these bindings must add them to their `[keymaps]` section. Keeping the defaults focused on core navigation means Dome is useful immediately and customizable later.
+Note: the default keybindings do not include `exec`, `toggle fullscreen`, or `toggle minimize_picker` bindings. The example config at `examples/config.toml` includes these as examples: `"cmd+return" = ["exec open -a Terminal"]` (macOS), `"cmd+shift+return" = ["toggle fullscreen"]`, and `"cmd+m" = ["toggle minimize_picker"]`. Users who want these bindings must add them to their `[keymaps]` section. Keeping the defaults focused on core navigation means Dome is useful immediately and customizable later.
 
 ## Window Rules
 

@@ -5,6 +5,11 @@ use crate::core::partition_tree::{Child, Container, Parent};
 use super::PartitionTreeStrategy;
 
 impl PartitionTreeStrategy {
+    /// Validate workspace focus invariants:
+    /// - `is_float_focused` is false when `float_windows` is empty
+    /// - `focused_tiling` points to a tiling-mode window (not float/fullscreen)
+    /// - `focused_tiling` is reachable from root by walking `container.focused`
+    /// - `root.is_some()` implies `focused_tiling.is_some()`
     pub(super) fn validate_workspace_focus(
         &self,
         hub: &HubAccess,
@@ -38,7 +43,7 @@ impl PartitionTreeStrategy {
             let root = root.unwrap_or_else(|| {
                 panic!("Workspace {workspace_id}: focused_tiling is {child:?} but root is None")
             });
-            // Walk the focus chain from root to a leaf to check reachability
+            // Walk the focus chain from root to check reachability of focused_tiling
             let mut current = root;
             for _ in crate::core::bounded_loop() {
                 if current == child {
@@ -285,6 +290,10 @@ impl PartitionTreeStrategy {
         assert!(
             !window.is_fullscreen(),
             "Window {wid} in tree but mode is Fullscreen"
+        );
+        assert!(
+            !window.is_minimized(),
+            "Window {wid} in tree but mode is Minimized"
         );
 
         let td = self.tiling_data(wid);

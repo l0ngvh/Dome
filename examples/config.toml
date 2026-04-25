@@ -81,6 +81,7 @@ active_tab_background_color = "#4d4d66"
 "cmd+shift+return" = ["toggle fullscreen"]
 "cmd+shift+q" = ["exit"]
 "cmd+return" = ["exec open -a Terminal"]
+# "cmd+m" = ["toggle minimize_picker"]
 
 # Window rules to ignore windows or run actions on open
 # All specified fields must match (AND logic)

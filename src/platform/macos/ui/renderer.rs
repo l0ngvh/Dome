@@ -89,23 +89,25 @@ impl MetalBackend {
     }
 }
 
-/// Unified renderer for all overlay types. Owns the Metal layer, egui context,
+/// Unified renderer for overlay and opaque UI windows. Owns the Metal layer, egui context,
 /// texture cache, and optional mirror texture. Callers pass `FnOnce(&egui::Context)`
 /// and create their own `egui::Area`s inside.
-pub(super) struct OverlayRenderer {
+pub(super) struct Renderer {
     backend: Rc<MetalBackend>,
     layer: Retained<CAMetalLayer>,
     egui_ctx: egui::Context,
     egui_textures: HashMap<egui::TextureId, Retained<ProtocolObject<dyn MTLTexture>>>,
     mirror_texture: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
+    opaque: bool,
 }
 
-impl OverlayRenderer {
+impl Renderer {
     pub(super) fn new(
         backend: Rc<MetalBackend>,
         scale: f64,
         logical_w: f64,
         logical_h: f64,
+        opaque: bool,
     ) -> Self {
         let layer = CAMetalLayer::layer();
         layer.setDevice(Some(backend.device()));
@@ -113,7 +115,7 @@ impl OverlayRenderer {
         // Overlays composite over other windows, so non-drawn areas must be fully transparent.
         // Must be premultiplied (0,0,0,0) — non-zero RGB with zero alpha would leak color
         // through the premultiplied-alpha blend.
-        layer.setOpaque(false);
+        layer.setOpaque(opaque);
         // Synchronous presentation ensures drawable.present() updates CALayer.contents
         // within the caller's CATransaction, so setDisableActions(true) can suppress
         // the implicit crossfade animation. Without this, Metal presents asynchronously
@@ -136,6 +138,7 @@ impl OverlayRenderer {
             egui_ctx,
             egui_textures: HashMap::new(),
             mirror_texture: None,
+            opaque,
         }
     }
 
@@ -149,6 +152,10 @@ impl OverlayRenderer {
             height: logical_h * scale,
         });
         self.layer.setContentsScale(scale);
+    }
+
+    pub(super) fn set_visuals(&self, visuals: egui::Visuals) {
+        self.egui_ctx.set_visuals(visuals);
     }
 
     fn backend(&self) -> &MetalBackend {
@@ -289,12 +296,12 @@ impl OverlayRenderer {
         let color0 = unsafe { pass_desc.colorAttachments().objectAtIndexedSubscript(0) };
         color0.setTexture(Some(&drawable.texture()));
         color0.setLoadAction(MTLLoadAction::Clear);
-        // Premultiplied transparent — see setOpaque(false) above.
+        // Premultiplied transparent — see setOpaque above.
         color0.setClearColor(MTLClearColor {
             red: 0.0,
             green: 0.0,
             blue: 0.0,
-            alpha: 0.0,
+            alpha: if self.opaque { 1.0 } else { 0.0 },
         });
         color0.setStoreAction(MTLStoreAction::Store);
 

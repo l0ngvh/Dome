@@ -35,6 +35,8 @@ pub enum HubAction {
     },
 }
 
+use crate::core::WindowId;
+
 #[derive(Debug, Clone, Subcommand)]
 pub enum Action {
     #[command(flatten)]
@@ -43,6 +45,10 @@ pub enum Action {
         command: String,
     },
     Exit,
+    ToggleMinimizePicker,
+    /// Restore a specific minimized window. Sent by the picker UI, not user-configurable.
+    #[command(skip)]
+    UnminimizeWindow(WindowId),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +77,8 @@ impl fmt::Display for Action {
             Action::Hub(hub) => hub.fmt(f),
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
+            Action::ToggleMinimizePicker => write!(f, "toggle minimize_picker"),
+            Action::UnminimizeWindow(id) => write!(f, "unminimize_window {id}"),
         }
     }
 }
@@ -336,6 +344,7 @@ impl FromStr for Action {
                 target: MasterTarget::DecrementMasterCount,
             })),
             ["exit"] => Ok(Action::Exit),
+            ["toggle", "minimize_picker"] => Ok(Action::ToggleMinimizePicker),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
     }
@@ -364,6 +373,8 @@ enum FlatAction {
     Master { target: MasterTarget },
     Exec { command: String },
     Exit,
+    ToggleMinimizePicker,
+    UnminimizeWindow(WindowId),
 }
 
 impl From<Action> for FlatAction {
@@ -375,6 +386,8 @@ impl From<Action> for FlatAction {
             Action::Hub(HubAction::Master { target }) => FlatAction::Master { target },
             Action::Exec { command } => FlatAction::Exec { command },
             Action::Exit => FlatAction::Exit,
+            Action::ToggleMinimizePicker => FlatAction::ToggleMinimizePicker,
+            Action::UnminimizeWindow(id) => FlatAction::UnminimizeWindow(id),
         }
     }
 }
@@ -388,6 +401,8 @@ impl From<FlatAction> for Action {
             FlatAction::Master { target } => Action::Hub(HubAction::Master { target }),
             FlatAction::Exec { command } => Action::Exec { command },
             FlatAction::Exit => Action::Exit,
+            FlatAction::ToggleMinimizePicker => Action::ToggleMinimizePicker,
+            FlatAction::UnminimizeWindow(id) => Action::UnminimizeWindow(id),
         }
     }
 }
@@ -448,6 +463,7 @@ mod tests {
                 r#"{"Exec":{"command":"open -a Terminal"}}"#,
             ),
             (Action::Exit, r#""Exit""#),
+            (Action::ToggleMinimizePicker, r#""ToggleMinimizePicker""#),
         ];
         for (action, expected) in &cases {
             let json = serde_json::to_string(action).unwrap();

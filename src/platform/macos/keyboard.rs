@@ -131,6 +131,9 @@ fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
         modifiers |= Modifiers::CTRL;
     }
 
+    // When the picker is open, bare arrow/return/escape keys are delivered to the
+    // picker window via keyDown: instead of being intercepted here.
+
     let keymap = Keymap { key, modifiers };
     let actions = ctx
         .keymaps

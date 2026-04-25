@@ -10,7 +10,7 @@ src/
 ├── platform/
 │   ├── macos/      # AX API, Metal overlays, CGEvent tap
 │   └── windows/    # Win32, WinEvent hooks, OpenGL overlays
-└── ...             # overlay, config, action, ipc, logging
+└── ...             # overlay, picker, config, action, ipc, logging
 ```
 
 ## Core
@@ -47,6 +47,8 @@ The shared `Window` struct holds only mode, workspace, restrictions, title, and 
 
 **Fullscreen** — separate list on the workspace. If non-empty, tiling and float windows are skipped in placements. Detection is platform-specific (see [Fullscreen Detection](#fullscreen-detection)).
 
+**Minimized** — global list on Hub (`minimized_windows: Vec<WindowId>`), outside any workspace. When a window is minimized (via platform events or the picker), it is detached from its current layout (tiling tree, float list, or fullscreen list), its mode set to `Minimized`, and the workspace pruned if empty. The window's `workspace` field becomes stale after minimize since the workspace may be pruned. Code must check `window.mode != DisplayMode::Minimized` before using `window.workspace` to index into the workspace allocator. Unminimize always restores to the current workspace as tiling (scratchpad model), regardless of the window's original workspace or mode. `minimize_window` and `unminimize_window` live in `src/core/minimize.rs`, following the same pattern as `float.rs` and `fullscreen.rs`.
+
 **Window restrictions.** The platform sets a `WindowRestrictions` enum on fullscreen windows; core checks it without knowing why.
 
 - `None` — no restrictions.
@@ -63,15 +65,19 @@ Focus is split into three independent mechanisms, one per window mode:
 
 1. **Fullscreen focus** is implicit. If `fullscreen_windows` is non-empty, the last element is the focused fullscreen window. Focusing a fullscreen window moves it to the end of the vec.
 2. **Float focus** uses z-order. `float_windows` is z-ordered (last = topmost = focused). Focusing a float moves it to the end of the vec. A separate `is_float_focused` bool on Workspace tracks whether float mode has focus.
-3. **Tiling focus** uses a dedicated `focused_tiling: Option<Child>` pointer on Workspace. Only set by the strategy's `set_focus` method.
+3. **Tiling focus** uses a dedicated `focused_tiling: Option<Child>` pointer on `WorkspaceTilingState` (owned by the strategy). Primarily set by the strategy's `set_focus` method.
 
 The `focused()` accessor on Workspace computes effective focus by checking in priority order: fullscreen > float > tiling. All external reads go through this accessor. The three mechanisms are independent -- `focused_tiling` persists even when fullscreen or float windows are active, serving as "tiling focus memory." When fullscreen is unset or float is unfocused, tiling focus is restored without recomputing.
 
-**Container highlight.** When `focused_tiling` is `Child::Container` (after `focus_parent`), `focused_tiling_window()` returns `None` rather than walking to a leaf. This means `hub.focused_window()` returns `None` when a container is highlighted (assuming no fullscreen/float focus), which makes `toggle_float` and `toggle_fullscreen` no-ops and causes the platform to receive `focused_window: None` in placements, focusing the tiling overlay. Move-to-workspace and move-to-monitor bypass `focused_window()` in this case and call the strategy directly to move the whole container.
+**Focus chain invariant.** `container.focused` stores the last focused node in that subtree, not the immediate child. This node can be a `Child::Window` or a `Child::Container` (e.g. after `focus_parent`). `set_focus_child` writes the same target to every ancestor container from the target up to the workspace root. This means if `focused_tiling == Some(X)`, every ancestor of X has `focused == X`, and walking `container.focused` from root reaches X directly in one hop per level. `replace_split_child_focus` preserves this invariant during tree mutations by replacing old references with new ones along the same scope. The test validator (`validate_workspace_focus`) checks reachability from root via the focus chain.
+
+**Container highlight.** When `focused_tiling` is `Child::Container` (after `focus_parent`), `focused_tiling_window()` returns `None` rather than walking to a descendant window. This means `hub.focused_window()` returns `None` when a container is highlighted (assuming no fullscreen/float focus), which makes `toggle_float` and `toggle_fullscreen` no-ops and causes the platform to receive `focused_window: None` in placements, focusing the tiling overlay. Move-to-workspace and move-to-monitor bypass `focused_window()` in this case and call the strategy directly to move the whole container.
 
 **Invariant:** `is_float_focused` must be false when `float_windows` is empty. The test validator enforces this. The `focused()` accessor also handles it gracefully as defense-in-depth, falling through to `focused_tiling`.
 
-**Write paths.** The strategy's `set_focus` is purely tiling: it walks up the container tree updating `container.focused` and active tabs, sets `focused_tiling`, and clears `is_float_focused`. `set_focus` (the entry point from the platform layer when the OS reports a focus change) branches by display mode: fullscreen promotes to top of the z-order stack, float sets `is_float_focused` and moves to end of `float_windows`, tiling delegates to `strategy.set_focus`.
+**Write paths.** `set_focus_child` is the internal workhorse: it walks up from the target child, writing the child (the original argument, which can be a window or container) to `container.focused` on every ancestor, calling `set_active_tab(current)` on tabbed containers (where `current` is the direct child for correct tab activation), and finally setting `focused_tiling` and clearing `is_float_focused` at the workspace level. The public `set_focus` wraps a `WindowId` and delegates here. Hub's `set_focus` (the entry point from the platform layer) branches by display mode: fullscreen promotes to top of the z-order stack, float sets `is_float_focused` and moves to end of `float_windows`, tiling delegates to `strategy.set_focus`.
+
+**Focus replacement during tree mutations.** `replace_split_child_focus` uses a two-walk algorithm. Walk 1 (scope): walks up from old_child, finding the highest ancestor with `focused == old_child`. If the walk reaches the workspace, the scope covers the entire path. Walk 2 (replace): walks up from new_child, replacing `focused` values and updating active tabs within the scope. When the scope reaches the workspace, `focused_tiling` is also updated if it pointed to old_child.
 
 **Detach cleanup.** Each detach function only cleans up its own mode's focus state. Cross-mode priority resolution happens at read time via `focused()`. For example, detaching the last float sets `is_float_focused = false` and `focused()` falls through to `focused_tiling`. Detaching the last tiling child with floats present sets `is_float_focused = true`. Detaching the last fullscreen window falls back directly to `focused_tiling`, skipping float. Users rarely focus float windows explicitly, so falling back to float would be surprising. There's no cross-mode fallback chain from fullscreen to float.
 
@@ -281,17 +287,25 @@ Borderless: position/size covers monitor. Exclusive: D3D/Vulkan, detected via `S
 
 ### Rendering
 
-Both platforms use egui for borders and tab bars. Shared painting logic takes placements + config, draws into egui. Platform code handles windowing and GPU backend.
+Both platforms use egui for borders, tab bars, and the minimized window picker. Shared tiling/container painting logic lives in `src/overlay.rs` (takes placements + config, draws into egui). Shared picker painting logic lives in `src/picker.rs`. Platform code handles windowing and GPU backend.
+
+Each platform has a `Renderer` struct (macOS: Metal backend, Windows: OpenGL via glutin) that owns the GPU context, egui state, and texture cache. `Renderer::new()` takes an `opaque: bool` parameter: `false` for transparent overlays (clear-to-transparent, alpha blending), `true` for opaque UI windows like the picker (clear-to-black, no alpha). All tiling and float overlays pass `false`; the picker window passes `true`.
 
 One tiling overlay per monitor draws all tiling borders and container overlays including tab bars. Float windows get separate overlays (they need z-ordering, mirroring on macOS). Each float overlay sized to `visible_frame`.
 
-Border edges offset from full frame — clipped edges fall outside overlay bounds, clipped by egui. Tab bars are interactive (click sends event to hub thread). Focused window border shows spawn-mode indicator: one edge colored for next spawn direction.
+Border edges offset from full frame -- clipped edges fall outside overlay bounds, clipped by egui. Tab bars are interactive (click sends event to hub thread). Focused window border shows spawn-mode indicator: one edge colored for next spawn direction.
+
+**Minimized window picker.** A separate OS window (not part of the tiling overlay) that shows a list of minimized windows. Triggered by `Action::ToggleMinimizePicker`. The picker is a borderless, topmost, opaque window centered on the focused monitor (400x300 logical pixels, clamped). It uses egui `CentralPanel` with `ScrollArea` and `SelectableLabel` for the list UI, rendered with egui's default dark `Visuals` (set once at context creation, not per-frame). `PickerResult` and the `paint_picker()` function live in `src/picker.rs`. Platform picker window code lives in `src/platform/macos/ui/picker.rs` and `src/platform/windows/dome/picker.rs`.
+
+Picker state (selected index, entries list) is owned by the platform picker window, not by Dome. When the picker opens, Dome calls `hub.minimized_window_entries()` and passes the snapshot to the picker window. This is a one-shot read, not a persistent reference. The owning struct holds the picker as an `Option` (`Option<Box<PickerWindow>>` on Windows, `RefCell<Option<PickerPopup>>` on macOS) but never sets it back to `None` after creation. The picker window is created lazily on first toggle and reused via show/hide.
+
+Only two events cross the picker boundary. `HubMessage::PickerToggle` (Dome to UI, macOS only since Windows is single-threaded) carries entries and monitor info. The picker sends `HubEvent::Action` with `Action::UnminimizeWindow(WindowId)` to trigger unminimize, the same channel used by all other actions. There is no picker-specific event variant. There is no `PickerClosed` or `PickerClose` event. Keyboard input (arrow keys, Return, Escape), focus loss, and close are handled entirely within the picker window with no round-trip through the hub thread. The picker hides itself directly (`orderOut` on macOS, `OwnedHwnd::hide` on Windows). Both hide calls are no-ops when already hidden, so `resignKeyWindow`/`WM_KILLFOCUS` firing after an explicit hide causes no double-action. This works because all default Dome keybindings require Cmd/Meta modifier, so bare arrow/enter/escape keys pass through the global keyboard hooks to the focused picker window.
 
 **Empty workspace focus.** Dome focuses its own tiling overlay on empty workspaces to prevent keyboard focus landing on offscreen windows. On macOS, needed when switching to an empty workspace from another Space. On Windows, prevents unwanted workspace switches when destroying a window hands focus to an offscreen window.
 
 #### macOS
 
-Borderless transparent NSWindows with CAMetalLayer. Shared Metal backend: device, command queue, two pipelines — egui (premultiplied alpha for text blending) and mirror (passthrough). Each overlay has its own renderer.
+Borderless transparent NSWindows with CAMetalLayer. Shared Metal backend: device, command queue, two pipelines -- egui (premultiplied alpha for text blending) and mirror (passthrough). Each overlay has its own `Renderer` instance.
 
 ScreenCaptureKit captures IOSurface for mirroring, rendered as textured quad. Captures start/stop as floats gain/lose focus.
 
@@ -305,7 +319,7 @@ Win32 layered windows, egui_glow (OpenGL via glutin). Tab bars use DWM blur-behi
 
 **Render-last invariant.** All overlay updates follow this sequence: data assignments, `SetWindowRgn(FALSE)`, `SetWindowPos(SWP_NOREDRAW)`, `ShowWindow` (first show only), GL render + `SwapBuffers`. Positioning calls (`SetWindowPos`, `SetWindowRgn` with `bRedraw=TRUE`) can trigger synchronous quick-repaints (WM_NCPAINT + WM_ERASEBKGND) that overwrite GL content. Rendering last ensures the GL content goes straight to DWM without being clobbered.
 
-**WM_ERASEBKGND / WM_PAINT handlers.** All three window classes (app, float overlay, tiling overlay) handle `WM_ERASEBKGND` by returning `LRESULT(1)` to suppress background erase. `WM_PAINT` handlers only call `BeginPaint`/`EndPaint` to validate dirty regions as a safety net. Neither handler renders GL content. Removing `WM_PAINT` entirely could cause infinite WM_PAINT loops if something unexpected invalidates the window.
+**WM_ERASEBKGND / WM_PAINT handlers.** All window classes (app, float overlay, tiling overlay, picker overlay) handle `WM_ERASEBKGND` by returning `LRESULT(1)` to suppress background erase. `WM_PAINT` handlers only call `BeginPaint`/`EndPaint` to validate dirty regions as a safety net. Neither handler renders GL content. Removing `WM_PAINT` entirely could cause infinite WM_PAINT loops if something unexpected invalidates the window.
 
 **No CS_HREDRAW|CS_VREDRAW.** GL windows don't use these class styles. They cause full-client invalidation on any size change, which is counterproductive when the application controls all rendering via `SwapBuffers`.
 
@@ -325,7 +339,7 @@ Console control handler (Ctrl+C, Ctrl+Break, console close) posts `WM_QUIT` to t
 
 ### IPC
 
-The binary serves dual purpose: `dome`/`dome launch` starts the WM, `dome <action>` sends a command. Action variants (Focus, Move, Toggle, Exec, Exit) are clap subcommands and serde IPC payloads.
+The binary serves dual purpose: `dome`/`dome launch` starts the WM, `dome <action>` sends a command. Action variants (Focus, Move, Toggle, Exec, Exit, ToggleMinimizePicker) are clap subcommands and serde IPC payloads.
 
 - macOS: Unix domain socket (`/tmp/dome.sock`), stale socket auto-cleaned.
 - Windows: named pipe (`\\.\pipe\dome`).

@@ -115,6 +115,7 @@ pub(crate) struct HubAccess {
 pub(crate) struct Hub {
     pub(super) access: HubAccess,
     pub(super) strategy: Box<dyn TilingStrategy>,
+    pub(super) minimized_windows: Vec<WindowId>,
 }
 
 impl Hub {
@@ -140,6 +141,7 @@ impl Hub {
                 windows: Allocator::new(),
             },
             strategy: Box::new(PartitionTreeStrategy::new()),
+            minimized_windows: Vec::new(),
         }
     }
 
@@ -172,6 +174,7 @@ impl Hub {
                 windows: Allocator::new(),
             },
             strategy,
+            minimized_windows: Vec::new(),
         }
     }
 
@@ -264,6 +267,10 @@ impl Hub {
     }
 
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
+        if self.access.windows.get(window_id).mode == DisplayMode::Minimized {
+            self.unminimize_window(window_id);
+            return;
+        }
         tracing::debug!(%window_id, "Setting focus to window");
         let window = self.access.windows.get(window_id);
         let ws = window.workspace;
@@ -282,6 +289,7 @@ impl Hub {
             DisplayMode::Tiling => {
                 self.strategy.set_focus(&mut self.access, window_id);
             }
+            DisplayMode::Minimized => unreachable!("guarded above"),
         }
         self.focus_workspace_with_id(ws);
     }
@@ -413,6 +421,11 @@ impl Hub {
     }
 
     #[cfg(test)]
+    pub(crate) fn minimized_windows(&self) -> &[WindowId] {
+        &self.minimized_windows
+    }
+
+    #[cfg(test)]
     pub(crate) fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
         self.strategy.focused_tiling_window(&self.access, ws_id)
     }
@@ -541,7 +554,8 @@ impl Hub {
     pub(crate) fn delete_window(&mut self, id: WindowId) {
         let window = self.access.windows.get(id);
         let ws = window.workspace;
-        match window.mode {
+        let mode = window.mode;
+        match mode {
             DisplayMode::Float => {
                 let _dim = self.detach_float_from_workspace(id);
             }
@@ -549,8 +563,15 @@ impl Hub {
             DisplayMode::Tiling => {
                 self.strategy.detach_window(&mut self.access, id);
             }
+            DisplayMode::Minimized => {
+                self.minimized_windows.retain(|&w| w != id);
+            }
         }
-        self.prune_workspace(ws);
+        // Minimized windows have a stale workspace field (the workspace may
+        // have been pruned already), so skip prune_workspace for them.
+        if mode != DisplayMode::Minimized {
+            self.prune_workspace(ws);
+        }
         self.access.windows.delete(id);
     }
 
@@ -610,9 +631,13 @@ impl Hub {
 
         tracing::debug!(%window_id, ?min_width, ?min_height, ?max_width, ?max_height, "Window constraint set");
 
+        let mode = window.mode;
         let workspace_id = window.workspace;
-        self.strategy
-            .layout_workspace(&mut self.access, workspace_id);
+        // Minimized windows have a stale workspace field, so skip relayout.
+        if mode != DisplayMode::Minimized {
+            self.strategy
+                .layout_workspace(&mut self.access, workspace_id);
+        }
     }
 
     /// Move a window to a target workspace. For tiling windows, delegates to
@@ -643,6 +668,7 @@ impl Hub {
                 self.strategy
                     .move_focused_to_workspace(&mut self.access, current_ws, target_ws);
             }
+            DisplayMode::Minimized => return,
         }
 
         tracing::debug!(?window_id, ?target_ws, "Moved to workspace");

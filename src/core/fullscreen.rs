@@ -7,6 +7,9 @@ use crate::core::{
 impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn set_fullscreen(&mut self, window_id: WindowId, restrictions: WindowRestrictions) {
+        if self.access.windows.get(window_id).mode == DisplayMode::Minimized {
+            self.unminimize_window(window_id);
+        }
         let window = self.access.windows.get(window_id);
         let ws = window.workspace;
 
@@ -26,6 +29,7 @@ impl Hub {
                 self.access.windows.get_mut(window_id).restrictions = restrictions;
                 return;
             }
+            DisplayMode::Minimized => unreachable!("guarded above"),
         }
 
         let window = self.access.windows.get_mut(window_id);
@@ -85,6 +89,7 @@ impl Hub {
             DisplayMode::Tiling | DisplayMode::Float => {
                 self.set_fullscreen(window_id, WindowRestrictions::None)
             }
+            DisplayMode::Minimized => (),
         }
     }
 }

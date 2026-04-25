@@ -1,5 +1,6 @@
 mod mirror;
 mod overlay;
+mod picker;
 mod renderer;
 
 use std::cell::{Cell, RefCell};
@@ -25,10 +26,11 @@ use crate::config::Config;
 use crate::core::{MonitorId, WindowId};
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TilingOverlay};
+use picker::PickerPopup;
 use renderer::MetalBackend;
 
 #[derive(Clone)]
-pub(crate) struct MessageSender {
+pub(super) struct MessageSender {
     tx: mpsc::Sender<HubMessage>,
     source: CFRetained<CFRunLoopSource>,
     run_loop: CFRetained<CFRunLoop>,
@@ -145,6 +147,7 @@ struct AppDelegateIvars {
     config: RefCell<Config>,
     last_focused: Cell<Option<WindowId>>,
     last_focused_monitor_id: Cell<Option<MonitorId>>,
+    picker_window: RefCell<Option<PickerPopup>>,
 }
 
 define_class!(
@@ -189,6 +192,7 @@ impl AppDelegate {
             config: RefCell::new(config),
             last_focused: Cell::new(None),
             last_focused_monitor_id: Cell::new(None),
+            picker_window: RefCell::new(None),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
@@ -318,6 +322,34 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 }
                 for overlay in delegate.ivars().tiling_overlays.borrow().values() {
                     overlay.set_config(new_config.clone());
+                }
+            }
+            HubMessage::PickerToggle {
+                entries,
+                monitor_dim,
+                cocoa_frame,
+                scale,
+            } => {
+                let mut pw = delegate.ivars().picker_window.borrow_mut();
+                match pw.as_ref() {
+                    Some(picker) if picker.is_visible() => {
+                        picker.hide();
+                    }
+                    Some(picker) => {
+                        picker.update_and_show(mtm, entries, monitor_dim, cocoa_frame, scale);
+                    }
+                    None => {
+                        let backend = delegate.ivars().backend.clone();
+                        let hub_sender = delegate.ivars().hub_sender.clone();
+                        let picker = PickerPopup::new(
+                            mtm,
+                            backend,
+                            entries,
+                            (monitor_dim, cocoa_frame, scale),
+                            hub_sender,
+                        );
+                        *pw = Some(picker);
+                    }
                 }
             }
             HubMessage::Shutdown => {

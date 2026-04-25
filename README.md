@@ -63,6 +63,7 @@ dome focus left|down|up|right    # Move focus
 dome move left|down|up|right     # Move window
 dome toggle float/fullscreen     # Toggle floating/fullscreen
 dome toggle layout               # Toggle split/tabbed
+dome toggle minimize-picker      # Open minimized window picker
 dome focus workspace <name>      # Switch workspace
 dome exit                        # Quit Dome
 ```

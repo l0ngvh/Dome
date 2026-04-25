@@ -4,6 +4,7 @@ mod float;
 mod fullscreen;
 mod hub;
 mod master_stack;
+mod minimize;
 mod node;
 mod partition_tree;
 mod strategy;
