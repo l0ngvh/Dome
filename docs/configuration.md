@@ -8,7 +8,8 @@ The config format is TOML, and the same file works on both macOS and Windows. Ch
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `border_size` | float | `2.0` | Border width around windows, in logical pixels. |
+| `border_size` | float | `4.0` | Border width around windows, in logical pixels. |
+| `border_radius` | float | `12.0` | Corner radius for window and container borders, in logical pixels. `0` means sharp corners. Clamped at runtime to half the smallest window dimension, so large values are safe. |
 | `tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, in logical pixels. |
 | `automatic_tiling` | boolean | `true` | When `true`, Dome chooses horizontal or vertical split based on the focused window's dimensions. When `false`, new windows always split in the current container's direction. |
 | `min_width` | float or string | `"5%"` | Minimum window width. A number means logical pixels (e.g., `200`). A string with `%` means percentage of screen width (e.g., `"10%"`). |
@@ -37,6 +38,7 @@ max_height = 800      # 800 logical pixels
 
 ```toml
 border_size = 2.0
+border_radius = 0.0
 tab_bar_height = 24.0
 automatic_tiling = true
 min_width = "5%"

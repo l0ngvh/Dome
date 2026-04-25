@@ -569,6 +569,8 @@ pub(crate) struct Config {
     pub(crate) keymaps: HashMap<Keymap, Actions>,
     #[serde(default = "default_border_size")]
     pub(crate) border_size: f32,
+    #[serde(default = "default_border_radius")]
+    pub(crate) border_radius: f32,
     #[serde(default = "default_tab_bar_height")]
     pub(crate) tab_bar_height: f32,
     #[serde(default = "default_automatic_tiling")]
@@ -627,7 +629,11 @@ impl LogLevel {
 }
 
 fn default_border_size() -> f32 {
-    2.0
+    4.0
+}
+
+fn default_border_radius() -> f32 {
+    12.0
 }
 
 fn default_tab_bar_height() -> f32 {
@@ -643,6 +649,7 @@ impl Default for Config {
         Config {
             keymaps: default_keymaps(),
             border_size: default_border_size(),
+            border_radius: default_border_radius(),
             tab_bar_height: default_tab_bar_height(),
             automatic_tiling: default_automatic_tiling(),
             min_width: SizeConstraint::default_min(),

@@ -1,5 +1,6 @@
 use egui::{
-    Align, Color32, CornerRadius, Id, LayerId, Layout, Order, Rect, RichText, Sense, pos2, vec2,
+    Align, Color32, CornerRadius, Id, LayerId, Layout, Order, Rect, RichText, Sense, Stroke,
+    StrokeKind, pos2, vec2,
 };
 
 use crate::config::{Color, Config};
@@ -85,7 +86,9 @@ pub(crate) fn paint_window_border(
         frame,
         visible_frame,
         config.border_size,
+        config.border_radius,
         colors,
+        to_color32(config.focused_color),
         origin,
     );
 }
@@ -108,6 +111,7 @@ pub(crate) fn show_container(
     let h = f.height;
     let is_tabbed = placement.is_tabbed && !tab_titles.is_empty();
     let th = config.tab_bar_height;
+    let r = effective_radius(config.border_radius, w, h);
 
     let border_c = to_color32(if placement.is_highlighted {
         config.focused_color
@@ -117,29 +121,109 @@ pub(crate) fn show_container(
 
     if placement.is_highlighted {
         let colors = border_colors(true, placement.spawn_indicator, config);
+        let focused = to_color32(config.focused_color);
         let painter = ui.painter();
 
         if is_tabbed {
-            // Left border: from tab bar bottom to container bottom
-            painter.rect_filled(
-                Rect::from_min_size(pos2(ox, oy + th), vec2(b, h - th - b)),
-                CornerRadius::ZERO,
-                colors[3],
-            );
-            // Right border: from tab bar bottom to container bottom
-            painter.rect_filled(
-                Rect::from_min_size(pos2(ox + w - b, oy + th), vec2(b, h - th - b)),
-                CornerRadius::ZERO,
-                colors[1],
-            );
-            // Bottom border
-            painter.rect_filled(
-                Rect::from_min_size(pos2(ox, oy + h - b), vec2(w, b)),
-                CornerRadius::ZERO,
-                colors[2],
-            );
+            let body_h = h - th;
+            let r_body = effective_radius(r, w, body_h);
+
+            // When r_body==0, clip rects collapse to zero dimensions (same bug as
+            // paint_border_edges). Draw filled rects for the body border instead.
+            if r_body == 0.0 {
+                let corners = corner_colors(colors, focused);
+                // Left/right edges inset by b at bottom to avoid overlap with corner squares
+                painter.rect_filled(
+                    Rect::from_min_size(pos2(ox, oy + th), vec2(b, body_h - b)),
+                    CornerRadius::ZERO,
+                    colors[3],
+                );
+                painter.rect_filled(
+                    Rect::from_min_size(pos2(ox + w - b, oy + th), vec2(b, body_h - b)),
+                    CornerRadius::ZERO,
+                    colors[1],
+                );
+                painter.rect_filled(
+                    Rect::from_min_size(pos2(ox + b, oy + h - b), vec2(w - 2.0 * b, b)),
+                    CornerRadius::ZERO,
+                    colors[2],
+                );
+                painter.rect_filled(
+                    Rect::from_min_size(pos2(ox, oy + h - b), vec2(b, b)),
+                    CornerRadius::ZERO,
+                    corners[2],
+                );
+                painter.rect_filled(
+                    Rect::from_min_size(pos2(ox + w - b, oy + h - b), vec2(b, b)),
+                    CornerRadius::ZERO,
+                    corners[3],
+                );
+            } else {
+                let full_rect = Rect::from_min_size(pos2(ox, oy + th), vec2(w, body_h));
+                let cr = CornerRadius {
+                    nw: 0,
+                    ne: 0,
+                    sw: cr_u8(r_body),
+                    se: cr_u8(r_body),
+                };
+                let corners = corner_colors(colors, focused);
+
+                stroke_clipped(
+                    painter,
+                    Rect::from_min_size(pos2(ox, oy + th), vec2(r_body, body_h - r_body)),
+                    full_rect,
+                    cr,
+                    (b, colors[3]),
+                );
+                stroke_clipped(
+                    painter,
+                    Rect::from_min_size(
+                        pos2(ox + w - r_body, oy + th),
+                        vec2(r_body, body_h - r_body),
+                    ),
+                    full_rect,
+                    cr,
+                    (b, colors[1]),
+                );
+                stroke_clipped(
+                    painter,
+                    Rect::from_min_size(
+                        pos2(ox + r_body, oy + h - r_body),
+                        vec2(w - 2.0 * r_body, r_body),
+                    ),
+                    full_rect,
+                    cr,
+                    (b, colors[2]),
+                );
+                stroke_clipped(
+                    painter,
+                    Rect::from_min_size(pos2(ox, oy + h - r_body), vec2(r_body, r_body)),
+                    full_rect,
+                    cr,
+                    (b, corners[2]),
+                );
+                stroke_clipped(
+                    painter,
+                    Rect::from_min_size(
+                        pos2(ox + w - r_body, oy + h - r_body),
+                        vec2(r_body, r_body),
+                    ),
+                    full_rect,
+                    cr,
+                    (b, corners[3]),
+                );
+            }
         } else {
-            paint_border_edges(painter, f, vf, b, colors, origin);
+            paint_border_edges(
+                painter,
+                f,
+                vf,
+                b,
+                config.border_radius,
+                colors,
+                focused,
+                origin,
+            );
         }
     }
 
@@ -149,33 +233,16 @@ pub(crate) fn show_container(
 
     let bg = to_color32(config.tab_bar_background_color);
     let active_bg = to_color32(config.active_tab_background_color);
+    let tab_cr = r.min(th);
+    let tab_bar_cr = CornerRadius::same(cr_u8(tab_cr));
 
     // Tab bar background
     let tab_bar_rect = Rect::from_min_size(pos2(ox, oy), vec2(w, th));
-    ui.painter()
-        .rect_filled(tab_bar_rect, CornerRadius::ZERO, bg);
+    ui.painter().rect_filled(tab_bar_rect, tab_bar_cr, bg);
 
-    // Tab bar borders: top, bottom, left, right
-    ui.painter().rect_filled(
-        Rect::from_min_size(pos2(ox, oy), vec2(w, b)),
-        CornerRadius::ZERO,
-        border_c,
-    );
-    ui.painter().rect_filled(
-        Rect::from_min_size(pos2(ox, oy + th - b), vec2(w, b)),
-        CornerRadius::ZERO,
-        border_c,
-    );
-    ui.painter().rect_filled(
-        Rect::from_min_size(pos2(ox, oy + b), vec2(b, th - 2.0 * b)),
-        CornerRadius::ZERO,
-        border_c,
-    );
-    ui.painter().rect_filled(
-        Rect::from_min_size(pos2(ox + w - b, oy + b), vec2(b, th - 2.0 * b)),
-        CornerRadius::ZERO,
-        border_c,
-    );
+    // Tab bar border
+    ui.painter()
+        .rect_stroke(tab_bar_rect, tab_bar_cr, (b, border_c), StrokeKind::Inside);
 
     // Tabs
     let tab_width = w / tab_titles.len() as f32;
@@ -188,31 +255,21 @@ pub(crate) fn show_container(
         let is_active = i == placement.active_tab_index;
 
         if is_active {
-            ui.painter()
-                .rect_filled(tab_rect, CornerRadius::ZERO, active_bg);
+            let active_cr = CornerRadius {
+                nw: if i == 0 { cr_u8(tab_cr) } else { 0 },
+                ne: if i == tab_titles.len() - 1 {
+                    cr_u8(tab_cr)
+                } else {
+                    0
+                },
+                sw: 0,
+                se: 0,
+            };
+            ui.painter().rect_filled(tab_rect, active_cr, active_bg);
 
             if placement.is_highlighted {
-                // Active tab border: top, bottom, left, right
-                ui.painter().rect_filled(
-                    Rect::from_min_size(pos2(tab_x, oy), vec2(tab_width, b)),
-                    CornerRadius::ZERO,
-                    focused_c,
-                );
-                ui.painter().rect_filled(
-                    Rect::from_min_size(pos2(tab_x, oy + th - b), vec2(tab_width, b)),
-                    CornerRadius::ZERO,
-                    focused_c,
-                );
-                ui.painter().rect_filled(
-                    Rect::from_min_size(pos2(tab_x, oy + b), vec2(b, th - 2.0 * b)),
-                    CornerRadius::ZERO,
-                    focused_c,
-                );
-                ui.painter().rect_filled(
-                    Rect::from_min_size(pos2(tab_x + tab_width - b, oy + b), vec2(b, th - 2.0 * b)),
-                    CornerRadius::ZERO,
-                    focused_c,
-                );
+                ui.painter()
+                    .rect_stroke(tab_rect, active_cr, (b, focused_c), StrokeKind::Inside);
             }
         }
 
@@ -256,42 +313,158 @@ pub(crate) fn show_container(
     clicked
 }
 
+fn stroke_clipped(
+    painter: &egui::Painter,
+    clip: Rect,
+    full_rect: Rect,
+    cr: CornerRadius,
+    stroke: impl Into<Stroke>,
+) {
+    painter
+        .with_clip_rect(clip)
+        .rect_stroke(full_rect, cr, stroke, StrokeKind::Inside);
+}
+
+/// Clamps radius to fit within the given dimensions.
+/// When r == w/2 or h/2, corner clips cover everything and edges have zero width, which is fine.
+fn effective_radius(r: f32, w: f32, h: f32) -> f32 {
+    r.max(0.0).min(w / 2.0).min(h / 2.0)
+}
+
+/// Defensive clamp for converting f32 radius to u8 for CornerRadius fields.
+fn cr_u8(r: f32) -> u8 {
+    r.clamp(0.0, 255.0) as u8
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "drawing params that must travel together; a struct would add indirection without clarity"
+)]
 fn paint_border_edges(
     painter: &egui::Painter,
     frame: Dimension,
     visible_frame: Dimension,
     b: f32,
+    r: f32,
     colors: [Color32; 4],
+    focused: Color32,
     origin: egui::Vec2,
 ) {
-    // Offset: origin positions the visible_frame in canvas space, then frame is offset
-    // relative to visible_frame. For per-window overlays (origin=ZERO), this reduces to
-    // the original frame.x - visible_frame.x calculation.
     let ox = origin.x + frame.x - visible_frame.x;
     let oy = origin.y + frame.y - visible_frame.y;
     let w = frame.width;
     let h = frame.height;
+    let r = effective_radius(r, w, h);
 
-    // [top, right, bottom, left]
-    painter.rect_filled(
-        Rect::from_min_size(pos2(ox, oy), vec2(w, b)),
-        CornerRadius::ZERO,
-        colors[0],
+    // When r==0, clip rects for the 8-region approach collapse to zero dimensions
+    // and egui skips them entirely. Draw simple filled rects instead.
+    if r == 0.0 {
+        let corners = corner_colors(colors, focused);
+        // Edges (inset by b at corners to avoid overlap with corner squares)
+        painter.rect_filled(
+            Rect::from_min_size(pos2(ox + b, oy), vec2(w - 2.0 * b, b)),
+            CornerRadius::ZERO,
+            colors[0],
+        );
+        painter.rect_filled(
+            Rect::from_min_size(pos2(ox + w - b, oy + b), vec2(b, h - 2.0 * b)),
+            CornerRadius::ZERO,
+            colors[1],
+        );
+        painter.rect_filled(
+            Rect::from_min_size(pos2(ox + b, oy + h - b), vec2(w - 2.0 * b, b)),
+            CornerRadius::ZERO,
+            colors[2],
+        );
+        painter.rect_filled(
+            Rect::from_min_size(pos2(ox, oy + b), vec2(b, h - 2.0 * b)),
+            CornerRadius::ZERO,
+            colors[3],
+        );
+        // Corners: [nw, ne, sw, se]
+        painter.rect_filled(
+            Rect::from_min_size(pos2(ox, oy), vec2(b, b)),
+            CornerRadius::ZERO,
+            corners[0],
+        );
+        painter.rect_filled(
+            Rect::from_min_size(pos2(ox + w - b, oy), vec2(b, b)),
+            CornerRadius::ZERO,
+            corners[1],
+        );
+        painter.rect_filled(
+            Rect::from_min_size(pos2(ox, oy + h - b), vec2(b, b)),
+            CornerRadius::ZERO,
+            corners[2],
+        );
+        painter.rect_filled(
+            Rect::from_min_size(pos2(ox + w - b, oy + h - b), vec2(b, b)),
+            CornerRadius::ZERO,
+            corners[3],
+        );
+        return;
+    }
+
+    let full_rect = Rect::from_min_size(pos2(ox, oy), vec2(w, h));
+    let cr = CornerRadius::from(r);
+    let corners = corner_colors(colors, focused);
+
+    stroke_clipped(
+        painter,
+        Rect::from_min_size(pos2(ox + r, oy), vec2(w - 2.0 * r, r)),
+        full_rect,
+        cr,
+        (b, colors[0]),
     );
-    painter.rect_filled(
-        Rect::from_min_size(pos2(ox + w - b, oy + b), vec2(b, h - 2.0 * b)),
-        CornerRadius::ZERO,
-        colors[1],
+    stroke_clipped(
+        painter,
+        Rect::from_min_size(pos2(ox + w - r, oy + r), vec2(r, h - 2.0 * r)),
+        full_rect,
+        cr,
+        (b, colors[1]),
     );
-    painter.rect_filled(
-        Rect::from_min_size(pos2(ox, oy + h - b), vec2(w, b)),
-        CornerRadius::ZERO,
-        colors[2],
+    stroke_clipped(
+        painter,
+        Rect::from_min_size(pos2(ox + r, oy + h - r), vec2(w - 2.0 * r, r)),
+        full_rect,
+        cr,
+        (b, colors[2]),
     );
-    painter.rect_filled(
-        Rect::from_min_size(pos2(ox, oy + b), vec2(b, h - 2.0 * b)),
-        CornerRadius::ZERO,
-        colors[3],
+    stroke_clipped(
+        painter,
+        Rect::from_min_size(pos2(ox, oy + r), vec2(r, h - 2.0 * r)),
+        full_rect,
+        cr,
+        (b, colors[3]),
+    );
+
+    stroke_clipped(
+        painter,
+        Rect::from_min_size(pos2(ox, oy), vec2(r, r)),
+        full_rect,
+        cr,
+        (b, corners[0]),
+    );
+    stroke_clipped(
+        painter,
+        Rect::from_min_size(pos2(ox + w - r, oy), vec2(r, r)),
+        full_rect,
+        cr,
+        (b, corners[1]),
+    );
+    stroke_clipped(
+        painter,
+        Rect::from_min_size(pos2(ox, oy + h - r), vec2(r, r)),
+        full_rect,
+        cr,
+        (b, corners[2]),
+    );
+    stroke_clipped(
+        painter,
+        Rect::from_min_size(pos2(ox + w - r, oy + h - r), vec2(r, r)),
+        full_rect,
+        cr,
+        (b, corners[3]),
     );
 }
 
@@ -317,6 +490,19 @@ fn border_colors(
     ]
 }
 
+/// Returns [nw, ne, sw, se] corner colors. A corner gets the focused color only if both
+/// adjacent edges are focused. Otherwise it takes the non-focused color from whichever
+/// adjacent edge has it, with a fixed priority order per corner.
+fn corner_colors(edge_colors: [Color32; 4], focused: Color32) -> [Color32; 4] {
+    let c = edge_colors; // [top, right, bottom, left]
+    [
+        if c[0] != focused { c[0] } else { c[3] }, // NW: top first, then left
+        if c[0] != focused { c[0] } else { c[1] }, // NE: top first, then right
+        if c[2] != focused { c[2] } else { c[3] }, // SW: bottom first, then left
+        if c[2] != focused { c[2] } else { c[1] }, // SE: bottom first, then right
+    ]
+}
+
 fn to_color32(c: Color) -> Color32 {
     Color32::from_rgba_unmultiplied(
         (c.r * 255.0) as u8,
@@ -324,4 +510,87 @@ fn to_color32(c: Color) -> Color32 {
         (c.b * 255.0) as u8,
         (c.a * 255.0) as u8,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effective_radius_no_clamp() {
+        assert_eq!(effective_radius(8.0, 100.0, 200.0), 8.0);
+    }
+
+    #[test]
+    fn effective_radius_clamp_to_half_width() {
+        assert_eq!(effective_radius(60.0, 100.0, 200.0), 50.0);
+    }
+
+    #[test]
+    fn effective_radius_clamp_to_half_height() {
+        assert_eq!(effective_radius(60.0, 200.0, 80.0), 40.0);
+    }
+
+    #[test]
+    fn effective_radius_zero() {
+        assert_eq!(effective_radius(0.0, 100.0, 100.0), 0.0);
+    }
+
+    #[test]
+    fn effective_radius_tiny_window() {
+        assert_eq!(effective_radius(10.0, 6.0, 4.0), 2.0);
+    }
+
+    #[test]
+    fn effective_radius_negative_input() {
+        assert_eq!(effective_radius(-5.0, 100.0, 100.0), 0.0);
+    }
+
+    #[test]
+    fn corner_colors_uniform() {
+        assert_eq!(
+            corner_colors([Color32::GRAY; 4], Color32::GRAY),
+            [Color32::GRAY; 4]
+        );
+    }
+
+    #[test]
+    fn corner_colors_spawn_right() {
+        let focused = Color32::from_rgb(102, 153, 255);
+        let spawn = Color32::from_rgb(255, 100, 100);
+        let edge_colors = [focused, spawn, focused, focused];
+        assert_eq!(
+            corner_colors(edge_colors, focused),
+            [focused, spawn, focused, spawn]
+        );
+    }
+
+    #[test]
+    fn corner_colors_spawn_top_and_right() {
+        let focused = Color32::from_rgb(102, 153, 255);
+        let spawn = Color32::from_rgb(255, 100, 100);
+        let edge_colors = [spawn, spawn, focused, focused];
+        assert_eq!(
+            corner_colors(edge_colors, focused),
+            [spawn, spawn, focused, spawn]
+        );
+    }
+
+    #[test]
+    fn corner_colors_spawn_bottom() {
+        let focused = Color32::from_rgb(102, 153, 255);
+        let spawn = Color32::from_rgb(255, 100, 100);
+        let edge_colors = [focused, focused, spawn, focused];
+        assert_eq!(
+            corner_colors(edge_colors, focused),
+            [focused, focused, spawn, spawn]
+        );
+    }
+
+    #[test]
+    fn corner_colors_all_spawn() {
+        let focused = Color32::from_rgb(102, 153, 255);
+        let spawn = Color32::from_rgb(255, 100, 100);
+        assert_eq!(corner_colors([spawn; 4], focused), [spawn; 4]);
+    }
 }

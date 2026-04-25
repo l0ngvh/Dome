@@ -91,11 +91,7 @@ impl PickerWindow {
         Ok(boxed)
     }
 
-    fn show(
-        &mut self,
-        entries: Vec<(WindowId, String)>,
-        monitor_dim: Dimension,
-    ) {
+    fn show(&mut self, entries: Vec<(WindowId, String)>, monitor_dim: Dimension) {
         let w = PICKER_WIDTH.min(monitor_dim.width as u32);
         let h = PICKER_HEIGHT.min(monitor_dim.height as u32);
         let x = monitor_dim.x as i32 + (monitor_dim.width as i32 - w as i32) / 2;
