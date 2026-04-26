@@ -13,8 +13,8 @@ use raw_window_handle::{RawWindowHandle, Win32WindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CombineRgn, CreateRectRgn, DeleteObject, EndPaint, HRGN, OffsetRgn, PAINTSTRUCT,
-    RGN_OR, SetWindowRgn,
+    BeginPaint, CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, EndPaint, HRGN,
+    OffsetRgn, PAINTSTRUCT, RGN_AND, RGN_DIFF, RGN_OR, SetWindowRgn,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::MARGINS;
@@ -262,6 +262,41 @@ fn enable_blur_behind(hwnd: HWND) {
     unsafe { DwmExtendFrameIntoClientArea(hwnd, &margins).ok() };
 }
 
+/// Creates a border-frame region: outer rounded rect minus inner rounded rect,
+/// clipped to the visible window bounds `(0,0)-(vw,vh)`. Uses `CreateRoundRectRgn`
+/// subtraction instead of 4 rectangular strips so inner corners are rounded,
+/// matching the egui-drawn border arcs.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "plain geometry params, a wrapper struct would add noise"
+)]
+fn rounded_border_region(
+    ox: i32,
+    oy: i32,
+    fw: i32,
+    fh: i32,
+    b: i32,
+    r: i32,
+    vw: i32,
+    vh: i32,
+) -> HRGN {
+    let ri = (r - b).max(0);
+    unsafe {
+        let outer = CreateRoundRectRgn(ox, oy, ox + fw, oy + fh, 2 * r, 2 * r);
+        let inner = CreateRoundRectRgn(ox + b, oy + b, ox + fw - b, oy + fh - b, 2 * ri, 2 * ri);
+        let clip = CreateRectRgn(0, 0, vw, vh);
+        let region = CreateRectRgn(0, 0, 0, 0);
+        CombineRgn(Some(region), Some(outer), Some(inner), RGN_DIFF);
+        CombineRgn(Some(region), Some(region), Some(clip), RGN_AND);
+        // DeleteObject only fails for invalid or DC-selected handles;
+        // these regions are freshly created and never selected into a DC.
+        DeleteObject(outer.into()).ok().ok();
+        DeleteObject(inner.into()).ok().ok();
+        DeleteObject(clip.into()).ok().ok();
+        region
+    }
+}
+
 pub(super) fn build_window_border_region(
     frame: Dimension,
     visible_frame: Dimension,
@@ -276,35 +311,12 @@ pub(super) fn build_window_border_region(
     let vw = vf.width as i32;
     let vh = vf.height as i32;
     let b = config.border_size as i32;
-
-    let clamped_rgn = |x1: i32, y1: i32, x2: i32, y2: i32| -> HRGN {
-        unsafe {
-            CreateRectRgn(
-                x1.max(0).min(vw),
-                y1.max(0).min(vh),
-                x2.max(0).min(vw),
-                y2.max(0).min(vh),
-            )
-        }
-    };
-
-    unsafe {
-        let top = clamped_rgn(ox, oy, ox + fw, oy + b);
-        let bottom = clamped_rgn(ox, oy + fh - b, ox + fw, oy + fh);
-        let left = clamped_rgn(ox, oy + b, ox + b, oy + fh - b);
-        let right = clamped_rgn(ox + fw - b, oy + b, ox + fw, oy + fh - b);
-        let region = CreateRectRgn(0, 0, 0, 0);
-        CombineRgn(Some(region), Some(top), Some(bottom), RGN_OR);
-        CombineRgn(Some(region), Some(region), Some(left), RGN_OR);
-        CombineRgn(Some(region), Some(region), Some(right), RGN_OR);
-        // DeleteObject only fails for invalid or DC-selected handles;
-        // these regions are freshly created and never selected into a DC.
-        DeleteObject(top.into()).ok().ok();
-        DeleteObject(bottom.into()).ok().ok();
-        DeleteObject(left.into()).ok().ok();
-        DeleteObject(right.into()).ok().ok();
-        region
-    }
+    let r = config
+        .border_radius
+        .max(0.0)
+        .min(fw as f32 / 2.0)
+        .min(fh as f32 / 2.0) as i32;
+    rounded_border_region(ox, oy, fw, fh, b, r, vw, vh)
 }
 
 /// Builds a hit-test region covering border strips and (if tabbed) the tab bar.
@@ -322,15 +334,6 @@ fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HR
     let vh = vf.height as i32;
     let b = config.border_size as i32;
 
-    // Clamp helper: intersect a rect with the visible window bounds (0,0)-(vw,vh)
-    let clamped_rgn = |x1: i32, y1: i32, x2: i32, y2: i32| -> HRGN {
-        let cx1 = x1.max(0).min(vw);
-        let cy1 = y1.max(0).min(vh);
-        let cx2 = x2.max(0).min(vw);
-        let cy2 = y2.max(0).min(vh);
-        unsafe { CreateRectRgn(cx1, cy1, cx2, cy2) }
-    };
-
     unsafe {
         let region = CreateRectRgn(0, 0, 0, 0);
 
@@ -338,37 +341,68 @@ fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HR
         // borders underneath remain visible (egui skips drawing them anyway).
         if placement.is_tabbed {
             let th = config.tab_bar_height as i32;
-            let tab = clamped_rgn(ox, oy, ox + fw, oy + th);
-            CombineRgn(Some(region), Some(region), Some(tab), RGN_OR);
-            // DeleteObject only fails for invalid or DC-selected handles;
-            // these regions are freshly created and never selected into a DC.
-            DeleteObject(tab.into()).ok().ok();
 
             if placement.is_highlighted {
-                let left = clamped_rgn(ox, oy + th, ox + b, oy + fh - b);
-                CombineRgn(Some(region), Some(region), Some(left), RGN_OR);
-                DeleteObject(left.into()).ok().ok();
-                let right = clamped_rgn(ox + fw - b, oy + th, ox + fw, oy + fh - b);
-                CombineRgn(Some(region), Some(region), Some(right), RGN_OR);
-                DeleteObject(right.into()).ok().ok();
-                let bottom = clamped_rgn(ox, oy + fh - b, ox + fw, oy + fh);
-                CombineRgn(Some(region), Some(region), Some(bottom), RGN_OR);
-                DeleteObject(bottom.into()).ok().ok();
+                let r = config
+                    .border_radius
+                    .max(0.0)
+                    .min(fw as f32 / 2.0)
+                    .min(fh as f32 / 2.0);
+                // Tab bar and body use different corner radii in egui (see overlay.rs
+                // tab_cr and effective_radius calls). Two separate outer regions are
+                // unioned, then the body inner is subtracted.
+                let r_tab = r.min(th as f32) as i32;
+                let r_body = r.min(fw as f32 / 2.0).min((fh - th) as f32 / 2.0) as i32;
+                let ri_body = (r_body - b).max(0);
+
+                let tab_bar = CreateRoundRectRgn(ox, oy, ox + fw, oy + th, 2 * r_tab, 2 * r_tab);
+                // Body outer top is extended upward by r_body so its rounded top
+                // corners fall within the tab bar region. The union in the next step
+                // hides the unwanted rounding, producing a clean tab-to-body junction.
+                // Clamped with .max(oy) to handle the edge case where r_body > th.
+                let body_top = (oy + th - r_body).max(oy);
+                let body_outer =
+                    CreateRoundRectRgn(ox, body_top, ox + fw, oy + fh, 2 * r_body, 2 * r_body);
+                let body_inner = CreateRoundRectRgn(
+                    ox + b,
+                    oy + th,
+                    ox + fw - b,
+                    oy + fh - b,
+                    2 * ri_body,
+                    2 * ri_body,
+                );
+                let clip = CreateRectRgn(0, 0, vw, vh);
+
+                CombineRgn(Some(region), Some(tab_bar), Some(body_outer), RGN_OR);
+                CombineRgn(Some(region), Some(region), Some(body_inner), RGN_DIFF);
+                CombineRgn(Some(region), Some(region), Some(clip), RGN_AND);
+
+                DeleteObject(tab_bar.into()).ok().ok();
+                DeleteObject(body_outer.into()).ok().ok();
+                DeleteObject(body_inner.into()).ok().ok();
+                DeleteObject(clip.into()).ok().ok();
+            } else {
+                // Tab bar only, no border. Rectangular region is acceptable here;
+                // the minor clipping of egui's rounded top corners is not the bug
+                // being fixed.
+                let tab = CreateRectRgn(
+                    ox.max(0).min(vw),
+                    oy.max(0).min(vh),
+                    (ox + fw).max(0).min(vw),
+                    (oy + th).max(0).min(vh),
+                );
+                CombineRgn(Some(region), Some(region), Some(tab), RGN_OR);
+                DeleteObject(tab.into()).ok().ok();
             }
         } else if placement.is_highlighted {
-            let top = clamped_rgn(ox, oy, ox + fw, oy + b);
-            let bottom = clamped_rgn(ox, oy + fh - b, ox + fw, oy + fh);
-            let left = clamped_rgn(ox, oy + b, ox + b, oy + fh - b);
-            let right = clamped_rgn(ox + fw - b, oy + b, ox + fw, oy + fh - b);
-            CombineRgn(Some(region), Some(top), Some(bottom), RGN_OR);
-            CombineRgn(Some(region), Some(region), Some(left), RGN_OR);
-            CombineRgn(Some(region), Some(region), Some(right), RGN_OR);
-            // DeleteObject only fails for invalid or DC-selected handles;
-            // these regions are freshly created and never selected into a DC.
-            DeleteObject(top.into()).ok().ok();
-            DeleteObject(bottom.into()).ok().ok();
-            DeleteObject(left.into()).ok().ok();
-            DeleteObject(right.into()).ok().ok();
+            let r = config
+                .border_radius
+                .max(0.0)
+                .min(fw as f32 / 2.0)
+                .min(fh as f32 / 2.0) as i32;
+            let border = rounded_border_region(ox, oy, fw, fh, b, r, vw, vh);
+            CombineRgn(Some(region), Some(region), Some(border), RGN_OR);
+            DeleteObject(border.into()).ok().ok();
         }
 
         region
