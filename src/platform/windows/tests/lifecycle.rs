@@ -11,12 +11,14 @@ fn window_destroyed_fills_screen() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -39,12 +41,14 @@ fn window_minimized_removes_from_tiling() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -70,12 +74,14 @@ fn user_minimize_then_restore() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -113,6 +119,7 @@ fn on_open_moves_window_to_workspace() {
         "Terminal",
         "terminal.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 
@@ -121,6 +128,7 @@ fn on_open_moves_window_to_workspace() {
         "Slack",
         "slack.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w2.clone());
 
@@ -137,6 +145,7 @@ fn move_size_suppresses_placement() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 
@@ -151,6 +160,7 @@ fn move_size_suppresses_placement() {
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w2.clone());
 
@@ -174,6 +184,7 @@ fn screens_changed_updates_layout() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 
@@ -209,8 +220,14 @@ fn screens_changed_updates_layout() {
 fn unmanageable_window_is_ignored() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "App1", "app1.exe", env.moves.clone())
-            .with_manageable(false),
+        MockExternalHwnd::with_title(
+            1,
+            "App1",
+            "app1.exe",
+            env.moves.clone(),
+            env.z_model.clone(),
+        )
+        .with_manageable(false),
     );
     let initial = w1.get_dim();
     env.add_window(w1.clone());
@@ -233,6 +250,7 @@ fn ignored_window_rule_prevents_insertion() {
         "Bloat",
         "bloat.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let initial = w1.get_dim();
     env.add_window(w1.clone());
@@ -248,6 +266,7 @@ fn title_changed_manages_unknown_window() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
 
     // Title change on an unknown window should try to manage it
@@ -270,12 +289,14 @@ fn delete_currently_displayed_window() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());

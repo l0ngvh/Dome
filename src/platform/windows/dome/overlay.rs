@@ -11,10 +11,12 @@ use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use raw_window_handle::{RawWindowHandle, Win32WindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
+use windows::Win32::Graphics::Dwm::{
+    DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND, DwmEnableBlurBehindWindow,
+    DwmExtendFrameIntoClientArea,
+};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, EndPaint, HRGN,
-    OffsetRgn, PAINTSTRUCT, RGN_AND, RGN_DIFF, RGN_OR, SetWindowRgn,
+    BeginPaint, CreateRectRgn, DeleteObject, EndPaint, PAINTSTRUCT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::MARGINS;
@@ -36,7 +38,7 @@ use crate::core::{
     ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement, WindowId,
 };
 use crate::overlay;
-use crate::platform::windows::external::{HwndId, ZOrder};
+use crate::platform::windows::external::ZOrder;
 
 pub(in crate::platform::windows) fn raw_window_handle(hwnd: HWND) -> RawWindowHandle {
     let mut handle = Win32WindowHandle::new(std::num::NonZeroIsize::new(hwnd.0 as isize).unwrap());
@@ -252,160 +254,40 @@ impl Drop for Renderer {
     }
 }
 
+/// Enables per-pixel alpha compositing for an OpenGL overlay window.
+///
+/// DWM requires two calls to enable per-pixel alpha on a non-layered window:
+/// 1. `DwmEnableBlurBehindWindow` with a minimal blur region -- tells DWM to
+///    use the window's alpha channel for compositing in the non-blurred area.
+/// 2. `DwmExtendFrameIntoClientArea` with margins=-1 -- extends the glass
+///    frame over the entire client area ("sheet of glass" mode).
+///
+/// Without both calls, DWM treats the window as opaque black.
+/// See: https://stackoverflow.com/a/4052940 (wilkie's answer)
+///
+/// Note: the caller must also ensure the window is NOT sized exactly to the
+/// monitor dimensions, or DWM will treat it as fullscreen and disable alpha.
+/// See: https://stackoverflow.com/questions/4052940 (John Mellor's comment)
 fn enable_blur_behind(hwnd: HWND) {
-    let margins = MARGINS {
-        cxLeftWidth: -1,
-        cxRightWidth: -1,
-        cyTopHeight: -1,
-        cyBottomHeight: -1,
-    };
-    unsafe { DwmExtendFrameIntoClientArea(hwnd, &margins).ok() };
-}
-
-/// Creates a border-frame region: outer rounded rect minus inner rounded rect,
-/// clipped to the visible window bounds `(0,0)-(vw,vh)`. Uses `CreateRoundRectRgn`
-/// subtraction instead of 4 rectangular strips so inner corners are rounded,
-/// matching the egui-drawn border arcs.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "plain geometry params, a wrapper struct would add noise"
-)]
-fn rounded_border_region(
-    ox: i32,
-    oy: i32,
-    fw: i32,
-    fh: i32,
-    b: i32,
-    r: i32,
-    vw: i32,
-    vh: i32,
-) -> HRGN {
-    let ri = (r - b).max(0);
     unsafe {
-        let outer = CreateRoundRectRgn(ox, oy, ox + fw, oy + fh, 2 * r, 2 * r);
-        let inner = CreateRoundRectRgn(ox + b, oy + b, ox + fw - b, oy + fh - b, 2 * ri, 2 * ri);
-        let clip = CreateRectRgn(0, 0, vw, vh);
-        let region = CreateRectRgn(0, 0, 0, 0);
-        CombineRgn(Some(region), Some(outer), Some(inner), RGN_DIFF);
-        CombineRgn(Some(region), Some(region), Some(clip), RGN_AND);
-        // DeleteObject only fails for invalid or DC-selected handles;
-        // these regions are freshly created and never selected into a DC.
-        DeleteObject(outer.into()).ok().ok();
-        DeleteObject(inner.into()).ok().ok();
-        DeleteObject(clip.into()).ok().ok();
-        region
-    }
-}
+        let region = CreateRectRgn(0, 0, 1, 1);
+        let blur = DWM_BLURBEHIND {
+            dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION,
+            fEnable: true.into(),
+            hRgnBlur: region,
+            fTransitionOnMaximized: false.into(),
+        };
+        DwmEnableBlurBehindWindow(hwnd, &blur).ok();
+        // DeleteObject is best-effort cleanup; .ok().ok() silences the unused Result lint.
+        DeleteObject(region.into()).ok().ok();
 
-pub(super) fn build_window_border_region(
-    frame: Dimension,
-    visible_frame: Dimension,
-    config: &Config,
-) -> HRGN {
-    let vf = visible_frame;
-    let f = frame;
-    let ox = (f.x - vf.x) as i32;
-    let oy = (f.y - vf.y) as i32;
-    let fw = f.width as i32;
-    let fh = f.height as i32;
-    let vw = vf.width as i32;
-    let vh = vf.height as i32;
-    let b = config.border_size as i32;
-    let r = config
-        .border_radius
-        .max(0.0)
-        .min(fw as f32 / 2.0)
-        .min(fh as f32 / 2.0) as i32;
-    rounded_border_region(ox, oy, fw, fh, b, r, vw, vh)
-}
-
-/// Builds a hit-test region covering border strips and (if tabbed) the tab bar.
-/// Coordinates are window-local (the overlay window is sized to `visible_frame`).
-/// The drawing code in overlay.rs uses offsets `ox = frame.x - visible_frame.x`,
-/// `oy = frame.y - visible_frame.y`, so the region must use the same offsets.
-fn build_container_region(placement: &ContainerPlacement, config: &Config) -> HRGN {
-    let vf = placement.visible_frame;
-    let f = placement.frame;
-    let ox = (f.x - vf.x) as i32;
-    let oy = (f.y - vf.y) as i32;
-    let fw = f.width as i32;
-    let fh = f.height as i32;
-    let vw = vf.width as i32;
-    let vh = vf.height as i32;
-    let b = config.border_size as i32;
-
-    unsafe {
-        let region = CreateRectRgn(0, 0, 0, 0);
-
-        // Unfocused containers exclude border strips so the per-window overlay
-        // borders underneath remain visible (egui skips drawing them anyway).
-        if placement.is_tabbed {
-            let th = config.tab_bar_height as i32;
-
-            if placement.is_highlighted {
-                let r = config
-                    .border_radius
-                    .max(0.0)
-                    .min(fw as f32 / 2.0)
-                    .min(fh as f32 / 2.0);
-                // Tab bar and body use different corner radii in egui (see overlay.rs
-                // tab_cr and effective_radius calls). Two separate outer regions are
-                // unioned, then the body inner is subtracted.
-                let r_tab = r.min(th as f32) as i32;
-                let r_body = r.min(fw as f32 / 2.0).min((fh - th) as f32 / 2.0) as i32;
-                let ri_body = (r_body - b).max(0);
-
-                let tab_bar = CreateRoundRectRgn(ox, oy, ox + fw, oy + th, 2 * r_tab, 2 * r_tab);
-                // Body outer top is extended upward by r_body so its rounded top
-                // corners fall within the tab bar region. The union in the next step
-                // hides the unwanted rounding, producing a clean tab-to-body junction.
-                // Clamped with .max(oy) to handle the edge case where r_body > th.
-                let body_top = (oy + th - r_body).max(oy);
-                let body_outer =
-                    CreateRoundRectRgn(ox, body_top, ox + fw, oy + fh, 2 * r_body, 2 * r_body);
-                let body_inner = CreateRoundRectRgn(
-                    ox + b,
-                    oy + th,
-                    ox + fw - b,
-                    oy + fh - b,
-                    2 * ri_body,
-                    2 * ri_body,
-                );
-                let clip = CreateRectRgn(0, 0, vw, vh);
-
-                CombineRgn(Some(region), Some(tab_bar), Some(body_outer), RGN_OR);
-                CombineRgn(Some(region), Some(region), Some(body_inner), RGN_DIFF);
-                CombineRgn(Some(region), Some(region), Some(clip), RGN_AND);
-
-                DeleteObject(tab_bar.into()).ok().ok();
-                DeleteObject(body_outer.into()).ok().ok();
-                DeleteObject(body_inner.into()).ok().ok();
-                DeleteObject(clip.into()).ok().ok();
-            } else {
-                // Tab bar only, no border. Rectangular region is acceptable here;
-                // the minor clipping of egui's rounded top corners is not the bug
-                // being fixed.
-                let tab = CreateRectRgn(
-                    ox.max(0).min(vw),
-                    oy.max(0).min(vh),
-                    (ox + fw).max(0).min(vw),
-                    (oy + th).max(0).min(vh),
-                );
-                CombineRgn(Some(region), Some(region), Some(tab), RGN_OR);
-                DeleteObject(tab.into()).ok().ok();
-            }
-        } else if placement.is_highlighted {
-            let r = config
-                .border_radius
-                .max(0.0)
-                .min(fw as f32 / 2.0)
-                .min(fh as f32 / 2.0) as i32;
-            let border = rounded_border_region(ox, oy, fw, fh, b, r, vw, vh);
-            CombineRgn(Some(region), Some(region), Some(border), RGN_OR);
-            DeleteObject(border.into()).ok().ok();
-        }
-
-        region
+        let margins = MARGINS {
+            cxLeftWidth: -1,
+            cxRightWidth: -1,
+            cyTopHeight: -1,
+            cyBottomHeight: -1,
+        };
+        DwmExtendFrameIntoClientArea(hwnd, &margins).ok();
     }
 }
 
@@ -449,9 +331,6 @@ impl TilingOverlay {
     }
 
     fn rerender(&mut self) {
-        if self.windows.is_empty() && self.containers.is_empty() {
-            return;
-        }
         let monitor = self.monitor;
         let config = &self.config;
         let events = std::mem::take(&mut self.events);
@@ -468,82 +347,58 @@ impl TilingOverlay {
 }
 
 impl TilingOverlayApi for TilingOverlay {
-    fn id(&self) -> HwndId {
-        HwndId::from(self.window.hwnd())
-    }
-
     fn update(
         &mut self,
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
+        z: ZOrder,
     ) {
         let w = monitor.width.max(1.0) as u32;
         let h = monitor.height.max(1.0) as u32;
 
         if self.monitor != monitor {
-            self.renderer.resize(w, h);
+            // DWM disables per-pixel alpha compositing for windows sized exactly to the
+            // monitor, treating them as fullscreen. Adding 1px to the height prevents
+            // this detection. The extra row is transparent (GL clear alpha=0).
+            // See: https://stackoverflow.com/questions/4052940 (John Mellor's comment)
+            self.renderer.resize(w, h + 1);
             self.monitor = monitor;
         }
 
-        // ORDERING INVARIANT: data assignments MUST come before rerender().
-        // SetWindowRgn is called after rerender() so the compositor never
-        // exposes stale buffer content (see architecture.md, render-last invariant).
+        // ORDERING INVARIANT: data assignments, SetWindowPos, show, render.
+        // Data must be set before rerender() reads it.
         self.windows = windows.to_vec();
         self.containers = containers.to_vec();
 
-        // Build combined region covering all border strips and tab bar rects
-        let region = unsafe { CreateRectRgn(0, 0, 0, 0) };
-        for wp in windows {
-            let wr = build_window_border_region(wp.frame, wp.visible_frame, &self.config);
-            let ox = (wp.visible_frame.x - monitor.x) as i32;
-            let oy = (wp.visible_frame.y - monitor.y) as i32;
-            unsafe {
-                OffsetRgn(wr, ox, oy);
-                CombineRgn(Some(region), Some(region), Some(wr), RGN_OR);
-                DeleteObject(wr.into()).ok().ok();
-            }
+        let z_after: Option<HWND> = z.into();
+        let mut flags = SWP_NOACTIVATE | SWP_NOREDRAW;
+        if z_after.is_none() {
+            flags |= SWP_NOZORDER;
         }
-        for (cp, _) in containers {
-            let cr = build_container_region(cp, &self.config);
-            let ox = (cp.visible_frame.x - monitor.x) as i32;
-            let oy = (cp.visible_frame.y - monitor.y) as i32;
-            unsafe {
-                OffsetRgn(cr, ox, oy);
-                CombineRgn(Some(region), Some(region), Some(cr), RGN_OR);
-                DeleteObject(cr.into()).ok().ok();
-            }
-        }
-
         unsafe {
             SetWindowPos(
                 self.window.hwnd(),
-                None,
+                z_after,
                 monitor.x as i32,
                 monitor.y as i32,
                 w as i32,
-                h as i32,
-                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW,
+                h as i32 + 1,
+                flags,
             )
             .ok();
         }
         // Show before render so the GL pixel ownership test passes.
-        // Region is set after render so the compositor never exposes stale buffer content.
         self.window.show();
         self.rerender();
-
-        // SetWindowRgn after render: with bRedraw=FALSE this only updates the
-        // compositor's region metadata without triggering a GDI repaint, so it
-        // cannot overwrite the GL buffer. Placing it after SwapBuffers ensures
-        // the DWM never composites the new region with stale/transparent content.
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
     }
 
     fn clear(&mut self) {
         self.windows.clear();
         self.containers.clear();
-        let region = unsafe { CreateRectRgn(0, 0, 0, 0) };
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
+        // Render a transparent frame so the overlay becomes invisible.
+        // No region clipping needed: the overlay sits behind managed windows.
+        self.rerender();
     }
 
     fn focus(&self) {
@@ -648,18 +503,17 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
 }
 
 pub(in crate::platform::windows) trait FloatOverlayApi {
-    fn id(&self) -> HwndId;
     fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder);
     fn hide(&mut self);
 }
 
 pub(in crate::platform::windows) trait TilingOverlayApi {
-    fn id(&self) -> HwndId;
     fn update(
         &mut self,
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
+        z: ZOrder,
     );
     fn clear(&mut self);
     fn focus(&self);
@@ -706,10 +560,6 @@ impl FloatOverlay {
 }
 
 impl FloatOverlayApi for FloatOverlay {
-    fn id(&self) -> HwndId {
-        HwndId::from(self.window.hwnd())
-    }
-
     fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder) {
         let vf = wp.visible_frame;
         let w = vf.width.max(1.0) as u32;
@@ -721,8 +571,7 @@ impl FloatOverlayApi for FloatOverlay {
             self.height = h;
         }
 
-        let region = build_window_border_region(wp.frame, wp.visible_frame, config);
-
+        // ORDERING INVARIANT: SetWindowPos, show, render.
         let z_after: Option<HWND> = z.into();
         let mut flags = SWP_NOACTIVATE | SWP_NOREDRAW;
         if z_after.is_none() {
@@ -742,7 +591,6 @@ impl FloatOverlayApi for FloatOverlay {
         }
 
         // Show before render so the GL pixel ownership test passes.
-        // Region is set after render so the compositor never exposes stale buffer content.
         self.window.show();
 
         self.renderer.render(w, h, 1.0, vec![], |ctx| {
@@ -764,12 +612,6 @@ impl FloatOverlayApi for FloatOverlay {
                 egui::vec2(0.0, 0.0),
             );
         });
-
-        // SetWindowRgn after render: with bRedraw=FALSE this only updates the
-        // compositor's region metadata without triggering a GDI repaint, so it
-        // cannot overwrite the GL buffer. Placing it after SwapBuffers ensures
-        // the DWM never composites the new region with stale/transparent content.
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
     }
 
     fn hide(&mut self) {

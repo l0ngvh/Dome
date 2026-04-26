@@ -694,30 +694,52 @@ impl Dome {
             self.show_float(wp.id, wp, focus_changed, focused == Some(wp.id));
         }
 
-        // Tiling windows — per monitor, chained after tiling overlay
+        // Tiling windows — positioned first, overlay placed behind the last window
         for data in per_monitor {
-            if let Some(overlay) = self.tiling_overlays.get_mut(&data.monitor_id) {
-                if data.tiling_windows.is_empty() && data.containers.is_empty() {
-                    overlay.clear();
-                } else {
-                    overlay.update(data.dimension, &data.tiling_windows, &data.containers);
-                }
-                let mut anchor = overlay.id();
-                // Focused window first so it's highest in z-order among tiling
-                let focused_first = data
-                    .tiling_windows
-                    .iter()
-                    .filter(|wp| focused == Some(wp.id))
-                    .chain(
-                        data.tiling_windows
-                            .iter()
-                            .filter(|wp| focused != Some(wp.id)),
-                    );
-                for wp in focused_first {
-                    self.show_tiling(wp.id, wp, ZOrder::After(anchor));
-                    anchor = self.registry.get(wp.id).ext.id();
-                }
+            if !self.tiling_overlays.contains_key(&data.monitor_id) {
+                continue;
             }
+            if data.tiling_windows.is_empty() && data.containers.is_empty() {
+                self.tiling_overlays
+                    .get_mut(&data.monitor_id)
+                    .unwrap()
+                    .clear();
+                continue;
+            }
+            // Focused window first so it's highest in z-order among tiling.
+            // Overlay goes behind all tiling windows so managed windows
+            // naturally occlude the overlay interior (same as macOS).
+            let mut last_window: Option<HwndId> = None;
+            let focused_first = data
+                .tiling_windows
+                .iter()
+                .filter(|wp| focused == Some(wp.id))
+                .chain(
+                    data.tiling_windows
+                        .iter()
+                        .filter(|wp| focused != Some(wp.id)),
+                );
+            for wp in focused_first {
+                let z = match last_window {
+                    Some(prev) => ZOrder::After(prev),
+                    None => ZOrder::Top,
+                };
+                self.show_tiling(wp.id, wp, z);
+                last_window = Some(self.registry.get(wp.id).ext.id());
+            }
+            let overlay_z = match last_window {
+                Some(last) => ZOrder::After(last),
+                None => ZOrder::Unchanged,
+            };
+            self.tiling_overlays
+                .get_mut(&data.monitor_id)
+                .unwrap()
+                .update(
+                    data.dimension,
+                    &data.tiling_windows,
+                    &data.containers,
+                    overlay_z,
+                );
         }
     }
 

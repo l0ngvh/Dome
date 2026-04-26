@@ -184,7 +184,7 @@ WindowState
 └── Minimized
 ```
 
-- Each positioned window carries `DriftState` with target vs. actual and retry logic.
+- Each positioned window carries `DriftState` with target vs. actual and retry logic. `DriftState` also tracks `last_z`, the z-order last applied via `set_position`. This prevents the early-return optimization in `show_tiling` from silently dropping z-order changes when the position target is unchanged.
 - User drags detected via `EVENT_OBJECT_LOCATIONCHANGE` bracketed by move/size start/end events. Drift correction suppressed during drags. 60-second safety timeout for missed drag-end.
 - `FullscreenExclusive` bypasses the compositor; Dome skips overlay rendering.
 
@@ -210,7 +210,9 @@ Float windows are persistent overlays users rarely type into. macOS can't contro
 
 #### Windows
 
-`SetWindowPos` sets z-order of any window — no mirroring needed. Float overlay set to `HWND_TOPMOST`.
+`SetWindowPos` sets z-order of any window -- no mirroring needed. Both tiling and float overlays sit behind their managed windows (mirroring macOS), so managed windows naturally occlude the overlay interior and no region clipping is needed. For topmost floats, the overlay is placed just below the managed window in the topmost band.
+
+**Tiling z-order chain.** `position_windows` builds a z-order chain: the focused tiling window gets `ZOrder::Top` (`HWND_TOP`), each subsequent window gets `ZOrder::After(previous)`, and the tiling overlay gets `ZOrder::After(last_window)`. This keeps all tiling windows above the overlay regardless of focus changes or workspace switches. The chain is deterministic for a given focus state, which lets `DriftState.last_z` tracking detect when z-order is unchanged and skip redundant `SetWindowPos` calls.
 
 Auto-float: windows without `WS_THICKFRAME`, or with `WS_POPUP`, `WS_EX_TOPMOST`, `WS_EX_DLGMODALFRAME` are inserted as float.
 
@@ -293,7 +295,7 @@ Each platform has a `Renderer` struct (macOS: Metal backend, Windows: OpenGL via
 
 One tiling overlay per monitor draws all tiling borders and container overlays including tab bars. Float windows get separate overlays (they need z-ordering, mirroring on macOS). Each float overlay sized to `visible_frame`.
 
-Borders are drawn with `rect_stroke` + `StrokeKind::Inside` (stroke stays within the frame rect), clipped to per-edge and per-corner regions to support per-piece coloring. The same full-rect stroke is drawn multiple times, each clipped to a different region with a different color, so the pieces join seamlessly. When `border_radius > 0`, corners get rounded arcs; when `0`, the result is identical to sharp corners. Radius is clamped at runtime to half the window dimension via `effective_radius` so it can't produce negative clip rects. On Windows, the GDI window region (`SetWindowRgn`) uses `CreateRoundRectRgn` outer-minus-inner subtraction so the hit-test region matches the rounded border arcs drawn by egui. On macOS, overlay windows are rectangular and clicks in the rounded corner area (transparent pixels) pass through to the window beneath; the corner area is small enough that this is acceptable. Tab bars are interactive (click sends event to hub thread). Focused window border shows spawn-mode indicator: one edge colored for next spawn direction, with corners colored based on their two adjacent edges.
+Borders are drawn with `rect_stroke` + `StrokeKind::Inside` (stroke stays within the frame rect), clipped to per-edge and per-corner regions to support per-piece coloring. The same full-rect stroke is drawn multiple times, each clipped to a different region with a different color, so the pieces join seamlessly. When `border_radius > 0`, corners get rounded arcs; when `0`, the result is identical to sharp corners. Radius is clamped at runtime to half the window dimension via `effective_radius` so it can't produce negative clip rects. On both platforms, overlays sit behind managed windows, so managed windows naturally occlude the overlay interior. Only border strips between windows and tab bar areas remain visible. No region clipping is needed. On macOS, clicks in the rounded corner area (transparent pixels) pass through to the window beneath; the corner area is small enough that this is acceptable. Tab bars are interactive (click sends event to hub thread). Focused window border shows spawn-mode indicator: one edge colored for next spawn direction, with corners colored based on their two adjacent edges.
 
 **Minimized window picker.** A separate OS window (not part of the tiling overlay) that shows a list of minimized windows. Triggered by `Action::ToggleMinimizePicker`. The picker is a borderless, topmost, opaque window centered on the focused monitor (400x300 logical pixels, clamped). It uses egui `CentralPanel` with `ScrollArea` and `SelectableLabel` for the list UI, rendered with egui's default dark `Visuals` (set once at context creation, not per-frame). `PickerResult` and the `paint_picker()` function live in `src/picker.rs`. Platform picker window code lives in `src/platform/macos/ui/picker.rs` and `src/platform/windows/dome/picker.rs`.
 
@@ -317,7 +319,9 @@ Win32 layered windows, egui_glow (OpenGL via glutin). Tab bars use DWM blur-behi
 
 **DWM + OpenGL.** With DWM (always on since Windows 8), each window renders to an offscreen surface. `SwapBuffers` copies the GL front buffer to a DWM-managed D3D surface. DWM composites all surfaces to screen at vsync. `WM_PAINT`/`BeginPaint`/`EndPaint` are irrelevant to actual screen content -- DWM picks up content from `SwapBuffers`, not from the GDI paint cycle.
 
-**Render-last invariant.** All overlay updates follow this sequence: data assignments, `SetWindowPos(SWP_NOREDRAW)`, `ShowWindow` (first show only), GL render + `SwapBuffers`, `SetWindowRgn(FALSE)`. `SetWindowRgn` is placed after render because, with `bRedraw=FALSE`, it does not trigger a synchronous repaint (no `WM_NCPAINT` / `WM_ERASEBKGND`). It only updates the compositor's region metadata. Placing it after `SwapBuffers` prevents the compositor from exposing stale buffer content between a region update and the next render. Positioning calls (`SetWindowPos`, `SetWindowRgn` with `bRedraw=TRUE`) can trigger synchronous quick-repaints that overwrite GL content, which is why `SWP_NOREDRAW` and `bRedraw=FALSE` are used.
+**Per-pixel alpha.** Transparent overlays need two DWM calls: `DwmEnableBlurBehindWindow` with a 1x1 region, then `DwmExtendFrameIntoClientArea` with margins=-1. `DwmExtendFrameIntoClientArea` alone is not sufficient -- without either `SetWindowRgn` or `DwmEnableBlurBehindWindow`, DWM treats the window as opaque black. The 1x1 blur region enables the alpha channel without visible blur effect.
+
+**Render-last invariant.** All overlay updates follow this sequence: data assignments, `SetWindowPos(SWP_NOREDRAW)`, `ShowWindow` (first show only), GL render + `SwapBuffers`. Positioning calls with redraw flags can trigger synchronous quick-repaints that overwrite GL content, which is why `SWP_NOREDRAW` is used.
 
 **WM_ERASEBKGND / WM_PAINT handlers.** All window classes (app, float overlay, tiling overlay, picker overlay) handle `WM_ERASEBKGND` by returning `LRESULT(1)` to suppress background erase. `WM_PAINT` handlers only call `BeginPaint`/`EndPaint` to validate dirty regions as a safety net. Neither handler renders GL content. Removing `WM_PAINT` entirely could cause infinite WM_PAINT loops if something unexpected invalidates the window.
 

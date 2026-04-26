@@ -11,12 +11,17 @@ pub(super) const MAX_DRIFT_RETRIES: u8 = 5;
 #[derive(Clone, Copy)]
 pub(super) struct DriftState {
     pub(super) target: (i32, i32, i32, i32),
-    /// The window's last known position — written by `window_moved`
+    /// The window's last known position -- written by `window_moved`
     /// via a dispatched `get_visible_rect` read. When a window goes offscreen,
     /// this preserves its position from before the hide: "actual" means where
     /// the window currently is (or last was), not where we want it.
     pub(super) actual: (i32, i32, i32, i32),
     pub(super) retries: u8,
+    /// The z-order last applied via `set_position`. Compared against the
+    /// incoming `z` in `show_tiling` to decide whether the early return
+    /// can fire. Without this, the early return would silently drop z-order
+    /// changes when the position target is unchanged (Bug 2A).
+    pub(super) last_z: ZOrder,
 }
 
 /// Tracks the platform-level visibility and fullscreen status of a managed window.
@@ -115,22 +120,16 @@ impl Dome {
             }
         };
 
-        let z = if needs_topmost {
-            ZOrder::Topmost
-        } else {
-            ZOrder::Unchanged
-        };
-
         if let Some(overlay) = self.float_overlays.get_mut(&id) {
-            if !settled {
-                overlay.update(wp, &self.config, z);
-                if needs_topmost {
-                    entry.ext.set_position(ZOrder::Topmost, x, y, w, h);
-                } else {
-                    entry
-                        .ext
-                        .set_position(ZOrder::After(overlay.id()), x, y, w, h);
-                }
+            if needs_topmost {
+                entry.ext.set_position(ZOrder::Topmost, x, y, w, h);
+                overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()));
+            } else if !settled {
+                // Unchanged is safe: this branch only fires for Float-to-Float
+                // position changes where the window is already visible from a
+                // prior Topmost placement.
+                entry.ext.set_position(ZOrder::Unchanged, x, y, w, h);
+                overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()));
             } else if focus_changed {
                 // Full overlay update is acceptable here: typically 1-3 floats, each a single GL draw.
                 // Matches macOS which unconditionally re-renders every float overlay every frame.
@@ -143,6 +142,7 @@ impl Dome {
                 target: new_target,
                 actual: prev_actual,
                 retries: 0,
+                last_z: ZOrder::Unchanged,
             }));
         }
     }
@@ -162,7 +162,9 @@ impl Dome {
                 debug_assert!(false, "show_tiling called on fullscreen window {id}");
                 return;
             }
-            WindowState::Positioned(PositionedState::Tiling(d)) if d.target == new_target => {
+            WindowState::Positioned(PositionedState::Tiling(d))
+                if d.target == new_target && d.last_z == z =>
+            {
                 return;
             }
             WindowState::Minimized | WindowState::UserMinimized => {
@@ -185,6 +187,7 @@ impl Dome {
             target: new_target,
             actual: prev_actual,
             retries: 0,
+            last_z: z,
         }));
     }
 
@@ -215,6 +218,7 @@ impl Dome {
                     target: new_target,
                     actual: prev_actual,
                     retries: 0,
+                    last_z: ZOrder::Unchanged,
                 }));
             }
         }

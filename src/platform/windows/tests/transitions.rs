@@ -11,12 +11,14 @@ fn toggle_fullscreen_hides_siblings() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -41,12 +43,14 @@ fn toggle_fullscreen_on_and_off() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -74,12 +78,14 @@ fn toggle_float() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -109,12 +115,14 @@ fn fullscreen_restored_after_workspace_switch() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -139,19 +147,25 @@ fn window_created_as_fullscreen_borderless() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 
     // Second window arrives already fullscreen
     let w2 = Arc::new(
-        MockExternalHwnd::with_title(2, "Game", "game.exe", env.moves.clone()).with_dimension(
-            Dimension {
-                x: 0.0,
-                y: 0.0,
-                width: SCREEN_WIDTH,
-                height: SCREEN_HEIGHT,
-            },
-        ),
+        MockExternalHwnd::with_title(
+            2,
+            "Game",
+            "game.exe",
+            env.moves.clone(),
+            env.z_model.clone(),
+        )
+        .with_dimension(Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: SCREEN_WIDTH,
+            height: SCREEN_HEIGHT,
+        }),
     );
     env.add_window(w2.clone());
 
@@ -167,12 +181,14 @@ fn move_window_to_other_workspace() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -194,14 +210,19 @@ fn move_window_to_other_workspace() {
 fn fullscreen_borderless_minimizes_on_workspace_switch() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone()).with_dimension(
-            Dimension {
-                x: 0.0,
-                y: 0.0,
-                width: SCREEN_WIDTH,
-                height: SCREEN_HEIGHT,
-            },
-        ),
+        MockExternalHwnd::with_title(
+            1,
+            "Game",
+            "game.exe",
+            env.moves.clone(),
+            env.z_model.clone(),
+        )
+        .with_dimension(Dimension {
+            x: 0.0,
+            y: 0.0,
+            width: SCREEN_WIDTH,
+            height: SCREEN_HEIGHT,
+        }),
     );
     env.add_window(w1.clone());
 
@@ -218,6 +239,7 @@ fn fullscreen_exclusive_not_repositioned() {
         "Game",
         "game.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 
@@ -237,6 +259,7 @@ fn iconic_window_restored_before_positioning() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 
@@ -249,6 +272,7 @@ fn iconic_window_restored_before_positioning() {
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w2.clone());
 
@@ -260,8 +284,14 @@ fn iconic_window_restored_before_positioning() {
 fn borderless_fullscreen_restored_on_workspace_switch_back() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone())
-            .with_dimension(fullscreen_dim()),
+        MockExternalHwnd::with_title(
+            1,
+            "Game",
+            "game.exe",
+            env.moves.clone(),
+            env.z_model.clone(),
+        )
+        .with_dimension(fullscreen_dim()),
     );
     env.add_window(w1.clone());
     assert!(!w1.iconic.load(Ordering::Relaxed));
@@ -279,8 +309,14 @@ fn borderless_fullscreen_restored_on_workspace_switch_back() {
 fn dome_minimized_window_survives_minimize_event() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone())
-            .with_dimension(fullscreen_dim()),
+        MockExternalHwnd::with_title(
+            1,
+            "Game",
+            "game.exe",
+            env.moves.clone(),
+            env.z_model.clone(),
+        )
+        .with_dimension(fullscreen_dim()),
     );
     env.add_window(w1.clone());
 
@@ -299,6 +335,7 @@ fn exclusive_fullscreen_survives_minimize_event() {
         "Game",
         "game.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 
@@ -319,12 +356,14 @@ fn float_restored_from_offscreen_is_topmost() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -351,12 +390,14 @@ fn float_to_tiling_loses_topmost() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -377,12 +418,14 @@ fn float_focus_change_retops() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -408,18 +451,21 @@ fn tiling_windows_not_topmost() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w3 = Arc::new(MockExternalHwnd::with_title(
         3,
         "App3",
         "app3.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -438,6 +484,7 @@ fn float_survives_sibling_add() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 
@@ -449,6 +496,7 @@ fn float_survives_sibling_add() {
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w2.clone());
 
@@ -465,6 +513,7 @@ fn exclusive_fullscreen_blocks_all_commands() {
         "Game",
         "game.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 
@@ -503,8 +552,14 @@ fn exclusive_fullscreen_blocks_all_commands() {
 fn borderless_fullscreen_blocks_toggle_float_but_allows_workspace_move() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone())
-            .with_dimension(fullscreen_dim()),
+        MockExternalHwnd::with_title(
+            1,
+            "Game",
+            "game.exe",
+            env.moves.clone(),
+            env.z_model.clone(),
+        )
+        .with_dimension(fullscreen_dim()),
     );
     env.add_window(w1.clone());
     let dim_before = w1.get_dim();
@@ -523,8 +578,14 @@ fn borderless_fullscreen_blocks_toggle_float_but_allows_workspace_move() {
 fn borderless_fullscreen_exit_unblocks_commands() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
-        MockExternalHwnd::with_title(1, "Game", "game.exe", env.moves.clone())
-            .with_dimension(fullscreen_dim()),
+        MockExternalHwnd::with_title(
+            1,
+            "Game",
+            "game.exe",
+            env.moves.clone(),
+            env.z_model.clone(),
+        )
+        .with_dimension(fullscreen_dim()),
     );
     env.add_window(w1.clone());
     let dim_before = w1.get_dim();

@@ -10,6 +10,7 @@ fn single_window_fills_screen() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     assert_h_tiled(
@@ -27,12 +28,14 @@ fn two_windows_split_screen() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -55,18 +58,21 @@ fn three_windows_split_screen() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w3 = Arc::new(MockExternalHwnd::with_title(
         3,
         "App3",
         "app3.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -96,6 +102,7 @@ fn positions_are_rounded_not_truncated() {
                 "App",
                 "app.exe",
                 env.moves.clone(),
+                env.z_model.clone(),
             ))
         })
         .collect();
@@ -114,12 +121,14 @@ fn workspace_switch_hides_and_restores() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -150,12 +159,14 @@ fn focus_left_right() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     let w2 = Arc::new(MockExternalHwnd::with_title(
         2,
         "App2",
         "app2.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
     env.add_window(w2.clone());
@@ -178,6 +189,7 @@ fn resize_detects_fullscreen() {
         "App1",
         "app1.exe",
         env.moves.clone(),
+        env.z_model.clone(),
     ));
     env.add_window(w1.clone());
 

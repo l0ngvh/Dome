@@ -41,13 +41,16 @@ Both macOS and Windows have test directories (`src/platform/macos/tests/`, `src/
 **Windows**: `MockExternalHwnd` implements `ManageExternalHwnd`, `MockDisplay` implements `QueryDisplay`, `NoopTaskbar` implements `ManageTaskbar`, `NoopOverlays` implements `CreateOverlay` (with `NoopTilingOverlay` and `NoopFloatOverlay`). `TestEnv` wraps everything for convenient test setup. `NoopFloatOverlay` increments a shared `overlay_update_count` on each `update()` call; `TestEnv::overlay_update_count()` returns the current count, letting tests verify overlay re-renders happen (or don't) without real GL contexts.
 
 Test files are organized by concern:
-- `lifecycle.rs` — window add/remove (both platforms)
-- `transitions.rs` — WindowState transition tests (both platforms)
-- `placement.rs` — drift correction, constraint detection (both platforms)
-- `uncooperative.rs` — windows that resist placement (macOS only)
-- `drift.rs` — drift retry logic (Windows only)
+- `lifecycle.rs` -- window add/remove (both platforms)
+- `transitions.rs` -- WindowState transition tests (both platforms)
+- `placement.rs` -- drift correction, constraint detection (both platforms)
+- `uncooperative.rs` -- windows that resist placement (macOS only)
+- `drift.rs` -- drift retry logic (Windows only)
+- `zorder.rs` -- z-order chain correctness (Windows only)
 
-Platform tests don't use snapshots — they assert on concrete state values and mock call counts.
+Platform tests don't use snapshots -- they assert on concrete state values and mock call counts.
+
+**ZOrderModel.** Windows z-order tests use a `ZOrderModel` that emulates Win32's z-order stack. It tracks two bands (topmost and normal) and processes `ZOrder` variants the same way `SetWindowPos` does: `Top` inserts at the front of the normal band, `After(other)` inserts behind `other`, `Topmost` inserts at the front of the topmost band, `Unchanged` preserves the original position. Both `MockExternalHwnd` and `NoopTilingOverlay` feed into the same shared `ZOrderModel`, so `env.tiling_z_order()` returns the full normal-band stack including the overlay sentinel (`HwndId::test(9999)`). The older per-window `z_state` field (`ZOrderState`) is kept alongside `ZOrderModel` because existing tests use `is_topmost()` and `is_bottom()` for per-window assertions where multiple windows can independently be "bottom" (e.g., after workspace switch hides them all).
 
 ## E2E Tests
 

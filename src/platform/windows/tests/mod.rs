@@ -2,6 +2,7 @@ mod drift;
 mod lifecycle;
 mod placement;
 mod transitions;
+mod zorder;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -74,6 +75,7 @@ struct TestEnv {
     overlay_focus_count: Rc<Cell<u32>>,
     overlay_update_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<(WindowId, String)>>>,
+    z_model: ZOrderModel,
 }
 
 impl TestEnv {
@@ -91,6 +93,7 @@ impl TestEnv {
         let overlay_focus_count = Rc::new(Cell::new(0));
         let overlay_update_count = Rc::new(Cell::new(0));
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
+        let z_model = ZOrderModel::new();
         let dome = Dome::new(
             config.clone(),
             Rc::new(NoopTaskbar),
@@ -98,6 +101,7 @@ impl TestEnv {
                 focus_count: overlay_focus_count.clone(),
                 overlay_update_count: overlay_update_count.clone(),
                 picker_entries: picker_entries.clone(),
+                z_model: z_model.clone(),
             }),
             Box::new(display),
         )
@@ -110,6 +114,7 @@ impl TestEnv {
             overlay_focus_count,
             overlay_update_count,
             picker_entries,
+            z_model,
         }
     }
 
@@ -119,6 +124,7 @@ impl TestEnv {
             title,
             process,
             self.moves.clone(),
+            self.z_model.clone(),
         ))
     }
 
@@ -274,6 +280,18 @@ impl TestEnv {
         self.dome.screens_changed(screens);
         self.dome.apply_layout();
     }
+
+    fn z_order(&self) -> Vec<HwndId> {
+        self.z_model.stack()
+    }
+
+    fn tiling_z_order(&self) -> Vec<HwndId> {
+        self.z_model.normal_stack()
+    }
+
+    fn overlay_id(&self) -> HwndId {
+        HwndId::test(9999)
+    }
 }
 
 fn fullscreen_dim() -> Dimension {
@@ -294,6 +312,88 @@ enum ZOrderState {
 
 type MoveLog = Arc<Mutex<Vec<(HwndId, i32, i32, i32, i32)>>>;
 
+struct ZOrderStack {
+    topmost: Vec<HwndId>,
+    normal: Vec<HwndId>,
+}
+
+/// Emulates Win32's z-order stack for test assertions. Tracks the relative
+/// ordering of windows as `set_position` and `move_offscreen` calls arrive.
+#[derive(Clone)]
+struct ZOrderModel {
+    inner: Arc<Mutex<ZOrderStack>>,
+}
+
+impl ZOrderModel {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(ZOrderStack {
+                topmost: Vec::new(),
+                normal: Vec::new(),
+            })),
+        }
+    }
+
+    fn apply(&self, hwnd: HwndId, z: ZOrder) {
+        let mut stack = self.inner.lock().unwrap();
+
+        // Record original position for Unchanged
+        let orig_topmost_pos = stack.topmost.iter().position(|&id| id == hwnd);
+        let orig_normal_pos = stack.normal.iter().position(|&id| id == hwnd);
+
+        // Remove from both lists
+        stack.topmost.retain(|&id| id != hwnd);
+        stack.normal.retain(|&id| id != hwnd);
+
+        match z {
+            ZOrder::Top => {
+                stack.normal.insert(0, hwnd);
+            }
+            ZOrder::After(other) => {
+                if let Some(pos) = stack.normal.iter().position(|&id| id == other) {
+                    stack.normal.insert(pos + 1, hwnd);
+                } else {
+                    stack.normal.push(hwnd);
+                }
+            }
+            ZOrder::Topmost => {
+                stack.topmost.insert(0, hwnd);
+            }
+            ZOrder::Unchanged => {
+                // Re-insert at original position (clamped to list length)
+                if let Some(pos) = orig_topmost_pos {
+                    let clamped = pos.min(stack.topmost.len());
+                    stack.topmost.insert(clamped, hwnd);
+                } else if let Some(pos) = orig_normal_pos {
+                    let clamped = pos.min(stack.normal.len());
+                    stack.normal.insert(clamped, hwnd);
+                } else {
+                    stack.normal.push(hwnd);
+                }
+            }
+        }
+    }
+
+    fn move_to_bottom(&self, hwnd: HwndId) {
+        let mut stack = self.inner.lock().unwrap();
+        stack.topmost.retain(|&id| id != hwnd);
+        stack.normal.retain(|&id| id != hwnd);
+        stack.normal.push(hwnd);
+    }
+
+    /// Returns the full z-order stack from top to bottom: topmost band first, then normal.
+    fn stack(&self) -> Vec<HwndId> {
+        let stack = self.inner.lock().unwrap();
+        let mut result = stack.topmost.clone();
+        result.extend_from_slice(&stack.normal);
+        result
+    }
+
+    fn normal_stack(&self) -> Vec<HwndId> {
+        self.inner.lock().unwrap().normal.clone()
+    }
+}
+
 struct MockExternalHwnd {
     hwnd_id: HwndId,
     manageable: bool,
@@ -306,11 +406,18 @@ struct MockExternalHwnd {
     min_size: (f32, f32),
     max_size: (f32, f32),
     z_state: Mutex<ZOrderState>,
+    z_model: ZOrderModel,
     moves: MoveLog,
 }
 
 impl MockExternalHwnd {
-    fn with_title(id: isize, title: &str, process: &str, moves: MoveLog) -> Self {
+    fn with_title(
+        id: isize,
+        title: &str,
+        process: &str,
+        moves: MoveLog,
+        z_model: ZOrderModel,
+    ) -> Self {
         Self {
             hwnd_id: HwndId::test(id),
             manageable: true,
@@ -328,6 +435,7 @@ impl MockExternalHwnd {
             min_size: (0.0, 0.0),
             max_size: (0.0, 0.0),
             z_state: Mutex::new(ZOrderState::Normal),
+            z_model,
             moves,
         }
     }
@@ -405,9 +513,11 @@ impl ManageExternalHwnd for MockExternalHwnd {
         let mut z_state = self.z_state.lock().unwrap();
         match z {
             ZOrder::Topmost => *z_state = ZOrderState::Topmost,
+            ZOrder::Top => *z_state = ZOrderState::Normal,
             ZOrder::After(_) => *z_state = ZOrderState::Normal,
             ZOrder::Unchanged => {}
         }
+        self.z_model.apply(self.hwnd_id, z);
         self.moves
             .lock()
             .unwrap()
@@ -435,6 +545,7 @@ impl ManageExternalHwnd for MockExternalHwnd {
             )
         };
         *self.z_state.lock().unwrap() = ZOrderState::Bottom;
+        self.z_model.move_to_bottom(self.hwnd_id);
         self.moves
             .lock()
             .unwrap()
@@ -496,9 +607,6 @@ struct NoopFloatOverlay {
     overlay_update_count: Rc<Cell<u32>>,
 }
 impl FloatOverlayApi for NoopFloatOverlay {
-    fn id(&self) -> HwndId {
-        HwndId::test(0)
-    }
     fn update(&mut self, _: &crate::core::FloatWindowPlacement, _: &Config, _: ZOrder) {
         self.overlay_update_count
             .set(self.overlay_update_count.get() + 1);
@@ -508,18 +616,19 @@ impl FloatOverlayApi for NoopFloatOverlay {
 
 struct NoopTilingOverlay {
     focus_count: Rc<Cell<u32>>,
+    overlay_id: HwndId,
+    z_model: ZOrderModel,
 }
 
 impl TilingOverlayApi for NoopTilingOverlay {
-    fn id(&self) -> HwndId {
-        HwndId::test(0)
-    }
     fn update(
         &mut self,
         _: Dimension,
         _: &[crate::core::TilingWindowPlacement],
         _: &[(crate::core::ContainerPlacement, Vec<String>)],
+        z: ZOrder,
     ) {
+        self.z_model.apply(self.overlay_id, z);
     }
     fn clear(&mut self) {}
     fn focus(&self) {
@@ -552,12 +661,15 @@ struct NoopOverlays {
     focus_count: Rc<Cell<u32>>,
     overlay_update_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<(WindowId, String)>>>,
+    z_model: ZOrderModel,
 }
 
 impl CreateOverlay for NoopOverlays {
     fn create_tiling_overlay(&self, _: Config) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         Ok(Box::new(NoopTilingOverlay {
             focus_count: self.focus_count.clone(),
+            overlay_id: HwndId::test(9999),
+            z_model: self.z_model.clone(),
         }))
     }
     fn create_float_overlay(&self) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
