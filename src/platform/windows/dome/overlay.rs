@@ -452,7 +452,9 @@ impl TilingOverlayApi for TilingOverlay {
             self.monitor = monitor;
         }
 
-        // ORDERING INVARIANT: data assignments MUST come before SetWindowRgn and rerender().
+        // ORDERING INVARIANT: data assignments MUST come before rerender().
+        // SetWindowRgn is called after rerender() so the compositor never
+        // exposes stale buffer content (see architecture.md, render-last invariant).
         self.windows = windows.to_vec();
         self.containers = containers.to_vec();
 
@@ -478,7 +480,6 @@ impl TilingOverlayApi for TilingOverlay {
                 DeleteObject(cr.into()).ok().ok();
             }
         }
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
 
         unsafe {
             SetWindowPos(
@@ -492,11 +493,16 @@ impl TilingOverlayApi for TilingOverlay {
             )
             .ok();
         }
-        // Show before render: the GL pixel ownership test fails for hidden windows,
-        // so SwapBuffers content is discarded. WM_ERASEBKGND and WM_PAINT handlers
-        // prevent GDI interference between show and render.
+        // Show before render so the GL pixel ownership test passes.
+        // Region is set after render so the compositor never exposes stale buffer content.
         self.window.show();
         self.rerender();
+
+        // SetWindowRgn after render: with bRedraw=FALSE this only updates the
+        // compositor's region metadata without triggering a GDI repaint, so it
+        // cannot overwrite the GL buffer. Placing it after SwapBuffers ensures
+        // the DWM never composites the new region with stale/transparent content.
+        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
     }
 
     fn clear(&mut self) {
@@ -682,7 +688,6 @@ impl FloatOverlayApi for FloatOverlay {
         }
 
         let region = build_window_border_region(wp.frame, wp.visible_frame, config);
-        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
 
         let z_after: Option<HWND> = z.into();
         let mut flags = SWP_NOACTIVATE | SWP_NOREDRAW;
@@ -702,9 +707,8 @@ impl FloatOverlayApi for FloatOverlay {
             .ok();
         }
 
-        // Show before render: the GL pixel ownership test fails for hidden windows,
-        // so SwapBuffers content is discarded. WM_ERASEBKGND and WM_PAINT handlers
-        // prevent GDI interference between show and render.
+        // Show before render so the GL pixel ownership test passes.
+        // Region is set after render so the compositor never exposes stale buffer content.
         self.window.show();
 
         self.renderer.render(w, h, 1.0, vec![], |ctx| {
@@ -726,6 +730,12 @@ impl FloatOverlayApi for FloatOverlay {
                 egui::vec2(0.0, 0.0),
             );
         });
+
+        // SetWindowRgn after render: with bRedraw=FALSE this only updates the
+        // compositor's region metadata without triggering a GDI repaint, so it
+        // cannot overwrite the GL buffer. Placing it after SwapBuffers ensures
+        // the DWM never composites the new region with stale/transparent content.
+        unsafe { SetWindowRgn(self.window.hwnd(), Some(region), false) };
     }
 
     fn hide(&mut self) {
