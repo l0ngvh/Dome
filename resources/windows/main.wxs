@@ -22,9 +22,17 @@
 
         <MajorUpgrade
             Schedule="afterInstallInitialize"
-            DowngradeErrorMessage="A newer version of [ProductName] is already installed. Setup will now exit." />
+            DowngradeErrorMessage="A newer version of Dome is already installed. Setup will now exit." />
 
         <MediaTemplate EmbedCab="yes" />
+
+        <Icon Id="DomeIcon.ico" SourceFile="icon.ico"/>
+        <Property Id="ARPPRODUCTICON" Value="DomeIcon.ico" />
+
+        <WixVariable Id="WixUIBannerBmp" Value="WixBanner.bmp" />
+        <WixVariable Id="WixUIDialogBmp" Value="WixDialog.bmp" />
+
+        <UIRef Id="WixUI_FeatureTree" />
 
         <Feature Id="Binaries" Title="Application" Description="Installs the dome.exe binary." Level="1" ConfigurableDirectory="APPLICATIONFOLDER" AllowAdvertise="no" Display="expand">
             <ComponentRef Id="binary0" />

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  
+  <!-- Outer Black Border -->
+  <path d="M 212 732 L 812 732 L 812 592 A 300 300 0 0 0 212 592 Z" 
+        fill="none" 
+        stroke="#000000" 
+        stroke-width="150" 
+        stroke-linejoin="miter" />
+
+  <!-- Inner White Body -->
+  <path d="M 212 732 L 812 732 L 812 592 A 300 300 0 0 0 212 592 Z" 
+        fill="none" 
+        stroke="#ffffff" 
+        stroke-width="120" 
+        stroke-linejoin="miter" />
+        
+</svg>
