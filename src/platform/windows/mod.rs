@@ -12,6 +12,7 @@ mod throttle;
 #[cfg(test)]
 mod tests;
 
+use std::mem::size_of;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::thread;
@@ -30,10 +31,15 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, IDC_ARROW, LoadCursorW, MSG,
-    PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_ERASEBKGND,
-    WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow, GetMessageW, HWND_TOP,
+    IDC_ARROW, LoadCursorW, MSG, PostThreadMessageW, RegisterClassW, SW_SHOWNA, SWP_NOACTIVATE,
+    SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow, TranslateMessage, WM_APP,
+    WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW,
+    WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR};
 
@@ -42,7 +48,7 @@ use crate::core::{Dimension, WindowId};
 use crate::ipc;
 use dome::overlay::{FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, tiling_overlay_wnd_proc};
 use dome::picker::{PICKER_OVERLAY_CLASS, picker_wnd_proc};
-use dome::{Dome, HubEvent};
+use dome::{Dome, HubEvent, KeyboardSinkApi};
 use event_listener::install_event_hooks;
 use external::HwndId;
 
@@ -74,6 +80,45 @@ impl HubSender {
         let ptr = Box::into_raw(Box::new(event)) as usize;
         unsafe {
             PostThreadMessageW(self.thread_id, WM_APP_HUBEVENT, WPARAM(ptr), LPARAM(0)).ok();
+        }
+    }
+}
+
+pub(super) struct AppWindowSink {
+    hwnd: HWND,
+}
+
+impl KeyboardSinkApi for AppWindowSink {
+    fn focus(&self) {
+        if unsafe { GetForegroundWindow() } == self.hwnd {
+            return;
+        }
+        // Alt-tap unlocks the foreground lock as a safety net for edge cases
+        // (user clicked away, then hotkeyed back).
+        let inputs = [
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_MENU,
+                        ..Default::default() // dwFlags=0 means key-down
+                    },
+                },
+            },
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_MENU,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        ..Default::default() // remaining KEYBDINPUT fields unused for VK_MENU
+                    },
+                },
+            },
+        ];
+        unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
+        if !unsafe { SetForegroundWindow(self.hwnd) }.as_bool() {
+            tracing::warn!("SetForegroundWindow failed for keyboard sink");
         }
     }
 }
@@ -278,7 +323,7 @@ unsafe extern "system" fn app_wnd_proc(
             };
             LRESULT(0)
         }
-        // App window is never shown (WS_POPUP + WS_EX_TOOLWINDOW, no ShowWindow); these arms are defensive only.
+        // App window is 1x1 offscreen; these arms are defensive only.
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => LRESULT(0),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
@@ -347,9 +392,9 @@ fn run_dome(config: Config, main_thread_id: u32) {
     };
     unsafe { RegisterClassW(&wc_picker) };
 
-    // The HWND is kept alive for its WndProc (handles WM_DISPLAYCHANGE).
-    // It is never referenced by name after creation.
-    let _app_hwnd = unsafe {
+    // The HWND serves as a keyboard sink (holds foreground when no managed window
+    // is focused) and a WndProc host (handles WM_DISPLAYCHANGE).
+    let app_hwnd = unsafe {
         CreateWindowExW(
             WS_EX_TOOLWINDOW,
             APP_CLASS,
@@ -366,6 +411,23 @@ fn run_dome(config: Config, main_thread_id: u32) {
         )
     }
     .expect("Failed to create app window");
+
+    // Move offscreen so activating it is invisible. Same coordinate move_offscreen uses.
+    unsafe {
+        SetWindowPos(
+            app_hwnd,
+            Some(HWND_TOP),
+            handle::OFFSCREEN_POS as i32,
+            handle::OFFSCREEN_POS as i32,
+            1,
+            1,
+            SWP_NOACTIVATE | SWP_NOZORDER,
+        )
+        .ok();
+    }
+    // Show without activating. Hidden windows are flaky SetForegroundWindow targets;
+    // a 1x1 offscreen window makes activation reliable with no visible effect.
+    unsafe { ShowWindow(app_hwnd, SW_SHOWNA).ok().ok() };
 
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::DX12,
@@ -405,6 +467,7 @@ fn run_dome(config: Config, main_thread_id: u32) {
         Rc::new(taskbar),
         Box::new(overlays),
         Box::new(display::Win32Display),
+        Box::new(AppWindowSink { hwnd: app_hwnd }),
     )
     .expect("Failed to initialize Dome");
 

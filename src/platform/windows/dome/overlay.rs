@@ -1,4 +1,3 @@
-use std::mem::size_of;
 use std::sync::Arc;
 
 use crate::platform::windows::HubSender;
@@ -8,15 +7,11 @@ use windows::Win32::Graphics::DirectComposition::{
 };
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
-};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetForegroundWindow,
-    GetWindowLongPtrW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOREDRAW, SWP_NOZORDER,
-    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE,
-    WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WS_EX_NOACTIVATE,
-    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetWindowLongPtrW, SW_HIDE,
+    SW_SHOWNA, SWP_NOACTIVATE, SWP_NOREDRAW, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, WINDOW_EX_STYLE, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_PAINT, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Interface, PCWSTR};
 
@@ -406,38 +401,6 @@ impl TilingOverlayApi for TilingOverlay {
         self.rerender();
     }
 
-    fn focus(&self) {
-        let hwnd = self.window.hwnd();
-        if unsafe { GetForegroundWindow() } == hwnd {
-            return;
-        }
-        let inputs = [
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_MENU,
-                        ..Default::default()
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_MENU,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        ..Default::default()
-                    },
-                },
-            },
-        ];
-        unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
-        if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
-            tracing::warn!("SetForegroundWindow failed for tiling overlay");
-        }
-    }
-
     fn set_config(&mut self, config: Config) {
         self.config = config;
     }
@@ -521,7 +484,6 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
         z: ZOrder,
     );
     fn clear(&mut self);
-    fn focus(&self);
     fn set_config(&mut self, config: Config);
 }
 

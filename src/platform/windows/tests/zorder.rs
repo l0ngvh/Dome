@@ -178,10 +178,10 @@ fn empty_workspace_overlay_focus() {
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
 
-    env.reset_overlay_focus();
+    env.reset_sink_focus();
     env.run_actions("focus workspace 1");
 
-    assert_eq!(env.overlay_focus_count(), 1);
+    assert_eq!(env.sink_focus_count(), 1);
 }
 
 #[test]

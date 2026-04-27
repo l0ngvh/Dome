@@ -71,7 +71,7 @@ The `focused()` accessor on Workspace computes effective focus by checking in pr
 
 **Focus chain invariant.** `container.focused` stores the last focused node in that subtree, not the immediate child. This node can be a `Child::Window` or a `Child::Container` (e.g. after `focus_parent`). `set_focus_child` writes the same target to every ancestor container from the target up to the workspace root. This means if `focused_tiling == Some(X)`, every ancestor of X has `focused == X`, and walking `container.focused` from root reaches X directly in one hop per level. `replace_split_child_focus` preserves this invariant during tree mutations by replacing old references with new ones along the same scope. The test validator (`validate_workspace_focus`) checks reachability from root via the focus chain.
 
-**Container highlight.** When `focused_tiling` is `Child::Container` (after `focus_parent`), `focused_tiling_window()` returns `None` rather than walking to a descendant window. This means `hub.focused_window()` returns `None` when a container is highlighted (assuming no fullscreen/float focus), which makes `toggle_float` and `toggle_fullscreen` no-ops and causes the platform to receive `focused_window: None` in placements, focusing the tiling overlay. Move-to-workspace and move-to-monitor bypass `focused_window()` in this case and call the strategy directly to move the whole container.
+**Container highlight.** When `focused_tiling` is `Child::Container` (after `focus_parent`), `focused_tiling_window()` returns `None` rather than walking to a descendant window. This means `hub.focused_window()` returns `None` when a container is highlighted (assuming no fullscreen/float focus), which makes `toggle_float` and `toggle_fullscreen` no-ops and causes the platform to receive `focused_window: None` in placements (see Empty workspace focus in the platform docs for per-platform behavior). Move-to-workspace and move-to-monitor bypass `focused_window()` in this case and call the strategy directly to move the whole container.
 
 **Invariant:** `is_float_focused` must be false when `float_windows` is empty. The test validator enforces this. The `focused()` accessor also handles it gracefully as defense-in-depth, falling through to `focused_tiling`.
 
@@ -148,6 +148,8 @@ Accessibility API (`AXUIElement`) via `AXWindowApi` trait for position, size, fo
 `SetWindowPos` for positioning, `ShowWindow` for minimize/restore. Focus uses simulated ALT + `SetForegroundWindow` — ALT satisfies the foreground lock exception.
 
 DWM invisible borders affect positioning. `DwmGetWindowAttribute` queries extended frame bounds; `SetWindowPos` compensates.
+
+**Keyboard sink.** A 1x1 invisible HWND (`WS_POPUP | WS_EX_TOOLWINDOW`, moved offscreen) holds Win32 foreground when no managed window is focused (empty workspace, `focus_parent` container highlight). Activating this HWND instead of the tiling overlay avoids disturbing tiling window z-order, since `SetForegroundWindow` raises the target window. macOS doesn't need this because tiling overlay windows there are one window level behind normal windows.
 
 ### Window State Machines
 
@@ -303,7 +305,7 @@ Picker state (selected index, entries list) is owned by the platform picker wind
 
 Only two events cross the picker boundary. `HubMessage::PickerToggle` (Dome to UI, macOS only since Windows is single-threaded) carries entries and monitor info. The picker sends `HubEvent::Action` with `Action::UnminimizeWindow(WindowId)` to trigger unminimize, the same channel used by all other actions. There is no picker-specific event variant. There is no `PickerClosed` or `PickerClose` event. Keyboard input (arrow keys, Return, Escape), focus loss, and close are handled entirely within the picker window with no round-trip through the hub thread. The picker hides itself directly (`orderOut` on macOS, `OwnedHwnd::hide` on Windows). Both hide calls are no-ops when already hidden, so `resignKeyWindow`/`WM_KILLFOCUS` firing after an explicit hide causes no double-action. This works because all default Dome keybindings require Cmd/Meta modifier, so bare arrow/enter/escape keys pass through the global keyboard hooks to the focused picker window.
 
-**Empty workspace focus.** Dome focuses its own tiling overlay on empty workspaces to prevent keyboard focus landing on offscreen windows. On macOS, needed when switching to an empty workspace from another Space. On Windows, prevents unwanted workspace switches when destroying a window hands focus to an offscreen window.
+**Empty workspace focus.** When no managed window is focused (empty workspace, container highlight), the platform must hold keyboard focus to prevent it from landing on offscreen windows. On macOS, Dome focuses the tiling overlay NSWindow. On Windows, Dome activates the keyboard sink HWND (see [Window Manipulation > Windows](#windows)) instead of the overlay, avoiding z-order disruption.
 
 #### macOS
 

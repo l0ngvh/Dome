@@ -16,7 +16,7 @@ use crate::core::{Dimension, WindowId};
 use crate::platform::windows::ScreenInfo;
 use crate::platform::windows::dome::ObservedPosition;
 use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
-use crate::platform::windows::dome::{CreateOverlay, Dome, QueryDisplay};
+use crate::platform::windows::dome::{CreateOverlay, Dome, KeyboardSinkApi, QueryDisplay};
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
 
@@ -72,7 +72,7 @@ struct TestEnv {
     moves: MoveLog,
     exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
     config: Config,
-    overlay_focus_count: Rc<Cell<u32>>,
+    sink_focus_count: Rc<Cell<u32>>,
     overlay_update_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<(WindowId, String)>>>,
     z_model: ZOrderModel,
@@ -90,7 +90,7 @@ impl TestEnv {
             screens,
             exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
         };
-        let overlay_focus_count = Rc::new(Cell::new(0));
+        let sink_focus_count = Rc::new(Cell::new(0));
         let overlay_update_count = Rc::new(Cell::new(0));
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let z_model = ZOrderModel::new();
@@ -98,12 +98,14 @@ impl TestEnv {
             config.clone(),
             Rc::new(NoopTaskbar),
             Box::new(NoopOverlays {
-                focus_count: overlay_focus_count.clone(),
                 overlay_update_count: overlay_update_count.clone(),
                 picker_entries: picker_entries.clone(),
                 z_model: z_model.clone(),
             }),
             Box::new(display),
+            Box::new(NoopKeyboardSink {
+                focus_count: sink_focus_count.clone(),
+            }),
         )
         .unwrap();
         Self {
@@ -111,7 +113,7 @@ impl TestEnv {
             moves: Arc::new(Mutex::new(Vec::new())),
             exclusive_fullscreen_hwnd,
             config,
-            overlay_focus_count,
+            sink_focus_count,
             overlay_update_count,
             picker_entries,
             z_model,
@@ -262,12 +264,12 @@ impl TestEnv {
         self.dome.apply_layout();
     }
 
-    fn overlay_focus_count(&self) -> u32 {
-        self.overlay_focus_count.get()
+    fn sink_focus_count(&self) -> u32 {
+        self.sink_focus_count.get()
     }
 
-    fn reset_overlay_focus(&self) {
-        self.overlay_focus_count.set(0);
+    fn reset_sink_focus(&self) {
+        self.sink_focus_count.set(0);
     }
 
     fn overlay_update_count(&self) -> u32 {
@@ -603,6 +605,16 @@ impl ManageTaskbar for NoopTaskbar {
     fn delete_tab(&self, _: HwndId) {}
 }
 
+struct NoopKeyboardSink {
+    focus_count: Rc<Cell<u32>>,
+}
+
+impl KeyboardSinkApi for NoopKeyboardSink {
+    fn focus(&self) {
+        self.focus_count.set(self.focus_count.get() + 1);
+    }
+}
+
 struct NoopFloatOverlay {
     overlay_update_count: Rc<Cell<u32>>,
 }
@@ -615,7 +627,6 @@ impl FloatOverlayApi for NoopFloatOverlay {
 }
 
 struct NoopTilingOverlay {
-    focus_count: Rc<Cell<u32>>,
     overlay_id: HwndId,
     z_model: ZOrderModel,
 }
@@ -631,9 +642,6 @@ impl TilingOverlayApi for NoopTilingOverlay {
         self.z_model.apply(self.overlay_id, z);
     }
     fn clear(&mut self) {}
-    fn focus(&self) {
-        self.focus_count.set(self.focus_count.get() + 1);
-    }
     fn set_config(&mut self, _: Config) {}
 }
 
@@ -658,7 +666,6 @@ impl PickerApi for NoopPicker {
 }
 
 struct NoopOverlays {
-    focus_count: Rc<Cell<u32>>,
     overlay_update_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<(WindowId, String)>>>,
     z_model: ZOrderModel,
@@ -667,7 +674,6 @@ struct NoopOverlays {
 impl CreateOverlay for NoopOverlays {
     fn create_tiling_overlay(&self, _: Config) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         Ok(Box::new(NoopTilingOverlay {
-            focus_count: self.focus_count.clone(),
             overlay_id: HwndId::test(9999),
             z_model: self.z_model.clone(),
         }))

@@ -321,10 +321,10 @@ fn destroy_last_window_focuses_overlay() {
     let mut env = TestEnv::new();
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
-    env.reset_overlay_focus();
+    env.reset_sink_focus();
 
     env.destroy_window(&w1);
-    assert_eq!(env.overlay_focus_count(), 1);
+    assert_eq!(env.sink_focus_count(), 1);
 }
 
 #[test]
@@ -334,10 +334,10 @@ fn destroy_one_of_two_windows_does_not_focus_overlay() {
     let w2 = env.spawn_window(2, "App2", "app2.exe");
     env.add_window(w1.clone());
     env.add_window(w2.clone());
-    env.reset_overlay_focus();
+    env.reset_sink_focus();
 
     env.destroy_window(&w2);
-    assert_eq!(env.overlay_focus_count(), 0);
+    assert_eq!(env.sink_focus_count(), 0);
 }
 
 #[test]
@@ -345,10 +345,10 @@ fn workspace_switch_to_empty_focuses_overlay() {
     let mut env = TestEnv::new();
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
-    env.reset_overlay_focus();
+    env.reset_sink_focus();
 
     env.run_actions("focus workspace 1");
-    assert_eq!(env.overlay_focus_count(), 1);
+    assert_eq!(env.sink_focus_count(), 1);
 }
 
 #[test]
@@ -356,12 +356,12 @@ fn workspace_switch_back_does_not_focus_overlay() {
     let mut env = TestEnv::new();
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
-    env.reset_overlay_focus();
+    env.reset_sink_focus();
 
     env.run_actions("focus workspace 1");
-    env.reset_overlay_focus();
+    env.reset_sink_focus();
     env.run_actions("focus workspace 0");
-    assert_eq!(env.overlay_focus_count(), 0);
+    assert_eq!(env.sink_focus_count(), 0);
 }
 
 #[test]
@@ -371,10 +371,10 @@ fn focus_parent_focuses_overlay() {
     let w2 = env.spawn_window(2, "App2", "app2.exe");
     env.add_window(w1.clone());
     env.add_window(w2.clone());
-    env.reset_overlay_focus();
+    env.reset_sink_focus();
 
     env.run_actions("focus parent");
-    assert_eq!(env.overlay_focus_count(), 1);
+    assert_eq!(env.sink_focus_count(), 1);
 }
 
 #[test]
@@ -386,9 +386,9 @@ fn focus_child_after_parent_does_not_focus_overlay() {
     env.add_window(w2.clone());
 
     env.run_actions("focus parent");
-    env.reset_overlay_focus();
+    env.reset_sink_focus();
     env.run_actions("focus down");
-    assert_eq!(env.overlay_focus_count(), 0);
+    assert_eq!(env.sink_focus_count(), 0);
 }
 
 #[test]
@@ -396,10 +396,10 @@ fn monitor_switch_empty_to_empty_focuses_overlay() {
     let mut env = TestEnv::new();
     env.add_screen(second_screen());
     env.run_actions("focus workspace 1");
-    env.reset_overlay_focus();
+    env.reset_sink_focus();
 
     env.run_actions("focus monitor right");
-    assert_eq!(env.overlay_focus_count(), 1);
+    assert_eq!(env.sink_focus_count(), 1);
 }
 
 #[test]

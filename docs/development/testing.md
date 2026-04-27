@@ -38,7 +38,7 @@ Both macOS and Windows have test directories (`src/platform/macos/tests/`, `src/
 
 **macOS**: `MockAXWindow` implements `AXWindowApi`, `TestSender` implements `FrameSender` (captures the latest `HubMessage::Frame` into a shared `FrameState`). Tests create a `Dome` with mock windows and a `TestSender`, then call Dome methods and assert on window state transitions and move logs.
 
-**Windows**: `MockExternalHwnd` implements `ManageExternalHwnd`, `MockDisplay` implements `QueryDisplay`, `NoopTaskbar` implements `ManageTaskbar`, `NoopOverlays` implements `CreateOverlay` (with `NoopTilingOverlay` and `NoopFloatOverlay`). `TestEnv` wraps everything for convenient test setup. `NoopFloatOverlay` increments a shared `overlay_update_count` on each `update()` call; `TestEnv::overlay_update_count()` returns the current count, letting tests verify overlay re-renders happen (or don't) without real GL contexts.
+**Windows**: `MockExternalHwnd` implements `ManageExternalHwnd`, `MockDisplay` implements `QueryDisplay`, `NoopTaskbar` implements `ManageTaskbar`, `NoopOverlays` implements `CreateOverlay` (with `NoopTilingOverlay` and `NoopFloatOverlay`); `NoopKeyboardSink` implements `KeyboardSinkApi`. `TestEnv` wraps everything for convenient test setup. `NoopFloatOverlay` increments a shared `overlay_update_count` on each `update()` call; `TestEnv::overlay_update_count()` returns the current count, letting tests verify overlay re-renders happen (or don't) without real GL contexts.
 
 Test files are organized by concern:
 - `lifecycle.rs` -- window add/remove (both platforms)
