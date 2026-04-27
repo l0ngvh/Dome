@@ -433,14 +433,9 @@ impl Renderer {
     #[tracing::instrument(skip_all)]
     fn update_textures(&mut self, delta: &egui::TexturesDelta) {
         for (id, image_delta) in &delta.set {
-            let pixels: Vec<u8> = match &image_delta.image {
-                egui::ImageData::Color(img) => {
-                    img.pixels.iter().flat_map(|c| c.to_array()).collect()
-                }
-                egui::ImageData::Font(img) => {
-                    img.srgba_pixels(None).flat_map(|c| c.to_array()).collect()
-                }
-            };
+            // egui 0.32 removed ImageData::Font; all textures are now ColorImage.
+            let egui::ImageData::Color(img) = &image_delta.image;
+            let pixels: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
             let [w, h] = image_delta.image.size();
 
             if let Some(pos) = image_delta.pos {

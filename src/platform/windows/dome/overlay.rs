@@ -1,25 +1,13 @@
 use std::mem::size_of;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use crate::platform::windows::HubSender;
-use glow::HasContext;
-use glutin::config::ConfigTemplateBuilder;
-use glutin::context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentContext};
-use glutin::display::Display;
-use glutin::prelude::*;
-use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
-use raw_window_handle::{RawWindowHandle, Win32WindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Dwm::{
-    DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND, DwmEnableBlurBehindWindow,
-    DwmExtendFrameIntoClientArea,
+use windows::Win32::Graphics::DirectComposition::{
+    DCompositionCreateDevice2, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
 };
-use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateRectRgn, DeleteObject, EndPaint, PAINTSTRUCT,
-};
+use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
 };
@@ -28,9 +16,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOREDRAW, SWP_NOZORDER,
     SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE,
     WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_POPUP,
+    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_POPUP,
 };
-use windows::core::PCWSTR;
+use windows::core::{Interface, PCWSTR};
 
 use super::HubEvent;
 use crate::config::Config;
@@ -40,30 +28,19 @@ use crate::core::{
 use crate::overlay;
 use crate::platform::windows::external::ZOrder;
 
-pub(in crate::platform::windows) fn raw_window_handle(hwnd: HWND) -> RawWindowHandle {
-    let mut handle = Win32WindowHandle::new(std::num::NonZeroIsize::new(hwnd.0 as isize).unwrap());
-    let hinstance = unsafe { GetModuleHandleW(None).unwrap() };
-    handle.hinstance = std::num::NonZeroIsize::new(hinstance.0 as isize);
-    RawWindowHandle::Win32(handle)
-}
-
 /// Owns an HWND and calls `DestroyWindow` on drop.
 /// Fields declared before this in a struct are dropped first,
-/// ensuring GL resources are cleaned up while the window's HDC is still alive.
+/// ensuring renderer resources are cleaned up while the window's HDC is still alive.
 pub(super) struct OwnedHwnd {
     hwnd: HWND,
     is_visible: bool,
 }
 
 impl OwnedHwnd {
-    pub(super) fn new(
-        class: PCWSTR,
-        ex_style: WINDOW_EX_STYLE,
-        opaque: bool,
-    ) -> anyhow::Result<Self> {
+    pub(super) fn new(class: PCWSTR, ex_style: WINDOW_EX_STYLE) -> anyhow::Result<Self> {
         let hwnd = unsafe {
             CreateWindowExW(
-                ex_style,
+                ex_style | WS_EX_NOREDIRECTIONBITMAP,
                 class,
                 windows::core::w!(""),
                 WS_POPUP,
@@ -77,9 +54,6 @@ impl OwnedHwnd {
                 None,
             )?
         };
-        if !opaque {
-            enable_blur_behind(hwnd);
-        }
         Ok(Self {
             hwnd,
             is_visible: false,
@@ -117,78 +91,108 @@ impl Drop for OwnedHwnd {
     }
 }
 
+/// wgpu + DirectComposition renderer for overlay windows.
+///
+/// Field order matters for drop safety: `surface` must drop before the DComp objects
+/// it references, and `painter` before the device. Rust drops fields in declaration order.
 pub(super) struct Renderer {
-    surface: Surface<WindowSurface>,
-    gl_context: PossiblyCurrentContext,
-    gl: Arc<glow::Context>,
-    painter: egui_glow::Painter,
+    surface: wgpu::Surface<'static>,
+    surface_config: wgpu::SurfaceConfiguration,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    painter: egui_wgpu::Renderer,
     egui_ctx: egui::Context,
+    // DComp objects kept alive for the surface lifetime.
+    // dcomp_device is also used in resize() to commit after reconfiguration.
+    _dcomp_visual: IDCompositionVisual,
+    _dcomp_target: IDCompositionTarget,
+    dcomp_device: IDCompositionDevice,
     opaque: bool,
 }
 
 impl Renderer {
     pub(super) fn new(
-        display: &Display,
+        instance: &wgpu::Instance,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
         hwnd: HWND,
         width: u32,
         height: u32,
         opaque: bool,
     ) -> anyhow::Result<Self> {
-        let raw_window = raw_window_handle(hwnd);
+        // DCompositionCreateDevice2 (not v1) accepts None for dxgiDevice, letting wgpu
+        // own its own DXGI device and swap chain internally.
+        let dcomp_device: IDCompositionDevice = unsafe { DCompositionCreateDevice2(None)? };
+        // topmost = true is conventional for DComp overlays. With WS_EX_NOREDIRECTIONBITMAP
+        // there is no GDI surface, so the value is irrelevant.
+        let dcomp_target = unsafe { dcomp_device.CreateTargetForHwnd(hwnd, true)? };
+        let dcomp_visual = unsafe { dcomp_device.CreateVisual()? };
 
-        let mut builder = ConfigTemplateBuilder::new();
-        if !opaque {
-            builder = builder.with_alpha_size(8);
-        }
-        let config_template = builder.build();
-        let gl_config = unsafe { display.find_configs(config_template) }?
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("no suitable GL config"))?;
+        // SurfaceTargetUnsafe::CompositionVisual is #[cfg(dx12)] in wgpu 25. It does not
+        // appear on docs.rs (Linux build), but compiles on Windows with the dx12 feature.
+        let target = wgpu::SurfaceTargetUnsafe::CompositionVisual(dcomp_visual.as_raw() as *mut _);
+        let surface = unsafe { instance.create_surface_unsafe(target)? };
 
-        let context_attrs = ContextAttributesBuilder::new()
-            .with_context_api(ContextApi::OpenGl(None))
-            .build(Some(raw_window));
-        let context = unsafe { display.create_context(&gl_config, &context_attrs) }?;
+        unsafe { dcomp_target.SetRoot(&dcomp_visual)? };
 
-        let w = NonZeroU32::new(width.max(1)).unwrap();
-        let h = NonZeroU32::new(height.max(1)).unwrap();
-        let surface_attrs =
-            SurfaceAttributesBuilder::<WindowSurface>::new().build(raw_window, w, h);
-        let surface = unsafe { display.create_window_surface(&gl_config, &surface_attrs) }?;
-
-        let gl_context = context.make_current(&surface)?;
-        surface
-            .set_swap_interval(&gl_context, SwapInterval::DontWait)
-            .ok();
-
-        let gl = unsafe {
-            Arc::new(glow::Context::from_loader_function_cstr(|s| {
-                display.get_proc_address(s)
-            }))
+        let alpha_mode = if opaque {
+            wgpu::CompositeAlphaMode::Opaque
+        } else {
+            // PreMultiplied maps to DXGI_ALPHA_MODE_PREMULTIPLIED, giving native
+            // per-pixel alpha compositing through DComp without DWM blur-behind hacks.
+            wgpu::CompositeAlphaMode::PreMultiplied
         };
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            width: width.max(1),
+            height: height.max(1),
+            // Immediate matches the previous SwapInterval::DontWait -- no vsync wait.
+            // Overlays render on-demand, not in a loop.
+            present_mode: wgpu::PresentMode::Immediate,
+            alpha_mode,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &surface_config);
+        // Commit after configure: wgpu calls SetContent(swap_chain) inside configure(),
+        // so Commit must come after for DWM to see the visual with its content.
+        unsafe { dcomp_device.Commit()? };
 
-        let painter = egui_glow::Painter::new(Arc::clone(&gl), "", None, false)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let painter = egui_wgpu::Renderer::new(
+            &device,
+            surface_config.format,
+            None,  // no depth format
+            1,     // msaa_samples
+            false, // dithering
+        );
 
         // Disable selectable labels so clicks on tab bars register as tab switches
         // instead of triggering egui's text selection behavior.
-        let egui_ctx = egui::Context::default();
+        let egui_ctx = egui::Context::default(); // only egui context in this overlay
         egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
 
         Ok(Self {
             surface,
-            gl_context,
-            gl,
+            surface_config,
+            device,
+            queue,
             painter,
             egui_ctx,
+            _dcomp_visual: dcomp_visual,
+            _dcomp_target: dcomp_target,
+            dcomp_device,
             opaque,
         })
     }
 
-    pub(super) fn resize(&self, width: u32, height: u32) {
-        let w = NonZeroU32::new(width.max(1)).unwrap();
-        let h = NonZeroU32::new(height.max(1)).unwrap();
-        self.surface.resize(&self.gl_context, w, h);
+    pub(super) fn resize(&mut self, width: u32, height: u32) {
+        self.surface_config.width = width.max(1);
+        self.surface_config.height = height.max(1);
+        self.surface.configure(&self.device, &self.surface_config);
+        // configure() may create a new swap chain and call SetContent again,
+        // which requires a Commit for DWM to pick up the change.
+        unsafe { self.dcomp_device.Commit() }.expect("DComp commit after resize");
     }
 
     pub(super) fn set_visuals(&self, visuals: egui::Visuals) {
@@ -203,12 +207,10 @@ impl Renderer {
         events: Vec<egui::Event>,
         mut ctx_fn: impl FnMut(&egui::Context) -> R,
     ) -> R {
-        self.gl_context.make_current(&self.surface).ok();
-        unsafe {
-            self.gl
-                .clear_color(0.0, 0.0, 0.0, if self.opaque { 1.0 } else { 0.0 });
-            self.gl.clear(glow::COLOR_BUFFER_BIT);
-        }
+        let frame = self.surface.get_current_texture().expect("surface texture");
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default()); // default view of the surface texture
 
         let w_pts = width as f32 / pixels_per_point;
         let h_pts = height as f32 / pixels_per_point;
@@ -221,12 +223,12 @@ impl Renderer {
                 egui::ViewportId::ROOT,
                 egui::ViewportInfo {
                     native_pixels_per_point: Some(pixels_per_point),
-                    ..Default::default()
+                    ..Default::default() // remaining ViewportInfo fields not needed for overlay rendering
                 },
             ))
             .collect(),
             events,
-            ..Default::default()
+            ..Default::default() // remaining RawInput fields (focused, max_texture_side, etc.) not needed for overlay rendering
         };
 
         let mut result = None;
@@ -236,58 +238,63 @@ impl Renderer {
         let meshes = self
             .egui_ctx
             .tessellate(output.shapes, output.pixels_per_point);
-        self.painter.paint_and_update_textures(
-            [width, height],
-            output.pixels_per_point,
-            &meshes,
-            &output.textures_delta,
+
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [width, height],
+            pixels_per_point: output.pixels_per_point,
+        };
+
+        for (id, delta) in &output.textures_delta.set {
+            self.painter
+                .update_texture(&self.device, &self.queue, *id, delta);
+        }
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let user_cmds =
+            self.painter
+                .update_buffers(&self.device, &self.queue, &mut encoder, &meshes, &screen);
+
+        {
+            let clear_color = wgpu::Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: if self.opaque { 1.0 } else { 0.0 },
+            };
+            let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(clear_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default() // no occlusion query, no timestamp writes
+            });
+            // forget_lifetime() is required because egui_wgpu::Renderer::render
+            // needs a RenderPass with 'static lifetime.
+            self.painter
+                .render(&mut rpass.forget_lifetime(), &meshes, &screen);
+            // rpass dropped here before encoder.finish()
+        }
+
+        self.queue.submit(
+            user_cmds
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
         );
-        self.surface.swap_buffers(&self.gl_context).ok();
+        frame.present();
+
+        for id in &output.textures_delta.free {
+            self.painter.free_texture(id);
+        }
+
         result.unwrap()
-    }
-}
-
-impl Drop for Renderer {
-    fn drop(&mut self) {
-        self.gl_context.make_current(&self.surface).ok();
-        self.painter.destroy();
-    }
-}
-
-/// Enables per-pixel alpha compositing for an OpenGL overlay window.
-///
-/// DWM requires two calls to enable per-pixel alpha on a non-layered window:
-/// 1. `DwmEnableBlurBehindWindow` with a minimal blur region -- tells DWM to
-///    use the window's alpha channel for compositing in the non-blurred area.
-/// 2. `DwmExtendFrameIntoClientArea` with margins=-1 -- extends the glass
-///    frame over the entire client area ("sheet of glass" mode).
-///
-/// Without both calls, DWM treats the window as opaque black.
-/// See: https://stackoverflow.com/a/4052940 (wilkie's answer)
-///
-/// Note: the caller must also ensure the window is NOT sized exactly to the
-/// monitor dimensions, or DWM will treat it as fullscreen and disable alpha.
-/// See: https://stackoverflow.com/questions/4052940 (John Mellor's comment)
-fn enable_blur_behind(hwnd: HWND) {
-    unsafe {
-        let region = CreateRectRgn(0, 0, 1, 1);
-        let blur = DWM_BLURBEHIND {
-            dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION,
-            fEnable: true.into(),
-            hRgnBlur: region,
-            fTransitionOnMaximized: false.into(),
-        };
-        DwmEnableBlurBehindWindow(hwnd, &blur).ok();
-        // DeleteObject is best-effort cleanup; .ok().ok() silences the unused Result lint.
-        DeleteObject(region.into()).ok().ok();
-
-        let margins = MARGINS {
-            cxLeftWidth: -1,
-            cxRightWidth: -1,
-            cyTopHeight: -1,
-            cyBottomHeight: -1,
-        };
-        DwmExtendFrameIntoClientArea(hwnd, &margins).ok();
     }
 }
 
@@ -309,13 +316,15 @@ pub(in crate::platform::windows) struct TilingOverlay {
 
 impl TilingOverlay {
     pub(in crate::platform::windows) fn new(
-        display: &Display,
+        instance: &wgpu::Instance,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
         config: Config,
         hub_sender: HubSender,
     ) -> anyhow::Result<Box<Self>> {
-        let window = OwnedHwnd::new(TILING_OVERLAY_CLASS, WS_EX_TOOLWINDOW, false)?;
+        let window = OwnedHwnd::new(TILING_OVERLAY_CLASS, WS_EX_TOOLWINDOW)?;
         let hwnd = window.hwnd();
-        let renderer = Renderer::new(display, hwnd, 1, 1, false)?;
+        let renderer = Renderer::new(instance, device, queue, hwnd, 1, 1, false)?;
         let mut boxed = Box::new(Self {
             renderer,
             events: Vec::new(),
@@ -358,11 +367,7 @@ impl TilingOverlayApi for TilingOverlay {
         let h = monitor.height.max(1.0) as u32;
 
         if self.monitor != monitor {
-            // DWM disables per-pixel alpha compositing for windows sized exactly to the
-            // monitor, treating them as fullscreen. Adding 1px to the height prevents
-            // this detection. The extra row is transparent (GL clear alpha=0).
-            // See: https://stackoverflow.com/questions/4052940 (John Mellor's comment)
-            self.renderer.resize(w, h + 1);
+            self.renderer.resize(w, h);
             self.monitor = monitor;
         }
 
@@ -383,12 +388,12 @@ impl TilingOverlayApi for TilingOverlay {
                 monitor.x as i32,
                 monitor.y as i32,
                 w as i32,
-                h as i32 + 1,
+                h as i32,
                 flags,
             )
             .ok();
         }
-        // Show before render so the GL pixel ownership test passes.
+        // Show before render so the window is visible when the first frame presents.
         self.window.show();
         self.rerender();
     }
@@ -530,9 +535,11 @@ pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =
     windows::core::w!("DomeFloatOverlay");
 
 pub(in crate::platform::windows) fn create_float_overlay(
-    display: &Display,
+    instance: &wgpu::Instance,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
 ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
-    Ok(Box::new(FloatOverlay::new(display)?))
+    Ok(Box::new(FloatOverlay::new(instance, device, queue)?))
 }
 
 struct FloatOverlay {
@@ -543,13 +550,13 @@ struct FloatOverlay {
 }
 
 impl FloatOverlay {
-    fn new(display: &Display) -> anyhow::Result<Self> {
-        let window = OwnedHwnd::new(
-            FLOAT_OVERLAY_CLASS,
-            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-            false,
-        )?;
-        let renderer = Renderer::new(display, window.hwnd(), 1, 1, false)?;
+    fn new(
+        instance: &wgpu::Instance,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+    ) -> anyhow::Result<Self> {
+        let window = OwnedHwnd::new(FLOAT_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
+        let renderer = Renderer::new(instance, device, queue, window.hwnd(), 1, 1, false)?;
         Ok(Self {
             renderer,
             width: 1,
@@ -590,7 +597,7 @@ impl FloatOverlayApi for FloatOverlay {
             .ok();
         }
 
-        // Show before render so the GL pixel ownership test passes.
+        // Show before render so the window is visible when the first frame presents.
         self.window.show();
 
         self.renderer.render(w, h, 1.0, vec![], |ctx| {

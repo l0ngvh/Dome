@@ -1,4 +1,4 @@
-use egui::{CentralPanel, ScrollArea, SelectableLabel};
+use egui::{Button, CentralPanel, ScrollArea};
 
 use crate::core::WindowId;
 
@@ -32,7 +32,7 @@ pub(crate) fn paint_picker(
                 };
                 let response = ui.add_sized(
                     [ui.available_width(), 28.0],
-                    SelectableLabel::new(i == selected_index, text),
+                    Button::new(text).selected(i == selected_index),
                 );
                 if response.clicked() {
                     result = PickerResult::Selected(*id);

@@ -18,7 +18,7 @@ serde_json = "1.0.148"
 regex = "1.12.2"
 interprocess = "2.2.3"
 notify = "8.2.0"
-egui = "0.31"
+egui = "0.32"
 calloop = { version = "0.14", features = ["executor"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -40,12 +40,11 @@ objc2-metal = { version = "0.3.2", features = ["MTLDevice", "MTLCommandQueue", "
 objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "dispatch2", "SCShareableContent", "SCStream", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-media"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO", "Win32_UI_HiDpi", "Win32_System_Console"] }
+windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO", "Win32_UI_HiDpi", "Win32_System_Console", "Win32_Graphics_DirectComposition"] }
 windows-registry = "0.6"
-egui_glow = "0.31"
-glow = "0.16"
-glutin = "0.32"
-raw-window-handle = "0.6"
+egui-wgpu = "0.32"
+wgpu = { version = "25", features = ["dx12"] }
+pollster = "0.4"
 rayon = "1.10"
 
 [dev-dependencies]

@@ -40,18 +40,14 @@ use windows::core::{BOOL, PCWSTR};
 use crate::config::{Config, start_config_watcher};
 use crate::core::{Dimension, WindowId};
 use crate::ipc;
-use dome::overlay::{
-    FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, raw_window_handle, tiling_overlay_wnd_proc,
-};
+use dome::overlay::{FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, tiling_overlay_wnd_proc};
 use dome::picker::{PICKER_OVERLAY_CLASS, picker_wnd_proc};
 use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
 use external::HwndId;
 
 const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
-use glutin::display::{Display as GlDisplay, DisplayApiPreference};
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
-use raw_window_handle::{RawDisplayHandle, WindowsDisplayHandle};
 use taskbar::Taskbar;
 
 #[derive(Clone)]
@@ -220,24 +216,32 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     Ok(())
 }
 
-struct GlOverlayFactory {
-    display: glutin::display::Display,
+struct WgpuOverlayFactory {
+    instance: wgpu::Instance,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
     hub_sender: HubSender,
 }
 
-impl dome::CreateOverlay for GlOverlayFactory {
+impl dome::CreateOverlay for WgpuOverlayFactory {
     fn create_tiling_overlay(
         &self,
         config: Config,
     ) -> anyhow::Result<Box<dyn dome::overlay::TilingOverlayApi>> {
         Ok(dome::overlay::TilingOverlay::new(
-            &self.display,
+            &self.instance,
+            Arc::clone(&self.device),
+            Arc::clone(&self.queue),
             config,
             self.hub_sender.clone(),
         )?)
     }
     fn create_float_overlay(&self) -> anyhow::Result<Box<dyn dome::overlay::FloatOverlayApi>> {
-        dome::overlay::create_float_overlay(&self.display)
+        dome::overlay::create_float_overlay(
+            &self.instance,
+            Arc::clone(&self.device),
+            Arc::clone(&self.queue),
+        )
     }
     fn create_picker(
         &self,
@@ -245,7 +249,9 @@ impl dome::CreateOverlay for GlOverlayFactory {
         monitor_dim: Dimension,
     ) -> anyhow::Result<Box<dyn dome::overlay::PickerApi>> {
         Ok(dome::picker::PickerWindow::new(
-            &self.display,
+            &self.instance,
+            Arc::clone(&self.device),
+            Arc::clone(&self.queue),
             entries,
             monitor_dim,
             self.hub_sender.clone(),
@@ -341,7 +347,9 @@ fn run_dome(config: Config, main_thread_id: u32) {
     };
     unsafe { RegisterClassW(&wc_picker) };
 
-    let app_hwnd = unsafe {
+    // The HWND is kept alive for its WndProc (handles WM_DISPLAYCHANGE).
+    // It is never referenced by name after creation.
+    let _app_hwnd = unsafe {
         CreateWindowExW(
             WS_EX_TOOLWINDOW,
             APP_CLASS,
@@ -359,19 +367,36 @@ fn run_dome(config: Config, main_thread_id: u32) {
     }
     .expect("Failed to create app window");
 
-    let raw_display = RawDisplayHandle::Windows(WindowsDisplayHandle::new());
-    let raw_window = raw_window_handle(app_hwnd);
-    let display =
-        unsafe { GlDisplay::new(raw_display, DisplayApiPreference::Wgl(Some(raw_window))) }
-            .expect("Failed to create GL display");
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::DX12,
+        // DX12 is the only backend we target; no instance flags, no dxc shader compiler
+        // (wgsl compiled via wgpu's default path), no GLES minor version.
+        ..Default::default()
+    });
+    let adapter = pollster::block_on(instance.request_adapter(
+        // No power-preference hint (system picks the DX12 adapter), no compatible_surface
+        // required before surface creation, force_fallback_adapter = false.
+        &wgpu::RequestAdapterOptions::default(),
+    ))
+    .expect("No DX12 adapter");
+    let (device, queue) = pollster::block_on(adapter.request_device(
+        // No required features; default (downlevel) limits are more than enough for
+        // 2D egui rendering; no memory hints, no trace path.
+        &wgpu::DeviceDescriptor::default(),
+    ))
+    .expect("Failed to create wgpu device");
+    let device = Arc::new(device);
+    let queue = Arc::new(queue);
 
     let taskbar = Taskbar::new().expect("Failed to create Taskbar");
 
     let hub_sender = HubSender {
         thread_id: unsafe { GetCurrentThreadId() },
     };
-    let overlays = GlOverlayFactory {
-        display: display.clone(),
+    let overlays = WgpuOverlayFactory {
+        instance,
+        device,
+        queue,
         hub_sender: hub_sender.clone(),
     };
 

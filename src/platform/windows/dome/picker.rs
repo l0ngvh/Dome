@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -24,7 +26,7 @@ const PICKER_WIDTH: u32 = 400;
 const PICKER_HEIGHT: u32 = 300;
 
 /// Opaque picker popup window for browsing and restoring minimized windows.
-/// `renderer` is declared before `window` so it drops first (GL cleanup before HWND destruction).
+/// `renderer` is declared before `window` so it drops first (renderer cleanup before HWND destruction).
 pub(in crate::platform::windows) struct PickerWindow {
     renderer: Renderer,
     events: Vec<egui::Event>,
@@ -39,7 +41,9 @@ pub(in crate::platform::windows) struct PickerWindow {
 
 impl PickerWindow {
     pub(in crate::platform::windows) fn new(
-        display: &glutin::display::Display,
+        instance: &wgpu::Instance,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
         entries: Vec<(WindowId, String)>,
         monitor_dim: Dimension,
         hub_sender: HubSender,
@@ -53,10 +57,9 @@ impl PickerWindow {
             PICKER_OVERLAY_CLASS,
             windows::Win32::UI::WindowsAndMessaging::WS_EX_TOOLWINDOW
                 | windows::Win32::UI::WindowsAndMessaging::WS_EX_TOPMOST,
-            true,
         )?;
         let hwnd = window.hwnd();
-        let renderer = Renderer::new(display, hwnd, w, h, true)?;
+        let renderer = Renderer::new(instance, device, queue, hwnd, w, h, true)?;
         renderer.set_visuals(egui::Visuals::dark());
 
         let mut boxed = Box::new(Self {
