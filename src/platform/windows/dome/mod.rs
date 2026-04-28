@@ -29,7 +29,7 @@ pub(super) enum ObservedPosition {
     Visible(i32, i32, i32, i32),
 }
 use super::ScreenInfo;
-use super::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
+use super::external::{HwndId, ManageExternalHwnd, ShowCmd};
 use super::taskbar::ManageTaskbar;
 
 pub(super) enum HubEvent {
@@ -60,6 +60,7 @@ struct MonitorPositionData {
     monitor_id: MonitorId,
     dimension: Dimension,
     tiling_windows: Vec<TilingWindowPlacement>,
+    float_windows: Vec<FloatWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
 }
 
@@ -546,7 +547,6 @@ impl Dome {
         let focused_monitor = result.focused_monitor;
         let focused = focused_window;
 
-        let mut float_windows: Vec<FloatWindowPlacement> = Vec::new();
         let mut per_monitor: Vec<MonitorPositionData> = Vec::new();
         let mut new_displayed: HashMap<MonitorId, DisplayedMonitor> = HashMap::new();
 
@@ -558,7 +558,7 @@ impl Dome {
             match &mp.layout {
                 MonitorLayout::Fullscreen(id) => {
                     window_ids.insert(*id);
-                    self.show_fullscreen_window(*id, dimension);
+                    self.show_fullscreen_window(*id, dimension, mp.monitor_id);
                 }
                 MonitorLayout::Normal {
                     tiling_windows,
@@ -566,6 +566,7 @@ impl Dome {
                     containers,
                 } => {
                     let mut placed_tiling = Vec::new();
+                    let mut placed_floats = Vec::new();
                     let mut container_data = Vec::new();
 
                     for wp in tiling_windows {
@@ -586,7 +587,7 @@ impl Dome {
                         {
                             continue;
                         }
-                        float_windows.push(*wp);
+                        placed_floats.push(*wp);
                     }
                     for cp in containers {
                         if !cp.is_tabbed && !cp.is_highlighted {
@@ -600,6 +601,7 @@ impl Dome {
                         monitor_id: mp.monitor_id,
                         dimension,
                         tiling_windows: placed_tiling,
+                        float_windows: placed_floats,
                         containers: container_data,
                     });
                 }
@@ -648,10 +650,13 @@ impl Dome {
         }
 
         // Position
-        self.position_windows(&float_windows, &per_monitor, focused);
+        self.position_windows(&per_monitor, focused);
 
         // Clean up float overlays for windows that are no longer float
-        let current_float_ids: HashSet<WindowId> = float_windows.iter().map(|wp| wp.id).collect();
+        let current_float_ids: HashSet<WindowId> = per_monitor
+            .iter()
+            .flat_map(|m| m.float_windows.iter().map(|wp| wp.id))
+            .collect();
         self.float_overlays
             .retain(|id, _| current_float_ids.contains(id));
 
@@ -681,32 +686,31 @@ impl Dome {
     }
 
     #[tracing::instrument(skip_all)]
-    fn position_windows(
-        &mut self,
-        float_windows: &[FloatWindowPlacement],
-        per_monitor: &[MonitorPositionData],
-        focused: Option<WindowId>,
-    ) {
+    fn position_windows(&mut self, per_monitor: &[MonitorPositionData], focused: Option<WindowId>) {
         let focus_changed = focused != self.last_focused;
 
-        // Float windows — ensure overlay exists, then position
-        for wp in float_windows {
-            if !self.float_overlays.contains_key(&wp.id) {
-                match self.overlay_factory.create_float_overlay() {
-                    Ok(o) => {
-                        self.float_overlays.insert(wp.id, o);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to create float overlay: {e:#}");
-                        continue;
+        for data in per_monitor {
+            for wp in &data.float_windows {
+                if !self.float_overlays.contains_key(&wp.id) {
+                    match self.overlay_factory.create_float_overlay() {
+                        Ok(o) => {
+                            self.float_overlays.insert(wp.id, o);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to create float overlay: {e:#}");
+                            continue;
+                        }
                     }
                 }
+                self.show_float(
+                    wp.id,
+                    wp,
+                    focus_changed,
+                    focused == Some(wp.id),
+                    data.monitor_id,
+                );
             }
-            self.show_float(wp.id, wp, focus_changed, focused == Some(wp.id));
-        }
 
-        // Tiling windows — positioned first, overlay placed behind the last window
-        for data in per_monitor {
             if !self.tiling_overlays.contains_key(&data.monitor_id) {
                 continue;
             }
@@ -717,40 +721,13 @@ impl Dome {
                     .clear();
                 continue;
             }
-            // Focused window first so it's highest in z-order among tiling.
-            // Overlay goes behind all tiling windows so managed windows
-            // naturally occlude the overlay interior (same as macOS).
-            let mut last_window: Option<HwndId> = None;
-            let focused_first = data
-                .tiling_windows
-                .iter()
-                .filter(|wp| focused == Some(wp.id))
-                .chain(
-                    data.tiling_windows
-                        .iter()
-                        .filter(|wp| focused != Some(wp.id)),
-                );
-            for wp in focused_first {
-                let z = match last_window {
-                    Some(prev) => ZOrder::After(prev),
-                    None => ZOrder::Top,
-                };
-                self.show_tiling(wp.id, wp, z);
-                last_window = Some(self.registry.get(wp.id).ext.id());
+            for wp in &data.tiling_windows {
+                self.show_tiling(wp.id, wp, data.monitor_id);
             }
-            let overlay_z = match last_window {
-                Some(last) => ZOrder::After(last),
-                None => ZOrder::Unchanged,
-            };
             self.tiling_overlays
                 .get_mut(&data.monitor_id)
                 .unwrap()
-                .update(
-                    data.dimension,
-                    &data.tiling_windows,
-                    &data.containers,
-                    overlay_z,
-                );
+                .update(data.dimension, &data.tiling_windows, &data.containers);
         }
     }
 

@@ -356,40 +356,31 @@ impl TilingOverlayApi for TilingOverlay {
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
-        z: ZOrder,
     ) {
         let w = monitor.width.max(1.0) as u32;
         let h = monitor.height.max(1.0) as u32;
 
         if self.monitor != monitor {
             self.renderer.resize(w, h);
+            unsafe {
+                SetWindowPos(
+                    self.window.hwnd(),
+                    None,
+                    monitor.x as i32,
+                    monitor.y as i32,
+                    w as i32,
+                    h as i32,
+                    SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOZORDER,
+                )
+                .ok();
+            }
+            self.window.show();
             self.monitor = monitor;
         }
 
-        // ORDERING INVARIANT: data assignments, SetWindowPos, show, render.
-        // Data must be set before rerender() reads it.
+        // Data assignments must precede rerender().
         self.windows = windows.to_vec();
         self.containers = containers.to_vec();
-
-        let z_after: Option<HWND> = z.into();
-        let mut flags = SWP_NOACTIVATE | SWP_NOREDRAW;
-        if z_after.is_none() {
-            flags |= SWP_NOZORDER;
-        }
-        unsafe {
-            SetWindowPos(
-                self.window.hwnd(),
-                z_after,
-                monitor.x as i32,
-                monitor.y as i32,
-                w as i32,
-                h as i32,
-                flags,
-            )
-            .ok();
-        }
-        // Show before render so the window is visible when the first frame presents.
-        self.window.show();
         self.rerender();
     }
 
@@ -481,7 +472,6 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
-        z: ZOrder,
     );
     fn clear(&mut self);
     fn set_config(&mut self, config: Config);

@@ -229,6 +229,7 @@ impl TestEnv {
 
     fn destroy_window(&mut self, ext: &Arc<MockExternalHwnd>) {
         self.dome.window_destroyed(ext.hwnd_id);
+        self.z_model.remove(ext.hwnd_id);
         self.dome.apply_layout();
     }
 
@@ -393,6 +394,13 @@ impl ZOrderModel {
 
     fn normal_stack(&self) -> Vec<HwndId> {
         self.inner.lock().unwrap().normal.clone()
+    }
+
+    /// Removes a window from both z-order bands. Mirrors Win32 `DestroyWindow`.
+    fn remove(&self, hwnd: HwndId) {
+        let mut stack = self.inner.lock().unwrap();
+        stack.topmost.retain(|&id| id != hwnd);
+        stack.normal.retain(|&id| id != hwnd);
     }
 }
 
@@ -574,6 +582,12 @@ impl ManageExternalHwnd for MockExternalHwnd {
     }
 }
 
+impl Drop for MockExternalHwnd {
+    fn drop(&mut self) {
+        self.z_model.remove(self.hwnd_id);
+    }
+}
+
 /// Assert that windows tile horizontally across the screen.
 fn assert_h_tiled(dims: &[Dimension], screen: Dimension, border: f32) {
     assert!(!dims.is_empty());
@@ -626,10 +640,7 @@ impl FloatOverlayApi for NoopFloatOverlay {
     fn hide(&mut self) {}
 }
 
-struct NoopTilingOverlay {
-    overlay_id: HwndId,
-    z_model: ZOrderModel,
-}
+struct NoopTilingOverlay;
 
 impl TilingOverlayApi for NoopTilingOverlay {
     fn update(
@@ -637,9 +648,7 @@ impl TilingOverlayApi for NoopTilingOverlay {
         _: Dimension,
         _: &[crate::core::TilingWindowPlacement],
         _: &[(crate::core::ContainerPlacement, Vec<String>)],
-        z: ZOrder,
     ) {
-        self.z_model.apply(self.overlay_id, z);
     }
     fn clear(&mut self) {}
     fn set_config(&mut self, _: Config) {}
@@ -673,10 +682,11 @@ struct NoopOverlays {
 
 impl CreateOverlay for NoopOverlays {
     fn create_tiling_overlay(&self, _: Config) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
-        Ok(Box::new(NoopTilingOverlay {
-            overlay_id: HwndId::test(9999),
-            z_model: self.z_model.clone(),
-        }))
+        // Seed the overlay at the top of the normal band, mirroring Win32
+        // CreateWindowExW. Subsequent tiling windows placed with ZOrder::Top
+        // push it down.
+        self.z_model.apply(HwndId::test(9999), ZOrder::Top);
+        Ok(Box::new(NoopTilingOverlay))
     }
     fn create_float_overlay(&self) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         Ok(Box::new(NoopFloatOverlay {

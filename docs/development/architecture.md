@@ -186,7 +186,7 @@ WindowState
 └── Minimized
 ```
 
-- Each positioned window carries `DriftState` with target vs. actual and retry logic. `DriftState` also tracks `last_z`, the z-order last applied via `set_position`. This prevents the early-return optimization in `show_tiling` from silently dropping z-order changes when the position target is unchanged.
+- Each positioned window carries `DriftState` with target vs. actual and retry logic. `DriftState` also tracks `monitor`, the monitor the window was last placed on; compared in `show_tiling` to detect cross-monitor moves.
 - User drags detected via `EVENT_OBJECT_LOCATIONCHANGE` bracketed by move/size start/end events. Drift correction suppressed during drags. 60-second safety timeout for missed drag-end.
 - `FullscreenExclusive` bypasses the compositor; Dome skips overlay rendering.
 
@@ -214,7 +214,7 @@ Float windows are persistent overlays users rarely type into. macOS can't contro
 
 `SetWindowPos` sets z-order of any window -- no mirroring needed. Both tiling and float overlays sit behind their managed windows (mirroring macOS), so managed windows naturally occlude the overlay interior and no region clipping is needed. For topmost floats, the overlay is placed just below the managed window in the topmost band.
 
-**Tiling z-order chain.** `position_windows` builds a z-order chain: the focused tiling window gets `ZOrder::Top` (`HWND_TOP`), each subsequent window gets `ZOrder::After(previous)`, and the tiling overlay gets `ZOrder::After(last_window)`. This keeps all tiling windows above the overlay regardless of focus changes or workspace switches. The chain is deterministic for a given focus state, which lets `DriftState.last_z` tracking detect when z-order is unchanged and skip redundant `SetWindowPos` calls.
+**Tiling z-order.** Windows tiling z-order is state-driven in `show_tiling`: newly-appearing tiling windows raise to `Top` above the overlay; same-monitor stable windows early-return with no `SetWindowPos`. The overlay is positioned once at creation and never re-raised. Sibling order follows Win32 foreground activation.
 
 Auto-float: windows without `WS_THICKFRAME`, or with `WS_POPUP`, `WS_EX_TOPMOST`, `WS_EX_DLGMODALFRAME` are inserted as float.
 

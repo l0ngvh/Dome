@@ -1,5 +1,5 @@
 use crate::core::{
-    Dimension, FloatWindowPlacement, TilingWindowPlacement, WindowId, WindowRestrictions,
+    Dimension, FloatWindowPlacement, MonitorId, TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::platform::windows::external::{ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
@@ -17,11 +17,9 @@ pub(super) struct DriftState {
     /// the window currently is (or last was), not where we want it.
     pub(super) actual: (i32, i32, i32, i32),
     pub(super) retries: u8,
-    /// The z-order last applied via `set_position`. Compared against the
-    /// incoming `z` in `show_tiling` to decide whether the early return
-    /// can fire. Without this, the early return would silently drop z-order
-    /// changes when the position target is unchanged (Bug 2A).
-    pub(super) last_z: ZOrder,
+    /// Monitor this window was last placed on. `show_tiling` compares against
+    /// the incoming monitor to detect cross-monitor moves.
+    pub(super) monitor: MonitorId,
 }
 
 /// Tracks the platform-level visibility and fullscreen status of a managed window.
@@ -85,6 +83,7 @@ impl Dome {
         wp: &FloatWindowPlacement,
         focus_changed: bool,
         is_focused: bool,
+        monitor: MonitorId,
     ) {
         let entry = self.registry.get_mut(id);
         let border = self.config.border_size;
@@ -138,16 +137,23 @@ impl Dome {
         }
 
         if !settled {
+            // Float z-order uses Topmost/Unchanged; the monitor field is written
+            // because DriftState is shared across positioned states.
             entry.state = WindowState::Positioned(PositionedState::Float(DriftState {
                 target: new_target,
                 actual: prev_actual,
                 retries: 0,
-                last_z: ZOrder::Unchanged,
+                monitor,
             }));
         }
     }
 
-    pub(super) fn show_tiling(&mut self, id: WindowId, wp: &TilingWindowPlacement, z: ZOrder) {
+    pub(super) fn show_tiling(
+        &mut self,
+        id: WindowId,
+        wp: &TilingWindowPlacement,
+        monitor: MonitorId,
+    ) {
         let entry = self.registry.get_mut(id);
         let border = self.config.border_size;
         let content = apply_inset(wp.frame, border);
@@ -157,28 +163,36 @@ impl Dome {
         let h = content.height.round() as i32;
         let new_target = (x, y, w, h);
 
-        let prev_actual = match entry.state {
+        let (z, prev_actual) = match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {
                 debug_assert!(false, "show_tiling called on fullscreen window {id}");
                 return;
             }
+            // Stable: same monitor, same target. No set_position needed.
             WindowState::Positioned(PositionedState::Tiling(d))
-                if d.target == new_target && d.last_z == z =>
+                if d.monitor == monitor && d.target == new_target =>
             {
                 return;
             }
+            // Same monitor, target drifted: reposition without raising.
+            WindowState::Positioned(PositionedState::Tiling(d)) if d.monitor == monitor => {
+                (ZOrder::Unchanged, d.actual)
+            }
+            // New window, restored from Minimized/Offscreen, Float->Tiling, or
+            // cross-monitor Tiling: raise to Top above the overlay.
             WindowState::Minimized | WindowState::UserMinimized => {
                 entry.ext.show_cmd(ShowCmd::Restore);
-                new_target
+                (ZOrder::Top, new_target)
             }
             WindowState::Positioned(ps) => {
                 if entry.ext.is_iconic() {
                     entry.ext.show_cmd(ShowCmd::Restore);
                 }
-                match ps {
+                let prev = match ps {
                     PositionedState::Tiling(d) | PositionedState::Float(d) => d.actual,
                     PositionedState::Offscreen { actual, .. } => actual,
-                }
+                };
+                (ZOrder::Top, prev)
             }
         };
 
@@ -187,11 +201,16 @@ impl Dome {
             target: new_target,
             actual: prev_actual,
             retries: 0,
-            last_z: z,
+            monitor,
         }));
     }
 
-    pub(super) fn show_fullscreen_window(&mut self, id: WindowId, dimension: Dimension) {
+    pub(super) fn show_fullscreen_window(
+        &mut self,
+        id: WindowId,
+        dimension: Dimension,
+        monitor: MonitorId,
+    ) {
         let entry = self.registry.get_mut(id);
         match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {}
@@ -214,11 +233,13 @@ impl Dome {
                     PositionedState::Tiling(d) | PositionedState::Float(d) => d.actual,
                     PositionedState::Offscreen { actual, .. } => actual,
                 };
+                // monitor is written because DriftState is shared across positioned
+                // states; fullscreen logic does not read it.
                 entry.state = WindowState::Positioned(PositionedState::Tiling(DriftState {
                     target: new_target,
                     actual: prev_actual,
                     retries: 0,
-                    last_z: ZOrder::Unchanged,
+                    monitor,
                 }));
             }
         }
