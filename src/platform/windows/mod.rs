@@ -44,8 +44,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PCWSTR};
 
 use crate::config::{Config, start_config_watcher};
-use crate::core::{Dimension, WindowId};
+use crate::core::Dimension;
 use crate::ipc;
+use crate::picker::PickerEntry;
 use dome::overlay::{FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, tiling_overlay_wnd_proc};
 use dome::picker::{PICKER_OVERLAY_CLASS, picker_wnd_proc};
 use dome::{Dome, HubEvent, KeyboardSinkApi};
@@ -290,7 +291,7 @@ impl dome::CreateOverlay for WgpuOverlayFactory {
     }
     fn create_picker(
         &self,
-        entries: Vec<(WindowId, String)>,
+        entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
     ) -> anyhow::Result<Box<dyn dome::overlay::PickerApi>> {
         Ok(dome::picker::PickerWindow::new(

@@ -85,7 +85,9 @@ impl Dome {
         is_focused: bool,
         monitor: MonitorId,
     ) {
-        let entry = self.registry.get_mut(id);
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
         let border = self.config.border_size;
         let content = apply_inset(wp.frame, border);
         let x = content.x.round() as i32;
@@ -154,7 +156,9 @@ impl Dome {
         wp: &TilingWindowPlacement,
         monitor: MonitorId,
     ) {
-        let entry = self.registry.get_mut(id);
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
         let border = self.config.border_size;
         let content = apply_inset(wp.frame, border);
         let x = content.x.round() as i32;
@@ -211,7 +215,9 @@ impl Dome {
         dimension: Dimension,
         monitor: MonitorId,
     ) {
-        let entry = self.registry.get_mut(id);
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
         match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {}
             WindowState::Minimized | WindowState::UserMinimized => {
@@ -246,7 +252,9 @@ impl Dome {
     }
 
     pub(super) fn hide_window(&mut self, id: WindowId) {
-        let entry = self.registry.get_mut(id);
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
         match entry.state {
             WindowState::Positioned(PositionedState::Tiling(d) | PositionedState::Float(d)) => {
                 entry.ext.move_offscreen();
@@ -274,7 +282,9 @@ impl Dome {
     }
 
     pub(super) fn window_entered_borderless_fullscreen(&mut self, id: WindowId) {
-        let window = self.registry.get_mut(id);
+        let Some(window) = self.registry.get_mut(id) else {
+            return;
+        };
         match window.state {
             WindowState::Positioned(_) => {
                 window.state = WindowState::FullscreenBorderless;
@@ -290,7 +300,9 @@ impl Dome {
 
     pub(super) fn window_drifted(&mut self, id: WindowId, x: i32, y: i32, w: i32, h: i32) {
         let visible_rect = (x, y, w, h);
-        let entry = self.registry.get_mut(id);
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
         match &mut entry.state {
             WindowState::FullscreenExclusive | WindowState::UserMinimized => {}
             WindowState::FullscreenBorderless | WindowState::Minimized => {
@@ -332,7 +344,9 @@ impl Dome {
     }
 
     pub(super) fn enter_fullscreen_exclusive(&mut self, id: WindowId) {
-        self.registry.get_mut(id).state = WindowState::FullscreenExclusive;
+        if let Some(entry) = self.registry.get_mut(id) {
+            entry.state = WindowState::FullscreenExclusive;
+        }
         self.hub.set_fullscreen(id, WindowRestrictions::BlockAll);
     }
 }

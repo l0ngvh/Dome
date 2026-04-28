@@ -71,11 +71,11 @@ impl Dome {
 
         if focused_window != self.last_focused {
             self.last_focused = focused_window;
-            if let Some(id) = focused_window {
-                let window = self.registry.by_id(id);
-                if let Err(err) = window.ax.focus() {
-                    tracing::trace!("Failed to focus window: {err:#}");
-                }
+            if let Some(id) = focused_window
+                && let Some(window) = self.registry.by_id(id)
+                && let Err(err) = window.ax.focus()
+            {
+                tracing::trace!("Failed to focus window: {err:#}");
             }
         }
         let created = std::mem::take(&mut self.pending_created);
@@ -88,7 +88,9 @@ impl Dome {
         }
 
         for &wid in &deleted {
-            let entry = self.registry.by_id(wid);
+            let Some(entry) = self.registry.by_id(wid) else {
+                continue;
+            };
             let cg_id = entry.cg_id;
             self.recovery.untrack(cg_id);
             self.monitor_registry.remove_displayed_window(wid);
@@ -160,7 +162,9 @@ impl Dome {
                     } else {
                         self.place_window(wp.id, content_dim);
                     }
-                    let entry = self.registry.by_id(wp.id);
+                    let Some(entry) = self.registry.by_id(wp.id) else {
+                        continue;
+                    };
                     float_shows.push(FloatShow {
                         cg_id: entry.cg_id,
                         placement: *wp,

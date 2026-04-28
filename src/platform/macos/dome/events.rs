@@ -12,6 +12,7 @@ use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, MonitorId,
     TilingWindowPlacement, WindowId,
 };
+use crate::picker::PickerEntry;
 
 use super::super::MonitorInfo;
 
@@ -101,7 +102,7 @@ pub(in crate::platform::macos) enum HubMessage {
     RefreshObservers,
     ConfigChanged(Config),
     PickerToggle {
-        entries: Vec<(WindowId, String)>,
+        entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
         cocoa_frame: NSRect,
         scale: f64,

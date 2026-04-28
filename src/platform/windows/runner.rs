@@ -201,6 +201,9 @@ impl Runner {
                 }
                 Action::ToggleMinimizePicker => {
                     self.dome.toggle_picker();
+                    if self.dome.picker_visible() {
+                        self.dispatch_picker_icons();
+                    }
                 }
                 Action::UnminimizeWindow(id) => {
                     self.dome.picker_unminimize_window(*id);
@@ -300,6 +303,25 @@ impl Runner {
                 runner.dome.apply_layout();
             },
         );
+    }
+
+    fn dispatch_picker_icons(&mut self) {
+        let to_load = self.dome.picker_icons_to_load();
+        for (app_id, hwnd_id) in to_load {
+            self.dispatcher.dispatch(
+                move || {
+                    let hwnd = windows::Win32::Foundation::HWND::from(hwnd_id);
+                    crate::platform::windows::dome::icon::load_app_icon(hwnd)
+                        .map(|image| (app_id, image))
+                },
+                move |result, runner| {
+                    if let Some((app_id, image)) = result {
+                        runner.dome.picker_receive_icon(app_id, image);
+                        runner.dome.picker_rerender();
+                    }
+                },
+            );
+        }
     }
 }
 

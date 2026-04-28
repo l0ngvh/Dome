@@ -1,3 +1,4 @@
+pub(super) mod icon;
 pub(super) mod overlay;
 pub(super) mod picker;
 mod placement_tracker;
@@ -16,6 +17,7 @@ use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, MonitorId,
     MonitorLayout, TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
 };
+use crate::picker::{PickerEntry, build_picker_entries};
 
 use self::overlay::{FloatOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
@@ -69,7 +71,7 @@ pub(super) trait CreateOverlay {
     fn create_float_overlay(&self) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
     fn create_picker(
         &self,
-        entries: Vec<(WindowId, String)>,
+        entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
     ) -> anyhow::Result<Box<dyn overlay::PickerApi>>;
 }
@@ -206,12 +208,17 @@ impl Dome {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
-        match self.registry.get(id).state {
+        let Some(entry) = self.registry.get(id) else {
+            return;
+        };
+        match entry.state {
             // Dome-initiated minimize or exclusive fullscreen -- ignore.
             WindowState::Minimized | WindowState::FullscreenExclusive => {}
             _ => {
                 self.hub.minimize_window(id);
-                self.registry.get_mut(id).state = WindowState::UserMinimized;
+                if let Some(entry) = self.registry.get_mut(id) {
+                    entry.state = WindowState::UserMinimized;
+                }
             }
         }
     }
@@ -221,14 +228,20 @@ impl Dome {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
-        if !matches!(self.registry.get(id).state, WindowState::UserMinimized) {
+        if !self
+            .registry
+            .get(id)
+            .is_some_and(|e| matches!(e.state, WindowState::UserMinimized))
+        {
             return;
         }
         self.hub.unminimize_window(id);
-        self.registry.get_mut(id).state = WindowState::Positioned(PositionedState::Offscreen {
-            retries: 0,
-            actual: (0, 0, 0, 0),
-        });
+        if let Some(entry) = self.registry.get_mut(id) {
+            entry.state = WindowState::Positioned(PositionedState::Offscreen {
+                retries: 0,
+                actual: (0, 0, 0, 0),
+            });
+        }
     }
 
     pub(super) fn move_size_started(&mut self, id_key: HwndId) {
@@ -500,13 +513,19 @@ impl Dome {
                 pw.hide();
             }
             Some(pw) => {
-                let entries = self.hub.minimized_window_entries();
+                let minimized = self.hub.minimized_window_entries();
+                let entries = build_picker_entries(&minimized, |wid| {
+                    self.registry.get(wid).map(|e| e.process.clone())
+                });
                 let focused_monitor = self.hub.focused_monitor();
                 let monitor_dim = self.monitor_dimensions[&focused_monitor];
                 pw.show(entries, monitor_dim);
             }
             None => {
-                let entries = self.hub.minimized_window_entries();
+                let minimized = self.hub.minimized_window_entries();
+                let entries = build_picker_entries(&minimized, |wid| {
+                    self.registry.get(wid).map(|e| e.process.clone())
+                });
                 let focused_monitor = self.hub.focused_monitor();
                 let monitor_dim = self.monitor_dimensions[&focused_monitor];
                 match self.overlay_factory.create_picker(entries, monitor_dim) {
@@ -521,6 +540,30 @@ impl Dome {
         }
     }
 
+    pub(super) fn picker_icons_to_load(&mut self) -> Vec<(String, super::external::HwndId)> {
+        let Some(picker) = &mut self.picker else {
+            return Vec::new();
+        };
+        let registry = &self.registry;
+        picker.icons_to_load(&|wid| registry.get(wid).map(|e| e.ext.id()))
+    }
+
+    pub(super) fn picker_receive_icon(&mut self, app_id: String, image: egui::ColorImage) {
+        if let Some(picker) = &mut self.picker {
+            picker.receive_icon(app_id, image);
+        }
+    }
+
+    pub(super) fn picker_visible(&self) -> bool {
+        self.picker.as_ref().is_some_and(|p| p.is_visible())
+    }
+
+    pub(super) fn picker_rerender(&mut self) {
+        if let Some(picker) = &mut self.picker {
+            picker.rerender();
+        }
+    }
+
     /// Unminimize a window selected via the picker. Unlike `window_restored`
     /// (driven by a Win32 event after the user clicks the taskbar), the picker
     /// path must drive both the core state and the OS state: tell the hub the
@@ -528,7 +571,9 @@ impl Dome {
     /// state to Positioned(Offscreen) so apply_layout can place it.
     pub(super) fn picker_unminimize_window(&mut self, id: WindowId) {
         self.hub.unminimize_window(id);
-        let entry = self.registry.get_mut(id);
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
         if let WindowState::UserMinimized = entry.state {
             entry.ext.show_cmd(ShowCmd::Restore);
             entry.state = WindowState::Positioned(PositionedState::Offscreen {
@@ -571,20 +616,20 @@ impl Dome {
 
                     for wp in tiling_windows {
                         window_ids.insert(wp.id);
-                        if self
-                            .placement_tracker
-                            .is_moving(self.registry.get(wp.id).ext.id())
-                        {
+                        let Some(entry) = self.registry.get(wp.id) else {
+                            continue;
+                        };
+                        if self.placement_tracker.is_moving(entry.ext.id()) {
                             continue;
                         }
                         placed_tiling.push(*wp);
                     }
                     for wp in fw {
                         window_ids.insert(wp.id);
-                        if self
-                            .placement_tracker
-                            .is_moving(self.registry.get(wp.id).ext.id())
-                        {
+                        let Some(entry) = self.registry.get(wp.id) else {
+                            continue;
+                        };
+                        if self.placement_tracker.is_moving(entry.ext.id()) {
                             continue;
                         }
                         placed_floats.push(*wp);
@@ -637,8 +682,10 @@ impl Dome {
         for &id in &to_hide {
             // Keep taskbar tab for user-minimized windows so the user can
             // click it to restore. Dome-hidden windows get their tab removed.
-            if !matches!(self.registry.get(id).state, WindowState::UserMinimized) {
-                self.taskbar.delete_tab(self.registry.get(id).ext.id());
+            if let Some(entry) = self.registry.get(id)
+                && !matches!(entry.state, WindowState::UserMinimized)
+            {
+                self.taskbar.delete_tab(entry.ext.id());
             }
             self.hide_window(id);
         }
@@ -662,7 +709,9 @@ impl Dome {
 
         // Taskbar
         for &id in &tabs_to_add {
-            self.taskbar.add_tab(self.registry.get(id).ext.id());
+            if let Some(entry) = self.registry.get(id) {
+                self.taskbar.add_tab(entry.ext.id());
+            }
         }
 
         // Focus
@@ -674,8 +723,9 @@ impl Dome {
         if focused != self.last_focused || monitor_changed {
             self.last_focused = focused;
             if let Some(id) = focused {
-                let entry = self.registry.get(id);
-                if !matches!(entry.state, WindowState::FullscreenExclusive) {
+                if let Some(entry) = self.registry.get(id)
+                    && !matches!(entry.state, WindowState::FullscreenExclusive)
+                {
                     entry.ext.set_foreground_window();
                 }
             } else {
@@ -753,10 +803,9 @@ impl Dome {
         self.registry
             .iter()
             .filter(|(_, id)| {
-                !matches!(
-                    self.registry.get(*id).state,
-                    WindowState::FullscreenExclusive
-                )
+                self.registry
+                    .get(*id)
+                    .is_none_or(|e| !matches!(e.state, WindowState::FullscreenExclusive))
             })
             .map(|(hwnd_id, _)| hwnd_id)
             .collect()

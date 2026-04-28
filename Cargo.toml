@@ -27,7 +27,7 @@ dispatch2 = "0.3"
 futures-channel = "0.3"
 libc = "0.2.179"
 objc2 = "0.6.3"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "libc", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSWindow", "NSWindowScripting", "NSView", "NSColor", "NSEvent", "NSScreen", "NSResponder", "NSGraphics", "objc2-core-foundation", "objc2-core-graphics", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "libc", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSWindow", "NSWindowScripting", "NSView", "NSColor", "NSEvent", "NSScreen", "NSResponder", "NSGraphics", "NSImage", "NSImageRep", "NSBitmapImageRep", "objc2-core-foundation", "objc2-core-graphics", "objc2-quartz-core"] }
 objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "objc2", "libc", "HIServices", "AXUIElement", "AXValue", "AXError", "Accessibility", "AXNotificationConstants"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFDictionary", "CFNumber", "CFString", "CFRunLoop", "CFMachPort", "CFCGTypes", "CFDate"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGWindow", "CGColorSpace", "CGSession", "CGDirectDisplay", "CGEvent", "CGEventTypes"] }

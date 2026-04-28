@@ -1,3 +1,4 @@
+mod icon;
 mod mirror;
 mod overlay;
 mod picker;

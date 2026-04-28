@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::action::{Action, Actions};
 use crate::config::Config;
-use crate::core::{Dimension, WindowId};
+use crate::core::Dimension;
+use crate::picker::PickerEntry;
 use crate::platform::windows::ScreenInfo;
 use crate::platform::windows::dome::ObservedPosition;
 use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
@@ -74,7 +75,7 @@ struct TestEnv {
     config: Config,
     sink_focus_count: Rc<Cell<u32>>,
     overlay_update_count: Rc<Cell<u32>>,
-    picker_entries: Rc<RefCell<Vec<(WindowId, String)>>>,
+    picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     z_model: ZOrderModel,
 }
 
@@ -656,12 +657,12 @@ impl TilingOverlayApi for NoopTilingOverlay {
 
 struct NoopPicker {
     visible: bool,
-    entries: Rc<RefCell<Vec<(WindowId, String)>>>,
+    entries: Rc<RefCell<Vec<PickerEntry>>>,
 }
 
 impl PickerApi for NoopPicker {
-    fn show(&mut self, entries: Vec<(WindowId, String)>, _monitor_dim: Dimension) {
-        self.entries.borrow_mut().clone_from(&entries);
+    fn show(&mut self, entries: Vec<PickerEntry>, _monitor_dim: Dimension) {
+        *self.entries.borrow_mut() = entries;
         self.visible = true;
     }
 
@@ -672,11 +673,22 @@ impl PickerApi for NoopPicker {
     fn is_visible(&self) -> bool {
         self.visible
     }
+
+    fn icons_to_load(
+        &mut self,
+        _lookup_hwnd: &dyn Fn(crate::core::WindowId) -> Option<HwndId>,
+    ) -> Vec<(String, HwndId)> {
+        Vec::new()
+    }
+
+    fn receive_icon(&mut self, _app_id: String, _image: egui::ColorImage) {}
+
+    fn rerender(&mut self) {}
 }
 
 struct NoopOverlays {
     overlay_update_count: Rc<Cell<u32>>,
-    picker_entries: Rc<RefCell<Vec<(WindowId, String)>>>,
+    picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     z_model: ZOrderModel,
 }
 
@@ -695,7 +707,7 @@ impl CreateOverlay for NoopOverlays {
     }
     fn create_picker(
         &self,
-        entries: Vec<(WindowId, String)>,
+        entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
         let mut picker = NoopPicker {

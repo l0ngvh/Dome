@@ -231,6 +231,7 @@ pub(crate) struct Dimension {
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
 pub struct WindowId(usize);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ContainerId(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

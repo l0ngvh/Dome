@@ -47,12 +47,12 @@ impl WindowRegistry {
         Some(window_id)
     }
 
-    pub(super) fn get(&self, id: WindowId) -> &WindowEntry {
-        &self.by_id[&id]
+    pub(super) fn get(&self, id: WindowId) -> Option<&WindowEntry> {
+        self.by_id.get(&id)
     }
 
-    pub(super) fn get_mut(&mut self, id: WindowId) -> &mut WindowEntry {
-        self.by_id.get_mut(&id).unwrap()
+    pub(super) fn get_mut(&mut self, id: WindowId) -> Option<&mut WindowEntry> {
+        self.by_id.get_mut(&id)
     }
 
     pub(super) fn get_id(&self, id: HwndId) -> Option<WindowId> {

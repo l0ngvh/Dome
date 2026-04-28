@@ -269,7 +269,9 @@ fn hidden_position(monitors: &[MonitorInfo]) -> (i32, i32) {
 impl Dome {
     #[tracing::instrument(skip(self))]
     pub(super) fn place_window(&mut self, window_id: WindowId, dim: Dimension) {
-        let window = self.registry.by_id_mut(window_id);
+        let Some(window) = self.registry.by_id_mut(window_id) else {
+            return;
+        };
         if window.is_moving {
             return;
         }
@@ -308,7 +310,9 @@ impl Dome {
 
     #[tracing::instrument(skip(self))]
     pub(super) fn place_fullscreen_window(&mut self, window_id: WindowId, monitor_id: MonitorId) {
-        let window = self.registry.by_id_mut(window_id);
+        let Some(window) = self.registry.by_id_mut(window_id) else {
+            return;
+        };
         let monitor = self.monitor_registry.get_entry_mut(monitor_id);
         let screen_dim = monitor.screen.dimension;
         match &mut window.state {
@@ -350,7 +354,9 @@ impl Dome {
 
     #[tracing::instrument(skip(self))]
     pub(super) fn window_entered_native_fullscreen(&mut self, window_id: WindowId) {
-        let window = self.registry.by_id_mut(window_id);
+        let Some(window) = self.registry.by_id_mut(window_id) else {
+            return;
+        };
         window.state = WindowState::NativeFullscreen;
         self.hub
             .set_fullscreen(window.window_id, WindowRestrictions::ProtectFullscreen);
@@ -373,7 +379,9 @@ impl Dome {
             height: h,
         };
         let monitors = self.monitor_registry.all_screens();
-        let window = self.registry.by_id_mut(window_id);
+        let Some(window) = self.registry.by_id_mut(window_id) else {
+            return;
+        };
         let monitor = self
             .monitor_registry
             .find_monitor_at(new_placement.x as f32, new_placement.y as f32);
@@ -544,7 +552,9 @@ impl Dome {
     #[tracing::instrument(skip(self))]
     pub(super) fn hide_window(&mut self, window_id: WindowId) {
         let monitors = self.monitor_registry.all_screens();
-        let window = self.registry.by_id_mut(window_id);
+        let Some(window) = self.registry.by_id_mut(window_id) else {
+            return;
+        };
         // Minimize borderless fullscreen windows instead of moving offscreen:
         // 1. User-zoomed windows maintain their fullscreen state, so moving them is futile
         // 2. Moving offscreen triggers handle_window_moved which detects fullscreen exit
@@ -576,7 +586,9 @@ impl Dome {
 
     #[tracing::instrument(skip(self))]
     pub(super) fn move_window_offscreen(&mut self, window_id: WindowId) {
-        let window = self.registry.by_id_mut(window_id);
+        let Some(window) = self.registry.by_id_mut(window_id) else {
+            return;
+        };
         let WindowState::Positioned(positioned_state) = window.state else {
             debug_assert!(
                 false,

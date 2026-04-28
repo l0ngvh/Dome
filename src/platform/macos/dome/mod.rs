@@ -20,6 +20,7 @@ use crate::config::{Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
     ContainerId, Dimension, Direction, Hub, TilingAction, WindowId, WindowRestrictions,
 };
+use crate::picker::build_picker_entries;
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 
@@ -138,7 +139,9 @@ impl Dome {
                 None => continue,
             };
             self.hub.minimize_window(wid);
-            self.registry.by_id_mut(wid).state = WindowState::UserMinimized;
+            if let Some(w) = self.registry.by_id_mut(wid) {
+                w.state = WindowState::UserMinimized;
+            }
         }
         for unmin in unminimized {
             let wid = match self.registry.get(unmin.cg_id).map(|e| e.window_id) {
@@ -152,9 +155,11 @@ impl Dome {
                 width: unmin.w,
                 height: unmin.h,
             };
-            self.registry.by_id_mut(wid).state = WindowState::Positioned(
-                PositionedState::Offscreen(OffscreenPlacement::new(actual)),
-            );
+            if let Some(w) = self.registry.by_id_mut(wid) {
+                w.state = WindowState::Positioned(PositionedState::Offscreen(
+                    OffscreenPlacement::new(actual),
+                ));
+            }
         }
         let mut on_open = Vec::new();
         for new in added {
@@ -195,7 +200,9 @@ impl Dome {
             };
             self.recovery.track(ax, w, h, self.primary_screen);
             let actions = {
-                let entry = self.registry.by_id(window_id);
+                let Some(entry) = self.registry.by_id(window_id) else {
+                    continue;
+                };
                 on_open_actions(entry, &self.config.macos.on_open)
             };
             if let Some(actions) = actions {
@@ -430,7 +437,10 @@ impl Dome {
     /// Sends picker data to the UI thread, which toggles the picker window:
     /// creates it if absent, closes it if already open.
     pub(in crate::platform::macos) fn toggle_picker(&mut self) {
-        let entries = self.hub.minimized_window_entries();
+        let minimized = self.hub.minimized_window_entries();
+        let entries = build_picker_entries(&minimized, |wid| {
+            self.registry.by_id(wid).and_then(|e| e.bundle_id.clone())
+        });
         let focused_monitor = self.hub.focused_monitor();
         let screen = &self.monitor_registry.get_entry(focused_monitor).screen;
         let monitor_dim = screen.dimension;
@@ -453,7 +463,9 @@ impl Dome {
     ///    flush_layout's place_window can move it into view.
     pub(in crate::platform::macos) fn picker_unminimize_window(&mut self, window_id: WindowId) {
         self.hub.unminimize_window(window_id);
-        let window = self.registry.by_id_mut(window_id);
+        let Some(window) = self.registry.by_id_mut(window_id) else {
+            return;
+        };
         if let WindowState::UserMinimized = window.state {
             if let Err(e) = window.ax.unminimize() {
                 tracing::debug!(%window_id, "Failed to unminimize window from picker: {e:#}");

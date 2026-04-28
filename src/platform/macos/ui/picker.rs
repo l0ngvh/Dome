@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use calloop::channel::Sender as CalloopSender;
@@ -13,9 +14,15 @@ use objc2_quartz_core::CAMetalLayer;
 
 use super::renderer::{MetalBackend, Renderer};
 use crate::action::{Action, Actions};
-use crate::core::{Dimension, WindowId};
-use crate::picker::PickerResult;
+use crate::core::Dimension;
+use crate::picker::{PickerEntry, PickerResult};
 use crate::platform::macos::dome::HubEvent;
+
+/// Snapshot of the icon texture cache plus newly loaded images awaiting TextureHandle conversion.
+type PendingIcons = (
+    HashMap<String, Option<egui::TextureHandle>>,
+    Vec<(String, egui::ColorImage)>,
+);
 
 struct PickerWindowIvars {
     hub_sender: CalloopSender<HubEvent>,
@@ -74,8 +81,8 @@ define_class!(
                 0x24 => {
                     let entries = view_ivars.entries.borrow();
                     let idx = view_ivars.selected_index.get();
-                    if let Some(&(id, _)) = entries.get(idx) {
-                        let actions = Actions::new(vec![Action::UnminimizeWindow(id)]);
+                    if let Some(entry) = entries.get(idx) {
+                        let actions = Actions::new(vec![Action::UnminimizeWindow(entry.id)]);
                         ivars.hub_sender.send(HubEvent::Action(actions)).ok();
                     }
                     self.orderOut(None);
@@ -122,10 +129,11 @@ struct PickerViewIvars {
     layer: Retained<CAMetalLayer>,
     events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<Renderer>,
-    entries: RefCell<Vec<(WindowId, String)>>,
+    entries: RefCell<Vec<PickerEntry>>,
     selected_index: Cell<usize>,
     scale: Cell<f64>,
     hub_sender: CalloopSender<HubEvent>,
+    icon_textures: RefCell<HashMap<String, Option<egui::TextureHandle>>>,
 }
 
 define_class!(
@@ -197,7 +205,7 @@ impl PickerView {
     fn new(
         mtm: MainThreadMarker,
         backend: Rc<MetalBackend>,
-        entries: Vec<(WindowId, String)>,
+        entries: Vec<PickerEntry>,
         render_info: (f64, f64, f64),
         hub_sender: CalloopSender<HubEvent>,
     ) -> Retained<Self> {
@@ -213,6 +221,7 @@ impl PickerView {
             selected_index: Cell::new(0),
             scale: Cell::new(scale),
             hub_sender,
+            icon_textures: RefCell::new(HashMap::new()),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
@@ -224,20 +233,76 @@ impl PickerView {
 
     fn render_now(&self) {
         let ivars = self.ivars();
+
         let entries = ivars.entries.borrow();
         let selected_index = ivars.selected_index.get();
         let events = std::mem::take(&mut *ivars.events.borrow_mut());
         let scale = ivars.scale.get();
-        let result = ivars
-            .renderer
-            .borrow_mut()
-            .render(scale as f32, events, None, |ctx| {
-                crate::picker::paint_picker(ctx, &entries, selected_index)
-            });
+
+        let (icon_snapshot, mut new_icons) = self.load_pending_icons(&entries);
+
+        // Convert new ColorImages to TextureHandles inside the render closure
+        // (requires egui Context), then call paint_picker with the merged map.
+        let (result, new_textures) =
+            ivars
+                .renderer
+                .borrow_mut()
+                .render(scale as f32, events, None, |ctx| {
+                    let mut all_icons = icon_snapshot.clone();
+                    let mut created = Vec::new();
+                    for (app_id, image) in new_icons.drain(..) {
+                        let handle = ctx.load_texture(
+                            &app_id,
+                            image,
+                            Default::default(), // TextureOptions default is fine for icon textures
+                        );
+                        all_icons.insert(app_id.clone(), Some(handle.clone()));
+                        created.push((app_id, handle));
+                    }
+                    let picker_result =
+                        crate::picker::paint_picker(ctx, &entries, selected_index, &all_icons);
+                    (picker_result, created)
+                });
+
+        self.commit_icons(new_textures);
+
         if let PickerResult::Selected(id) = result {
             let actions = Actions::new(vec![Action::UnminimizeWindow(id)]);
             ivars.hub_sender.send(HubEvent::Action(actions)).ok();
             self.window().unwrap().orderOut(None);
+        }
+    }
+
+    /// Loads icons for entries not yet in the cache. Inserts None sentinels for
+    /// entries being attempted so failed loads are not retried. Returns a snapshot
+    /// of the current icon_textures cache and any newly loaded ColorImages that
+    /// still need TextureHandle conversion (which requires the egui Context).
+    fn load_pending_icons(&self, entries: &[PickerEntry]) -> PendingIcons {
+        let ivars = self.ivars();
+        let mut new_icons: Vec<(String, egui::ColorImage)> = Vec::new();
+        for entry in entries.iter() {
+            if let Some(app_id) = &entry.app_id
+                && !ivars.icon_textures.borrow().contains_key(app_id)
+            {
+                // Sentinel prevents re-attempting failed loads within a session.
+                ivars
+                    .icon_textures
+                    .borrow_mut()
+                    .insert(app_id.clone(), None);
+                if let Some(image) = super::icon::load_app_icon(app_id) {
+                    new_icons.push((app_id.clone(), image));
+                }
+            }
+        }
+        let snapshot = ivars.icon_textures.borrow().clone();
+        (snapshot, new_icons)
+    }
+
+    /// Inserts newly created TextureHandles into the persistent icon cache.
+    fn commit_icons(&self, new_textures: Vec<(String, egui::TextureHandle)>) {
+        let mut textures = self.ivars().icon_textures.borrow_mut();
+        for (app_id, handle) in new_textures {
+            textures.insert(app_id, Some(handle));
         }
     }
 
@@ -250,7 +315,7 @@ impl PickerView {
     fn update(
         &self,
         _mtm: MainThreadMarker,
-        entries: Vec<(WindowId, String)>,
+        entries: Vec<PickerEntry>,
         scale: f64,
         width: f64,
         height: f64,
@@ -259,6 +324,9 @@ impl PickerView {
         *ivars.entries.borrow_mut() = entries;
         ivars.selected_index.set(0);
         ivars.scale.set(scale);
+        // Clear failed-load sentinels so relaunched apps can be retried.
+        // Loaded Some(_) entries are preserved as valid cache.
+        ivars.icon_textures.borrow_mut().retain(|_, v| v.is_some());
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
         self.setFrame(frame);
         ivars.renderer.borrow().resize(width, height, scale);
@@ -274,7 +342,7 @@ impl PickerPopup {
     pub(super) fn new(
         mtm: MainThreadMarker,
         backend: Rc<MetalBackend>,
-        entries: Vec<(WindowId, String)>,
+        entries: Vec<PickerEntry>,
         monitor: (Dimension, NSRect, f64),
         hub_sender: CalloopSender<HubEvent>,
     ) -> Self {
@@ -324,7 +392,7 @@ impl PickerPopup {
     pub(super) fn update_and_show(
         &self,
         mtm: MainThreadMarker,
-        entries: Vec<(WindowId, String)>,
+        entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
         cocoa_frame: NSRect,
         scale: f64,

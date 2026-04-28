@@ -21,7 +21,8 @@ use crate::core::{
     ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement, WindowId,
 };
 use crate::overlay;
-use crate::platform::windows::external::ZOrder;
+use crate::picker::PickerEntry;
+use crate::platform::windows::external::{HwndId, ZOrder};
 
 /// Owns an HWND and calls `DestroyWindow` on drop.
 /// Fields declared before this in a struct are dropped first,
@@ -478,9 +479,15 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
 }
 
 pub(in crate::platform::windows) trait PickerApi {
-    fn show(&mut self, entries: Vec<(WindowId, String)>, monitor_dim: Dimension);
+    fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension);
     fn hide(&mut self);
     fn is_visible(&self) -> bool;
+    fn icons_to_load(
+        &mut self,
+        lookup_hwnd: &dyn Fn(WindowId) -> Option<HwndId>,
+    ) -> Vec<(String, HwndId)>;
+    fn receive_icon(&mut self, app_id: String, image: egui::ColorImage);
+    fn rerender(&mut self);
 }
 
 pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =

@@ -83,19 +83,17 @@ impl Registry {
         Some(entry.window_id)
     }
 
-    pub(super) fn by_id(&self, window_id: WindowId) -> &WindowEntry {
+    pub(super) fn by_id(&self, window_id: WindowId) -> Option<&WindowEntry> {
         self.id_to_cg
             .get(&window_id)
             .and_then(|&cg_id| self.windows.get(&cg_id))
-            .unwrap()
     }
 
-    pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> &mut WindowEntry {
+    pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> Option<&mut WindowEntry> {
         self.id_to_cg
             .get(&window_id)
             .copied()
             .and_then(|cg_id| self.windows.get_mut(&cg_id))
-            .unwrap()
     }
 
     pub(super) fn for_pid(&self, pid: i32) -> impl Iterator<Item = (CGWindowID, &WindowEntry)> {
