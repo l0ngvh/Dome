@@ -282,17 +282,22 @@ impl dome::CreateOverlay for WgpuOverlayFactory {
             self.hub_sender.clone(),
         )?)
     }
-    fn create_float_overlay(&self) -> anyhow::Result<Box<dyn dome::overlay::FloatOverlayApi>> {
+    fn create_float_overlay(
+        &self,
+        flavor: crate::theme::Flavor,
+    ) -> anyhow::Result<Box<dyn dome::overlay::FloatOverlayApi>> {
         dome::overlay::create_float_overlay(
             &self.instance,
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
+            flavor,
         )
     }
     fn create_picker(
         &self,
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
+        flavor: crate::theme::Flavor,
     ) -> anyhow::Result<Box<dyn dome::overlay::PickerApi>> {
         Ok(dome::picker::PickerWindow::new(
             &self.instance,
@@ -301,6 +306,7 @@ impl dome::CreateOverlay for WgpuOverlayFactory {
             entries,
             monitor_dim,
             self.hub_sender.clone(),
+            flavor,
         )?)
     }
 }

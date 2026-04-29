@@ -8,6 +8,7 @@ use std::str::FromStr;
 use crate::action::{
     Action, Actions, FocusTarget, HubAction, MonitorTarget, MoveTarget, ToggleTarget,
 };
+use crate::theme::{Flavor, Theme};
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -271,77 +272,6 @@ fn parse_actions(action_strs: &[String]) -> Result<Actions> {
     Ok(Actions::new(actions))
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Color {
-    pub(crate) r: f32,
-    pub(crate) g: f32,
-    pub(crate) b: f32,
-    pub(crate) a: f32,
-}
-
-impl<'de> Deserialize<'de> for Color {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        let c = s
-            .parse::<csscolorparser::Color>()
-            .map_err(serde::de::Error::custom)?;
-        Ok(Color {
-            r: c.r,
-            g: c.g,
-            b: c.b,
-            a: c.a,
-        })
-    }
-}
-
-fn default_focused_color() -> Color {
-    Color {
-        r: 0.4,
-        g: 0.6,
-        b: 1.0,
-        a: 1.0,
-    }
-}
-
-fn default_spawn_indicator_color() -> Color {
-    Color {
-        r: 1.0,
-        g: 0.6,
-        b: 0.2,
-        a: 1.0,
-    }
-}
-
-fn default_border_color() -> Color {
-    Color {
-        r: 0.3,
-        g: 0.3,
-        b: 0.3,
-        a: 1.0,
-    }
-}
-
-fn default_tab_bar_background_color() -> Color {
-    Color {
-        r: 0.15,
-        g: 0.15,
-        b: 0.2,
-        a: 1.0,
-    }
-}
-
-fn default_active_tab_background_color() -> Color {
-    Color {
-        r: 0.3,
-        g: 0.3,
-        b: 0.4,
-        a: 1.0,
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum SizeConstraint {
     Pixels(f32),
@@ -583,16 +513,8 @@ pub(crate) struct Config {
     pub(crate) max_width: SizeConstraint,
     #[serde(default)]
     pub(crate) max_height: SizeConstraint,
-    #[serde(default = "default_focused_color")]
-    pub(crate) focused_color: Color,
-    #[serde(default = "default_spawn_indicator_color")]
-    pub(crate) spawn_indicator_color: Color,
-    #[serde(default = "default_border_color")]
-    pub(crate) border_color: Color,
-    #[serde(default = "default_tab_bar_background_color")]
-    pub(crate) tab_bar_background_color: Color,
-    #[serde(default = "default_active_tab_background_color")]
-    pub(crate) active_tab_background_color: Color,
+    #[serde(default)]
+    pub(crate) theme: Flavor,
     #[serde(default)]
     #[cfg_attr(not(target_os = "macos"), expect(dead_code))]
     pub(crate) macos: MacosConfig,
@@ -656,11 +578,8 @@ impl Default for Config {
             min_height: SizeConstraint::default_min(),
             max_width: SizeConstraint::default(),
             max_height: SizeConstraint::default(),
-            focused_color: default_focused_color(),
-            spawn_indicator_color: default_spawn_indicator_color(),
-            border_color: default_border_color(),
-            tab_bar_background_color: default_tab_bar_background_color(),
-            active_tab_background_color: default_active_tab_background_color(),
+            // Mocha is the darkest flavour and matches Dome's pre-theme default palette.
+            theme: Flavor::default(),
             macos: MacosConfig::default(),
             windows: WindowsConfig::default(),
             log_level: LogLevel::default(),
@@ -670,6 +589,10 @@ impl Default for Config {
 }
 
 impl Config {
+    pub(crate) fn theme(&self) -> Theme {
+        Theme::from_flavor(self.theme)
+    }
+
     #[cfg(target_os = "windows")]
     pub(crate) fn default_path() -> String {
         let config_dir = std::env::var("APPDATA").unwrap_or_else(|_| {
@@ -860,5 +783,36 @@ mod tests {
     fn start_at_login_parses_true() {
         let config: Config = toml::from_str("start_at_login = true").unwrap();
         assert!(config.start_at_login);
+    }
+
+    #[test]
+    fn theme_deserializes() {
+        let config: Config = toml::from_str(r#"theme = "latte""#).unwrap();
+        assert_eq!(config.theme, Flavor::Latte);
+    }
+
+    #[test]
+    fn config_theme_method_returns_correct_theme() {
+        use crate::theme::Theme;
+        let config = Config {
+            theme: Flavor::Latte,
+            ..Config::default()
+        };
+        assert_eq!(
+            config.theme().focused_border,
+            Theme::from_flavor(Flavor::Latte).focused_border
+        );
+    }
+
+    #[test]
+    fn removed_color_field_rejected() {
+        // Configs mentioning any of the five removed color field names must fail
+        // at parse time via deny_unknown_fields. This is intentional: the entire
+        // per-color config surface was replaced by a single `theme` field.
+        assert!(toml::from_str::<Config>(r##"focused_color = "#ff0000""##).is_err());
+        assert!(toml::from_str::<Config>(r##"border_color = "#ff0000""##).is_err());
+        assert!(toml::from_str::<Config>(r##"spawn_indicator_color = "#ff0000""##).is_err());
+        assert!(toml::from_str::<Config>(r##"tab_bar_background_color = "#ff0000""##).is_err());
+        assert!(toml::from_str::<Config>(r##"active_tab_background_color = "#ff0000""##).is_err());
     }
 }

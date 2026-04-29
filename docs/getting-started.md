@@ -76,7 +76,7 @@ dome move workspace 2
 dome toggle float
 ```
 
-These commands communicate with the running Dome instance over IPC. See the [Command Reference](../commands/reference.md) for the full list. Most users bind commands to keyboard shortcuts instead of typing them — see [Keybindings](configuration.md#keybindings).
+These commands communicate with the running Dome instance over IPC. See the [Command Reference](commands.md) for the full list. Most users bind commands to keyboard shortcuts instead of typing them — see [Keybindings](configuration.md#keybindings).
 
 ## Stopping Dome
 

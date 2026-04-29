@@ -705,3 +705,43 @@ fn float_overlay_updates_on_position_change() {
     env.dome.apply_layout();
     assert!(env.overlay_update_count() - baseline >= 1);
 }
+
+#[test]
+fn config_reload_dispatches_apply_theme_on_flavor_change() {
+    let mut env = TestEnv::new(); // default Mocha
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w2.clone());
+    env.run_actions("toggle float");
+
+    let tiling_baseline = env.tiling_overlay_apply_theme_count();
+    let float_baseline = env.float_overlay_apply_theme_count();
+
+    let mut new_config = env.config.clone();
+    new_config.theme = crate::theme::Flavor::Latte;
+    env.dome.config_changed(new_config);
+
+    assert_eq!(env.tiling_overlay_apply_theme_count() - tiling_baseline, 1);
+    assert_eq!(env.float_overlay_apply_theme_count() - float_baseline, 1);
+}
+
+#[test]
+fn config_reload_skips_apply_theme_when_flavor_unchanged() {
+    let mut env = TestEnv::new(); // default Mocha
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w2.clone());
+    env.run_actions("toggle float");
+
+    let tiling_baseline = env.tiling_overlay_apply_theme_count();
+    let float_baseline = env.float_overlay_apply_theme_count();
+
+    let mut new_config = env.config.clone();
+    new_config.border_size += 2.0;
+    env.dome.config_changed(new_config);
+
+    assert_eq!(env.tiling_overlay_apply_theme_count(), tiling_baseline);
+    assert_eq!(env.float_overlay_apply_theme_count(), float_baseline);
+}

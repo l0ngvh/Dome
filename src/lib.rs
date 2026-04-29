@@ -6,6 +6,7 @@ mod logging;
 mod overlay;
 pub(crate) mod picker;
 mod platform;
+mod theme;
 
 pub use action::{Action, FocusTarget, HubAction, IpcMessage, MoveTarget, Query, ToggleTarget};
 pub use ipc::DomeClient;

@@ -11,6 +11,8 @@ use objc2_io_surface::IOSurface;
 use objc2_metal::*;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
 
+use crate::theme::Flavor;
+
 pub(in crate::platform::macos) struct MetalBackend {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     command_queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
@@ -108,6 +110,7 @@ impl Renderer {
         logical_w: f64,
         logical_h: f64,
         opaque: bool,
+        flavor: Flavor,
     ) -> Self {
         let layer = CAMetalLayer::layer();
         layer.setDevice(Some(backend.device()));
@@ -131,6 +134,7 @@ impl Renderer {
         // instead of triggering egui's text selection behavior.
         let egui_ctx = egui::Context::default();
         egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
+        catppuccin_egui::set_theme(&egui_ctx, flavor.catppuccin_egui());
 
         Self {
             backend,
@@ -156,6 +160,10 @@ impl Renderer {
 
     pub(super) fn set_visuals(&self, visuals: egui::Visuals) {
         self.egui_ctx.set_visuals(visuals);
+    }
+
+    pub(super) fn apply_theme(&self, flavor: Flavor) {
+        catppuccin_egui::set_theme(&self.egui_ctx, flavor.catppuccin_egui());
     }
 
     fn backend(&self) -> &MetalBackend {

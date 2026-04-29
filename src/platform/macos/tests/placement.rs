@@ -10,7 +10,7 @@ fn single_window_placed_in_view() {
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg1));
-    assert_eq!(macos.window_frame(cg1), (2, 2, 1916, 1076));
+    assert_eq!(macos.window_frame(cg1), (4, 4, 1912, 1072));
 }
 
 #[test]

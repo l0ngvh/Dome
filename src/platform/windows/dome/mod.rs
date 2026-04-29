@@ -18,6 +18,7 @@ use crate::core::{
     MonitorLayout, TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::picker::{PickerEntry, build_picker_entries};
+use crate::theme::{Flavor, theme_changed};
 
 use self::overlay::{FloatOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
@@ -68,11 +69,12 @@ struct MonitorPositionData {
 
 pub(super) trait CreateOverlay {
     fn create_tiling_overlay(&self, config: Config) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
-    fn create_float_overlay(&self) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
+    fn create_float_overlay(&self, flavor: Flavor) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
     fn create_picker(
         &self,
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
+        flavor: Flavor,
     ) -> anyhow::Result<Box<dyn overlay::PickerApi>>;
 }
 
@@ -190,11 +192,20 @@ impl Dome {
     }
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
+        let old_flavor = self.config.theme;
         self.hub.sync_config(new_config.clone().into());
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_config(new_config.clone());
         }
         self.config = new_config;
+        if theme_changed(old_flavor, self.config.theme) {
+            for overlay in self.tiling_overlays.values_mut() {
+                overlay.apply_theme(self.config.theme);
+            }
+            for overlay in self.float_overlays.values_mut() {
+                overlay.apply_theme(self.config.theme);
+            }
+        }
         tracing::info!("Config reloaded");
     }
 
@@ -547,7 +558,10 @@ impl Dome {
                 });
                 let focused_monitor = self.hub.focused_monitor();
                 let monitor_dim = self.monitor_dimensions[&focused_monitor];
-                match self.overlay_factory.create_picker(entries, monitor_dim) {
+                match self
+                    .overlay_factory
+                    .create_picker(entries, monitor_dim, self.config.theme)
+                {
                     Ok(pw) => {
                         self.picker = Some(pw);
                     }
@@ -763,7 +777,7 @@ impl Dome {
                     continue;
                 }
                 if !self.float_overlays.contains_key(&wp.id) {
-                    match self.overlay_factory.create_float_overlay() {
+                    match self.overlay_factory.create_float_overlay(self.config.theme) {
                         Ok(o) => {
                             self.float_overlays.insert(wp.id, o);
                         }

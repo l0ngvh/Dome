@@ -77,6 +77,8 @@ struct TestEnv {
     overlay_update_count: Rc<Cell<u32>>,
     tiling_overlay_update_count: Rc<Cell<u32>>,
     tiling_overlay_clear_count: Rc<Cell<u32>>,
+    float_overlay_apply_theme_count: Rc<Cell<u32>>,
+    tiling_overlay_apply_theme_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     z_model: ZOrderModel,
 }
@@ -97,6 +99,8 @@ impl TestEnv {
         let overlay_update_count = Rc::new(Cell::new(0));
         let tiling_overlay_update_count = Rc::new(Cell::new(0));
         let tiling_overlay_clear_count = Rc::new(Cell::new(0));
+        let float_overlay_apply_theme_count = Rc::new(Cell::new(0));
+        let tiling_overlay_apply_theme_count = Rc::new(Cell::new(0));
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let z_model = ZOrderModel::new();
         let dome = Dome::new(
@@ -106,6 +110,8 @@ impl TestEnv {
                 overlay_update_count: overlay_update_count.clone(),
                 tiling_overlay_update_count: tiling_overlay_update_count.clone(),
                 tiling_overlay_clear_count: tiling_overlay_clear_count.clone(),
+                float_overlay_apply_theme_count: float_overlay_apply_theme_count.clone(),
+                tiling_overlay_apply_theme_count: tiling_overlay_apply_theme_count.clone(),
                 picker_entries: picker_entries.clone(),
                 z_model: z_model.clone(),
             }),
@@ -124,6 +130,8 @@ impl TestEnv {
             overlay_update_count,
             tiling_overlay_update_count,
             tiling_overlay_clear_count,
+            float_overlay_apply_theme_count,
+            tiling_overlay_apply_theme_count,
             picker_entries,
             z_model,
         }
@@ -293,6 +301,14 @@ impl TestEnv {
 
     fn tiling_overlay_clear_count(&self) -> u32 {
         self.tiling_overlay_clear_count.get()
+    }
+
+    fn float_overlay_apply_theme_count(&self) -> u32 {
+        self.float_overlay_apply_theme_count.get()
+    }
+
+    fn tiling_overlay_apply_theme_count(&self) -> u32 {
+        self.tiling_overlay_apply_theme_count.get()
     }
 
     fn add_screen(&mut self, screen: ScreenInfo) {
@@ -651,6 +667,7 @@ impl KeyboardSinkApi for NoopKeyboardSink {
 
 struct NoopFloatOverlay {
     overlay_update_count: Rc<Cell<u32>>,
+    apply_theme_count: Rc<Cell<u32>>,
 }
 impl FloatOverlayApi for NoopFloatOverlay {
     fn update(&mut self, _: &crate::core::FloatWindowPlacement, _: &Config, _: ZOrder) {
@@ -658,11 +675,15 @@ impl FloatOverlayApi for NoopFloatOverlay {
             .set(self.overlay_update_count.get() + 1);
     }
     fn hide(&mut self) {}
+    fn apply_theme(&mut self, _flavor: crate::theme::Flavor) {
+        self.apply_theme_count.set(self.apply_theme_count.get() + 1);
+    }
 }
 
 struct NoopTilingOverlay {
     update_count: Rc<Cell<u32>>,
     clear_count: Rc<Cell<u32>>,
+    apply_theme_count: Rc<Cell<u32>>,
 }
 
 impl TilingOverlayApi for NoopTilingOverlay {
@@ -678,6 +699,9 @@ impl TilingOverlayApi for NoopTilingOverlay {
         self.clear_count.set(self.clear_count.get() + 1);
     }
     fn set_config(&mut self, _: Config) {}
+    fn apply_theme(&mut self, _flavor: crate::theme::Flavor) {
+        self.apply_theme_count.set(self.apply_theme_count.get() + 1);
+    }
 }
 
 struct NoopPicker {
@@ -715,6 +739,8 @@ struct NoopOverlays {
     overlay_update_count: Rc<Cell<u32>>,
     tiling_overlay_update_count: Rc<Cell<u32>>,
     tiling_overlay_clear_count: Rc<Cell<u32>>,
+    float_overlay_apply_theme_count: Rc<Cell<u32>>,
+    tiling_overlay_apply_theme_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     z_model: ZOrderModel,
 }
@@ -728,17 +754,23 @@ impl CreateOverlay for NoopOverlays {
         Ok(Box::new(NoopTilingOverlay {
             update_count: self.tiling_overlay_update_count.clone(),
             clear_count: self.tiling_overlay_clear_count.clone(),
+            apply_theme_count: self.tiling_overlay_apply_theme_count.clone(),
         }))
     }
-    fn create_float_overlay(&self) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
+    fn create_float_overlay(
+        &self,
+        _flavor: crate::theme::Flavor,
+    ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         Ok(Box::new(NoopFloatOverlay {
             overlay_update_count: self.overlay_update_count.clone(),
+            apply_theme_count: self.float_overlay_apply_theme_count.clone(),
         }))
     }
     fn create_picker(
         &self,
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
+        _flavor: crate::theme::Flavor,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
         let mut picker = NoopPicker {
             visible: false,

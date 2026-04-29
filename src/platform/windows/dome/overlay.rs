@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::platform::windows::HubSender;
+use crate::theme::Flavor;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
@@ -107,6 +108,10 @@ pub(super) struct Renderer {
 }
 
 impl Renderer {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "flavor added for sub-plan B theming; restructuring Renderer::new is out of scope"
+    )]
     pub(super) fn new(
         instance: &wgpu::Instance,
         device: Arc<wgpu::Device>,
@@ -115,6 +120,7 @@ impl Renderer {
         width: u32,
         height: u32,
         opaque: bool,
+        flavor: Flavor,
     ) -> anyhow::Result<Self> {
         // DCompositionCreateDevice2 (not v1) accepts None for dxgiDevice, letting wgpu
         // own its own DXGI device and swap chain internally.
@@ -167,6 +173,7 @@ impl Renderer {
         // instead of triggering egui's text selection behavior.
         let egui_ctx = egui::Context::default(); // only egui context in this overlay
         egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
+        catppuccin_egui::set_theme(&egui_ctx, flavor.catppuccin_egui());
 
         Ok(Self {
             surface,
@@ -193,6 +200,10 @@ impl Renderer {
 
     pub(super) fn set_visuals(&self, visuals: egui::Visuals) {
         self.egui_ctx.set_visuals(visuals);
+    }
+
+    pub(super) fn apply_theme(&self, flavor: Flavor) {
+        catppuccin_egui::set_theme(&self.egui_ctx, flavor.catppuccin_egui());
     }
 
     pub(super) fn render<R>(
@@ -318,9 +329,10 @@ impl TilingOverlay {
         config: Config,
         hub_sender: HubSender,
     ) -> anyhow::Result<Box<Self>> {
+        let flavor = config.theme;
         let window = OwnedHwnd::new(TILING_OVERLAY_CLASS, WS_EX_TOOLWINDOW)?;
         let hwnd = window.hwnd();
-        let renderer = Renderer::new(instance, device, queue, hwnd, 1, 1, false)?;
+        let renderer = Renderer::new(instance, device, queue, hwnd, 1, 1, false, flavor)?;
         let mut boxed = Box::new(Self {
             renderer,
             events: Vec::new(),
@@ -396,6 +408,10 @@ impl TilingOverlayApi for TilingOverlay {
     fn set_config(&mut self, config: Config) {
         self.config = config;
     }
+
+    fn apply_theme(&mut self, flavor: Flavor) {
+        self.renderer.apply_theme(flavor);
+    }
 }
 
 impl Drop for TilingOverlay {
@@ -465,6 +481,9 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
 pub(in crate::platform::windows) trait FloatOverlayApi {
     fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder);
     fn hide(&mut self);
+    // &mut self keeps the receiver consistent with the other trait
+    // methods; apply_theme only needs &self on the underlying Renderer.
+    fn apply_theme(&mut self, flavor: Flavor);
 }
 
 pub(in crate::platform::windows) trait TilingOverlayApi {
@@ -476,6 +495,9 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     );
     fn clear(&mut self);
     fn set_config(&mut self, config: Config);
+    // &mut self keeps the receiver consistent with the other trait
+    // methods; apply_theme only needs &self on the underlying Renderer.
+    fn apply_theme(&mut self, flavor: Flavor);
 }
 
 pub(in crate::platform::windows) trait PickerApi {
@@ -497,8 +519,11 @@ pub(in crate::platform::windows) fn create_float_overlay(
     instance: &wgpu::Instance,
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
+    flavor: Flavor,
 ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
-    Ok(Box::new(FloatOverlay::new(instance, device, queue)?))
+    Ok(Box::new(FloatOverlay::new(
+        instance, device, queue, flavor,
+    )?))
 }
 
 struct FloatOverlay {
@@ -513,9 +538,10 @@ impl FloatOverlay {
         instance: &wgpu::Instance,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
+        flavor: Flavor,
     ) -> anyhow::Result<Self> {
         let window = OwnedHwnd::new(FLOAT_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
-        let renderer = Renderer::new(instance, device, queue, window.hwnd(), 1, 1, false)?;
+        let renderer = Renderer::new(instance, device, queue, window.hwnd(), 1, 1, false, flavor)?;
         Ok(Self {
             renderer,
             width: 1,
@@ -582,5 +608,9 @@ impl FloatOverlayApi for FloatOverlay {
 
     fn hide(&mut self) {
         self.window.hide();
+    }
+
+    fn apply_theme(&mut self, flavor: Flavor) {
+        self.renderer.apply_theme(flavor);
     }
 }

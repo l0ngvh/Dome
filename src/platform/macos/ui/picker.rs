@@ -17,6 +17,7 @@ use crate::action::{Action, Actions};
 use crate::core::Dimension;
 use crate::picker::{PickerEntry, PickerResult};
 use crate::platform::macos::dome::HubEvent;
+use crate::theme::{Flavor, Theme};
 
 /// Snapshot of the icon texture cache plus newly loaded images awaiting TextureHandle conversion.
 type PendingIcons = (
@@ -135,6 +136,7 @@ struct PickerViewIvars {
     scale: Cell<f64>,
     hub_sender: CalloopSender<HubEvent>,
     icon_textures: RefCell<HashMap<String, Option<egui::TextureHandle>>>,
+    flavor: Flavor,
 }
 
 define_class!(
@@ -209,10 +211,18 @@ impl PickerView {
         entries: Vec<PickerEntry>,
         render_info: (f64, f64, f64),
         hub_sender: CalloopSender<HubEvent>,
+        flavor: Flavor,
     ) -> Retained<Self> {
         let (scale, width, height) = render_info;
-        let renderer = Renderer::new(backend, scale, width, height, false);
-        renderer.set_visuals(crate::picker::picker_visuals());
+        let renderer = Renderer::new(backend, scale, width, height, false, flavor);
+        let theme = Theme::from_flavor(flavor);
+        // Renderer::new called set_theme with this flavor, which wrote catppuccin
+        // values into egui Visuals. The set_visuals call below fully overwrites
+        // those Visuals with picker_visuals(&theme), so at runtime the earlier
+        // set_theme is redundant for the picker. We keep it so every Renderer in
+        // the process is constructed uniformly, and so the picker stays themed if
+        // this picker-specific set_visuals is ever removed.
+        renderer.set_visuals(crate::picker::picker_visuals(&theme));
         let layer = renderer.layer();
         let ivars = PickerViewIvars {
             layer: layer.clone(),
@@ -223,6 +233,7 @@ impl PickerView {
             scale: Cell::new(scale),
             hub_sender,
             icon_textures: RefCell::new(HashMap::new()),
+            flavor,
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
@@ -241,6 +252,7 @@ impl PickerView {
         let scale = ivars.scale.get();
 
         let (icon_snapshot, mut new_icons) = self.load_pending_icons(&entries);
+        let flavor = ivars.flavor;
 
         // Convert new ColorImages to TextureHandles inside the render closure
         // (requires egui Context), then call paint_picker with the merged map.
@@ -260,8 +272,14 @@ impl PickerView {
                         all_icons.insert(app_id.clone(), Some(handle.clone()));
                         created.push((app_id, handle));
                     }
-                    let picker_result =
-                        crate::picker::paint_picker(ctx, &entries, selected_index, &all_icons);
+                    let theme = Theme::from_flavor(flavor);
+                    let picker_result = crate::picker::paint_picker(
+                        ctx,
+                        &entries,
+                        selected_index,
+                        &all_icons,
+                        &theme,
+                    );
                     (picker_result, created)
                 });
 
@@ -346,6 +364,7 @@ impl PickerPopup {
         entries: Vec<PickerEntry>,
         monitor: (Dimension, NSRect, f64),
         hub_sender: CalloopSender<HubEvent>,
+        flavor: Flavor,
     ) -> Self {
         let (monitor_dim, cocoa_frame, scale) = monitor;
         let pw = PICKER_WIDTH.min(monitor_dim.width as f64);
@@ -374,7 +393,7 @@ impl PickerPopup {
         unsafe { window.setReleasedWhenClosed(false) };
         window.setAcceptsMouseMovedEvents(true);
 
-        let view = PickerView::new(mtm, backend, entries, (scale, pw, ph), hub_sender);
+        let view = PickerView::new(mtm, backend, entries, (scale, pw, ph), hub_sender, flavor);
         view.ivars().layer.setCornerRadius(12.0);
         view.ivars().layer.setMasksToBounds(true);
         window.setContentView(Some(&view));

@@ -166,7 +166,7 @@ fn remove_borderless_fullscreen_window_restores_siblings() {
 
     // Sibling should be restored to full tiling
     assert!(!macos.is_offscreen(cg2));
-    assert_eq!(macos.window_frame(cg2), (2, 2, 1916, 1076));
+    assert_eq!(macos.window_frame(cg2), (4, 4, 1912, 1072));
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn app_terminated_removes_windows() {
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg3));
-    assert_eq!(macos.window_frame(cg3), (2, 2, 1916, 1076));
+    assert_eq!(macos.window_frame(cg3), (4, 4, 1912, 1072));
 }
 
 #[test]
@@ -215,7 +215,7 @@ fn window_removed_fills_screen() {
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg2));
-    assert_eq!(macos.window_frame(cg2), (2, 2, 1916, 1076));
+    assert_eq!(macos.window_frame(cg2), (4, 4, 1912, 1072));
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn delete_currently_displayed_window() {
 
     // Remaining window fills screen
     assert!(!macos.is_offscreen(cg2));
-    assert_eq!(macos.window_frame(cg2), (2, 2, 1916, 1076));
+    assert_eq!(macos.window_frame(cg2), (4, 4, 1912, 1072));
 
     // Second settle proves displayed state was cleaned up
     macos.settle(&mut dome, 10);

@@ -10,6 +10,9 @@ border_radius = 12.0
 # Automatic tiling - automatically determine split direction based on window dimensions (default: true)
 automatic_tiling = true
 
+# Theme: one of "latte", "frappe", "macchiato", "mocha" (default: mocha)
+theme = "mocha"
+
 # Minimum window size - float for pixels, string for percentage (default: "5%")
 min_width = 200     # 200 logical pixels
 min_height = "10%"  # 10% of screen height
@@ -18,18 +21,6 @@ min_height = "10%"  # 10% of screen height
 # Windows that hit max constraints are centered within their allocated space
 max_width = 800     # 800 logical pixels
 max_height = "50%"  # 50% of screen height
-
-# Focused window border color (default: light blue)
-focused_color = "#6699ff"
-
-# Unfocused window border color (default: gray)
-border_color = "#4d4d4d"
-
-# Tab bar background color (default: dark blue-gray)
-tab_bar_background_color = "#262633"
-
-# Active tab background color
-active_tab_background_color = "#4d4d66"
 
 # Log level filter (default: info)
 # log_level = "debug"

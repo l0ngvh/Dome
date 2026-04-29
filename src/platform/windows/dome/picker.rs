@@ -43,6 +43,7 @@ use crate::core::{Dimension, WindowId};
 use crate::picker::{PickerEntry, PickerResult};
 use crate::platform::windows::HubSender;
 use crate::platform::windows::external::HwndId;
+use crate::theme::{Flavor, Theme};
 
 pub(in crate::platform::windows) const PICKER_OVERLAY_CLASS: PCWSTR =
     windows::core::w!("DomePickerOverlay");
@@ -88,6 +89,7 @@ pub(in crate::platform::windows) struct PickerWindow {
     /// during render). Raw ColorImage results are staged here until the next
     /// render converts them.
     pending_icons: Vec<(String, egui::ColorImage)>,
+    flavor: Flavor,
 }
 
 impl PickerWindow {
@@ -98,6 +100,7 @@ impl PickerWindow {
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
         hub_sender: HubSender,
+        flavor: Flavor,
     ) -> anyhow::Result<Box<Self>> {
         let w = PICKER_WIDTH.min(monitor_dim.width as u32);
         let h = PICKER_HEIGHT.min(monitor_dim.height as u32);
@@ -111,8 +114,15 @@ impl PickerWindow {
         )?;
         let hwnd = window.hwnd();
         configure_picker_dwm(hwnd);
-        let renderer = Renderer::new(instance, device, queue, hwnd, w, h, false)?;
-        renderer.set_visuals(crate::picker::picker_visuals());
+        let renderer = Renderer::new(instance, device, queue, hwnd, w, h, false, flavor)?;
+        let theme = Theme::from_flavor(flavor);
+        // Renderer::new called set_theme with this flavor, which wrote catppuccin
+        // values into egui Visuals. The set_visuals call below fully overwrites
+        // those Visuals with picker_visuals(&theme), so at runtime the earlier
+        // set_theme is redundant for the picker. We keep it so every Renderer in
+        // the process is constructed uniformly, and so the picker stays themed if
+        // this picker-specific set_visuals is ever removed.
+        renderer.set_visuals(crate::picker::picker_visuals(&theme));
 
         let mut boxed = Box::new(Self {
             renderer,
@@ -126,6 +136,7 @@ impl PickerWindow {
             pixels_per_point: 1.0,
             icon_textures: HashMap::new(),
             pending_icons: Vec::new(),
+            flavor,
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
         unsafe {
@@ -225,6 +236,7 @@ impl PickerApi for PickerWindow {
         let entries = &self.entries;
         let selected_index = self.selected_index;
         let icon_textures = &self.icon_textures;
+        let flavor = self.flavor;
         let mut pending_opt = Some(pending);
         let (result, new_textures) = self.renderer.render(
             self.width,
@@ -250,7 +262,13 @@ impl PickerApi for PickerWindow {
                 for (id, handle) in &new_handles {
                     all_icons.insert(id.clone(), Some(handle.clone()));
                 }
-                let result = crate::picker::paint_picker(ctx, entries, selected_index, &all_icons);
+                let result = crate::picker::paint_picker(
+                    ctx,
+                    entries,
+                    selected_index,
+                    &all_icons,
+                    &Theme::from_flavor(flavor),
+                );
                 (result, new_handles)
             },
         );

@@ -25,6 +25,7 @@ use super::dome::{FrameSender, HubEvent, HubMessage};
 use super::listeners::EventListener;
 use crate::config::Config;
 use crate::core::{MonitorId, WindowId};
+use crate::theme::theme_changed;
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TilingOverlay};
 use picker::PickerPopup;
@@ -253,6 +254,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                             hub_sender.clone(),
                             backend.clone(),
                             config.clone(),
+                            config.theme,
                         )
                     });
                     overlay.render(
@@ -317,12 +319,26 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 delegate.ivars().event_listener.refresh_all_observers();
             }
             HubMessage::ConfigChanged(new_config) => {
+                let old_flavor = delegate.ivars().config.borrow().theme;
                 *delegate.ivars().config.borrow_mut() = new_config.clone();
                 for overlay in delegate.ivars().float_overlays.borrow_mut().values_mut() {
                     overlay.set_config(new_config.clone());
                 }
                 for overlay in delegate.ivars().tiling_overlays.borrow().values() {
                     overlay.set_config(new_config.clone());
+                }
+                // Each for-loop's borrow on float_overlays / tiling_overlays must
+                // stay scoped to that loop statement. Do not hoist the borrow into
+                // a local above the loops — apply_theme and set_config both borrow
+                // these RefCells indirectly via the ivars, and overlapping borrows
+                // would panic at runtime.
+                if theme_changed(old_flavor, new_config.theme) {
+                    for overlay in delegate.ivars().float_overlays.borrow().values() {
+                        overlay.apply_theme(new_config.theme);
+                    }
+                    for overlay in delegate.ivars().tiling_overlays.borrow().values() {
+                        overlay.apply_theme(new_config.theme);
+                    }
                 }
             }
             HubMessage::PickerToggle {
@@ -348,6 +364,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                             entries,
                             (monitor_dim, cocoa_frame, scale),
                             hub_sender,
+                            delegate.ivars().config.borrow().theme,
                         );
                         *pw = Some(picker);
                     }

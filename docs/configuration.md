@@ -16,11 +16,7 @@ The config format is TOML, and the same file works on both macOS and Windows. Ch
 | `min_height` | float or string | `"5%"` | Minimum window height. Same format as `min_width`, relative to screen height. |
 | `max_width` | float or string | `0` | Maximum window width. Same format as `min_width`. `0` means no limit. Windows that hit the max are centered within their allocated space. |
 | `max_height` | float or string | `0` | Maximum window height. Same format as `min_height`. `0` means no limit. |
-| `focused_color` | string | `"#6699ff"` | Border color of the focused window. Accepts any CSS color string (hex, `rgb()`, named colors). |
-| `spawn_indicator_color` | string | `"#ff9933"` | Border color indicating the spawn direction of the focused window. |
-| `border_color` | string | `"#4d4d4d"` | Border color of unfocused windows. |
-| `tab_bar_background_color` | string | `"#262633"` | Background color of the tab bar. |
-| `active_tab_background_color` | string | `"#4d4d66"` | Background color of the active tab in a tab bar. |
+| `theme` | string | `"mocha"` | Color theme. One of `"latte"`, `"frappe"`, `"macchiato"`, `"mocha"` ([Catppuccin](https://catppuccin.com/) flavors, light to dark). Changes apply live via hot reload. |
 | `log_level` | string | `"info"` | Log verbosity. One of: `trace`, `debug`, `info`, `warn`, `error`. |
 
 ## Size Constraints
@@ -45,13 +41,13 @@ min_width = "5%"
 min_height = "5%"
 max_width = 0
 max_height = 0
-focused_color = "#6699ff"
-spawn_indicator_color = "#ff9933"
-border_color = "#4d4d4d"
-tab_bar_background_color = "#262633"
-active_tab_background_color = "#4d4d66"
+theme = "mocha"
 log_level = "info"
 ```
+
+## Upgrading from Per-Color Config
+
+Older versions of Dome used five separate color fields (`focused_color`, `spawn_indicator_color`, `border_color`, `tab_bar_background_color`, `active_tab_background_color`). These have been replaced by the single `theme` field. If your config still contains any of the old color fields, Dome will fail to parse your config, print an error to stderr, and fall back to built-in defaults. This means your keybindings, window rules, and other settings silently revert to defaults. Remove the old fields and use `theme` instead.
 
 ## Log File
 

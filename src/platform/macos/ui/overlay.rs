@@ -20,6 +20,7 @@ use super::renderer::{MetalBackend, Renderer};
 use crate::config::Config;
 use crate::core::{ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement};
 use crate::overlay;
+use crate::theme::Flavor;
 
 define_class!(
     #[unsafe(super(NSWindow, NSResponder, NSObject))]
@@ -70,6 +71,7 @@ impl FloatOverlay {
         hub_sender: CalloopSender<HubEvent>,
         backend: Rc<MetalBackend>,
         config: Config,
+        flavor: Flavor,
     ) -> Self {
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -94,7 +96,14 @@ impl FloatOverlay {
         unsafe { window.setReleasedWhenClosed(false) };
 
         let scale = window.backingScaleFactor();
-        let renderer = Renderer::new(backend, scale, frame.size.width, frame.size.height, false);
+        let renderer = Renderer::new(
+            backend,
+            scale,
+            frame.size.width,
+            frame.size.height,
+            false,
+            flavor,
+        );
         let view = FloatOverlayView::new(
             mtm,
             NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
@@ -204,6 +213,10 @@ impl FloatOverlay {
         }
     }
 
+    pub(super) fn apply_theme(&self, flavor: Flavor) {
+        self.renderer.apply_theme(flavor);
+    }
+
     pub(super) fn apply_frame(&mut self, surface: &IOSurface) {
         self.renderer.set_mirror_surface(surface);
         if let Some(placement) = self.placement {
@@ -256,6 +269,7 @@ impl TilingOverlay {
         scale: f64,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Self {
+        let flavor = config.theme;
         let window = KeyableWindow::new(mtm, cocoa_frame, NSWindowStyleMask::Borderless);
         window.setBackgroundColor(Some(&NSColor::clearColor()));
         window.setOpaque(false);
@@ -270,7 +284,7 @@ impl TilingOverlay {
         window.setIgnoresMouseEvents(false);
         window.setAcceptsMouseMovedEvents(true);
 
-        let view = TilingOverlayView::new(mtm, backend, config, scale, hub_sender);
+        let view = TilingOverlayView::new(mtm, backend, config, scale, hub_sender, flavor);
         window.setContentView(Some(&view));
         window.setFrame_display(cocoa_frame, false);
         window.orderFront(None);
@@ -311,6 +325,10 @@ impl TilingOverlay {
 
     pub(super) fn set_config(&self, config: Config) {
         self.view.set_config(config);
+    }
+
+    pub(super) fn apply_theme(&self, flavor: Flavor) {
+        self.view.apply_theme(flavor);
     }
 }
 
@@ -470,8 +488,9 @@ impl TilingOverlayView {
         config: Config,
         scale: f64,
         hub_sender: CalloopSender<HubEvent>,
+        flavor: Flavor,
     ) -> Retained<Self> {
-        let renderer = Renderer::new(backend, scale, 0.0, 0.0, false);
+        let renderer = Renderer::new(backend, scale, 0.0, 0.0, false, flavor);
         let layer = renderer.layer();
         let ivars = TilingOverlayViewIvars {
             layer: layer.clone(),
@@ -520,6 +539,10 @@ impl TilingOverlayView {
     fn set_config(&self, config: Config) {
         *self.ivars().config.borrow_mut() = config;
         self.render_now();
+    }
+
+    fn apply_theme(&self, flavor: Flavor) {
+        self.ivars().renderer.borrow().apply_theme(flavor);
     }
 
     fn render_now(&self) {

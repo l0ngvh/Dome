@@ -9,7 +9,7 @@ src/
 ├── core/           # Tree model, layout, hub — zero OS dependencies
 ├── platform/
 │   ├── macos/      # AX API, Metal overlays, CGEvent tap
-│   └── windows/    # Win32, WinEvent hooks, OpenGL overlays
+│   └── windows/    # Win32, WinEvent hooks, wgpu/DX12 overlays
 └── ...             # overlay, picker, config, action, ipc, logging
 ```
 
@@ -293,13 +293,15 @@ Borderless: position/size covers monitor. Exclusive: D3D/Vulkan, detected via `S
 
 Both platforms use egui for borders, tab bars, and the minimized window picker. Shared tiling/container painting logic lives in `src/overlay.rs` (takes placements + config, draws into egui). Shared picker painting logic lives in `src/picker.rs`. Platform code handles windowing and GPU backend.
 
-Each platform has a `Renderer` struct (macOS: Metal backend, Windows: OpenGL via glutin) that owns the GPU context, egui state, and texture cache. `Renderer::new()` takes an `opaque: bool` parameter: `false` for transparent overlays (clear-to-transparent, alpha blending), `true` for opaque UI windows like the picker (clear-to-black, no alpha). All tiling and float overlays pass `false`; the picker window passes `true`.
+UI colors are resolved via `src/theme.rs`. The `Flavor` enum (latte/frappe/macchiato/mocha) is the config-facing type; `Theme` is a DTO of 13 semantic-role `Color32` fields built by `Theme::from_flavor()`. Overlay and picker code reads from `Theme`, never from raw palette constants. `Flavor::catppuccin_egui()` maps to the `catppuccin_egui` crate's theme constants for egui widget chrome (scrollbars, focus rings). `catppuccin_egui::set_theme` is called in `Renderer::new` on both platforms and re-applied via `Renderer::apply_theme` when a config reload changes the flavor. Theme lives outside `src/core/` because it depends on `egui::Color32` and `catppuccin_egui`.
+
+Each platform has a `Renderer` struct (macOS: Metal backend, Windows: wgpu/DX12 via DirectComposition) that owns the GPU context, egui state, and texture cache. `Renderer::new()` takes an `opaque: bool` parameter: `false` for transparent overlays (clear-to-transparent, alpha blending), `true` for opaque UI windows like the picker (clear-to-black, no alpha). All tiling and float overlays pass `false`; the picker window passes `true`.
 
 One tiling overlay per monitor draws all tiling borders and container overlays including tab bars. Float windows get separate overlays (they need z-ordering, mirroring on macOS). Each float overlay sized to `visible_frame`.
 
 Borders are drawn with `rect_stroke` + `StrokeKind::Inside` (stroke stays within the frame rect), clipped to per-edge and per-corner regions to support per-piece coloring. The same full-rect stroke is drawn multiple times, each clipped to a different region with a different color, so the pieces join seamlessly. When `border_radius > 0`, corners get rounded arcs; when `0`, the result is identical to sharp corners. Radius is clamped at runtime to half the window dimension via `effective_radius` so it can't produce negative clip rects. On both platforms, overlays sit behind managed windows, so managed windows naturally occlude the overlay interior. Only border strips between windows and tab bar areas remain visible. No region clipping is needed. On macOS, clicks in the rounded corner area (transparent pixels) pass through to the window beneath; the corner area is small enough that this is acceptable. Tab bars are interactive (click sends event to hub thread). Focused window border shows spawn-mode indicator: one edge colored for next spawn direction, with corners colored based on their two adjacent edges.
 
-**Minimized window picker.** A separate OS window (not part of the tiling overlay) that shows minimized windows with application icons. Triggered by `Action::ToggleMinimizePicker`. The picker is a borderless, topmost, opaque window centered on the focused monitor (400x300 logical pixels, clamped). It uses egui `CentralPanel` with `ScrollArea` for the list UI, rendered with egui's default dark `Visuals` (set once at context creation, not per-frame). `PickerEntry`, `build_picker_entries()`, `PickerResult`, and `paint_picker()` live in `src/picker.rs`. Platform picker window code lives in `src/platform/macos/ui/picker.rs` and `src/platform/windows/dome/picker.rs`.
+**Minimized window picker.** A separate OS window (not part of the tiling overlay) that shows minimized windows with application icons. Triggered by `Action::ToggleMinimizePicker`. The picker is a borderless, topmost, opaque window centered on the focused monitor (400x300 logical pixels, clamped). It uses egui `CentralPanel` with `ScrollArea` for the list UI. The picker's `Renderer` receives `catppuccin_egui::set_theme` at construction (like all renderers), then immediately overwrites `Visuals` with `picker_visuals(&theme)` for picker-specific styling. This override is intentional: it keeps renderer construction uniform while giving the picker its own look. `PickerEntry`, `build_picker_entries()`, `PickerResult`, and `paint_picker()` live in `src/picker.rs`. Platform picker window code lives in `src/platform/macos/ui/picker.rs` and `src/platform/windows/dome/picker.rs`.
 
 `PickerEntry` holds `id: WindowId`, `title: String`, and `app_id: Option<String>`. `build_picker_entries()` maps the raw `(WindowId, String)` list from `hub.minimized_window_entries()` into `Vec<PickerEntry>`, resolving `app_id` via a platform-provided closure. On macOS the closure looks up `bundle_id` from the registry; on Windows it looks up the process name. Registry lookups (`Registry::by_id`/`by_id_mut` on macOS, `WindowRegistry::get`/`get_mut` on Windows) return `Option` because a window can become unmanaged between picker open and icon dispatch. All callers handle the `None` case with early returns or `continue`.
 
@@ -324,19 +326,19 @@ ScreenCaptureKit captures IOSurface for mirroring, rendered as textured quad. Ca
 
 #### Windows
 
-Win32 layered windows, egui_glow (OpenGL via glutin). Tab bars use DWM blur-behind for frosted glass. Dome thread manages overlays directly -- no cross-thread dispatch.
+Win32 windows with DirectComposition, egui_wgpu (wgpu/DX12). Tab bars use DWM blur-behind for frosted glass. Dome thread manages overlays directly -- no cross-thread dispatch.
 
 #### Windows Rendering Model
 
-**DWM + OpenGL.** With DWM (always on since Windows 8), each window renders to an offscreen surface. `SwapBuffers` copies the GL front buffer to a DWM-managed D3D surface. DWM composites all surfaces to screen at vsync. `WM_PAINT`/`BeginPaint`/`EndPaint` are irrelevant to actual screen content -- DWM picks up content from `SwapBuffers`, not from the GDI paint cycle.
+**DWM + wgpu/DX12.** With DWM (always on since Windows 8), each window renders to an offscreen surface via DirectComposition. wgpu presents to a DComp swap chain, which DWM composites to screen at vsync. `WM_PAINT`/`BeginPaint`/`EndPaint` are irrelevant to actual screen content -- DWM picks up content from the swap chain, not from the GDI paint cycle.
 
-**Per-pixel alpha.** Transparent overlays need two DWM calls: `DwmEnableBlurBehindWindow` with a 1x1 region, then `DwmExtendFrameIntoClientArea` with margins=-1. `DwmExtendFrameIntoClientArea` alone is not sufficient -- without either `SetWindowRgn` or `DwmEnableBlurBehindWindow`, DWM treats the window as opaque black. The 1x1 blur region enables the alpha channel without visible blur effect.
+**Per-pixel alpha.** Transparent overlays use `WS_EX_NOREDIRECTIONBITMAP` + DirectComposition. The window has no GDI surface; wgpu renders to a DComp swap chain with `DXGI_ALPHA_MODE_PREMULTIPLIED` (via `CompositeAlphaMode::PreMultiplied`). DWM composites the swap chain output directly, giving native per-pixel alpha without the old `DwmEnableBlurBehindWindow` hack.
 
-**Render-last invariant.** All overlay updates follow this sequence: data assignments, `SetWindowPos(SWP_NOREDRAW)`, `ShowWindow` (first show only), GL render + `SwapBuffers`. Positioning calls with redraw flags can trigger synchronous quick-repaints that overwrite GL content, which is why `SWP_NOREDRAW` is used.
+**Render-last invariant.** All overlay updates follow this sequence: data assignments, `SetWindowPos(SWP_NOREDRAW)`, `ShowWindow` (first show only), wgpu render + present. Positioning calls with redraw flags can trigger synchronous quick-repaints that interfere with rendered content, which is why `SWP_NOREDRAW` is used.
 
-**WM_ERASEBKGND / WM_PAINT handlers.** All window classes (app, float overlay, tiling overlay, picker overlay) handle `WM_ERASEBKGND` by returning `LRESULT(1)` to suppress background erase. `WM_PAINT` handlers only call `BeginPaint`/`EndPaint` to validate dirty regions as a safety net. Neither handler renders GL content. Removing `WM_PAINT` entirely could cause infinite WM_PAINT loops if something unexpected invalidates the window.
+**WM_ERASEBKGND / WM_PAINT handlers.** All window classes (app, float overlay, tiling overlay, picker overlay) handle `WM_ERASEBKGND` by returning `LRESULT(1)` to suppress background erase. Overlay and picker window classes call `BeginPaint`/`EndPaint` in their `WM_PAINT` handlers to validate dirty regions as a safety net (the app HWND is a 1x1 keyboard sink and WndProc host (handles WM_DISPLAYCHANGE) that never repaints). Neither handler renders wgpu content. Removing `WM_PAINT` entirely from overlay windows could cause infinite WM_PAINT loops if something unexpected invalidates them.
 
-**No CS_HREDRAW|CS_VREDRAW.** GL windows don't use these class styles. They cause full-client invalidation on any size change, which is counterproductive when the application controls all rendering via `SwapBuffers`.
+**No CS_HREDRAW|CS_VREDRAW.** Overlay windows don't use these class styles. They cause full-client invalidation on any size change, which is counterproductive when the application controls all rendering via wgpu present.
 
 **Float overlay focus update.** In `show_float`, the `settled` check skips both positioning and overlay update when position is unchanged and no topmost change is needed. A separate `focus_changed` branch re-renders the overlay (without repositioning) when focus changes, so the border color updates even when the float's position hasn't moved.
 

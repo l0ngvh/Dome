@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
 use egui::{
-    Align, CentralPanel, Color32, CornerRadius, Image, Label, Layout, Rect, RichText, ScrollArea,
-    Sense, TextureHandle, UiBuilder, load::SizedTexture, pos2, vec2,
+    Align, CentralPanel, CornerRadius, Image, Label, Layout, Rect, RichText, ScrollArea, Sense,
+    TextureHandle, UiBuilder, load::SizedTexture, pos2, vec2,
 };
 
 use crate::core::WindowId;
+use crate::theme::Theme;
 
 #[derive(Clone, Debug)]
 pub(crate) struct PickerEntry {
@@ -47,9 +48,9 @@ const H_PAD: f32 = 12.0;
 /// Returns `egui::Visuals::dark()` with `panel_fill` overridden to a slightly
 /// darker gray (30,30,30); row chrome (selection, hover, separator) is painted
 /// directly in `paint_picker` and is not derived from these visuals.
-pub(crate) fn picker_visuals() -> egui::Visuals {
+pub(crate) fn picker_visuals(theme: &Theme) -> egui::Visuals {
     let mut v = egui::Visuals::dark();
-    v.panel_fill = Color32::from_gray(30);
+    v.panel_fill = theme.picker_panel;
     v
 }
 
@@ -67,6 +68,7 @@ pub(crate) fn paint_picker(
     entries: &[PickerEntry],
     selected_index: usize,
     icon_textures: &HashMap<String, Option<TextureHandle>>,
+    theme: &Theme,
 ) -> PickerResult {
     let corner_radius: CornerRadius = CornerRadius::same(6);
     let mem_id = egui::Id::new("picker_last_selected_index");
@@ -78,7 +80,7 @@ pub(crate) fn paint_picker(
                 ui.label(
                     RichText::new("No minimized windows")
                         .size(14.0)
-                        .color(Color32::from_gray(100)),
+                        .color(theme.picker_empty_text),
                 );
             });
             return;
@@ -98,14 +100,11 @@ pub(crate) fn paint_picker(
 
                 // Background: selected or hovered
                 if i == selected_index {
-                    ui.painter().rect_filled(
-                        row_rect,
-                        corner_radius,
-                        Color32::from_rgb(60, 100, 180),
-                    );
+                    ui.painter()
+                        .rect_filled(row_rect, corner_radius, theme.picker_selected_row);
                 } else if response.hovered() {
                     ui.painter()
-                        .rect_filled(row_rect, CornerRadius::ZERO, Color32::from_gray(50));
+                        .rect_filled(row_rect, CornerRadius::ZERO, theme.picker_hover_row);
                 }
 
                 // Scroll into view when selection changes
@@ -120,7 +119,7 @@ pub(crate) fn paint_picker(
                         vec2(row_rect.width() - H_PAD * 2.0, 1.0),
                     );
                     ui.painter()
-                        .rect_filled(sep_rect, CornerRadius::ZERO, Color32::from_gray(45));
+                        .rect_filled(sep_rect, CornerRadius::ZERO, theme.picker_separator);
                 }
 
                 // Icon
@@ -162,7 +161,7 @@ pub(crate) fn paint_picker(
                     text_ui.add(Label::new(
                         RichText::new(entry.app_name.as_deref().unwrap_or(""))
                             .size(12.0)
-                            .color(Color32::from_gray(100)),
+                            .color(theme.picker_subtext),
                     ));
                     text_ui.add_space(8.0);
                 }
@@ -177,7 +176,7 @@ pub(crate) fn paint_picker(
                     Label::new(
                         RichText::new(title_text)
                             .size(14.0)
-                            .color(Color32::from_gray(230)),
+                            .color(theme.picker_title_text),
                     )
                     .truncate(),
                 );
@@ -270,7 +269,10 @@ mod tests {
     /// correctness is verified by manual testing.
     #[test]
     fn paint_picker_with_icons() {
+        use crate::theme::{Flavor, Theme};
         use egui::{Color32, ColorImage, RawInput};
+
+        let theme = Theme::from_flavor(Flavor::Mocha);
 
         let mut hub = test_hub();
         let w1 = hub.insert_tiling();
@@ -317,7 +319,7 @@ mod tests {
         };
         let mut result = PickerResult::None;
         let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, selected_index, &all_loaded);
+            result = paint_picker(ctx, &entries, selected_index, &all_loaded, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));
@@ -328,7 +330,7 @@ mod tests {
         mixed.insert("app-b".to_string(), None);
         let mut result = PickerResult::None;
         let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, selected_index, &mixed);
+            result = paint_picker(ctx, &entries, selected_index, &mixed, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));
@@ -337,7 +339,7 @@ mod tests {
         let empty: HashMap<String, Option<TextureHandle>> = HashMap::new();
         let mut result = PickerResult::None;
         let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, selected_index, &empty);
+            result = paint_picker(ctx, &entries, selected_index, &empty, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));
@@ -345,7 +347,7 @@ mod tests {
         // Frame 4: selected_index changes to 1, exercises scroll_to_rect branch
         let mut result = PickerResult::None;
         let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, 1, &empty);
+            result = paint_picker(ctx, &entries, 1, &empty, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));
@@ -353,7 +355,7 @@ mod tests {
         // Frame 5: selected_index stays at 1, exercises the skip branch
         let mut result = PickerResult::None;
         let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, 1, &empty);
+            result = paint_picker(ctx, &entries, 1, &empty, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));

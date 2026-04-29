@@ -3,10 +3,11 @@ use egui::{
     StrokeKind, pos2, vec2,
 };
 
-use crate::config::{Color, Config};
+use crate::config::Config;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, SpawnIndicator, TilingWindowPlacement,
 };
+use crate::theme::Theme;
 
 /// Draws all tiling window borders and container overlays for a single monitor.
 /// Returns `(ContainerId, tab_index)` for each tab that was clicked.
@@ -80,7 +81,8 @@ pub(crate) fn paint_window_border(
     config: &Config,
     origin: egui::Vec2,
 ) {
-    let colors = border_colors(is_highlighted, spawn_indicator, config);
+    let theme = config.theme();
+    let colors = border_colors(is_highlighted, spawn_indicator, &theme);
     paint_border_edges(
         painter,
         frame,
@@ -88,7 +90,7 @@ pub(crate) fn paint_window_border(
         config.border_size,
         config.border_radius,
         colors,
-        to_color32(config.focused_color),
+        theme.focused_border,
         origin,
     );
 }
@@ -112,16 +114,17 @@ pub(crate) fn show_container(
     let is_tabbed = placement.is_tabbed && !tab_titles.is_empty();
     let th = config.tab_bar_height;
     let r = effective_radius(config.border_radius, w, h);
+    let theme = config.theme();
 
-    let border_c = to_color32(if placement.is_highlighted {
-        config.focused_color
+    let border_c = if placement.is_highlighted {
+        theme.focused_border
     } else {
-        config.border_color
-    });
+        theme.unfocused_border
+    };
 
     if placement.is_highlighted {
-        let colors = border_colors(true, placement.spawn_indicator, config);
-        let focused = to_color32(config.focused_color);
+        let colors = border_colors(true, placement.spawn_indicator, &theme);
+        let focused = theme.focused_border;
         let painter = ui.painter();
 
         if is_tabbed {
@@ -231,8 +234,8 @@ pub(crate) fn show_container(
         return None;
     }
 
-    let bg = to_color32(config.tab_bar_background_color);
-    let active_bg = to_color32(config.active_tab_background_color);
+    let bg = theme.tab_bar_bg;
+    let active_bg = theme.active_tab_bg;
     let tab_cr = r.min(th);
     let tab_bar_cr = CornerRadius::same(cr_u8(tab_cr));
 
@@ -247,7 +250,7 @@ pub(crate) fn show_container(
     // Tabs
     let tab_width = w / tab_titles.len() as f32;
     let mut clicked = None;
-    let focused_c = to_color32(config.focused_color);
+    let focused_c = theme.focused_border;
 
     for (i, title) in tab_titles.iter().enumerate() {
         let tab_x = ox + i as f32 * tab_width;
@@ -302,7 +305,7 @@ pub(crate) fn show_container(
                 } else {
                     title.as_str()
                 })
-                .color(Color32::WHITE)
+                .color(theme.tab_text)
                 .size(12.0),
             )
             .truncate()
@@ -472,16 +475,16 @@ fn paint_border_edges(
 fn border_colors(
     is_highlighted: bool,
     spawn_indicator: Option<SpawnIndicator>,
-    config: &Config,
+    theme: &Theme,
 ) -> [Color32; 4] {
     if !is_highlighted {
-        return [to_color32(config.border_color); 4];
+        return [theme.unfocused_border; 4];
     }
     let Some(si) = spawn_indicator else {
-        return [to_color32(config.focused_color); 4];
+        return [theme.focused_border; 4];
     };
-    let f = to_color32(config.focused_color);
-    let s = to_color32(config.spawn_indicator_color);
+    let f = theme.focused_border;
+    let s = theme.spawn_indicator;
     [
         if si.top { s } else { f },
         if si.right { s } else { f },
@@ -501,15 +504,6 @@ fn corner_colors(edge_colors: [Color32; 4], focused: Color32) -> [Color32; 4] {
         if c[2] != focused { c[2] } else { c[3] }, // SW: bottom first, then left
         if c[2] != focused { c[2] } else { c[1] }, // SE: bottom first, then right
     ]
-}
-
-fn to_color32(c: Color) -> Color32 {
-    Color32::from_rgba_unmultiplied(
-        (c.r * 255.0) as u8,
-        (c.g * 255.0) as u8,
-        (c.b * 255.0) as u8,
-        (c.a * 255.0) as u8,
-    )
 }
 
 #[cfg(test)]
