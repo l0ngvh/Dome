@@ -75,6 +75,8 @@ struct TestEnv {
     config: Config,
     sink_focus_count: Rc<Cell<u32>>,
     overlay_update_count: Rc<Cell<u32>>,
+    tiling_overlay_update_count: Rc<Cell<u32>>,
+    tiling_overlay_clear_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     z_model: ZOrderModel,
 }
@@ -93,6 +95,8 @@ impl TestEnv {
         };
         let sink_focus_count = Rc::new(Cell::new(0));
         let overlay_update_count = Rc::new(Cell::new(0));
+        let tiling_overlay_update_count = Rc::new(Cell::new(0));
+        let tiling_overlay_clear_count = Rc::new(Cell::new(0));
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let z_model = ZOrderModel::new();
         let dome = Dome::new(
@@ -100,6 +104,8 @@ impl TestEnv {
             Rc::new(NoopTaskbar),
             Box::new(NoopOverlays {
                 overlay_update_count: overlay_update_count.clone(),
+                tiling_overlay_update_count: tiling_overlay_update_count.clone(),
+                tiling_overlay_clear_count: tiling_overlay_clear_count.clone(),
                 picker_entries: picker_entries.clone(),
                 z_model: z_model.clone(),
             }),
@@ -116,6 +122,8 @@ impl TestEnv {
             config,
             sink_focus_count,
             overlay_update_count,
+            tiling_overlay_update_count,
+            tiling_overlay_clear_count,
             picker_entries,
             z_model,
         }
@@ -276,6 +284,14 @@ impl TestEnv {
 
     fn overlay_update_count(&self) -> u32 {
         self.overlay_update_count.get()
+    }
+
+    fn tiling_overlay_update_count(&self) -> u32 {
+        self.tiling_overlay_update_count.get()
+    }
+
+    fn tiling_overlay_clear_count(&self) -> u32 {
+        self.tiling_overlay_clear_count.get()
     }
 
     fn add_screen(&mut self, screen: ScreenInfo) {
@@ -641,7 +657,10 @@ impl FloatOverlayApi for NoopFloatOverlay {
     fn hide(&mut self) {}
 }
 
-struct NoopTilingOverlay;
+struct NoopTilingOverlay {
+    update_count: Rc<Cell<u32>>,
+    clear_count: Rc<Cell<u32>>,
+}
 
 impl TilingOverlayApi for NoopTilingOverlay {
     fn update(
@@ -650,8 +669,11 @@ impl TilingOverlayApi for NoopTilingOverlay {
         _: &[crate::core::TilingWindowPlacement],
         _: &[(crate::core::ContainerPlacement, Vec<String>)],
     ) {
+        self.update_count.set(self.update_count.get() + 1);
     }
-    fn clear(&mut self) {}
+    fn clear(&mut self) {
+        self.clear_count.set(self.clear_count.get() + 1);
+    }
     fn set_config(&mut self, _: Config) {}
 }
 
@@ -688,6 +710,8 @@ impl PickerApi for NoopPicker {
 
 struct NoopOverlays {
     overlay_update_count: Rc<Cell<u32>>,
+    tiling_overlay_update_count: Rc<Cell<u32>>,
+    tiling_overlay_clear_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     z_model: ZOrderModel,
 }
@@ -698,7 +722,10 @@ impl CreateOverlay for NoopOverlays {
         // CreateWindowExW. Subsequent tiling windows placed with ZOrder::Top
         // push it down.
         self.z_model.apply(HwndId::test(9999), ZOrder::Top);
-        Ok(Box::new(NoopTilingOverlay))
+        Ok(Box::new(NoopTilingOverlay {
+            update_count: self.tiling_overlay_update_count.clone(),
+            clear_count: self.tiling_overlay_clear_count.clone(),
+        }))
     }
     fn create_float_overlay(&self) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         Ok(Box::new(NoopFloatOverlay {

@@ -616,20 +616,14 @@ impl Dome {
 
                     for wp in tiling_windows {
                         window_ids.insert(wp.id);
-                        let Some(entry) = self.registry.get(wp.id) else {
-                            continue;
-                        };
-                        if self.placement_tracker.is_moving(entry.ext.id()) {
+                        if self.registry.get(wp.id).is_none() {
                             continue;
                         }
                         placed_tiling.push(*wp);
                     }
                     for wp in fw {
                         window_ids.insert(wp.id);
-                        let Some(entry) = self.registry.get(wp.id) else {
-                            continue;
-                        };
-                        if self.placement_tracker.is_moving(entry.ext.id()) {
+                        if self.registry.get(wp.id).is_none() {
                             continue;
                         }
                         placed_floats.push(*wp);
@@ -741,6 +735,14 @@ impl Dome {
 
         for data in per_monitor {
             for wp in &data.float_windows {
+                let Some(entry) = self.registry.get(wp.id) else {
+                    tracing::debug!(id = ?wp.id, "position_windows: float window missing from registry");
+                    continue;
+                };
+                let hwnd_id = entry.ext.id();
+                if self.placement_tracker.is_moving(hwnd_id) {
+                    continue;
+                }
                 if !self.float_overlays.contains_key(&wp.id) {
                     match self.overlay_factory.create_float_overlay() {
                         Ok(o) => {
@@ -772,6 +774,15 @@ impl Dome {
                 continue;
             }
             for wp in &data.tiling_windows {
+                let Some(entry) = self.registry.get(wp.id) else {
+                    tracing::debug!(id = ?wp.id, "position_windows: tiling window missing from registry");
+                    continue;
+                };
+                let hwnd_id = entry.ext.id();
+                // Mid-move: skip SetWindowPos but overlay still gets target rect below.
+                if self.placement_tracker.is_moving(hwnd_id) {
+                    continue;
+                }
                 self.show_tiling(wp.id, wp, data.monitor_id);
             }
             self.tiling_overlays

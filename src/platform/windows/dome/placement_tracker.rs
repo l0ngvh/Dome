@@ -50,8 +50,11 @@ impl PlacementTracker {
     }
 
     /// Returns true if the window is currently being moved (drag or
-    /// programmatic). Used by `apply_layout` to skip repositioning
-    /// windows mid-move.
+    /// programmatic). Used by `position_windows` to decide whether to re-issue
+    /// `SetWindowPos` / `show_float` for a window. The per-monitor snapshot
+    /// built in `apply_layout` always includes moving windows so the tiling
+    /// overlay still receives their target rects. Do not use this to decide
+    /// whether a window exists on a monitor.
     pub(super) fn is_moving(&self, id: HwndId) -> bool {
         self.windows.contains_key(&id)
     }

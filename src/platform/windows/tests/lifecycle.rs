@@ -425,3 +425,62 @@ fn multi_action_sequence_applies_each_hub_action() {
     assert!(!w1.is_offscreen());
     assert!(!w2.is_offscreen());
 }
+
+#[test]
+fn programmatic_echo_keeps_tiling_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    let update_baseline = env.tiling_overlay_update_count();
+    let clear_baseline = env.tiling_overlay_clear_count();
+
+    // Simulate OS echoing LOCATIONCHANGE for windows we just placed.
+    // Both enter MoveKind::Programmatic.
+    assert!(env.dome.location_changed(w1.hwnd_id));
+    assert!(env.dome.location_changed(w2.hwnd_id));
+
+    env.dome.apply_layout();
+
+    // Overlay must not be cleared; it must receive an update with the full placement set.
+    assert_eq!(env.tiling_overlay_clear_count(), clear_baseline);
+    assert!(env.tiling_overlay_update_count() > update_baseline);
+}
+
+#[test]
+fn user_drag_keeps_tiling_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    let placed_w1 = w1.get_dim();
+
+    env.dome.move_size_started(w1.hwnd_id);
+
+    let update_baseline = env.tiling_overlay_update_count();
+    let clear_baseline = env.tiling_overlay_clear_count();
+
+    env.dome.apply_layout();
+
+    // Dragged window should not have been repositioned.
+    assert_eq!(w1.get_dim(), placed_w1);
+    // Overlay must not be cleared; w2's border must survive the drag.
+    assert_eq!(env.tiling_overlay_clear_count(), clear_baseline);
+    assert!(env.tiling_overlay_update_count() > update_baseline);
+}
+
+#[test]
+fn empty_monitor_clears_tiling_overlay() {
+    let mut env = TestEnv::new();
+    // No windows added. The primary monitor's tiling overlay exists from Dome::new.
+    let clear_baseline = env.tiling_overlay_clear_count();
+
+    env.dome.apply_layout();
+
+    // Monitor has zero tiling windows and zero containers, so clear must fire.
+    assert!(env.tiling_overlay_clear_count() > clear_baseline);
+}
