@@ -233,19 +233,24 @@ impl Runner {
                     inspect.get_process_name().unwrap_or_default(),
                     inspect.get_size_constraints(),
                     observation,
+                    inspect.get_app_display_name(),
                 ))
             },
             move |result, runner| {
-                let Some((title, process, constraints, observation)) = result else {
+                let Some((title, process, constraints, observation, app_name)) = result else {
                     return;
                 };
                 if runner.dome.registry_contains_hwnd(manage.id()) {
                     return;
                 }
-                let actions =
-                    runner
-                        .dome
-                        .try_manage_window(manage, title, process, constraints, observation);
+                let actions = runner.dome.try_manage_window(
+                    manage,
+                    title,
+                    process,
+                    constraints,
+                    observation,
+                    app_name,
+                );
                 // Flush unconditionally: try_manage_window may have inserted a
                 // window even when returning None (inserted but no on_open rules).
                 runner.dome.apply_layout();

@@ -8,6 +8,9 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
 };
+use windows::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
@@ -23,7 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_GETTEXTLENGTH, WS_CHILD, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
-use windows::core::{BOOL, PWSTR};
+use windows::core::{BOOL, PCWSTR, PWSTR, w};
 
 use crate::core::Dimension;
 use crate::platform::windows::external::{
@@ -216,12 +219,13 @@ pub(crate) fn get_window_title(hwnd: HWND) -> Option<String> {
     Some(String::from_utf16_lossy(&buf[..copied]))
 }
 
-pub(crate) fn get_process_name(hwnd: HWND) -> anyhow::Result<String> {
+fn get_exe_path(hwnd: HWND) -> Option<Vec<u16>> {
     let mut pid = 0u32;
     unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-    anyhow::ensure!(pid != 0, "GetWindowThreadProcessId failed");
-
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)? };
+    if pid == 0 {
+        return None;
+    }
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
     let mut buf = [0u16; 260];
     let mut len = buf.len() as u32;
     unsafe {
@@ -230,14 +234,85 @@ pub(crate) fn get_process_name(hwnd: HWND) -> anyhow::Result<String> {
             PROCESS_NAME_WIN32,
             PWSTR(buf.as_mut_ptr()),
             &mut len,
-        )?
-    };
+        )
+    }
+    .ok()?;
+    let mut path = buf[..len as usize].to_vec();
+    path.push(0); // null-terminate for Win32 string APIs
+    Some(path)
+}
 
-    let path = String::from_utf16_lossy(&buf[..len as usize]);
+pub(crate) fn get_process_name(hwnd: HWND) -> anyhow::Result<String> {
+    let path_wide =
+        get_exe_path(hwnd).ok_or_else(|| anyhow::anyhow!("could not query process image name"))?;
+    // Strip the trailing null before converting to a Rust string
+    let path = String::from_utf16_lossy(&path_wide[..path_wide.len().saturating_sub(1)]);
     path.rsplit('\\')
         .next()
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow::anyhow!("no filename in path"))
+}
+
+// Returns None for UWP shells, elevated processes we can't open, apps with no
+// version info, or empty FileDescription. Callers fall back to the executable name.
+pub(crate) fn get_app_display_name(hwnd: HWND) -> Option<String> {
+    let path = get_exe_path(hwnd)?;
+    let path_ptr = PCWSTR(path.as_ptr());
+
+    let size = unsafe { GetFileVersionInfoSizeW(path_ptr, None) };
+    if size == 0 {
+        return None;
+    }
+
+    let mut buf = vec![0u8; size as usize];
+    unsafe { GetFileVersionInfoW(path_ptr, None, size, buf.as_mut_ptr().cast()) }.ok()?;
+
+    let buf_ptr = buf.as_ptr().cast();
+    let mut ptr = std::ptr::null_mut();
+    let mut len = 0u32;
+
+    let ok = unsafe {
+        VerQueryValueW(
+            buf_ptr,
+            w!("\\VarFileInfo\\Translation"),
+            &mut ptr,
+            &mut len,
+        )
+    };
+    if !ok.as_bool() || len == 0 || ptr.is_null() {
+        return None;
+    }
+    let lang = unsafe { *(ptr as *const u16) };
+    let codepage = unsafe { *((ptr as *const u16).add(1)) };
+
+    // key_wide must live until after VerQueryValueW returns.
+    let key_wide: Vec<u16> = format!("\\StringFileInfo\\{lang:04x}{codepage:04x}\\FileDescription")
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut desc_ptr = std::ptr::null_mut();
+    let mut desc_len = 0u32;
+    let ok = unsafe {
+        VerQueryValueW(
+            buf_ptr,
+            PCWSTR(key_wide.as_ptr()),
+            &mut desc_ptr,
+            &mut desc_len,
+        )
+    };
+    if !ok.as_bool() || desc_len == 0 || desc_ptr.is_null() {
+        return None;
+    }
+    // desc_len includes the trailing null
+    let slice_len = (desc_len as usize).saturating_sub(1);
+    let desc_slice = unsafe { std::slice::from_raw_parts(desc_ptr as *const u16, slice_len) };
+    let result = String::from_utf16_lossy(desc_slice).trim().to_string();
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
 }
 
 fn is_cloaked(hwnd: HWND) -> bool {
@@ -489,5 +564,9 @@ impl InspectExternalHwnd for ExternalHwnd {
             && dim.y <= rc.top as f32
             && dim.x + dim.width >= rc.right as f32
             && dim.y + dim.height >= rc.bottom as f32
+    }
+
+    fn get_app_display_name(&self) -> Option<String> {
+        get_app_display_name(self.0)
     }
 }

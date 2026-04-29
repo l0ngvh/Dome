@@ -86,4 +86,5 @@ pub(crate) trait InspectExternalHwnd: Send + Sync {
     /// excluding invisible window borders. Same coordinate space as `set_position`.
     fn get_visible_rect(&self) -> (i32, i32, i32, i32);
     fn is_fullscreen(&self) -> bool;
+    fn get_app_display_name(&self) -> Option<String>;
 }

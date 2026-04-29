@@ -125,7 +125,8 @@ const PICKER_WIDTH: f64 = 400.0;
 const PICKER_HEIGHT: f64 = 300.0;
 
 struct PickerViewIvars {
-    #[expect(dead_code, reason = "retains CAMetalLayer to prevent deallocation")]
+    // Retained to keep the CAMetalLayer alive for the lifetime of the view;
+    // also read to set corner radius / masksToBounds.
     layer: Retained<CAMetalLayer>,
     events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<Renderer>,
@@ -210,8 +211,8 @@ impl PickerView {
         hub_sender: CalloopSender<HubEvent>,
     ) -> Retained<Self> {
         let (scale, width, height) = render_info;
-        let renderer = Renderer::new(backend, scale, width, height, true);
-        renderer.set_visuals(egui::Visuals::dark());
+        let renderer = Renderer::new(backend, scale, width, height, false);
+        renderer.set_visuals(crate::picker::picker_visuals());
         let layer = renderer.layer();
         let ivars = PickerViewIvars {
             layer: layer.clone(),
@@ -360,8 +361,9 @@ impl PickerPopup {
             NSWindowStyleMask::Borderless,
             hub_sender.clone(),
         );
-        window.setOpaque(true);
-        window.setBackgroundColor(Some(&NSColor::blackColor()));
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+        window.setHasShadow(true);
         window.setLevel(NSFloatingWindowLevel);
         window.setCollectionBehavior(
             NSWindowCollectionBehavior::Default
@@ -373,6 +375,8 @@ impl PickerPopup {
         window.setAcceptsMouseMovedEvents(true);
 
         let view = PickerView::new(mtm, backend, entries, (scale, pw, ph), hub_sender);
+        view.ivars().layer.setCornerRadius(12.0);
+        view.ivars().layer.setMasksToBounds(true);
         window.setContentView(Some(&view));
         *window.ivars().view.borrow_mut() = Some(view.clone());
         window.makeKeyAndOrderFront(None);

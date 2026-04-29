@@ -439,7 +439,11 @@ impl Dome {
     pub(in crate::platform::macos) fn toggle_picker(&mut self) {
         let minimized = self.hub.minimized_window_entries();
         let entries = build_picker_entries(&minimized, |wid| {
-            self.registry.by_id(wid).and_then(|e| e.bundle_id.clone())
+            let e = self.registry.by_id(wid);
+            (
+                e.and_then(|e| e.bundle_id.clone()),
+                e.and_then(|e| e.app_name.clone()),
+            )
         });
         let focused_monitor = self.hub.focused_monitor();
         let screen = &self.monitor_registry.get_entry(focused_monitor).screen;

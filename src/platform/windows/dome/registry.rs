@@ -11,6 +11,7 @@ pub(super) struct WindowEntry {
     pub(super) state: WindowState,
     pub(super) title: Option<String>,
     pub(super) process: String,
+    pub(super) app_name: Option<String>,
 }
 
 impl std::fmt::Display for WindowEntry {

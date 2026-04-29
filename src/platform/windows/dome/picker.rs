@@ -4,6 +4,10 @@ use std::sync::Arc;
 use egui::TextureHandle;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Dwm::{
+    DWM_WINDOW_CORNER_PREFERENCE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    DwmSetWindowAttribute,
+};
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
@@ -14,6 +18,23 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
 };
 use windows::core::PCWSTR;
+
+fn configure_picker_dwm(hwnd: HWND) {
+    let preference = DWMWCP_ROUND;
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &preference as *const DWM_WINDOW_CORNER_PREFERENCE as *const _,
+            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+        )
+    };
+    if let Err(e) = result {
+        // Windows 11 22000+ only. Older versions return E_INVALIDARG; fall through without
+        // rounded corners and log at debug so we don't spam the console.
+        tracing::debug!("DWM corner preference not supported: {e:#}");
+    }
+}
 
 use super::HubEvent;
 use super::overlay::{OwnedHwnd, PickerApi, Renderer};
@@ -89,8 +110,9 @@ impl PickerWindow {
                 | windows::Win32::UI::WindowsAndMessaging::WS_EX_TOPMOST,
         )?;
         let hwnd = window.hwnd();
-        let renderer = Renderer::new(instance, device, queue, hwnd, w, h, true)?;
-        renderer.set_visuals(egui::Visuals::dark());
+        configure_picker_dwm(hwnd);
+        let renderer = Renderer::new(instance, device, queue, hwnd, w, h, false)?;
+        renderer.set_visuals(crate::picker::picker_visuals());
 
         let mut boxed = Box::new(Self {
             renderer,
@@ -378,21 +400,25 @@ mod tests {
                 id: w1,
                 title: "Win A".to_string(),
                 app_id: Some("a".to_string()),
+                app_name: None,
             },
             PickerEntry {
                 id: w2,
                 title: "Win B".to_string(),
                 app_id: Some("b".to_string()),
+                app_name: None,
             },
             PickerEntry {
                 id: w3,
                 title: "Win C".to_string(),
                 app_id: None,
+                app_name: None,
             },
             PickerEntry {
                 id: w4,
                 title: "Win D".to_string(),
                 app_id: Some("c".to_string()),
+                app_name: None,
             },
         ];
 

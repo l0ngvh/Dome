@@ -169,6 +169,7 @@ impl TestEnv {
                 ext.max_size.1,
             ),
             observation,
+            ext.app_name.clone(),
         );
         if let Some(actions) = on_open {
             for action in &actions {
@@ -426,6 +427,7 @@ struct MockExternalHwnd {
     manageable: bool,
     title: Option<String>,
     process: String,
+    app_name: Option<String>,
     dimension: Mutex<Dimension>,
     override_position: Mutex<Option<(i32, i32, i32, i32)>>,
     should_float: bool,
@@ -450,6 +452,7 @@ impl MockExternalHwnd {
             manageable: true,
             title: Some(title.to_string()),
             process: process.to_string(),
+            app_name: None,
             dimension: Mutex::new(Dimension {
                 x: 0.0,
                 y: 0.0,

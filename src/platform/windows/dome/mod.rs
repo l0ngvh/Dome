@@ -297,12 +297,13 @@ impl Dome {
         process: String,
         constraints: (f32, f32, f32, f32),
         observation: ObservedPosition,
+        app_name: Option<String>,
     ) -> Option<Actions> {
         if should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
             return None;
         }
         let actions = on_open_actions(&process, title.as_deref(), &self.config.windows.on_open);
-        self.insert_window(ext, title, process, constraints, observation);
+        self.insert_window(ext, title, process, constraints, observation, app_name);
         actions
     }
 
@@ -313,6 +314,7 @@ impl Dome {
         process: String,
         constraints: (f32, f32, f32, f32),
         observation: ObservedPosition,
+        app_name: Option<String>,
     ) {
         let id_key = ext.id();
 
@@ -354,6 +356,7 @@ impl Dome {
                 state,
                 title,
                 process,
+                app_name,
             },
         );
         tracing::info!(%id, %id_key, %state, "Window managed");
@@ -515,7 +518,15 @@ impl Dome {
             Some(pw) => {
                 let minimized = self.hub.minimized_window_entries();
                 let entries = build_picker_entries(&minimized, |wid| {
-                    self.registry.get(wid).map(|e| e.process.clone())
+                    let Some(e) = self.registry.get(wid) else {
+                        return (None, None);
+                    };
+                    let display = e
+                        .app_name
+                        .clone()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| display_from_process(&e.process));
+                    (Some(e.process.clone()), Some(display))
                 });
                 let focused_monitor = self.hub.focused_monitor();
                 let monitor_dim = self.monitor_dimensions[&focused_monitor];
@@ -524,7 +535,15 @@ impl Dome {
             None => {
                 let minimized = self.hub.minimized_window_entries();
                 let entries = build_picker_entries(&minimized, |wid| {
-                    self.registry.get(wid).map(|e| e.process.clone())
+                    let Some(e) = self.registry.get(wid) else {
+                        return (None, None);
+                    };
+                    let display = e
+                        .app_name
+                        .clone()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| display_from_process(&e.process));
+                    (Some(e.process.clone()), Some(display))
                 });
                 let focused_monitor = self.hub.focused_monitor();
                 let monitor_dim = self.monitor_dimensions[&focused_monitor];
@@ -903,4 +922,21 @@ fn should_ignore(process: &str, title: Option<&str>, rules: &[WindowsWindow]) ->
         return true;
     }
     false
+}
+
+// Fallback display string derived from the executable name. Prefer
+// FileDescription from version info when available (see get_app_display_name).
+fn display_from_process(process: &str) -> String {
+    process.strip_suffix(".exe").unwrap_or(process).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_from_process_strips_exe() {
+        assert_eq!(display_from_process("chrome.exe"), "chrome");
+        assert_eq!(display_from_process("notepad"), "notepad");
+    }
 }
