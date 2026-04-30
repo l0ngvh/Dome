@@ -11,6 +11,7 @@ use objc2_io_surface::IOSurface;
 use objc2_metal::*;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
 
+use crate::font::FontConfig;
 use crate::theme::Flavor;
 
 pub(in crate::platform::macos) struct MetalBackend {
@@ -111,6 +112,7 @@ impl Renderer {
         logical_h: f64,
         opaque: bool,
         flavor: Flavor,
+        font: &FontConfig,
     ) -> Self {
         let layer = CAMetalLayer::layer();
         layer.setDevice(Some(backend.device()));
@@ -135,6 +137,7 @@ impl Renderer {
         let egui_ctx = egui::Context::default();
         egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
         catppuccin_egui::set_theme(&egui_ctx, flavor.catppuccin_egui());
+        font.apply_to(&egui_ctx);
 
         Self {
             backend,
@@ -164,6 +167,10 @@ impl Renderer {
 
     pub(super) fn apply_theme(&self, flavor: Flavor) {
         catppuccin_egui::set_theme(&self.egui_ctx, flavor.catppuccin_egui());
+    }
+
+    pub(super) fn apply_font(&self, font: &FontConfig) {
+        font.apply_to(&self.egui_ctx);
     }
 
     fn backend(&self) -> &MetalBackend {

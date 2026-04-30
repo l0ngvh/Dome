@@ -17,7 +17,25 @@ The config format is TOML, and the same file works on both macOS and Windows. Ch
 | `max_width` | float or string | `0` | Maximum window width. Same format as `min_width`. `0` means no limit. Windows that hit the max are centered within their allocated space. |
 | `max_height` | float or string | `0` | Maximum window height. Same format as `min_height`. `0` means no limit. |
 | `theme` | string | `"mocha"` | Color theme. One of `"latte"`, `"frappe"`, `"macchiato"`, `"mocha"` ([Catppuccin](https://catppuccin.com/) flavors, light to dark). Changes apply live via hot reload. |
+| `font.text_size` | float | `14.0` | Body text size in points. Used for overlay tab titles and picker labels. Must be in `[4.0, 128.0]`. |
+| `font.subtext_size` | float | `12.0` | Secondary text size in points. Used for picker app-name subtext. Must be in `[4.0, 128.0]`. |
 | `log_level` | string | `"info"` | Log verbosity. One of: `trace`, `debug`, `info`, `warn`, `error`. |
+
+## Font
+
+Font sizes are configured under the `[font]` table. Both fields are independent and optional (defaults apply if omitted). Changes are hot-reloaded.
+
+```toml
+[font]
+text_size = 14.0     # Body text: tab titles, picker labels
+subtext_size = 12.0  # Picker app-name subtext
+```
+
+Both values must be between `4.0` and `128.0`. Values outside this range cause a config validation error and Dome falls back to built-in defaults.
+
+Dome uses egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks). Custom font families are not configurable.
+
+Note: the default `text_size` of 14.0 is larger than the previous hardcoded 12pt overlay tab title. Long tab titles may truncate earlier inside a tab. `tab_bar_height` is a separate config knob and does not auto-scale with font size.
 
 ## Size Constraints
 
@@ -43,6 +61,10 @@ max_width = 0
 max_height = 0
 theme = "mocha"
 log_level = "info"
+
+[font]
+text_size = 14.0
+subtext_size = 12.0
 ```
 
 ## Upgrading from Per-Color Config

@@ -285,12 +285,14 @@ impl dome::CreateOverlay for WgpuOverlayFactory {
     fn create_float_overlay(
         &self,
         flavor: crate::theme::Flavor,
+        font: &crate::font::FontConfig,
     ) -> anyhow::Result<Box<dyn dome::overlay::FloatOverlayApi>> {
         dome::overlay::create_float_overlay(
             &self.instance,
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
             flavor,
+            font,
         )
     }
     fn create_picker(
@@ -298,6 +300,7 @@ impl dome::CreateOverlay for WgpuOverlayFactory {
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
         flavor: crate::theme::Flavor,
+        font: &crate::font::FontConfig,
     ) -> anyhow::Result<Box<dyn dome::overlay::PickerApi>> {
         Ok(dome::picker::PickerWindow::new(
             &self.instance,
@@ -307,6 +310,7 @@ impl dome::CreateOverlay for WgpuOverlayFactory {
             monitor_dim,
             self.hub_sender.clone(),
             flavor,
+            font,
         )?)
     }
 }

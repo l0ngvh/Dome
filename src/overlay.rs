@@ -1,6 +1,6 @@
 use egui::{
     Align, Color32, CornerRadius, Id, LayerId, Layout, Order, Rect, RichText, Sense, Stroke,
-    StrokeKind, pos2, vec2,
+    StrokeKind, TextStyle, pos2, vec2,
 };
 
 use crate::config::Config;
@@ -306,7 +306,7 @@ pub(crate) fn show_container(
                     title.as_str()
                 })
                 .color(theme.tab_text)
-                .size(12.0),
+                .text_style(TextStyle::Body),
             )
             .truncate()
             .halign(Align::Center),

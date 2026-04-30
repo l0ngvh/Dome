@@ -79,6 +79,8 @@ struct TestEnv {
     tiling_overlay_clear_count: Rc<Cell<u32>>,
     float_overlay_apply_theme_count: Rc<Cell<u32>>,
     tiling_overlay_apply_theme_count: Rc<Cell<u32>>,
+    float_overlay_apply_font_count: Rc<Cell<u32>>,
+    tiling_overlay_apply_font_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     z_model: ZOrderModel,
 }
@@ -101,6 +103,8 @@ impl TestEnv {
         let tiling_overlay_clear_count = Rc::new(Cell::new(0));
         let float_overlay_apply_theme_count = Rc::new(Cell::new(0));
         let tiling_overlay_apply_theme_count = Rc::new(Cell::new(0));
+        let float_overlay_apply_font_count = Rc::new(Cell::new(0));
+        let tiling_overlay_apply_font_count = Rc::new(Cell::new(0));
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let z_model = ZOrderModel::new();
         let dome = Dome::new(
@@ -112,6 +116,8 @@ impl TestEnv {
                 tiling_overlay_clear_count: tiling_overlay_clear_count.clone(),
                 float_overlay_apply_theme_count: float_overlay_apply_theme_count.clone(),
                 tiling_overlay_apply_theme_count: tiling_overlay_apply_theme_count.clone(),
+                float_overlay_apply_font_count: float_overlay_apply_font_count.clone(),
+                tiling_overlay_apply_font_count: tiling_overlay_apply_font_count.clone(),
                 picker_entries: picker_entries.clone(),
                 z_model: z_model.clone(),
             }),
@@ -132,6 +138,8 @@ impl TestEnv {
             tiling_overlay_clear_count,
             float_overlay_apply_theme_count,
             tiling_overlay_apply_theme_count,
+            float_overlay_apply_font_count,
+            tiling_overlay_apply_font_count,
             picker_entries,
             z_model,
         }
@@ -309,6 +317,14 @@ impl TestEnv {
 
     fn tiling_overlay_apply_theme_count(&self) -> u32 {
         self.tiling_overlay_apply_theme_count.get()
+    }
+
+    fn float_overlay_apply_font_count(&self) -> u32 {
+        self.float_overlay_apply_font_count.get()
+    }
+
+    fn tiling_overlay_apply_font_count(&self) -> u32 {
+        self.tiling_overlay_apply_font_count.get()
     }
 
     fn add_screen(&mut self, screen: ScreenInfo) {
@@ -668,6 +684,7 @@ impl KeyboardSinkApi for NoopKeyboardSink {
 struct NoopFloatOverlay {
     overlay_update_count: Rc<Cell<u32>>,
     apply_theme_count: Rc<Cell<u32>>,
+    apply_font_count: Rc<Cell<u32>>,
 }
 impl FloatOverlayApi for NoopFloatOverlay {
     fn update(&mut self, _: &crate::core::FloatWindowPlacement, _: &Config, _: ZOrder) {
@@ -678,12 +695,16 @@ impl FloatOverlayApi for NoopFloatOverlay {
     fn apply_theme(&mut self, _flavor: crate::theme::Flavor) {
         self.apply_theme_count.set(self.apply_theme_count.get() + 1);
     }
+    fn apply_font(&mut self, _font: &crate::font::FontConfig) {
+        self.apply_font_count.set(self.apply_font_count.get() + 1);
+    }
 }
 
 struct NoopTilingOverlay {
     update_count: Rc<Cell<u32>>,
     clear_count: Rc<Cell<u32>>,
     apply_theme_count: Rc<Cell<u32>>,
+    apply_font_count: Rc<Cell<u32>>,
 }
 
 impl TilingOverlayApi for NoopTilingOverlay {
@@ -701,6 +722,9 @@ impl TilingOverlayApi for NoopTilingOverlay {
     fn set_config(&mut self, _: Config) {}
     fn apply_theme(&mut self, _flavor: crate::theme::Flavor) {
         self.apply_theme_count.set(self.apply_theme_count.get() + 1);
+    }
+    fn apply_font(&mut self, _font: &crate::font::FontConfig) {
+        self.apply_font_count.set(self.apply_font_count.get() + 1);
     }
 }
 
@@ -741,6 +765,8 @@ struct NoopOverlays {
     tiling_overlay_clear_count: Rc<Cell<u32>>,
     float_overlay_apply_theme_count: Rc<Cell<u32>>,
     tiling_overlay_apply_theme_count: Rc<Cell<u32>>,
+    float_overlay_apply_font_count: Rc<Cell<u32>>,
+    tiling_overlay_apply_font_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     z_model: ZOrderModel,
 }
@@ -755,15 +781,18 @@ impl CreateOverlay for NoopOverlays {
             update_count: self.tiling_overlay_update_count.clone(),
             clear_count: self.tiling_overlay_clear_count.clone(),
             apply_theme_count: self.tiling_overlay_apply_theme_count.clone(),
+            apply_font_count: self.tiling_overlay_apply_font_count.clone(),
         }))
     }
     fn create_float_overlay(
         &self,
         _flavor: crate::theme::Flavor,
+        _font: &crate::font::FontConfig,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         Ok(Box::new(NoopFloatOverlay {
             overlay_update_count: self.overlay_update_count.clone(),
             apply_theme_count: self.float_overlay_apply_theme_count.clone(),
+            apply_font_count: self.float_overlay_apply_font_count.clone(),
         }))
     }
     fn create_picker(
@@ -771,6 +800,7 @@ impl CreateOverlay for NoopOverlays {
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
         _flavor: crate::theme::Flavor,
+        _font: &crate::font::FontConfig,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
         let mut picker = NoopPicker {
             visible: false,

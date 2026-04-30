@@ -1,6 +1,7 @@
 mod action;
 mod config;
 mod core;
+mod font;
 mod ipc;
 mod logging;
 mod overlay;

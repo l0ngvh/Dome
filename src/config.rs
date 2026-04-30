@@ -8,6 +8,7 @@ use std::str::FromStr;
 use crate::action::{
     Action, Actions, FocusTarget, HubAction, MonitorTarget, MoveTarget, ToggleTarget,
 };
+use crate::font::FontConfig;
 use crate::theme::{Flavor, Theme};
 
 bitflags::bitflags! {
@@ -516,6 +517,8 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) theme: Flavor,
     #[serde(default)]
+    pub(crate) font: FontConfig,
+    #[serde(default)]
     #[cfg_attr(not(target_os = "macos"), expect(dead_code))]
     pub(crate) macos: MacosConfig,
     #[serde(default)]
@@ -580,6 +583,7 @@ impl Default for Config {
             max_height: SizeConstraint::default(),
             // Mocha is the darkest flavour and matches Dome's pre-theme default palette.
             theme: Flavor::default(),
+            font: FontConfig::default(),
             macos: MacosConfig::default(),
             windows: WindowsConfig::default(),
             log_level: LogLevel::default(),
@@ -663,6 +667,7 @@ impl Config {
         {
             anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
         }
+        self.font.validate()?;
         Ok(())
     }
 }
@@ -789,6 +794,20 @@ mod tests {
     fn theme_deserializes() {
         let config: Config = toml::from_str(r#"theme = "latte""#).unwrap();
         assert_eq!(config.theme, Flavor::Latte);
+    }
+
+    #[test]
+    fn font_missing_is_default() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.font, crate::font::FontConfig::default());
+    }
+
+    #[test]
+    fn font_deserializes_via_config() {
+        let config: Config =
+            toml::from_str("[font]\ntext_size = 18.0\nsubtext_size = 15.0").unwrap();
+        assert_eq!(config.font.text_size, 18.0);
+        assert_eq!(config.font.subtext_size, 15.0);
     }
 
     #[test]

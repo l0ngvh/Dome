@@ -745,3 +745,46 @@ fn config_reload_skips_apply_theme_when_flavor_unchanged() {
     assert_eq!(env.tiling_overlay_apply_theme_count(), tiling_baseline);
     assert_eq!(env.float_overlay_apply_theme_count(), float_baseline);
 }
+
+#[test]
+fn config_reload_dispatches_apply_font_on_font_change() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w2.clone());
+    env.run_actions("toggle float");
+
+    let tiling_baseline = env.tiling_overlay_apply_font_count();
+    let float_baseline = env.float_overlay_apply_font_count();
+
+    let mut new_config = env.config.clone();
+    new_config.font = crate::font::FontConfig {
+        text_size: 18.0,
+        subtext_size: 12.0,
+    };
+    env.dome.config_changed(new_config);
+
+    assert_eq!(env.tiling_overlay_apply_font_count() - tiling_baseline, 1);
+    assert_eq!(env.float_overlay_apply_font_count() - float_baseline, 1);
+}
+
+#[test]
+fn config_reload_skips_apply_font_when_font_unchanged() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w2.clone());
+    env.run_actions("toggle float");
+
+    let tiling_baseline = env.tiling_overlay_apply_font_count();
+    let float_baseline = env.float_overlay_apply_font_count();
+
+    let mut new_config = env.config.clone();
+    new_config.border_size += 2.0;
+    env.dome.config_changed(new_config);
+
+    assert_eq!(env.tiling_overlay_apply_font_count(), tiling_baseline);
+    assert_eq!(env.float_overlay_apply_font_count(), float_baseline);
+}

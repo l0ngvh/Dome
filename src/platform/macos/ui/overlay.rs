@@ -19,6 +19,7 @@ use super::super::dome::HubEvent;
 use super::renderer::{MetalBackend, Renderer};
 use crate::config::Config;
 use crate::core::{ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement};
+use crate::font::FontConfig;
 use crate::overlay;
 use crate::theme::Flavor;
 
@@ -64,6 +65,10 @@ pub(super) struct FloatOverlay {
 }
 
 impl FloatOverlay {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "font added for font config plumbing; restructuring FloatOverlay::new is out of scope"
+    )]
     pub(super) fn new(
         mtm: MainThreadMarker,
         frame: NSRect,
@@ -72,6 +77,7 @@ impl FloatOverlay {
         backend: Rc<MetalBackend>,
         config: Config,
         flavor: Flavor,
+        font: &FontConfig,
     ) -> Self {
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -103,6 +109,7 @@ impl FloatOverlay {
             frame.size.height,
             false,
             flavor,
+            font,
         );
         let view = FloatOverlayView::new(
             mtm,
@@ -217,6 +224,10 @@ impl FloatOverlay {
         self.renderer.apply_theme(flavor);
     }
 
+    pub(super) fn apply_font(&self, font: &FontConfig) {
+        self.renderer.apply_font(font);
+    }
+
     pub(super) fn apply_frame(&mut self, surface: &IOSurface) {
         self.renderer.set_mirror_surface(surface);
         if let Some(placement) = self.placement {
@@ -270,6 +281,7 @@ impl TilingOverlay {
         hub_sender: CalloopSender<HubEvent>,
     ) -> Self {
         let flavor = config.theme;
+        let font = config.font.clone();
         let window = KeyableWindow::new(mtm, cocoa_frame, NSWindowStyleMask::Borderless);
         window.setBackgroundColor(Some(&NSColor::clearColor()));
         window.setOpaque(false);
@@ -284,7 +296,7 @@ impl TilingOverlay {
         window.setIgnoresMouseEvents(false);
         window.setAcceptsMouseMovedEvents(true);
 
-        let view = TilingOverlayView::new(mtm, backend, config, scale, hub_sender, flavor);
+        let view = TilingOverlayView::new(mtm, backend, config, scale, hub_sender, flavor, &font);
         window.setContentView(Some(&view));
         window.setFrame_display(cocoa_frame, false);
         window.orderFront(None);
@@ -329,6 +341,10 @@ impl TilingOverlay {
 
     pub(super) fn apply_theme(&self, flavor: Flavor) {
         self.view.apply_theme(flavor);
+    }
+
+    pub(super) fn apply_font(&self, font: &FontConfig) {
+        self.view.apply_font(font);
     }
 }
 
@@ -489,8 +505,9 @@ impl TilingOverlayView {
         scale: f64,
         hub_sender: CalloopSender<HubEvent>,
         flavor: Flavor,
+        font: &FontConfig,
     ) -> Retained<Self> {
-        let renderer = Renderer::new(backend, scale, 0.0, 0.0, false, flavor);
+        let renderer = Renderer::new(backend, scale, 0.0, 0.0, false, flavor, font);
         let layer = renderer.layer();
         let ivars = TilingOverlayViewIvars {
             layer: layer.clone(),
@@ -543,6 +560,10 @@ impl TilingOverlayView {
 
     fn apply_theme(&self, flavor: Flavor) {
         self.ivars().renderer.borrow().apply_theme(flavor);
+    }
+
+    fn apply_font(&self, font: &FontConfig) {
+        self.ivars().renderer.borrow().apply_font(font);
     }
 
     fn render_now(&self) {

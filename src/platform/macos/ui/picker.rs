@@ -15,6 +15,7 @@ use objc2_quartz_core::CAMetalLayer;
 use super::renderer::{MetalBackend, Renderer};
 use crate::action::{Action, Actions};
 use crate::core::Dimension;
+use crate::font::FontConfig;
 use crate::picker::{PickerEntry, PickerResult};
 use crate::platform::macos::dome::HubEvent;
 use crate::theme::{Flavor, Theme};
@@ -212,9 +213,10 @@ impl PickerView {
         render_info: (f64, f64, f64),
         hub_sender: CalloopSender<HubEvent>,
         flavor: Flavor,
+        font: &FontConfig,
     ) -> Retained<Self> {
         let (scale, width, height) = render_info;
-        let renderer = Renderer::new(backend, scale, width, height, false, flavor);
+        let renderer = Renderer::new(backend, scale, width, height, false, flavor, font);
         let theme = Theme::from_flavor(flavor);
         // Renderer::new called set_theme with this flavor, which wrote catppuccin
         // values into egui Visuals. The set_visuals call below fully overwrites
@@ -365,6 +367,7 @@ impl PickerPopup {
         monitor: (Dimension, NSRect, f64),
         hub_sender: CalloopSender<HubEvent>,
         flavor: Flavor,
+        font: &FontConfig,
     ) -> Self {
         let (monitor_dim, cocoa_frame, scale) = monitor;
         let pw = PICKER_WIDTH.min(monitor_dim.width as f64);
@@ -393,7 +396,15 @@ impl PickerPopup {
         unsafe { window.setReleasedWhenClosed(false) };
         window.setAcceptsMouseMovedEvents(true);
 
-        let view = PickerView::new(mtm, backend, entries, (scale, pw, ph), hub_sender, flavor);
+        let view = PickerView::new(
+            mtm,
+            backend,
+            entries,
+            (scale, pw, ph),
+            hub_sender,
+            flavor,
+            font,
+        );
         view.ivars().layer.setCornerRadius(12.0);
         view.ivars().layer.setMasksToBounds(true);
         window.setContentView(Some(&view));

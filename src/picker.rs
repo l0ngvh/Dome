@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use egui::{
     Align, CentralPanel, CornerRadius, Image, Label, Layout, Rect, RichText, ScrollArea, Sense,
-    TextureHandle, UiBuilder, load::SizedTexture, pos2, vec2,
+    TextStyle, TextureHandle, UiBuilder, load::SizedTexture, pos2, vec2,
 };
 
 use crate::core::WindowId;
@@ -79,7 +79,7 @@ pub(crate) fn paint_picker(
             ui.centered_and_justified(|ui| {
                 ui.label(
                     RichText::new("No minimized windows")
-                        .size(14.0)
+                        .text_style(TextStyle::Body)
                         .color(theme.picker_empty_text),
                 );
             });
@@ -160,7 +160,7 @@ pub(crate) fn paint_picker(
                 if entry.app_name.as_deref().is_some_and(|s| !s.is_empty()) {
                     text_ui.add(Label::new(
                         RichText::new(entry.app_name.as_deref().unwrap_or(""))
-                            .size(12.0)
+                            .text_style(TextStyle::Small)
                             .color(theme.picker_subtext),
                     ));
                     text_ui.add_space(8.0);
@@ -175,7 +175,7 @@ pub(crate) fn paint_picker(
                 text_ui.add(
                     Label::new(
                         RichText::new(title_text)
-                            .size(14.0)
+                            .text_style(TextStyle::Body)
                             .color(theme.picker_title_text),
                     )
                     .truncate(),

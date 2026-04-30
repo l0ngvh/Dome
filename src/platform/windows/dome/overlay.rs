@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::font::FontConfig;
 use crate::platform::windows::HubSender;
 use crate::theme::Flavor;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -121,6 +122,7 @@ impl Renderer {
         height: u32,
         opaque: bool,
         flavor: Flavor,
+        font: &FontConfig,
     ) -> anyhow::Result<Self> {
         // DCompositionCreateDevice2 (not v1) accepts None for dxgiDevice, letting wgpu
         // own its own DXGI device and swap chain internally.
@@ -174,6 +176,7 @@ impl Renderer {
         let egui_ctx = egui::Context::default(); // only egui context in this overlay
         egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
         catppuccin_egui::set_theme(&egui_ctx, flavor.catppuccin_egui());
+        font.apply_to(&egui_ctx);
 
         Ok(Self {
             surface,
@@ -204,6 +207,10 @@ impl Renderer {
 
     pub(super) fn apply_theme(&self, flavor: Flavor) {
         catppuccin_egui::set_theme(&self.egui_ctx, flavor.catppuccin_egui());
+    }
+
+    pub(super) fn apply_font(&self, font: &FontConfig) {
+        font.apply_to(&self.egui_ctx);
     }
 
     pub(super) fn render<R>(
@@ -330,9 +337,10 @@ impl TilingOverlay {
         hub_sender: HubSender,
     ) -> anyhow::Result<Box<Self>> {
         let flavor = config.theme;
+        let font = &config.font;
         let window = OwnedHwnd::new(TILING_OVERLAY_CLASS, WS_EX_TOOLWINDOW)?;
         let hwnd = window.hwnd();
-        let renderer = Renderer::new(instance, device, queue, hwnd, 1, 1, false, flavor)?;
+        let renderer = Renderer::new(instance, device, queue, hwnd, 1, 1, false, flavor, font)?;
         let mut boxed = Box::new(Self {
             renderer,
             events: Vec::new(),
@@ -412,6 +420,10 @@ impl TilingOverlayApi for TilingOverlay {
     fn apply_theme(&mut self, flavor: Flavor) {
         self.renderer.apply_theme(flavor);
     }
+
+    fn apply_font(&mut self, font: &FontConfig) {
+        self.renderer.apply_font(font);
+    }
 }
 
 impl Drop for TilingOverlay {
@@ -484,6 +496,7 @@ pub(in crate::platform::windows) trait FloatOverlayApi {
     // &mut self keeps the receiver consistent with the other trait
     // methods; apply_theme only needs &self on the underlying Renderer.
     fn apply_theme(&mut self, flavor: Flavor);
+    fn apply_font(&mut self, font: &FontConfig);
 }
 
 pub(in crate::platform::windows) trait TilingOverlayApi {
@@ -498,6 +511,7 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     // &mut self keeps the receiver consistent with the other trait
     // methods; apply_theme only needs &self on the underlying Renderer.
     fn apply_theme(&mut self, flavor: Flavor);
+    fn apply_font(&mut self, font: &FontConfig);
 }
 
 pub(in crate::platform::windows) trait PickerApi {
@@ -520,9 +534,10 @@ pub(in crate::platform::windows) fn create_float_overlay(
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     flavor: Flavor,
+    font: &FontConfig,
 ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
     Ok(Box::new(FloatOverlay::new(
-        instance, device, queue, flavor,
+        instance, device, queue, flavor, font,
     )?))
 }
 
@@ -539,9 +554,20 @@ impl FloatOverlay {
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         flavor: Flavor,
+        font: &FontConfig,
     ) -> anyhow::Result<Self> {
         let window = OwnedHwnd::new(FLOAT_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
-        let renderer = Renderer::new(instance, device, queue, window.hwnd(), 1, 1, false, flavor)?;
+        let renderer = Renderer::new(
+            instance,
+            device,
+            queue,
+            window.hwnd(),
+            1,
+            1,
+            false,
+            flavor,
+            font,
+        )?;
         Ok(Self {
             renderer,
             width: 1,
@@ -612,5 +638,9 @@ impl FloatOverlayApi for FloatOverlay {
 
     fn apply_theme(&mut self, flavor: Flavor) {
         self.renderer.apply_theme(flavor);
+    }
+
+    fn apply_font(&mut self, font: &FontConfig) {
+        self.renderer.apply_font(font);
     }
 }

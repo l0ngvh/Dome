@@ -25,6 +25,7 @@ use super::dome::{FrameSender, HubEvent, HubMessage};
 use super::listeners::EventListener;
 use crate::config::Config;
 use crate::core::{MonitorId, WindowId};
+use crate::font::font_changed;
 use crate::theme::theme_changed;
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TilingOverlay};
@@ -255,6 +256,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                             backend.clone(),
                             config.clone(),
                             config.theme,
+                            &config.font,
                         )
                     });
                     overlay.render(
@@ -320,6 +322,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
             }
             HubMessage::ConfigChanged(new_config) => {
                 let old_flavor = delegate.ivars().config.borrow().theme;
+                let old_font = delegate.ivars().config.borrow().font.clone();
                 *delegate.ivars().config.borrow_mut() = new_config.clone();
                 for overlay in delegate.ivars().float_overlays.borrow_mut().values_mut() {
                     overlay.set_config(new_config.clone());
@@ -340,6 +343,14 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         overlay.apply_theme(new_config.theme);
                     }
                 }
+                if font_changed(&old_font, &new_config.font) {
+                    for overlay in delegate.ivars().float_overlays.borrow().values() {
+                        overlay.apply_font(&new_config.font);
+                    }
+                    for overlay in delegate.ivars().tiling_overlays.borrow().values() {
+                        overlay.apply_font(&new_config.font);
+                    }
+                }
             }
             HubMessage::PickerToggle {
                 entries,
@@ -358,14 +369,17 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     None => {
                         let backend = delegate.ivars().backend.clone();
                         let hub_sender = delegate.ivars().hub_sender.clone();
+                        let config = delegate.ivars().config.borrow();
                         let picker = PickerPopup::new(
                             mtm,
                             backend,
                             entries,
                             (monitor_dim, cocoa_frame, scale),
                             hub_sender,
-                            delegate.ivars().config.borrow().theme,
+                            config.theme,
+                            &config.font,
                         );
+                        drop(config);
                         *pw = Some(picker);
                     }
                 }

@@ -40,6 +40,7 @@ use super::HubEvent;
 use super::overlay::{OwnedHwnd, PickerApi, Renderer};
 use crate::action::{Action, Actions};
 use crate::core::{Dimension, WindowId};
+use crate::font::FontConfig;
 use crate::picker::{PickerEntry, PickerResult};
 use crate::platform::windows::HubSender;
 use crate::platform::windows::external::HwndId;
@@ -93,6 +94,10 @@ pub(in crate::platform::windows) struct PickerWindow {
 }
 
 impl PickerWindow {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "font added for font config plumbing; restructuring PickerWindow::new is out of scope"
+    )]
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
         device: Arc<wgpu::Device>,
@@ -101,6 +106,7 @@ impl PickerWindow {
         monitor_dim: Dimension,
         hub_sender: HubSender,
         flavor: Flavor,
+        font: &FontConfig,
     ) -> anyhow::Result<Box<Self>> {
         let w = PICKER_WIDTH.min(monitor_dim.width as u32);
         let h = PICKER_HEIGHT.min(monitor_dim.height as u32);
@@ -114,7 +120,7 @@ impl PickerWindow {
         )?;
         let hwnd = window.hwnd();
         configure_picker_dwm(hwnd);
-        let renderer = Renderer::new(instance, device, queue, hwnd, w, h, false, flavor)?;
+        let renderer = Renderer::new(instance, device, queue, hwnd, w, h, false, flavor, font)?;
         let theme = Theme::from_flavor(flavor);
         // Renderer::new called set_theme with this flavor, which wrote catppuccin
         // values into egui Visuals. The set_visuals call below fully overwrites
