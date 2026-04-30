@@ -645,6 +645,19 @@ impl Config {
         format!("{data_dir}/dome")
     }
 
+    /// Loads config from `path`, falling back to defaults on any error.
+    /// The error is logged via `tracing::warn!` so it reaches `dome.log` and
+    /// stdout (see docs/configuration.md "Log File").
+    pub(crate) fn load_or_default(path: &str) -> Config {
+        match Self::load(path) {
+            Ok(config) => config,
+            Err(e) => {
+                tracing::warn!(%path, error = %e, "Failed to load config, using defaults");
+                Config::default()
+            }
+        }
+    }
+
     pub(crate) fn load(path: &str) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let config: Config = toml::from_str(&content)?;
@@ -833,5 +846,53 @@ mod tests {
         assert!(toml::from_str::<Config>(r##"spawn_indicator_color = "#ff0000""##).is_err());
         assert!(toml::from_str::<Config>(r##"tab_bar_background_color = "#ff0000""##).is_err());
         assert!(toml::from_str::<Config>(r##"active_tab_background_color = "#ff0000""##).is_err());
+    }
+
+    #[test]
+    fn load_or_default_returns_defaults_when_path_missing() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_does_not_exist_{nanos}.toml"));
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.log_level.as_str(), "info");
+        assert!(!config.start_at_login);
+    }
+
+    #[test]
+    fn load_or_default_returns_parsed_config_on_valid_toml() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_valid_{nanos}.toml"));
+        std::fs::write(&path, "log_level = \"debug\"\nstart_at_login = true\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.log_level.as_str(), "debug");
+        assert!(config.start_at_login);
+    }
+
+    #[test]
+    fn load_or_default_returns_defaults_on_malformed_toml() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_malformed_{nanos}.toml"));
+        std::fs::write(&path, "this is = = not valid toml\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.log_level.as_str(), "info");
+    }
+
+    /// RAII guard that removes a temp file on drop, even if the test panics.
+    struct CleanupFile(std::path::PathBuf);
+    impl Drop for CleanupFile {
+        fn drop(&mut self) {
+            // Best-effort cleanup of test temp file; nothing to do if it fails.
+            std::fs::remove_file(&self.0).ok();
+        }
     }
 }

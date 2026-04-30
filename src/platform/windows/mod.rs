@@ -154,13 +154,11 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     // COM needed for shell APIs on main thread
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
 
-    let config_path = config_path.unwrap_or_else(Config::default_path);
-    let config = Config::load(&config_path).unwrap_or_else(|e| {
-        eprintln!("Failed to load config from {config_path}: {e}, using defaults");
-        Config::default()
-    });
+    let logger = Logger::init();
 
-    let logger = Logger::init(&config);
+    let config_path = config_path.unwrap_or_else(Config::default_path);
+    let config = Config::load_or_default(&config_path);
+    logger.set_level(config.log_level);
     tracing::info!(%config_path, "Loaded config");
 
     login_item::sync_login_item(config.start_at_login);

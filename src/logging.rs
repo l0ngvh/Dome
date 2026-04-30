@@ -13,11 +13,15 @@ pub(crate) struct Logger {
 }
 
 impl Logger {
-    pub(crate) fn init(config: &Config) -> Self {
+    // Two-phase init: subscriber starts at LogLevel::Info so startup events
+    // (config-load warn, "Loaded config" info) are captured before the caller
+    // invokes `set_level` with the user's configured level. Any event emitted
+    // between `init()` and `set_level()` is filtered at Info.
+    pub(crate) fn init() -> Self {
         let (filter, handle) = match EnvFilter::try_from_default_env() {
             Ok(f) => (reload::Layer::new(f).0, None),
             Err(_) => {
-                let (layer, h) = reload::Layer::new(make_filter(config.log_level));
+                let (layer, h) = reload::Layer::new(make_filter(LogLevel::Info));
                 (layer, Some(h))
             }
         };

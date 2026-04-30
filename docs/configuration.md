@@ -69,7 +69,7 @@ subtext_size = 12.0
 
 ## Upgrading from Per-Color Config
 
-Older versions of Dome used five separate color fields (`focused_color`, `spawn_indicator_color`, `border_color`, `tab_bar_background_color`, `active_tab_background_color`). These have been replaced by the single `theme` field. If your config still contains any of the old color fields, Dome will fail to parse your config, print an error to stderr, and fall back to built-in defaults. This means your keybindings, window rules, and other settings silently revert to defaults. Remove the old fields and use `theme` instead.
+Older versions of Dome used five separate color fields (`focused_color`, `spawn_indicator_color`, `border_color`, `tab_bar_background_color`, `active_tab_background_color`). These have been replaced by the single `theme` field. If your config still contains any of the old color fields, Dome will fail to parse your config, log a warning to `dome.log`, and fall back to built-in defaults. This means your keybindings, window rules, and other settings silently revert to defaults. Remove the old fields and use `theme` instead.
 
 ## Log File
 
@@ -78,6 +78,8 @@ Dome writes logs to a single `dome.log` file, overwritten on each launch:
 - macOS: `~/Library/Logs/dome/dome.log`
 - Windows: `%APPDATA%\dome\logs\dome.log`
 - Linux: `$XDG_STATE_HOME/dome/dome.log` (defaults to `~/.local/state/dome/dome.log`)
+
+Config-load failures are recorded in this file at `warn` level with the failing path and error details.
 
 ## Keybindings
 
