@@ -218,3 +218,54 @@ fn resize_detects_fullscreen() {
     assert_eq!(d.width, SCREEN_WIDTH);
     assert_eq!(d.height, SCREEN_HEIGHT);
 }
+
+#[test]
+fn float_move_writes_core_and_does_not_correct() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.run_actions("toggle float");
+    env.settle(10);
+
+    // Clear move log to establish baseline
+    env.moves.lock().unwrap().clear();
+
+    // Simulate user dragging float to a new position (move_size_ended fires once at drag end)
+    env.dome.move_size_ended(w1.hwnd_id);
+    env.dome.placement_timeout(w1.hwnd_id);
+    env.dome
+        .window_moved(w1.hwnd_id, ObservedPosition::Visible(200, 150, 600, 400));
+
+    // Float arm should NOT call set_position
+    assert!(
+        env.moves.lock().unwrap().is_empty(),
+        "float observation should not trigger set_position"
+    );
+
+    // Idempotence: fp.target == new_target short-circuits show_float, so no
+    // set_position calls are issued across two successive apply_layout rounds.
+    env.dome.apply_layout();
+    env.settle(10);
+    env.dome.apply_layout();
+    env.settle(10);
+    assert!(
+        env.moves.lock().unwrap().is_empty(),
+        "two successive apply_layout rounds after float move should be no-ops"
+    );
+
+    // Core should store the reverse-inset outer frame
+    let border = env.config.border_size;
+    let stored = env
+        .dome
+        .float_frame(w1.hwnd_id)
+        .expect("float should have a stored frame");
+    assert_eq!(
+        stored,
+        Dimension {
+            x: 200.0 - border,
+            y: 150.0 - border,
+            width: 600.0 + 2.0 * border,
+            height: 400.0 + 2.0 * border,
+        }
+    );
+}

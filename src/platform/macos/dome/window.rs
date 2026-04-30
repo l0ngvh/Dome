@@ -32,8 +32,12 @@ pub(super) enum PositionedState {
     /// Window is moved offscreen by Dome. `actual` is the last observed position, may differ from
     /// the current hidden coordinates if monitors changed since the window was hidden.
     Offscreen(OffscreenPlacement),
-    /// Window is tiled or floating with an active placement target.
-    InView(Placement),
+    /// Window is in a tiling layout slot with drift correction.
+    Tiling(Placement),
+    /// Window is floating. Carries only the reconciled target rect and a
+    /// stale-observation timestamp -- no retry/drift fields because floats
+    /// accept the OS-reported position as ground truth.
+    Float(FloatPlacement),
 }
 
 #[derive(Clone, Copy)]
@@ -77,6 +81,44 @@ pub(super) struct Placement {
     /// When the last placement was issued. AX position-change notifications
     /// generated before this timestamp reflect pre-placement state and are ignored.
     placed_at: Instant,
+}
+
+/// Lightweight placement state for floating windows. Floats accept the
+/// OS-reported geometry as ground truth, so there is no `actual` (target IS
+/// actual after each observation) and no retry/drift machinery.
+#[derive(Clone, Copy)]
+pub(super) struct FloatPlacement {
+    /// Last rect reconciled with the OS -- the rect we most recently passed to
+    /// `set_frame` or adopted from a drag observation. Used for outbound
+    /// idempotence in `place_window` and to skip no-op observations in
+    /// `window_moved`.
+    pub(super) target: RoundedDimension,
+    /// When `target` was last bumped by an outbound `set_frame`. The
+    /// initial-placement stale filter in `window_moved` ignores AX bursts
+    /// whose `observed_at.last` predates this timestamp. User-drag
+    /// observations do NOT bump this: they write `target` without issuing
+    /// `set_frame`, so the filter anchor stays on the last outbound call.
+    placed_at: Instant,
+}
+
+impl FloatPlacement {
+    fn new(target: RoundedDimension) -> Self {
+        Self {
+            target,
+            placed_at: Instant::now(),
+        }
+    }
+
+    /// Record a new target. Returns true if set_frame is needed.
+    /// Bumps `placed_at` only when the target actually changes.
+    fn set_target(&mut self, target: RoundedDimension) -> bool {
+        if self.target == target {
+            return false;
+        }
+        self.target = target;
+        self.placed_at = Instant::now();
+        true
+    }
 }
 
 impl Placement {
@@ -183,6 +225,18 @@ pub(super) fn apply_inset(dim: Dimension, border: f32) -> Dimension {
     }
 }
 
+/// Inverse of `apply_inset`: converts an observed content rect (post-inset, i32)
+/// back to the outer frame stored in core's `float_windows`.
+// TODO: revisit if config.border_size is ever non-integer -- round-trip can drift by +/-1 px per edge
+fn reverse_inset(rounded: RoundedDimension, border: f32) -> Dimension {
+    Dimension {
+        x: rounded.x as f32 - border,
+        y: rounded.y as f32 - border,
+        width: rounded.width as f32 + 2.0 * border,
+        height: rounded.height as f32 + 2.0 * border,
+    }
+}
+
 struct RawConstraint {
     min_width: Option<f32>,
     min_height: Option<f32>,
@@ -276,8 +330,9 @@ impl Dome {
             return;
         }
         let target = round_dim(dim);
+        let is_float = self.hub.get_window(window_id).is_float();
         match &mut window.state {
-            WindowState::Positioned(PositionedState::InView(p)) => {
+            WindowState::Positioned(PositionedState::Tiling(p)) if !is_float => {
                 if p.set_target(target)
                     && let Err(e) =
                         window
@@ -287,11 +342,46 @@ impl Dome {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
+            WindowState::Positioned(PositionedState::Float(fp)) if is_float => {
+                if fp.set_target(target)
+                    && let Err(e) =
+                        window
+                            .ax
+                            .set_frame(target.x, target.y, target.width, target.height)
+                {
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                }
+            }
+            // Cross-transitions: hub says float but platform is tiling, or vice versa.
+            // Rebuild the placement state to match the hub's view.
+            WindowState::Positioned(PositionedState::Tiling(_) | PositionedState::Float(_)) => {
+                if is_float {
+                    window.state = WindowState::Positioned(PositionedState::Float(
+                        FloatPlacement::new(target),
+                    ));
+                } else {
+                    window.state = WindowState::Positioned(PositionedState::Tiling(
+                        Placement::new(target, target),
+                    ));
+                }
+                if let Err(e) = window
+                    .ax
+                    .set_frame(target.x, target.y, target.width, target.height)
+                {
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                }
+            }
             WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
                 let actual = offscreen.actual;
-                window.state = WindowState::Positioned(PositionedState::InView(Placement::new(
-                    actual, target,
-                )));
+                if is_float {
+                    window.state = WindowState::Positioned(PositionedState::Float(
+                        FloatPlacement::new(target),
+                    ));
+                } else {
+                    window.state = WindowState::Positioned(PositionedState::Tiling(
+                        Placement::new(actual, target),
+                    ));
+                }
                 if let Err(e) = window
                     .ax
                     .set_frame(target.x, target.y, target.width, target.height)
@@ -325,7 +415,8 @@ impl Dome {
             WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
                 let actual = offscreen.actual;
                 let target = round_dim(screen_dim);
-                window.state = WindowState::Positioned(PositionedState::InView(Placement::new(
+                // Fullscreen is tiling-shaped: always use Tiling placement
+                window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     actual, target,
                 )));
                 if let Err(err) =
@@ -336,9 +427,20 @@ impl Dome {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
             }
-            WindowState::Positioned(PositionedState::InView(p)) => {
+            WindowState::Positioned(PositionedState::Tiling(p)) => {
                 let target = round_dim(screen_dim);
                 if p.set_target(target)
+                    && let Err(err) =
+                        window
+                            .ax
+                            .set_frame(target.x, target.y, target.width, target.height)
+                {
+                    tracing::trace!("Failed to set fullscreen frame: {err:#}");
+                }
+            }
+            WindowState::Positioned(PositionedState::Float(fp)) => {
+                let target = round_dim(screen_dim);
+                if fp.set_target(target)
                     && let Err(err) =
                         window
                             .ax
@@ -416,7 +518,7 @@ impl Dome {
                     }
                 }
             }
-            WindowState::Positioned(PositionedState::InView(p)) => {
+            WindowState::Positioned(PositionedState::Tiling(p)) => {
                 // Stale check: if even the latest notification predates the
                 // last placement, the burst carries only pre-placement state
                 // and must be ignored. A burst that straddles placed_at
@@ -436,14 +538,6 @@ impl Dome {
                     window.state = WindowState::BorderlessFullscreen;
                     self.hub
                         .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
-                    return;
-                }
-                let hub_window = self.hub.get_window(window_id);
-                // Float can only be moved when focused (otherwise it's the mirror), and focused
-                // floats are always inside viewport
-                if hub_window.is_float() {
-                    p.actual = new_placement;
-                    // TODO: update float dimension
                     return;
                 }
 
@@ -491,6 +585,31 @@ impl Dome {
                         tracing::trace!("Window {} set_frame failed: {e}", window);
                     }
                 }
+            }
+            WindowState::Positioned(PositionedState::Float(fp)) => {
+                // Stale check against the last outbound set_frame timestamp.
+                if observed_at.last < fp.placed_at {
+                    tracing::trace!(placed_at = ?fp.placed_at, "stale observation, ignoring");
+                    return;
+                }
+
+                if new_placement == fp.target {
+                    return;
+                }
+
+                if is_borderless_fullscreen {
+                    window.state = WindowState::BorderlessFullscreen;
+                    self.hub
+                        .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
+                    return;
+                }
+
+                // Float accepts the OS-reported position as ground truth.
+                // Write target directly -- placed_at is NOT bumped because
+                // this is an observation, not an outbound set_frame.
+                fp.target = new_placement;
+                let outer_dim = reverse_inset(new_placement, self.config.border_size);
+                self.hub.update_float_dimension(window_id, outer_dim);
             }
             WindowState::Minimized => {
                 // Window somehow got brought back to screen, maybe through window focused but the
@@ -568,8 +687,15 @@ impl Dome {
                 Ok(())
             }
             WindowState::Positioned(positioned_state) => match positioned_state {
-                PositionedState::InView(placement) => {
+                PositionedState::Tiling(placement) => {
                     let offscreen = OffscreenPlacement::new(placement.actual);
+                    let result = move_offscreen(&monitors, &offscreen.actual, &*window.ax);
+                    window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
+                    result
+                }
+                PositionedState::Float(fp) => {
+                    // Post-sync: fp.target is the last observed rect
+                    let offscreen = OffscreenPlacement::new(fp.target);
                     let result = move_offscreen(&monitors, &offscreen.actual, &*window.ax);
                     window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
                     result
@@ -598,8 +724,16 @@ impl Dome {
         };
         let monitors = self.monitor_registry.all_screens();
         match positioned_state {
-            PositionedState::InView(placement) => {
+            PositionedState::Tiling(placement) => {
                 let offscreen = OffscreenPlacement::new(placement.actual);
+                if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
+                    tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
+                }
+                window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
+            }
+            PositionedState::Float(fp) => {
+                // Post-sync: fp.target is the last observed rect
+                let offscreen = OffscreenPlacement::new(fp.target);
                 if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
                     tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
                 }

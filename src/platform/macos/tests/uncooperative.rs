@@ -128,7 +128,7 @@ fn hide_retries_reset_on_fresh_hide() {
     }
     assert!(macos.moves.borrow().is_empty());
 
-    // Switch back to workspace 0 — cg1 becomes InView
+    // Switch back to workspace 0 — cg1 becomes Tiling
     macos.set_override_frame(cg1, None);
     send(&mut dome, "focus workspace 0");
     macos.settle(&mut dome, 10);

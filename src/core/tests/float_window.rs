@@ -1,4 +1,5 @@
-use crate::core::node::Dimension;
+use crate::core::allocator::NodeId;
+use crate::core::node::{Dimension, WindowId};
 use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
@@ -727,4 +728,171 @@ fn insert_float_offscreen_does_not_scroll_viewport() {
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
+}
+
+#[test]
+fn update_float_dimension_writes_new_dim() {
+    let mut hub = setup();
+    hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.update_float_dimension(
+        WindowId::new(0),
+        Dimension {
+            x: 50.0,
+            y: 20.0,
+            width: 60.0,
+            height: 40.0,
+        },
+    );
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=50.00, y=20.00, w=60.00, h=10.00, float, highlighted)
+      )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                      ************************************************************                                        
+                                                      *                                                          *                                        
+                                                      *                                                          *                                        
+                                                      *                                                          *                                        
+                                                      *                                                          *                                        
+                                                      *                            F0                            *                                        
+                                                      *                                                          *                                        
+                                                      *                                                          *                                        
+                                                      *                                                          *                                        
+                                                      *                                                          *
+    ");
+}
+
+#[test]
+fn update_float_dimension_preserves_z_order() {
+    let mut hub = setup();
+    let a = hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.insert_float(Dimension {
+        x: 50.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    hub.insert_float(Dimension {
+        x: 90.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    // Move a (index 0) without changing z-order or focus (c stays topmost/focused)
+    hub.update_float_dimension(
+        a,
+        Dimension {
+            x: 15.0,
+            y: 10.0,
+            width: 30.0,
+            height: 20.0,
+        },
+    );
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=15.00, y=10.00, w=30.00, h=20.00, float)
+        Window(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=20.00, float)
+        Window(id=WindowId(2), x=90.00, y=5.00, w=30.00, h=20.00, float, highlighted)
+      )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                      +----------------------------+          ******************************                              
+                                                      |                            |          *                            *                              
+                                                      |                            |          *                            *                              
+                                                      |                            |          *                            *                              
+                                                      |                            |          *                            *                              
+                   +----------------------------+     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     |             F1             |          *             F2             *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |             F0             |     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     |                            |          *                            *                              
+                   |                            |     +----------------------------+          ******************************                              
+                   |                            |                                                                                                         
+                   |                            |                                                                                                         
+                   |                            |                                                                                                         
+                   |                            |                                                                                                         
+                   +----------------------------+
+    ");
+}
+
+#[test]
+#[should_panic(expected = "is not Float")]
+fn update_float_dimension_on_tiling_panics() {
+    let mut hub = setup();
+    let w = hub.insert_tiling();
+    hub.update_float_dimension(
+        w,
+        Dimension {
+            x: 10.0,
+            y: 5.0,
+            width: 30.0,
+            height: 20.0,
+        },
+    );
+}
+
+#[test]
+#[should_panic]
+fn update_float_dimension_on_unknown_panics() {
+    let mut hub = setup();
+    hub.insert_float(Dimension {
+        x: 10.0,
+        y: 5.0,
+        width: 30.0,
+        height: 20.0,
+    });
+    // WindowId(999) was never inserted -- panics in allocator.get()
+    hub.update_float_dimension(
+        WindowId::new(999),
+        Dimension {
+            x: 10.0,
+            y: 5.0,
+            width: 30.0,
+            height: 20.0,
+        },
+    );
 }

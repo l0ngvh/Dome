@@ -60,6 +60,27 @@ impl Hub {
         dim
     }
 
+    /// Write back the observed screen-absolute dimension for a floating window.
+    /// Called by platform shells after a user drag/resize settles. Preserves
+    /// z-order and focus -- only the Dimension in float_windows is updated.
+    /// Panics if the window is not Float or is missing from float_windows
+    /// (those are invariant violations in the caller).
+    pub(crate) fn update_float_dimension(&mut self, window_id: WindowId, dim: Dimension) {
+        let window = self.access.windows.get(window_id);
+        assert!(
+            window.is_float(),
+            "update_float_dimension: {window_id} is not Float"
+        );
+        let ws_id = window.workspace;
+        let workspace = self.access.workspaces.get_mut(ws_id);
+        let entry = workspace
+            .float_windows
+            .iter_mut()
+            .find(|(id, _)| *id == window_id)
+            .expect("update_float_dimension: window not in float_windows");
+        entry.1 = dim;
+    }
+
     /// Toggle the focused window between tiling and floating mode.
     /// Does nothing if no window is focused or a container is focused.
     #[tracing::instrument(skip(self))]

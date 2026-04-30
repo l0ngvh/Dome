@@ -22,6 +22,17 @@ pub(super) struct DriftState {
     pub(super) monitor: MonitorId,
 }
 
+/// Lightweight placement state for floating windows. Floats accept the
+/// OS-reported geometry as ground truth, so there is no `actual` field
+/// (target IS actual after each observation) and no retry/drift fields.
+#[derive(Clone, Copy)]
+pub(super) struct FloatPlacement {
+    /// Last rect reconciled with the OS. `show_float` compares
+    /// `target == new_target` to skip redundant `set_position` calls;
+    /// `window_drifted` writes the observed rect back here on user drag.
+    pub(super) target: (i32, i32, i32, i32),
+}
+
 /// Tracks the platform-level visibility and fullscreen status of a managed window.
 ///
 /// The hub tracks logical state (tiling vs float, which workspace). This enum
@@ -53,7 +64,7 @@ pub(super) enum PositionedState {
     /// Visible on screen in a tiling layout slot.
     Tiling(DriftState),
     /// Visible on screen as a floating window.
-    Float(DriftState),
+    Float(FloatPlacement),
     /// Hidden offscreen by Dome (e.g. workspace switch, sibling of a
     /// fullscreen window).
     Offscreen {
@@ -83,7 +94,8 @@ impl Dome {
         wp: &FloatWindowPlacement,
         focus_changed: bool,
         is_focused: bool,
-        monitor: MonitorId,
+        // FloatPlacement doesn't track monitor (YAGNI for cross-monitor float reconciliation)
+        _monitor: MonitorId,
     ) {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
@@ -96,27 +108,26 @@ impl Dome {
         let h = content.height.round() as i32;
         let new_target = (x, y, w, h);
 
-        let (needs_topmost, settled, prev_actual) = match entry.state {
+        let (needs_topmost, settled) = match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {
                 debug_assert!(false, "show_float called on fullscreen window {id}");
                 return;
             }
             WindowState::Minimized | WindowState::UserMinimized => {
                 entry.ext.show_cmd(ShowCmd::Restore);
-                (true, false, new_target)
+                (true, false)
             }
             WindowState::Positioned(ps) => {
                 if entry.ext.is_iconic() {
                     entry.ext.show_cmd(ShowCmd::Restore);
                 }
                 match ps {
-                    PositionedState::Float(d) => {
+                    PositionedState::Float(fp) => {
                         let needs_topmost = focus_changed && is_focused;
-                        let settled = d.target == new_target && !needs_topmost;
-                        (needs_topmost, settled, d.actual)
+                        let settled = fp.target == new_target && !needs_topmost;
+                        (needs_topmost, settled)
                     }
-                    PositionedState::Tiling(d) => (true, false, d.actual),
-                    PositionedState::Offscreen { actual, .. } => (true, false, actual),
+                    PositionedState::Tiling(_) | PositionedState::Offscreen { .. } => (true, false),
                 }
             }
         };
@@ -139,13 +150,8 @@ impl Dome {
         }
 
         if !settled {
-            // Float z-order uses Topmost/Unchanged; the monitor field is written
-            // because DriftState is shared across positioned states.
-            entry.state = WindowState::Positioned(PositionedState::Float(DriftState {
+            entry.state = WindowState::Positioned(PositionedState::Float(FloatPlacement {
                 target: new_target,
-                actual: prev_actual,
-                retries: 0,
-                monitor,
             }));
         }
     }
@@ -193,7 +199,9 @@ impl Dome {
                     entry.ext.show_cmd(ShowCmd::Restore);
                 }
                 let prev = match ps {
-                    PositionedState::Tiling(d) | PositionedState::Float(d) => d.actual,
+                    PositionedState::Tiling(d) => d.actual,
+                    // Post-sync: fp.target is the last observed rect
+                    PositionedState::Float(fp) => fp.target,
                     PositionedState::Offscreen { actual, .. } => actual,
                 };
                 (ZOrder::Top, prev)
@@ -236,11 +244,11 @@ impl Dome {
                 entry.ext.set_position(ZOrder::Unchanged, x, y, w, h);
                 self.float_overlays.remove(&id);
                 let prev_actual = match ps {
-                    PositionedState::Tiling(d) | PositionedState::Float(d) => d.actual,
+                    PositionedState::Tiling(d) => d.actual,
+                    // Post-sync: fp.target is the last observed rect
+                    PositionedState::Float(fp) => fp.target,
                     PositionedState::Offscreen { actual, .. } => actual,
                 };
-                // monitor is written because DriftState is shared across positioned
-                // states; fullscreen logic does not read it.
                 entry.state = WindowState::Positioned(PositionedState::Tiling(DriftState {
                     target: new_target,
                     actual: prev_actual,
@@ -256,7 +264,7 @@ impl Dome {
             return;
         };
         match entry.state {
-            WindowState::Positioned(PositionedState::Tiling(d) | PositionedState::Float(d)) => {
+            WindowState::Positioned(PositionedState::Tiling(d)) => {
                 entry.ext.move_offscreen();
                 if let Some(overlay) = self.float_overlays.get_mut(&id) {
                     overlay.hide();
@@ -264,6 +272,17 @@ impl Dome {
                 entry.state = WindowState::Positioned(PositionedState::Offscreen {
                     retries: 0,
                     actual: d.actual,
+                });
+            }
+            WindowState::Positioned(PositionedState::Float(fp)) => {
+                entry.ext.move_offscreen();
+                if let Some(overlay) = self.float_overlays.get_mut(&id) {
+                    overlay.hide();
+                }
+                // Post-sync: fp.target is the last observed rect
+                entry.state = WindowState::Positioned(PositionedState::Offscreen {
+                    retries: 0,
+                    actual: fp.target,
                 });
             }
             WindowState::FullscreenBorderless => {
@@ -315,9 +334,7 @@ impl Dome {
                 });
                 self.hub.unset_fullscreen(id);
             }
-            WindowState::Positioned(
-                PositionedState::Tiling(drift) | PositionedState::Float(drift),
-            ) => {
+            WindowState::Positioned(PositionedState::Tiling(drift)) => {
                 drift.actual = visible_rect;
                 if drift.actual != drift.target {
                     drift.retries = drift.retries.saturating_add(1);
@@ -328,6 +345,13 @@ impl Dome {
                         entry.ext.set_position(ZOrder::Unchanged, x, y, w, h);
                     }
                 }
+            }
+            // Float windows accept the OS-reported position: the user dragged/resized
+            // them, so we sync core and mark the position as settled.
+            WindowState::Positioned(PositionedState::Float(fp)) => {
+                fp.target = visible_rect;
+                let outer_dim = reverse_inset(visible_rect, self.config.border_size);
+                self.hub.update_float_dimension(id, outer_dim);
             }
             WindowState::Positioned(PositionedState::Offscreen { retries, actual }) => {
                 *actual = visible_rect;
@@ -357,5 +381,18 @@ fn apply_inset(dim: Dimension, border: f32) -> Dimension {
         y: dim.y + border,
         width: (dim.width - 2.0 * border).max(0.0),
         height: (dim.height - 2.0 * border).max(0.0),
+    }
+}
+
+/// Inverse of `apply_inset`: converts an observed content rect (post-inset, i32)
+/// back to the outer frame stored in core's `float_windows`.
+// TODO: revisit if config.border_size is ever non-integer -- round-trip can drift by +/-1 px per edge
+fn reverse_inset(visible: (i32, i32, i32, i32), border: f32) -> Dimension {
+    let (x, y, w, h) = visible;
+    Dimension {
+        x: x as f32 - border,
+        y: y as f32 - border,
+        width: w as f32 + 2.0 * border,
+        height: h as f32 + 2.0 * border,
     }
 }

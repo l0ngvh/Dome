@@ -945,6 +945,20 @@ fn display_from_process(process: &str) -> String {
 }
 
 #[cfg(test)]
+impl Dome {
+    /// Test-only: returns the outer frame dimension stored in core for a floating window.
+    pub(super) fn float_frame(&self, hwnd_id: HwndId) -> Option<Dimension> {
+        let window_id = self.registry.get_id(hwnd_id)?;
+        let ws_id = self.hub.current_workspace();
+        let ws = self.hub.get_workspace(ws_id);
+        ws.float_windows()
+            .iter()
+            .find(|&&(id, _)| id == window_id)
+            .map(|&(_, dim)| dim)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
