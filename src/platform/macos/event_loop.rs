@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::os::unix::process::CommandExt;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -12,6 +13,7 @@ use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions};
+use crate::keymap::KeymapState;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dispatcher::GcdDispatcher;
 use crate::platform::macos::dome::{
@@ -31,9 +33,14 @@ pub(super) struct DomeRunner {
     move_state: HashMap<i32, (RegistrationToken, DebounceBurst)>,
     handle: LoopHandle<'static, DomeRunner>,
     signal: LoopSignal,
+    keymap_state: Arc<RwLock<KeymapState>>,
 }
 
-pub(super) fn run_dome(dome: Dome, channel: Channel<HubEvent>) {
+pub(super) fn run_dome(
+    dome: Dome,
+    channel: Channel<HubEvent>,
+    keymap_state: Arc<RwLock<KeymapState>>,
+) {
     install_signal_handlers();
     let mut event_loop =
         EventLoop::<'static, DomeRunner>::try_new().expect("Failed to create event loop");
@@ -49,6 +56,7 @@ pub(super) fn run_dome(dome: Dome, channel: Channel<HubEvent>) {
         move_state: HashMap::new(),
         handle: handle.clone(),
         signal,
+        keymap_state,
     };
 
     handle
@@ -169,6 +177,10 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
             Action::UnminimizeWindow(id) => {
                 runner.dome.picker_unminimize_window(*id);
                 runner.dome.flush_layout();
+            }
+            Action::Mode { name } => {
+                runner.keymap_state.write().unwrap().switch_mode(name);
+                tracing::debug!(mode = %name, "Switching to mode");
             }
         }
     }

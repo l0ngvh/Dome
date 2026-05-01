@@ -72,6 +72,7 @@ Adjust the master-stack layout's master area. Only applies when the master-stack
 | Command | Description |
 |---------|-------------|
 | `exec <command>` | Run a shell command. Everything after `exec ` is passed to the system shell. Example: `exec open -a Terminal` (macOS) or `exec cmd /c start notepad` (Windows). |
+| `mode <name>` | Switch to a named keybinding mode. `mode default` returns to the default keybindings. See [configuration: modes](configuration.md#modes). |
 | `exit` | Stop Dome and restore all windows. |
 
 ## Launching Dome
@@ -145,6 +146,12 @@ dome exec open -a Terminal
 
 # Stop Dome
 dome exit
+
+# Switch to resize keybinding mode
+dome mode resize
+
+# Return to default keybinding mode
+dome mode default
 ```
 
 ## Restrictions

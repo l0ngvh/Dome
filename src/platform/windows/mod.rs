@@ -14,7 +14,7 @@ mod tests;
 
 use std::mem::size_of;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 use crate::logging::Logger;
@@ -46,6 +46,7 @@ use windows::core::{BOOL, PCWSTR};
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
+use crate::keymap::KeymapState;
 use crate::picker::PickerEntry;
 use dome::overlay::{FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, tiling_overlay_wnd_proc};
 use dome::picker::{PICKER_OVERLAY_CLASS, picker_wnd_proc};
@@ -177,10 +178,12 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     let dome_thread_id = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let barrier = Arc::new(std::sync::Barrier::new(2));
+    let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
 
     let config_clone = config.clone();
     let tid = Arc::clone(&dome_thread_id);
     let bar = Arc::clone(&barrier);
+    let keymap_clone = Arc::clone(&keymap_state);
     let dome_thread = thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
@@ -191,7 +194,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
                 std::sync::atomic::Ordering::Release,
             );
             bar.wait();
-            run_dome(config_clone, main_thread_id);
+            run_dome(config_clone, main_thread_id, keymap_clone);
         }));
         if result.is_err() {
             tracing::error!("Dome thread panicked");
@@ -204,7 +207,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
         thread_id: dome_thread_id.load(std::sync::atomic::Ordering::Acquire),
     };
 
-    let keyboard_hook = install_keyboard_hook(hub_sender.clone(), config)?;
+    let keyboard_hook = install_keyboard_hook(hub_sender.clone(), Arc::clone(&keymap_state))?;
     let _event_hooks = install_event_hooks(hub_sender.clone())?;
 
     ipc::start_server({
@@ -233,9 +236,13 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 
     let _config_watcher = start_config_watcher(&config_path, {
         let sender = hub_sender.clone();
+        let keymap_state = Arc::clone(&keymap_state);
         move |cfg| {
             logger.set_level(cfg.log_level);
-            keyboard::update_config(cfg.clone());
+            keymap_state
+                .write()
+                .unwrap()
+                .update_keymaps(cfg.keymaps.clone());
             let start_at_login = cfg.start_at_login;
             sender.send(HubEvent::ConfigChanged(Box::new(cfg)));
             login_item::sync_login_item(start_at_login);
@@ -358,7 +365,7 @@ unsafe extern "system" fn float_overlay_wnd_proc(
     }
 }
 
-fn run_dome(config: Config, main_thread_id: u32) {
+fn run_dome(config: Config, main_thread_id: u32, keymap_state: Arc<RwLock<KeymapState>>) {
     let hinstance = unsafe { GetModuleHandleW(None) }.expect("GetModuleHandleW failed");
     // https://devblogs.microsoft.com/oldnewthing/20250424-00/?p=111114
     let arrow = unsafe { LoadCursorW(None, IDC_ARROW) }.expect("LoadCursorW failed");
@@ -487,7 +494,12 @@ fn run_dome(config: Config, main_thread_id: u32) {
         tracing::warn!("Failed to enumerate windows: {e}");
     }
 
-    let mut runner = runner::Runner::new(dome, unsafe { GetCurrentThreadId() }, main_thread_id);
+    let mut runner = runner::Runner::new(
+        dome,
+        unsafe { GetCurrentThreadId() },
+        main_thread_id,
+        keymap_state,
+    );
 
     for hwnd_id in initial_hwnds {
         runner.dispatch_window_created(hwnd_id);

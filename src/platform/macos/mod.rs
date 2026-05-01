@@ -31,6 +31,7 @@ use objc2_foundation::{NSNumber, NSString};
 use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
+use crate::keymap::KeymapState;
 use crate::logging::Logger;
 use dome::{Dome, HubEvent};
 use keyboard::KeyboardListener;
@@ -76,15 +77,18 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let (event_tx, event_rx) = calloop::channel::channel();
 
     let hub_config = config.clone();
-    let keymaps = Arc::new(RwLock::new(config.keymaps.clone()));
+    let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
 
     let _config_watcher = start_config_watcher(&config_path, {
-        let keymaps = keymaps.clone();
+        let keymap_state = keymap_state.clone();
         let tx = event_tx.clone();
         let bundle_path_for_watcher = bundle_path.clone();
         move |cfg| {
             logger.set_level(cfg.log_level);
-            *keymaps.write().unwrap() = cfg.keymaps.clone();
+            keymap_state
+                .write()
+                .unwrap()
+                .update_keymaps(cfg.keymaps.clone());
             let start_at_login = cfg.start_at_login;
             tx.send(HubEvent::ConfigChanged(Box::new(cfg))).ok();
             login_item::sync_login_item(start_at_login, bundle_path_for_watcher.as_deref());
@@ -126,14 +130,15 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     let is_suspended = Rc::new(Cell::new(false));
     let event_listener = EventListener::new(event_tx.clone(), is_suspended.clone());
-    let _keyboard_listener = KeyboardListener::new(keymaps, is_suspended, event_tx.clone())?;
+    let _keyboard_listener =
+        KeyboardListener::new(keymap_state.clone(), is_suspended, event_tx.clone())?;
 
     let (ui, sender) = Ui::new(mtm, event_tx, event_listener, config.clone());
 
     let hub_thread = thread::spawn(move || {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let dome = Dome::new(&screens, hub_config, Box::new(sender));
-            event_loop::run_dome(dome, event_rx);
+            event_loop::run_dome(dome, event_rx, keymap_state);
         }))
         .ok();
     });

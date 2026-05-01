@@ -1,5 +1,4 @@
 use std::cell::{Cell, OnceCell};
-use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
@@ -16,13 +15,13 @@ use objc2_core_graphics::{
 
 use super::dome::HubEvent;
 use super::send_hub_event;
-use crate::action::Actions;
 use crate::config::{Keymap, Modifiers};
+use crate::keymap::KeymapState;
 
-pub(super) type Keymaps = Arc<RwLock<HashMap<Keymap, Actions>>>;
+pub(super) type SharedKeymapState = Arc<RwLock<KeymapState>>;
 
 struct KeyboardCtx {
-    keymaps: Keymaps,
+    keymap_state: SharedKeymapState,
     is_suspended: Rc<Cell<bool>>,
     hub_sender: CalloopSender<HubEvent>,
     event_tap: OnceCell<CFRetained<CFMachPort>>,
@@ -46,12 +45,12 @@ impl Drop for KeyboardListener {
 
 impl KeyboardListener {
     pub(super) fn new(
-        keymaps: Keymaps,
+        keymap_state: SharedKeymapState,
         is_suspended: Rc<Cell<bool>>,
         hub_sender: CalloopSender<HubEvent>,
     ) -> Result<Self> {
         let ctx = Box::new(KeyboardCtx {
-            keymaps,
+            keymap_state,
             is_suspended,
             hub_sender,
             event_tap: OnceCell::new(),
@@ -135,17 +134,13 @@ fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
     // picker window via keyDown: instead of being intercepted here.
 
     let keymap = Keymap { key, modifiers };
-    let actions = ctx
-        .keymaps
-        .read()
-        .unwrap()
-        .get(&keymap)
-        .cloned()
-        .unwrap_or_default();
-
-    if actions.is_empty() {
+    let actions = {
+        let mut ks = ctx.keymap_state.write().unwrap();
+        ks.resolve(&keymap)
+    };
+    let Some(actions) = actions else {
         return false;
-    }
+    };
 
     tracing::trace!(?keymap, %actions, "Keymap matched");
 

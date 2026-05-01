@@ -52,7 +52,7 @@ Dome ships with these default keybindings. Meta is ⌘ on macOS and ⊞ Win on W
 | <kbd>Meta</kbd> + <kbd>B</kbd> | Toggle split/tabbed layout |
 | <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>Q</kbd> | Exit Dome |
 
-See the [keybinding configuration](docs/configuration.md#keybindings) for the complete list and customization options.
+See the [keybinding configuration](docs/configuration.md#keybindings) for the complete list, customization options, and [modal keybindings](docs/configuration.md#modes).
 
 ### CLI
 
@@ -66,6 +66,7 @@ dome toggle layout               # Toggle split/tabbed
 dome toggle minimized            # Open minimized window picker
 dome focus workspace <name>      # Switch workspace
 dome exit                        # Quit Dome
+dome mode resize                 # Switch to resize keybinding mode
 ```
 
 See the [command reference](docs/commands.md) for the full list.

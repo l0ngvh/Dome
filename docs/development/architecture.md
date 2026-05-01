@@ -358,7 +358,7 @@ Console control handler (Ctrl+C, Ctrl+Break, console close) posts `WM_QUIT` to t
 
 ### IPC
 
-The binary serves dual purpose: `dome`/`dome launch` starts the WM, `dome <action>` sends a command. Action variants (Focus, Move, Toggle, Master, Exec, Exit, ToggleMinimizePicker) are clap subcommands and serde IPC payloads.
+The binary serves dual purpose: `dome`/`dome launch` starts the WM, `dome <action>` sends a command. Action variants (Focus, Move, Toggle, Master, Exec, Exit, Mode, ToggleMinimizePicker) are clap subcommands and serde IPC payloads.
 
 - macOS: Unix domain socket (`/tmp/dome.sock`), stale socket auto-cleaned.
 - Windows: named pipe (`\\.\pipe\dome`).
@@ -377,7 +377,15 @@ Hot-reload via `notify` file watcher — changes sent as `HubEvent`.
 - macOS: hub thread relayouts; main thread updates overlay config.
 - Windows: dome thread does both.
 
-Keymaps shared between keyboard listener and config update path with synchronization. macOS: `Arc<RwLock>`. Windows: `keyboard::update_config()` on config watcher thread.
+Keymaps shared between keyboard listener, config update path, and hub thread (for IPC mode switching) via `Arc<RwLock<KeymapState>>` on both platforms. `KeymapState` in `src/keymap.rs` owns the active mode name and `ModalKeymaps`; `resolve()` handles lookup, mode switching, and filtering of `Action::Mode` out of returned actions.
+
+#### Why mode state lives outside core
+
+Mode state lives in `KeymapState` (shared via `Arc<RwLock>`) rather than in `core/hub` for three reasons:
+
+1. **Synchronous suppression.** The keyboard callback must decide whether to suppress a keypress before returning. Routing through the hub thread would introduce a round-trip, making suppression asynchronous and unreliable.
+2. **No race with concurrent events.** If mode state lived in the hub, a keyboard event and a concurrent `switch_mode` IPC event could race: the keyboard callback resolves against the old mode before the hub processes the switch.
+3. **Separation of concerns.** Mode is input-handling state, not tree state. It belongs near the keyboard layer, not in core/hub which owns the window tree.
 
 ### Launch at Login
 

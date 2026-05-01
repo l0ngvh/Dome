@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use windows::Win32::Foundation::{LPARAM, WPARAM};
@@ -8,6 +8,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::action::{Action, Actions};
+use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, ObservedPosition};
 use crate::platform::windows::external::{HwndId, InspectExternalHwnd, ManageExternalHwnd};
@@ -31,10 +32,16 @@ pub(super) struct Runner {
     focus_timer_id: Option<usize>,
     window_timers: HashMap<HwndId, usize>,
     main_thread_id: u32,
+    keymap_state: Arc<RwLock<KeymapState>>,
 }
 
 impl Runner {
-    pub(super) fn new(dome: Dome, thread_id: u32, main_thread_id: u32) -> Self {
+    pub(super) fn new(
+        dome: Dome,
+        thread_id: u32,
+        main_thread_id: u32,
+        keymap_state: Arc<RwLock<KeymapState>>,
+    ) -> Self {
         Self {
             dome,
             dispatcher: ReadDispatcher::new(thread_id),
@@ -42,6 +49,7 @@ impl Runner {
             focus_timer_id: None,
             window_timers: HashMap::new(),
             main_thread_id,
+            keymap_state,
         }
     }
 
@@ -208,6 +216,10 @@ impl Runner {
                 Action::UnminimizeWindow(id) => {
                     self.dome.picker_unminimize_window(*id);
                     self.dome.apply_layout();
+                }
+                Action::Mode { name } => {
+                    self.keymap_state.write().unwrap().switch_mode(name);
+                    tracing::debug!(mode = %name, "Switching to mode");
                 }
             }
         }

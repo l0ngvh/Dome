@@ -3,6 +3,7 @@ mod config;
 mod core;
 mod font;
 mod ipc;
+mod keymap;
 mod logging;
 mod overlay;
 pub(crate) mod picker;

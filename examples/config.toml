@@ -10,15 +10,6 @@ automatic_tiling = true
 # Theme: one of "latte", "frappe", "macchiato", "mocha" (default: mocha)
 theme = "mocha"
 
-# Font settings. Dome uses egui's built-in font stack (Ubuntu-Light
-# proportional, Hack monospace, plus emoji fallbacks); only sizes are
-# configurable. text_size drives body text (tab titles, picker rows);
-# subtext_size drives the picker app-name subtext. Both must be in
-# [4.0, 128.0].
-[font]
-text_size = 14.0
-subtext_size = 12.0
-
 # Minimum window size - float for pixels, string for percentage (default: "5%")
 min_width = 200     # 200 logical pixels
 min_height = "10%"  # 10% of screen height
@@ -33,6 +24,15 @@ max_height = "50%"  # 50% of screen height
 
 # Launch Dome at login (macOS and Windows, default: false)
 # start_at_login = false
+
+# Font settings. Dome uses egui's built-in font stack (Ubuntu-Light
+# proportional, Hack monospace, plus emoji fallbacks); only sizes are
+# configurable. text_size drives body text (tab titles, picker rows);
+# subtext_size drives the picker app-name subtext. Both must be in
+# [4.0, 128.0].
+[font]
+text_size = 14.0
+subtext_size = 12.0
 
 [keymaps]
 "cmd+0" = ["focus workspace 0"]
@@ -82,6 +82,18 @@ max_height = "50%"  # 50% of screen height
 "cmd+shift+q" = ["exit"]
 "cmd+return" = ["exec open -a Terminal"]
 # "cmd+m" = ["toggle minimized"]
+# "cmd+r" = ["mode resize"]
+
+# Modal keybinding modes
+# Define additional modes under [keymaps.mode.<name>].
+# Always include a binding back to default mode to avoid getting stuck.
+#
+# [keymaps.mode.resize]
+# "h" = ["master shrink"]
+# "l" = ["master grow"]
+# "j" = ["master more"]
+# "k" = ["master fewer"]
+# "escape" = ["mode default"]
 
 # Window rules to ignore windows or run actions on open
 # All specified fields must match (AND logic)

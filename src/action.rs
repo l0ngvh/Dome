@@ -45,6 +45,9 @@ pub enum Action {
         command: String,
     },
     Exit,
+    Mode {
+        name: String,
+    },
     ToggleMinimizePicker,
     /// Restore a specific minimized window. Sent by the picker UI, not user-configurable.
     #[command(skip)]
@@ -92,6 +95,7 @@ impl fmt::Display for Action {
             Action::Hub(hub) => hub.fmt(f),
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
+            Action::Mode { name } => write!(f, "mode {name}"),
             Action::ToggleMinimizePicker => write!(f, "toggle minimized"),
             Action::UnminimizeWindow(id) => write!(f, "unminimize_window {id}"),
         }
@@ -277,6 +281,17 @@ impl FromStr for Action {
             });
         }
 
+        // Uses strip_prefix (like exec) instead of the match-arm shape so mode
+        // names with spaces work and parsing stays consistent across free-form args.
+        if let Some(name) = s.strip_prefix("mode ") {
+            let name = name.trim();
+            if !name.is_empty() {
+                return Ok(Action::Mode {
+                    name: name.to_string(),
+                });
+            }
+        }
+
         let parts: Vec<&str> = s.split_whitespace().collect();
         match parts.as_slice() {
             ["focus", "up"] => Ok(Action::Hub(HubAction::Focus {
@@ -393,6 +408,7 @@ enum FlatAction {
     Master { target: MasterTarget },
     Exec { command: String },
     Exit,
+    Mode { name: String },
     ToggleMinimizePicker,
     UnminimizeWindow(WindowId),
 }
@@ -406,6 +422,7 @@ impl From<Action> for FlatAction {
             Action::Hub(HubAction::Master { target }) => FlatAction::Master { target },
             Action::Exec { command } => FlatAction::Exec { command },
             Action::Exit => FlatAction::Exit,
+            Action::Mode { name } => FlatAction::Mode { name },
             Action::ToggleMinimizePicker => FlatAction::ToggleMinimizePicker,
             Action::UnminimizeWindow(id) => FlatAction::UnminimizeWindow(id),
         }
@@ -421,6 +438,7 @@ impl From<FlatAction> for Action {
             FlatAction::Master { target } => Action::Hub(HubAction::Master { target }),
             FlatAction::Exec { command } => Action::Exec { command },
             FlatAction::Exit => Action::Exit,
+            FlatAction::Mode { name } => Action::Mode { name },
             FlatAction::ToggleMinimizePicker => Action::ToggleMinimizePicker,
             FlatAction::UnminimizeWindow(id) => Action::UnminimizeWindow(id),
         }
@@ -484,6 +502,12 @@ mod tests {
             ),
             (Action::Exit, r#""Exit""#),
             (Action::ToggleMinimizePicker, r#""ToggleMinimizePicker""#),
+            (
+                Action::Mode {
+                    name: "resize".into(),
+                },
+                r#"{"Mode":{"name":"resize"}}"#,
+            ),
             (
                 Action::Hub(HubAction::Focus {
                     target: FocusTarget::Tab {
@@ -566,6 +590,7 @@ mod tests {
             "master more",
             "master fewer",
             "exit",
+            "mode resize",
             "exec open -a Terminal",
         ];
         for input in cases {
@@ -577,5 +602,24 @@ mod tests {
                 "round-trip mismatch: from_str({input:?}).to_string() = {formatted:?}"
             );
         }
+    }
+
+    #[test]
+    fn parse_mode_action() {
+        assert_eq!(
+            "mode resize".parse::<Action>().unwrap().to_string(),
+            "mode resize"
+        );
+    }
+
+    #[test]
+    fn display_mode_action() {
+        assert_eq!(
+            Action::Mode {
+                name: "resize".to_string()
+            }
+            .to_string(),
+            "mode resize"
+        );
     }
 }

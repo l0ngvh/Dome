@@ -1,5 +1,5 @@
 use std::sync::mpsc;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::thread::{self, JoinHandle};
 
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -18,7 +18,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use super::HubSender;
 use super::dome::HubEvent;
 use crate::action::Actions;
-use crate::config::{Config, Keymap, Modifiers};
+use crate::config::{Keymap, Modifiers};
+use crate::keymap::KeymapState;
 
 pub(super) struct KeyboardHookHandle {
     thread_id: u32,
@@ -27,19 +28,19 @@ pub(super) struct KeyboardHookHandle {
 
 struct KeyboardState {
     sender: HubSender,
-    config: RwLock<Config>,
+    keymap_state: Arc<RwLock<KeymapState>>,
 }
 
 static STATE: OnceLock<KeyboardState> = OnceLock::new();
 
 pub(super) fn install_keyboard_hook(
     sender: HubSender,
-    config: Config,
+    keymap_state: Arc<RwLock<KeymapState>>,
 ) -> anyhow::Result<KeyboardHookHandle> {
     STATE
         .set(KeyboardState {
             sender,
-            config: RwLock::new(config),
+            keymap_state,
         })
         .ok();
 
@@ -75,12 +76,6 @@ pub(super) fn install_keyboard_hook(
         thread_id,
         join_handle: Some(join_handle),
     })
-}
-
-pub(super) fn update_config(config: Config) {
-    if let Some(state) = STATE.get() {
-        *state.config.write().unwrap() = config;
-    }
 }
 
 pub(super) fn uninstall_keyboard_hook(mut handle: KeyboardHookHandle) {
@@ -134,13 +129,8 @@ fn get_actions(vk: VIRTUAL_KEY) -> Option<Actions> {
     let keymap = Keymap { key, modifiers };
 
     let state = STATE.get()?;
-    let config = state.config.read().ok()?;
-    let actions = config.keymaps.get(&keymap).cloned().unwrap_or_default();
-    if actions.is_empty() {
-        None
-    } else {
-        Some(actions)
-    }
+    let mut ks = state.keymap_state.write().ok()?;
+    ks.resolve(&keymap)
 }
 
 fn is_key_pressed(vk: VIRTUAL_KEY) -> bool {

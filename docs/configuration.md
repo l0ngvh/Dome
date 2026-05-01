@@ -83,6 +83,43 @@ Config-load failures are recorded in this file at `warn` level with the failing 
 
 Keybindings are defined in the `[keymaps]` section of the config file. Each entry maps a key combination to one or more commands. Dome ships with a full set of default keybindings (listed below) — if you define a `[keymaps]` section, it completely replaces the defaults rather than merging with them.
 
+### Modes
+
+Dome supports modal keybindings. The `[keymaps]` section defines the **default** mode. Additional modes are defined with `[keymaps.mode.<name>]` sections. Switch between modes at runtime using the `mode <name>` action in a binding or via `dome mode <name>` over CLI/IPC.
+
+```toml
+[keymaps]
+"cmd+h" = ["focus left"]
+"cmd+r" = ["mode resize"]
+
+[keymaps.mode.resize]
+"h" = ["master shrink"]
+"l" = ["master grow"]
+"escape" = ["mode default"]
+```
+
+In this example, `cmd+r` enters resize mode. Inside resize mode, `h` and `l` adjust the master area without modifiers, and `escape` returns to the default keybindings. The special name `"default"` always refers to the top-level `[keymaps]` table.
+
+Mode switching is instant. When a binding contains `mode <name>`, the switch takes effect before the next keypress. A binding can combine a mode switch with other actions: `"cmd+r" = ["focus left", "mode resize"]` focuses left and enters resize mode in one keypress.
+
+If a binding lists multiple `mode` actions, the last one wins.
+
+#### Reserved names
+
+- `"default"` is reserved and refers to the top-level `[keymaps]` section. Using it as a `[keymaps.mode.default]` section name causes a config validation error.
+- `"mode"` is a reserved action keyword. It cannot appear as a key-combo string in `[keymaps]` because it is parsed as the action identifier (and as the sub-table key for `[keymaps.mode.<name>]`).
+- Empty string `""` is rejected as a mode name.
+
+#### Gotchas
+
+**No automatic escape binding.** Dome does not enforce that a mode has a binding back to `default`. If you define a mode with no way out, your keyboard will only have the bindings in that mode. Always include an escape binding (like `"escape" = ["mode default"]`) in every custom mode.
+
+**Config reload preserves active mode.** If you edit your config while in a non-default mode, hot reload keeps you in that mode as long as it still exists in the new config. If the reloaded config removes the active mode, Dome falls back to the default keybindings on the next keypress and logs a warning on each keystroke until you switch back to an existing mode (e.g. `dome mode default`).
+
+**Unknown mode names are rejected.** Running `dome mode typo` or pressing a binding with `mode typo` logs a warning and leaves your current mode unchanged. Your keyboard stays in whatever mode it was in.
+
+**Mode state is global.** Modes are per-process, not per-workspace or per-monitor. Switching workspaces does not change the active mode.
+
 ### Syntax
 
 Keys are written as `"modifier+modifier+key"` (all lowercase). Available modifiers: `cmd`, `shift`, `alt`, `ctrl`. Multiple modifiers are joined with `+`. The key is the final segment after all modifiers. Examples: `"cmd+h"`, `"cmd+shift+return"`, `"ctrl+alt+1"`.

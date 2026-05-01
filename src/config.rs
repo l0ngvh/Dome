@@ -50,7 +50,13 @@ impl FromStr for Keymap {
     }
 }
 
-fn default_keymaps() -> HashMap<Keymap, Actions> {
+#[derive(Debug, Clone)]
+pub(crate) struct ModalKeymaps {
+    pub(crate) default: HashMap<Keymap, Actions>,
+    pub(crate) modes: HashMap<String, HashMap<Keymap, Actions>>,
+}
+
+fn default_keymaps() -> ModalKeymaps {
     let mut keymaps = HashMap::new();
     for i in 0..=9 {
         keymaps.insert(
@@ -250,23 +256,79 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
             })]),
         );
     }
-    keymaps
+    ModalKeymaps {
+        default: keymaps,
+        modes: HashMap::new(),
+    }
 }
 
-fn deserialize_keymaps<'de, D>(deserializer: D) -> Result<HashMap<Keymap, Actions>, D::Error>
+fn deserialize_modal_keymaps<'de, D>(deserializer: D) -> Result<ModalKeymaps, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let raw = HashMap::<String, Vec<String>>::deserialize(deserializer)?;
-    let mut keymaps = HashMap::new();
-    for (key_str, action_strs) in raw {
-        let keymap = key_str
-            .parse::<Keymap>()
-            .map_err(serde::de::Error::custom)?;
-        let actions = parse_actions(&action_strs).map_err(serde::de::Error::custom)?;
-        keymaps.insert(keymap, actions);
+    // The [keymaps] table mixes key-combo bindings (string -> [actions]) with a
+    // special "mode" key (table of named modes). Deserialize as raw TOML values
+    // and discriminate on the key name.
+    let raw = HashMap::<String, toml::Value>::deserialize(deserializer)?;
+    let mut default = HashMap::new();
+    let mut modes = HashMap::new();
+
+    for (key_str, value) in raw {
+        if key_str == "mode" {
+            // value is { mode_name => { key_combo => [action_strings] } }
+            let mode_table = mode_table_from_value(value).map_err(serde::de::Error::custom)?;
+            for (mode_name, bindings) in mode_table {
+                let mut mode_keymaps = HashMap::new();
+                for (k, action_strs) in bindings {
+                    let keymap = k.parse::<Keymap>().map_err(serde::de::Error::custom)?;
+                    let actions = parse_actions(&action_strs).map_err(serde::de::Error::custom)?;
+                    mode_keymaps.insert(keymap, actions);
+                }
+                modes.insert(mode_name, mode_keymaps);
+            }
+        } else {
+            let action_strs: Vec<String> = value.try_into().map_err(serde::de::Error::custom)?;
+            let keymap = key_str
+                .parse::<Keymap>()
+                .map_err(serde::de::Error::custom)?;
+            let actions = parse_actions(&action_strs).map_err(serde::de::Error::custom)?;
+            default.insert(keymap, actions);
+        }
     }
-    Ok(keymaps)
+
+    Ok(ModalKeymaps { default, modes })
+}
+
+fn mode_table_from_value(
+    value: toml::Value,
+) -> Result<HashMap<String, HashMap<String, Vec<String>>>> {
+    let toml::Value::Table(table) = value else {
+        anyhow::bail!("expected 'mode' to be a table");
+    };
+    let mut result = HashMap::new();
+    for (mode_name, mode_val) in table {
+        let toml::Value::Table(bindings_table) = mode_val else {
+            anyhow::bail!("expected mode '{mode_name}' to be a table");
+        };
+        let mut bindings = HashMap::new();
+        for (key_combo, actions_val) in bindings_table {
+            let toml::Value::Array(arr) = actions_val else {
+                anyhow::bail!(
+                    "expected actions for key '{key_combo}' in mode '{mode_name}' to be an array"
+                );
+            };
+            let action_strs: Vec<String> = arr
+                .into_iter()
+                .map(|v| match v {
+                    toml::Value::String(s) => Ok(s),
+                    other => anyhow::bail!("expected string action, got {other}"),
+                })
+                .collect::<Result<_>>()?;
+            bindings.insert(key_combo, action_strs);
+        }
+        result.insert(mode_name, bindings);
+    }
+    Ok(result)
 }
 
 fn parse_actions(action_strs: &[String]) -> Result<Actions> {
@@ -500,8 +562,11 @@ pub(crate) struct WindowsConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
-    #[serde(default = "default_keymaps", deserialize_with = "deserialize_keymaps")]
-    pub(crate) keymaps: HashMap<Keymap, Actions>,
+    #[serde(
+        default = "default_keymaps",
+        deserialize_with = "deserialize_modal_keymaps"
+    )]
+    pub(crate) keymaps: ModalKeymaps,
     #[serde(default = "default_border_size")]
     pub(crate) border_size: f32,
     #[serde(default = "default_tab_bar_height")]
@@ -678,6 +743,13 @@ impl Config {
             anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
         }
         self.font.validate()?;
+        // "default" is the reserved name for the top-level [keymaps] table.
+        if self.keymaps.modes.contains_key("default") {
+            anyhow::bail!("mode name 'default' is reserved for the top-level [keymaps] table");
+        }
+        if self.keymaps.modes.contains_key("") {
+            anyhow::bail!("mode name must not be empty");
+        }
         Ok(())
     }
 }
@@ -890,6 +962,98 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let config = Config::load_or_default(path.to_str().unwrap());
         assert_eq!(config.log_level.as_str(), "info");
+    }
+
+    #[test]
+    fn modal_keymaps_empty_modes() {
+        let config: Config = toml::from_str(
+            r#"
+            [keymaps]
+            "cmd+h" = ["focus left"]
+            "#,
+        )
+        .unwrap();
+        assert!(config.keymaps.modes.is_empty());
+        let keymap = "cmd+h".parse::<Keymap>().unwrap();
+        assert!(config.keymaps.default.contains_key(&keymap));
+    }
+
+    #[test]
+    fn modal_keymaps_with_mode() {
+        let config: Config = toml::from_str(
+            r#"
+            [keymaps]
+            "cmd+h" = ["focus left"]
+
+            [keymaps.mode.resize]
+            "h" = ["focus left"]
+            "escape" = ["mode default"]
+            "#,
+        )
+        .unwrap();
+        let cmd_h = "cmd+h".parse::<Keymap>().unwrap();
+        assert!(config.keymaps.default.contains_key(&cmd_h));
+        let resize = config
+            .keymaps
+            .modes
+            .get("resize")
+            .expect("resize mode missing");
+        let h = "h".parse::<Keymap>().unwrap();
+        assert!(resize.contains_key(&h));
+        let esc = "escape".parse::<Keymap>().unwrap();
+        assert!(resize.contains_key(&esc));
+    }
+
+    #[test]
+    fn modal_keymaps_rejects_default_mode_name() {
+        let config: Config = toml::from_str(
+            r#"
+            [keymaps]
+            "cmd+h" = ["focus left"]
+
+            [keymaps.mode.default]
+            "h" = ["focus left"]
+            "#,
+        )
+        .unwrap();
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("default"),
+            "expected error about 'default', got: {err}"
+        );
+    }
+
+    #[test]
+    fn modal_keymaps_rejects_empty_mode_name() {
+        let result = toml::from_str::<Config>(
+            r#"
+            [keymaps]
+            "cmd+h" = ["focus left"]
+
+            [keymaps.mode.""]
+            "h" = ["focus left"]
+            "#,
+        );
+        // Empty mode name may fail at parse time (TOML key) or at validation.
+        // Either way it should not succeed silently.
+        match result {
+            Ok(config) => {
+                let err = config.validate().unwrap_err();
+                assert!(
+                    err.to_string().contains("empty"),
+                    "expected error about empty mode name, got: {err}"
+                );
+            }
+            Err(_) => { /* parse-time rejection is fine */ }
+        }
+    }
+
+    #[test]
+    fn example_config_parses() {
+        let path = format!("{}/examples/config.toml", env!("CARGO_MANIFEST_DIR"));
+        let content = std::fs::read_to_string(&path).expect("failed to read example config");
+        let config: Config = toml::from_str(&content).expect("failed to parse example config");
+        config.validate().expect("example config failed validation");
     }
 
     /// RAII guard that removes a temp file on drop, even if the test panics.
