@@ -4,9 +4,6 @@
 # Border size in pixels (default: 4.0)
 border_size = 4.0
 
-# Corner radius for window and container borders, in logical pixels (default: 12.0)
-border_radius = 12.0
-
 # Automatic tiling - automatically determine split direction based on window dimensions (default: true)
 automatic_tiling = true
 

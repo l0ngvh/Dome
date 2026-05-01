@@ -9,6 +9,11 @@ use crate::core::{
 };
 use crate::theme::Theme;
 
+/// Hardcoded corner radius for window borders and tabbed-container body
+/// borders. Kept private: rendering knobs should not leak into the config
+/// surface or into core, which has no view on pixels.
+const WINDOW_BORDER_RADIUS: f32 = 12.0;
+
 /// Draws all tiling window borders and container overlays for a single monitor.
 /// Returns `(ContainerId, tab_index)` for each tab that was clicked.
 pub(crate) fn paint_tiling_overlay(
@@ -88,7 +93,7 @@ pub(crate) fn paint_window_border(
         frame,
         visible_frame,
         config.border_size,
-        config.border_radius,
+        WINDOW_BORDER_RADIUS,
         colors,
         theme.focused_border,
         origin,
@@ -113,7 +118,7 @@ pub(crate) fn show_container(
     let h = f.height;
     let is_tabbed = placement.is_tabbed && !tab_titles.is_empty();
     let th = config.tab_bar_height;
-    let r = effective_radius(config.border_radius, w, h);
+    let r = effective_radius(WINDOW_BORDER_RADIUS, w, h);
     let theme = config.theme();
 
     let border_c = if placement.is_highlighted {
@@ -169,7 +174,6 @@ pub(crate) fn show_container(
                     sw: cr_u8(r_body),
                     se: cr_u8(r_body),
                 };
-                let corners = corner_colors(colors, focused);
 
                 stroke_clipped(
                     painter,
@@ -198,14 +202,18 @@ pub(crate) fn show_container(
                     cr,
                     (b, colors[2]),
                 );
-                stroke_clipped(
+                // SW corner: top half = left edge, bottom half = bottom edge
+                paint_split_corner(
                     painter,
                     Rect::from_min_size(pos2(ox, oy + h - r_body), vec2(r_body, r_body)),
                     full_rect,
                     cr,
-                    (b, corners[2]),
+                    b,
+                    colors[3],
+                    colors[2],
                 );
-                stroke_clipped(
+                // SE corner: top half = right edge, bottom half = bottom edge
+                paint_split_corner(
                     painter,
                     Rect::from_min_size(
                         pos2(ox + w - r_body, oy + h - r_body),
@@ -213,7 +221,9 @@ pub(crate) fn show_container(
                     ),
                     full_rect,
                     cr,
-                    (b, corners[3]),
+                    b,
+                    colors[1],
+                    colors[2],
                 );
             }
         } else {
@@ -222,7 +232,7 @@ pub(crate) fn show_container(
                 f,
                 vf,
                 b,
-                config.border_radius,
+                WINDOW_BORDER_RADIUS,
                 colors,
                 focused,
                 origin,
@@ -236,7 +246,7 @@ pub(crate) fn show_container(
 
     let bg = theme.tab_bar_bg;
     let active_bg = theme.active_tab_bg;
-    let tab_cr = r.min(th);
+    let tab_cr = tab_bar_corner_radius(th);
     let tab_bar_cr = CornerRadius::same(cr_u8(tab_cr));
 
     // Tab bar background
@@ -258,16 +268,7 @@ pub(crate) fn show_container(
         let is_active = i == placement.active_tab_index;
 
         if is_active {
-            let active_cr = CornerRadius {
-                nw: if i == 0 { cr_u8(tab_cr) } else { 0 },
-                ne: if i == tab_titles.len() - 1 {
-                    cr_u8(tab_cr)
-                } else {
-                    0
-                },
-                sw: 0,
-                se: 0,
-            };
+            let active_cr = active_tab_corner_radius(i, tab_titles.len(), tab_cr);
             ui.painter().rect_filled(tab_rect, active_cr, active_bg);
 
             if placement.is_highlighted {
@@ -328,6 +329,32 @@ fn stroke_clipped(
         .rect_stroke(full_rect, cr, stroke, StrokeKind::Inside);
 }
 
+/// Paints the inner stroke of `full_rect` twice, clipped to the top half and
+/// bottom half of `corner_rect`. Lets a rounded corner display two colours
+/// along its arc so a spawn-indicator edge tints only the half of the arc
+/// adjacent to the flagged edge rather than the entire 90-degree sweep.
+/// When `top == bottom` the two strokes coincide and produce pixel-identical
+/// output to a single full-corner stroke. Kept for `r > 0` branches only;
+/// the `r == 0` square-corner paths continue to use `corner_colors` since
+/// there is no arc to split there.
+/// Horizontal (top/bottom) split chosen over diagonal because
+/// `egui::Painter::with_clip_rect` only accepts axis-aligned rects.
+fn paint_split_corner(
+    painter: &egui::Painter,
+    corner_rect: Rect,
+    full_rect: Rect,
+    cr: CornerRadius,
+    b: f32,
+    top: Color32,
+    bottom: Color32,
+) {
+    let mid_y = corner_rect.min.y + corner_rect.height() / 2.0;
+    let top_half = Rect::from_min_max(corner_rect.min, pos2(corner_rect.max.x, mid_y));
+    let bottom_half = Rect::from_min_max(pos2(corner_rect.min.x, mid_y), corner_rect.max);
+    stroke_clipped(painter, top_half, full_rect, cr, (b, top));
+    stroke_clipped(painter, bottom_half, full_rect, cr, (b, bottom));
+}
+
 /// Clamps radius to fit within the given dimensions.
 /// When r == w/2 or h/2, corner clips cover everything and edges have zero width, which is fine.
 fn effective_radius(r: f32, w: f32, h: f32) -> f32 {
@@ -337,6 +364,34 @@ fn effective_radius(r: f32, w: f32, h: f32) -> f32 {
 /// Defensive clamp for converting f32 radius to u8 for CornerRadius fields.
 fn cr_u8(r: f32) -> u8 {
     r.clamp(0.0, 255.0) as u8
+}
+
+/// Tab-bar corner radius, sized to a quarter of the tab bar's thickness and
+/// clamped to `tab_bar_height / 2` so corners always fit. A quarter gives a
+/// visibly softer corner than the main window border (6px vs 12px at the
+/// default 24px tab-bar height) while scaling with the user-configured
+/// tab-bar thickness. Used for both the tab-bar outline and the active-tab
+/// highlight so they stay visually coherent.
+fn tab_bar_corner_radius(tab_bar_height: f32) -> f32 {
+    effective_radius(tab_bar_height * 0.25, tab_bar_height, tab_bar_height)
+}
+
+/// Returns the corner radius for the active-tab fill/highlight so its outer
+/// corners match the tab bar wherever the tab sits on a tab-bar outer
+/// corner. First tab rounds nw+sw, last tab rounds ne+se, a single tab
+/// rounds all four, middle tabs stay square. Assumes the tab bar has all
+/// four outer corners rounded with `tab_cr`; update in lockstep with the
+/// tab bar outline if that changes.
+fn active_tab_corner_radius(index: usize, tab_count: usize, tab_cr: f32) -> CornerRadius {
+    let r = cr_u8(tab_cr);
+    let is_first = index == 0;
+    let is_last = index + 1 == tab_count;
+    CornerRadius {
+        nw: if is_first { r } else { 0 },
+        sw: if is_first { r } else { 0 },
+        ne: if is_last { r } else { 0 },
+        se: if is_last { r } else { 0 },
+    }
 }
 
 #[expect(
@@ -410,7 +465,6 @@ fn paint_border_edges(
 
     let full_rect = Rect::from_min_size(pos2(ox, oy), vec2(w, h));
     let cr = CornerRadius::from(r);
-    let corners = corner_colors(colors, focused);
 
     stroke_clipped(
         painter,
@@ -441,33 +495,45 @@ fn paint_border_edges(
         (b, colors[3]),
     );
 
-    stroke_clipped(
+    // NW corner: top half = top edge colour, bottom half = left edge colour
+    paint_split_corner(
         painter,
         Rect::from_min_size(pos2(ox, oy), vec2(r, r)),
         full_rect,
         cr,
-        (b, corners[0]),
+        b,
+        colors[0],
+        colors[3],
     );
-    stroke_clipped(
+    // NE corner: top half = top edge colour, bottom half = right edge colour
+    paint_split_corner(
         painter,
         Rect::from_min_size(pos2(ox + w - r, oy), vec2(r, r)),
         full_rect,
         cr,
-        (b, corners[1]),
+        b,
+        colors[0],
+        colors[1],
     );
-    stroke_clipped(
+    // SW corner: top half = left edge colour, bottom half = bottom edge colour
+    paint_split_corner(
         painter,
         Rect::from_min_size(pos2(ox, oy + h - r), vec2(r, r)),
         full_rect,
         cr,
-        (b, corners[2]),
+        b,
+        colors[3],
+        colors[2],
     );
-    stroke_clipped(
+    // SE corner: top half = right edge colour, bottom half = bottom edge colour
+    paint_split_corner(
         painter,
         Rect::from_min_size(pos2(ox + w - r, oy + h - r), vec2(r, r)),
         full_rect,
         cr,
-        (b, corners[3]),
+        b,
+        colors[1],
+        colors[2],
     );
 }
 
@@ -586,5 +652,75 @@ mod tests {
         let focused = Color32::from_rgb(102, 153, 255);
         let spawn = Color32::from_rgb(255, 100, 100);
         assert_eq!(corner_colors([spawn; 4], focused), [spawn; 4]);
+    }
+
+    #[test]
+    fn active_tab_corner_radius_first_of_many() {
+        assert_eq!(
+            active_tab_corner_radius(0, 4, 6.0),
+            CornerRadius {
+                nw: 6,
+                sw: 6,
+                ne: 0,
+                se: 0
+            }
+        );
+    }
+
+    #[test]
+    fn active_tab_corner_radius_last_of_many() {
+        assert_eq!(
+            active_tab_corner_radius(3, 4, 6.0),
+            CornerRadius {
+                nw: 0,
+                sw: 0,
+                ne: 6,
+                se: 6
+            }
+        );
+    }
+
+    #[test]
+    fn active_tab_corner_radius_middle() {
+        assert_eq!(
+            active_tab_corner_radius(1, 4, 6.0),
+            CornerRadius {
+                nw: 0,
+                ne: 0,
+                sw: 0,
+                se: 0
+            }
+        );
+    }
+
+    #[test]
+    fn active_tab_corner_radius_single_tab() {
+        assert_eq!(active_tab_corner_radius(0, 1, 6.0), CornerRadius::same(6));
+    }
+
+    #[test]
+    fn active_tab_corner_radius_zero_radius() {
+        assert_eq!(active_tab_corner_radius(0, 3, 0.0), CornerRadius::ZERO);
+    }
+
+    #[test]
+    fn tab_bar_corner_radius_default_height() {
+        assert_eq!(tab_bar_corner_radius(24.0), 6.0);
+    }
+
+    #[test]
+    fn tab_bar_corner_radius_scales_linearly() {
+        assert_eq!(tab_bar_corner_radius(40.0), 10.0);
+        assert_eq!(tab_bar_corner_radius(12.0), 3.0);
+    }
+
+    #[test]
+    fn tab_bar_corner_radius_clamps_to_half_height() {
+        assert_eq!(tab_bar_corner_radius(4.0), 1.0);
+    }
+
+    #[test]
+    fn tab_bar_corner_radius_zero_height() {
+        assert_eq!(tab_bar_corner_radius(0.0), 0.0);
     }
 }

@@ -9,7 +9,6 @@ The config format is TOML, and the same file works on both macOS and Windows. Ch
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `border_size` | float | `4.0` | Border width around windows, in logical pixels. |
-| `border_radius` | float | `12.0` | Corner radius for window and container borders, in logical pixels. `0` means sharp corners. Clamped at runtime to half the smallest window dimension, so large values are safe. |
 | `tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, in logical pixels. |
 | `automatic_tiling` | boolean | `true` | When `true`, Dome chooses horizontal or vertical split based on the focused window's dimensions. When `false`, new windows always split in the current container's direction. |
 | `min_width` | float or string | `"5%"` | Minimum window width. A number means logical pixels (e.g., `200`). A string with `%` means percentage of screen width (e.g., `"10%"`). |
@@ -52,7 +51,6 @@ max_height = 800      # 800 logical pixels
 
 ```toml
 border_size = 2.0
-border_radius = 0.0
 tab_bar_height = 24.0
 automatic_tiling = true
 min_width = "5%"
@@ -67,9 +65,9 @@ text_size = 14.0
 subtext_size = 12.0
 ```
 
-## Upgrading from Per-Color Config
+## Upgrading from Removed Config Fields
 
-Older versions of Dome used five separate color fields (`focused_color`, `spawn_indicator_color`, `border_color`, `tab_bar_background_color`, `active_tab_background_color`). These have been replaced by the single `theme` field. If your config still contains any of the old color fields, Dome will fail to parse your config, log a warning to `dome.log`, and fall back to built-in defaults. This means your keybindings, window rules, and other settings silently revert to defaults. Remove the old fields and use `theme` instead.
+Older versions of Dome used five separate color fields (`focused_color`, `spawn_indicator_color`, `border_color`, `tab_bar_background_color`, `active_tab_background_color`). These have been replaced by the single `theme` field. The `border_radius` field has also been removed; Dome now hardcodes window and tab-bar corner radii in the renderer. If your config still contains any of these removed fields, Dome will fail to parse your config, log a warning to `dome.log`, and fall back to built-in defaults. This means your keybindings, window rules, and other settings silently revert to defaults. Remove the old fields to clear the warning.
 
 ## Log File
 

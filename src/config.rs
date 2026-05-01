@@ -500,8 +500,6 @@ pub(crate) struct Config {
     pub(crate) keymaps: HashMap<Keymap, Actions>,
     #[serde(default = "default_border_size")]
     pub(crate) border_size: f32,
-    #[serde(default = "default_border_radius")]
-    pub(crate) border_radius: f32,
     #[serde(default = "default_tab_bar_height")]
     pub(crate) tab_bar_height: f32,
     #[serde(default = "default_automatic_tiling")]
@@ -557,10 +555,6 @@ fn default_border_size() -> f32 {
     4.0
 }
 
-fn default_border_radius() -> f32 {
-    12.0
-}
-
 fn default_tab_bar_height() -> f32 {
     24.0
 }
@@ -574,7 +568,6 @@ impl Default for Config {
         Config {
             keymaps: default_keymaps(),
             border_size: default_border_size(),
-            border_radius: default_border_radius(),
             tab_bar_height: default_tab_bar_height(),
             automatic_tiling: default_automatic_tiling(),
             min_width: SizeConstraint::default_min(),
@@ -846,6 +839,14 @@ mod tests {
         assert!(toml::from_str::<Config>(r##"spawn_indicator_color = "#ff0000""##).is_err());
         assert!(toml::from_str::<Config>(r##"tab_bar_background_color = "#ff0000""##).is_err());
         assert!(toml::from_str::<Config>(r##"active_tab_background_color = "#ff0000""##).is_err());
+    }
+
+    #[test]
+    fn removed_border_radius_rejected() {
+        // Configs mentioning `border_radius` must fail at parse time via
+        // `deny_unknown_fields`. The field was replaced by hardcoded values
+        // in `src/overlay.rs` (WINDOW_BORDER_RADIUS and tab_bar_corner_radius).
+        assert!(toml::from_str::<Config>("border_radius = 12.0").is_err());
     }
 
     #[test]
