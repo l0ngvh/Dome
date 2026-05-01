@@ -97,7 +97,7 @@ The trait has a minimal surface: `attach_child`, `detach_child`, `handle_action`
 
 Hub holds `access: HubAccess` (monitors, focused_monitor, workspaces, windows, config) and `strategy: Box<dyn TilingStrategy>` as disjoint fields. Strategy methods receive `&mut HubAccess` so they can read/write shared state without borrowing Hub. This solves the split-borrow problem.
 
-`TilingAction` is an enum of tiling-specific commands (focus/move direction, toggle spawn mode, toggle direction, toggle layout, focus parent, focus tab). Hub's `command.rs` does restriction checks then delegates to `strategy.handle_action`. Float and fullscreen management stay on Hub.
+`TilingAction` is an enum of tiling-specific commands (focus/move direction, toggle spawn mode, toggle direction, toggle layout, focus parent, focus tab, master grow/shrink/more/fewer). Hub's `command.rs` does restriction checks then delegates to `strategy.handle_action`. Float and fullscreen management stay on Hub.
 
 ### Layout
 
@@ -358,7 +358,7 @@ Console control handler (Ctrl+C, Ctrl+Break, console close) posts `WM_QUIT` to t
 
 ### IPC
 
-The binary serves dual purpose: `dome`/`dome launch` starts the WM, `dome <action>` sends a command. Action variants (Focus, Move, Toggle, Exec, Exit, ToggleMinimizePicker) are clap subcommands and serde IPC payloads.
+The binary serves dual purpose: `dome`/`dome launch` starts the WM, `dome <action>` sends a command. Action variants (Focus, Move, Toggle, Master, Exec, Exit, ToggleMinimizePicker) are clap subcommands and serde IPC payloads.
 
 - macOS: Unix domain socket (`/tmp/dome.sock`), stale socket auto-cleaned.
 - Windows: named pipe (`\\.\pipe\dome`).

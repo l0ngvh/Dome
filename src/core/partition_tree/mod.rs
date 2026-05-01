@@ -273,10 +273,10 @@ impl TilingStrategy for PartitionTreeStrategy {
                 container_id,
                 index,
             } => self.focus_tab_index(hub, container_id, index),
-            TilingAction::IncreaseMasterRatio
-            | TilingAction::DecreaseMasterRatio
-            | TilingAction::IncrementMasterCount
-            | TilingAction::DecrementMasterCount => {}
+            TilingAction::GrowMaster
+            | TilingAction::ShrinkMaster
+            | TilingAction::MoreMaster
+            | TilingAction::FewerMaster => {}
         }
     }
 

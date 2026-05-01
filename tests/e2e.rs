@@ -200,8 +200,8 @@ fn test_tabbed_navigation() {
     spawn_test_window();
     assert!(dome(&["toggle", "layout"]));
 
-    assert!(dome(&["focus", "prev-tab"]));
-    assert!(dome(&["focus", "next-tab"]));
+    assert!(dome(&["focus", "tab", "prev"]));
+    assert!(dome(&["focus", "tab", "next"]));
 }
 
 #[test]

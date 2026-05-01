@@ -15,7 +15,9 @@ use std::time::Instant;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{Actions, FocusTarget, HubAction, MasterTarget, MoveTarget, ToggleTarget};
+use crate::action::{
+    Actions, FocusTarget, HubAction, MasterTarget, MoveTarget, TabDirection, ToggleTarget,
+};
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
     ContainerId, Dimension, Direction, Hub, TilingAction, WindowId, WindowRestrictions,
@@ -505,12 +507,11 @@ impl Dome {
                     forward: true,
                 }),
                 FocusTarget::Parent => self.hub.handle_tiling_action(TilingAction::FocusParent),
-                FocusTarget::NextTab => self
-                    .hub
-                    .handle_tiling_action(TilingAction::FocusTab { forward: true }),
-                FocusTarget::PrevTab => self
-                    .hub
-                    .handle_tiling_action(TilingAction::FocusTab { forward: false }),
+                FocusTarget::Tab { direction } => {
+                    self.hub.handle_tiling_action(TilingAction::FocusTab {
+                        forward: matches!(direction, TabDirection::Next),
+                    })
+                }
                 FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
                 FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
             },
@@ -535,9 +536,7 @@ impl Dome {
                 MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
             },
             HubAction::Toggle { target } => match target {
-                ToggleTarget::SpawnDirection => {
-                    self.hub.handle_tiling_action(TilingAction::ToggleSpawnMode)
-                }
+                ToggleTarget::Spawn => self.hub.handle_tiling_action(TilingAction::ToggleSpawnMode),
                 ToggleTarget::Direction => {
                     self.hub.handle_tiling_action(TilingAction::ToggleDirection)
                 }
@@ -549,10 +548,10 @@ impl Dome {
             },
             HubAction::Master { target } => {
                 let action = match target {
-                    MasterTarget::IncreaseMasterRatio => TilingAction::IncreaseMasterRatio,
-                    MasterTarget::DecreaseMasterRatio => TilingAction::DecreaseMasterRatio,
-                    MasterTarget::IncrementMasterCount => TilingAction::IncrementMasterCount,
-                    MasterTarget::DecrementMasterCount => TilingAction::DecrementMasterCount,
+                    MasterTarget::Grow => TilingAction::GrowMaster,
+                    MasterTarget::Shrink => TilingAction::ShrinkMaster,
+                    MasterTarget::More => TilingAction::MoreMaster,
+                    MasterTarget::Fewer => TilingAction::FewerMaster,
                 };
                 self.hub.handle_tiling_action(action);
             }

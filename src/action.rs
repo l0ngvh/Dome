@@ -60,6 +60,21 @@ pub enum MonitorTarget {
     Name(String),
 }
 
+#[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
+pub enum TabDirection {
+    Next,
+    Prev,
+}
+
+impl fmt::Display for TabDirection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TabDirection::Next => write!(f, "next"),
+            TabDirection::Prev => write!(f, "prev"),
+        }
+    }
+}
+
 impl fmt::Display for HubAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -77,7 +92,7 @@ impl fmt::Display for Action {
             Action::Hub(hub) => hub.fmt(f),
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
-            Action::ToggleMinimizePicker => write!(f, "toggle minimize_picker"),
+            Action::ToggleMinimizePicker => write!(f, "toggle minimized"),
             Action::UnminimizeWindow(id) => write!(f, "unminimize_window {id}"),
         }
     }
@@ -143,8 +158,10 @@ pub enum FocusTarget {
     Left,
     Right,
     Parent,
-    NextTab,
-    PrevTab,
+    Tab {
+        #[command(subcommand)]
+        direction: TabDirection,
+    },
     Workspace {
         name: String,
     },
@@ -162,8 +179,7 @@ impl fmt::Display for FocusTarget {
             FocusTarget::Left => write!(f, "left"),
             FocusTarget::Right => write!(f, "right"),
             FocusTarget::Parent => write!(f, "parent"),
-            FocusTarget::NextTab => write!(f, "next_tab"),
-            FocusTarget::PrevTab => write!(f, "prev_tab"),
+            FocusTarget::Tab { direction } => write!(f, "tab {direction}"),
             FocusTarget::Workspace { name } => write!(f, "workspace {name}"),
             FocusTarget::Monitor { target } => write!(f, "monitor {target}"),
         }
@@ -212,7 +228,7 @@ impl fmt::Display for MonitorTarget {
 
 #[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
 pub enum ToggleTarget {
-    SpawnDirection,
+    Spawn,
     Direction,
     Layout,
     Float,
@@ -222,7 +238,7 @@ pub enum ToggleTarget {
 impl fmt::Display for ToggleTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ToggleTarget::SpawnDirection => write!(f, "spawn direction"),
+            ToggleTarget::Spawn => write!(f, "spawn"),
             ToggleTarget::Direction => write!(f, "direction"),
             ToggleTarget::Layout => write!(f, "layout"),
             ToggleTarget::Float => write!(f, "float"),
@@ -233,19 +249,19 @@ impl fmt::Display for ToggleTarget {
 
 #[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
 pub enum MasterTarget {
-    IncreaseMasterRatio,
-    DecreaseMasterRatio,
-    IncrementMasterCount,
-    DecrementMasterCount,
+    Grow,
+    Shrink,
+    More,
+    Fewer,
 }
 
 impl fmt::Display for MasterTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MasterTarget::IncreaseMasterRatio => write!(f, "increase-master-ratio"),
-            MasterTarget::DecreaseMasterRatio => write!(f, "decrease-master-ratio"),
-            MasterTarget::IncrementMasterCount => write!(f, "increment-master-count"),
-            MasterTarget::DecrementMasterCount => write!(f, "decrement-master-count"),
+            MasterTarget::Grow => write!(f, "grow"),
+            MasterTarget::Shrink => write!(f, "shrink"),
+            MasterTarget::More => write!(f, "more"),
+            MasterTarget::Fewer => write!(f, "fewer"),
         }
     }
 }
@@ -283,11 +299,15 @@ impl FromStr for Action {
                     name: n.to_string(),
                 },
             })),
-            ["focus", "next_tab"] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::NextTab,
+            ["focus", "tab", "next"] => Ok(Action::Hub(HubAction::Focus {
+                target: FocusTarget::Tab {
+                    direction: TabDirection::Next,
+                },
             })),
-            ["focus", "prev_tab"] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::PrevTab,
+            ["focus", "tab", "prev"] => Ok(Action::Hub(HubAction::Focus {
+                target: FocusTarget::Tab {
+                    direction: TabDirection::Prev,
+                },
             })),
             ["focus", "monitor", target] => Ok(Action::Hub(HubAction::Focus {
                 target: FocusTarget::Monitor {
@@ -316,8 +336,8 @@ impl FromStr for Action {
                     target: parse_monitor_target(target)?,
                 },
             })),
-            ["toggle", "spawn_direction"] => Ok(Action::Hub(HubAction::Toggle {
-                target: ToggleTarget::SpawnDirection,
+            ["toggle", "spawn"] => Ok(Action::Hub(HubAction::Toggle {
+                target: ToggleTarget::Spawn,
             })),
             ["toggle", "direction"] => Ok(Action::Hub(HubAction::Toggle {
                 target: ToggleTarget::Direction,
@@ -331,20 +351,20 @@ impl FromStr for Action {
             ["toggle", "fullscreen"] => Ok(Action::Hub(HubAction::Toggle {
                 target: ToggleTarget::Fullscreen,
             })),
-            ["master", "increase-master-ratio"] => Ok(Action::Hub(HubAction::Master {
-                target: MasterTarget::IncreaseMasterRatio,
+            ["master", "grow"] => Ok(Action::Hub(HubAction::Master {
+                target: MasterTarget::Grow,
             })),
-            ["master", "decrease-master-ratio"] => Ok(Action::Hub(HubAction::Master {
-                target: MasterTarget::DecreaseMasterRatio,
+            ["master", "shrink"] => Ok(Action::Hub(HubAction::Master {
+                target: MasterTarget::Shrink,
             })),
-            ["master", "increment-master-count"] => Ok(Action::Hub(HubAction::Master {
-                target: MasterTarget::IncrementMasterCount,
+            ["master", "more"] => Ok(Action::Hub(HubAction::Master {
+                target: MasterTarget::More,
             })),
-            ["master", "decrement-master-count"] => Ok(Action::Hub(HubAction::Master {
-                target: MasterTarget::DecrementMasterCount,
+            ["master", "fewer"] => Ok(Action::Hub(HubAction::Master {
+                target: MasterTarget::Fewer,
             })),
             ["exit"] => Ok(Action::Exit),
-            ["toggle", "minimize_picker"] => Ok(Action::ToggleMinimizePicker),
+            ["toggle", "minimized"] => Ok(Action::ToggleMinimizePicker),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
     }
@@ -452,9 +472,9 @@ mod tests {
             ),
             (
                 Action::Hub(HubAction::Master {
-                    target: MasterTarget::IncreaseMasterRatio,
+                    target: MasterTarget::Grow,
                 }),
-                r#"{"Master":{"target":"IncreaseMasterRatio"}}"#,
+                r#"{"Master":{"target":"Grow"}}"#,
             ),
             (
                 Action::Exec {
@@ -464,6 +484,14 @@ mod tests {
             ),
             (Action::Exit, r#""Exit""#),
             (Action::ToggleMinimizePicker, r#""ToggleMinimizePicker""#),
+            (
+                Action::Hub(HubAction::Focus {
+                    target: FocusTarget::Tab {
+                        direction: TabDirection::Next,
+                    },
+                }),
+                r#"{"Focus":{"target":{"Tab":{"direction":"Next"}}}}"#,
+            ),
         ];
         for (action, expected) in &cases {
             let json = serde_json::to_string(action).unwrap();
@@ -500,6 +528,53 @@ mod tests {
                 &serde_json::to_string(&round_trip).unwrap(),
                 expected,
                 "round-trip {msg:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn action_from_str_round_trip() {
+        // Every action string whose FromStr path takes no free-form argument
+        // must survive a parse -> Display -> compare cycle. This locks
+        // Display/FromStr symmetry and would have caught the old
+        // SpawnDirection round-trip bug.
+        let cases = [
+            "focus up",
+            "focus down",
+            "focus left",
+            "focus right",
+            "focus parent",
+            "focus tab next",
+            "focus tab prev",
+            "focus workspace 3",
+            "focus monitor left",
+            "focus monitor foo",
+            "move up",
+            "move down",
+            "move left",
+            "move right",
+            "move workspace 3",
+            "move monitor left",
+            "toggle spawn",
+            "toggle direction",
+            "toggle layout",
+            "toggle float",
+            "toggle fullscreen",
+            "toggle minimized",
+            "master grow",
+            "master shrink",
+            "master more",
+            "master fewer",
+            "exit",
+            "exec open -a Terminal",
+        ];
+        for input in cases {
+            let action = Action::from_str(input)
+                .unwrap_or_else(|e| panic!("FromStr failed for {input:?}: {e}"));
+            let formatted = action.to_string();
+            assert_eq!(
+                formatted, input,
+                "round-trip mismatch: from_str({input:?}).to_string() = {formatted:?}"
             );
         }
     }

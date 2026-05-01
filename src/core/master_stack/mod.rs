@@ -371,19 +371,19 @@ impl TilingStrategy for MasterStackStrategy {
                 }
                 self.layout_workspace(hub, ws_id);
             }
-            TilingAction::IncreaseMasterRatio => {
+            TilingAction::GrowMaster => {
                 self.master_ratio = (self.master_ratio + 0.05).clamp(0.1, 0.9);
                 self.layout_workspace(hub, ws_id);
             }
-            TilingAction::DecreaseMasterRatio => {
+            TilingAction::ShrinkMaster => {
                 self.master_ratio = (self.master_ratio - 0.05).clamp(0.1, 0.9);
                 self.layout_workspace(hub, ws_id);
             }
-            TilingAction::IncrementMasterCount => {
+            TilingAction::MoreMaster => {
                 self.master_count += 1;
                 self.layout_workspace(hub, ws_id);
             }
-            TilingAction::DecrementMasterCount => {
+            TilingAction::FewerMaster => {
                 if self.master_count > 1 {
                     self.master_count -= 1;
                     self.layout_workspace(hub, ws_id);

@@ -10,8 +10,6 @@ There are three ways to send commands:
 
 All three use the same command syntax and produce the same result.
 
-> **Syntax note:** In config files, keybindings, and `on_open` rules, multi-word arguments use underscores (e.g., `next_tab`, `prev_tab`, `spawn_direction`). On the CLI, clap auto-converts these to kebab-case (e.g., `next-tab`, `prev-tab`, `spawn-direction`). The tables below use the config/keybinding form (underscores) since that is the canonical form.
-
 ## Focus
 
 Move keyboard focus to a different window, tab, workspace, or monitor.
@@ -23,8 +21,8 @@ Move keyboard focus to a different window, tab, workspace, or monitor.
 | `focus left` | Focus the window to the left. |
 | `focus right` | Focus the window to the right. |
 | `focus parent` | Focus the parent container. Useful for selecting a group of windows to move or toggle. |
-| `focus next_tab` | Focus the next tab in a tabbed container. |
-| `focus prev_tab` | Focus the previous tab in a tabbed container. |
+| `focus tab next` | Focus the next tab in a tabbed container. |
+| `focus tab prev` | Focus the previous tab in a tabbed container. |
 | `focus workspace <name>` | Switch to the named workspace (e.g., `focus workspace 2`). Workspaces are created on demand — any string is a valid name. |
 | `focus monitor up\|down\|left\|right` | Focus the nearest monitor in the given direction. |
 | `focus monitor <name>` | Focus the monitor with the given name. |
@@ -49,14 +47,25 @@ Toggle window or container properties.
 
 | Command | Description |
 |---------|-------------|
-| `toggle spawn_direction` | Cycle the spawn direction of the focused window/container between horizontal, vertical, and tabbed. Controls where the next window opens relative to the focused one. |
+| `toggle spawn` | Cycle the spawn direction of the focused window/container between horizontal, vertical, and tabbed. Controls where the next window opens relative to the focused one. |
 | `toggle direction` | Flip the parent container's split direction between horizontal and vertical. |
 | `toggle layout` | Toggle the parent container between split and tabbed layout. |
 | `toggle float` | Toggle the focused window between tiling and floating. Floating windows are not part of the tiling tree and can be freely positioned. Has no effect on fullscreen windows. |
 | `toggle fullscreen` | Toggle the focused window between normal and fullscreen. A fullscreen window covers the entire monitor. Works from both tiling and floating states. |
-| `toggle minimize_picker` | Open or close the minimized window picker. Shows a list of all minimized windows; select one to restore it to the current workspace. No default keybinding. |
+| `toggle minimized` | Open or close the minimized window picker. Shows a list of all minimized windows; select one to restore it to the current workspace. No default keybinding. |
 
 Fullscreen integrates with each platform's native fullscreen behavior — macOS Spaces and Windows borderless/exclusive fullscreen are detected and respected rather than overridden.
+
+## Master
+
+Adjust the master-stack layout's master area. Only applies when the master-stack layout is active.
+
+| Command | Description |
+|---------|-------------|
+| `master grow` | Increase the master area's size (by 5 percentage points, clamped to 0.1..=0.9 of the workspace). |
+| `master shrink` | Decrease the master area's size by the same increment. |
+| `master more` | Add one more window slot to the master area. |
+| `master fewer` | Remove one window slot from the master area (minimum 1). |
 
 ## Other
 
@@ -116,20 +125,20 @@ Empty workspaces that are not active on any monitor are pruned and never appear.
 # Focus the window to the right
 dome focus right
 
-# Focus the next tab (CLI uses kebab-case)
-dome focus next-tab
+# Focus the next tab
+dome focus tab next
 
 # Move focused window to workspace 3
 dome move workspace 3
 
-# Toggle spawn direction (CLI uses kebab-case)
-dome toggle spawn-direction
+# Toggle spawn direction
+dome toggle spawn
 
 # Toggle floating mode
 dome toggle float
 
-# Open minimized window picker (CLI uses kebab-case)
-dome toggle minimize-picker
+# Open minimized window picker
+dome toggle minimized
 
 # Launch a terminal
 dome exec open -a Terminal
@@ -142,7 +151,7 @@ dome exit
 
 Some commands are blocked when the focused window has restrictions (e.g., a window in native fullscreen). The behavior depends on the restriction level:
 
-- **Tiling navigation** (`focus`/`move` directional, `focus parent`, tab navigation, `toggle spawn_direction`, `toggle direction`, `toggle layout`) — blocked when the window has full restrictions.
+- **Tiling navigation** (`focus`/`move` directional, `focus parent`, tab navigation, `toggle spawn`, `toggle direction`, `toggle layout`) — blocked when the window has full restrictions.
 - **Display mode changes** (`toggle float`, `toggle fullscreen`) — blocked when the window has any restriction (full or fullscreen-protected).
 - **Workspace moves** (`move workspace`) — blocked only by full restrictions. Fullscreen windows can move across workspaces.
 - **Monitor moves** (`move monitor`) — blocked when the window has any restriction. Fullscreen windows are bound to their monitor.

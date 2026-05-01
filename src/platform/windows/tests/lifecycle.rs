@@ -62,7 +62,7 @@ fn window_minimized_removes_from_tiling() {
         env.config.border_size,
     );
     // w2 should be in the minimize picker, not deleted
-    env.run_actions("toggle minimize_picker");
+    env.run_actions("toggle minimized");
     assert_eq!(env.picker_entries.borrow().len(), 1);
 }
 
@@ -87,12 +87,12 @@ fn user_minimize_then_restore() {
     env.add_window(w2.clone());
 
     env.minimize_window(&w2);
-    env.run_actions("toggle minimize_picker");
+    env.run_actions("toggle minimized");
     assert_eq!(env.picker_entries.borrow().len(), 1);
-    env.run_actions("toggle minimize_picker"); // hide
+    env.run_actions("toggle minimized"); // hide
 
     env.restore_window(&w2);
-    env.run_actions("toggle minimize_picker"); // show again with fresh entries
+    env.run_actions("toggle minimized"); // show again with fresh entries
     assert_eq!(env.picker_entries.borrow().len(), 0);
     // Both windows should be tiled again
     assert_h_tiled(

@@ -325,19 +325,19 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
                     format!("SetWindowTitle({id}, {title:?})")
                 }
                 Op::IncreaseMasterRatio => {
-                    hub.handle_tiling_action(TilingAction::IncreaseMasterRatio);
+                    hub.handle_tiling_action(TilingAction::GrowMaster);
                     "IncreaseMasterRatio".into()
                 }
                 Op::DecreaseMasterRatio => {
-                    hub.handle_tiling_action(TilingAction::DecreaseMasterRatio);
+                    hub.handle_tiling_action(TilingAction::ShrinkMaster);
                     "DecreaseMasterRatio".into()
                 }
                 Op::IncrementMasterCount => {
-                    hub.handle_tiling_action(TilingAction::IncrementMasterCount);
+                    hub.handle_tiling_action(TilingAction::MoreMaster);
                     "IncrementMasterCount".into()
                 }
                 Op::DecrementMasterCount => {
-                    hub.handle_tiling_action(TilingAction::DecrementMasterCount);
+                    hub.handle_tiling_action(TilingAction::FewerMaster);
                     "DecrementMasterCount".into()
                 }
                 Op::QueryWorkspaces => {

@@ -24,10 +24,10 @@ pub(crate) enum TilingAction {
         container_id: ContainerId,
         index: usize,
     },
-    IncreaseMasterRatio,
-    DecreaseMasterRatio,
-    IncrementMasterCount,
-    DecrementMasterCount,
+    GrowMaster,
+    ShrinkMaster,
+    MoreMaster,
+    FewerMaster,
 }
 
 /// Tiling window and container placements collected by the strategy for a

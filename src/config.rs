@@ -6,7 +6,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use crate::action::{
-    Action, Actions, FocusTarget, HubAction, MonitorTarget, MoveTarget, ToggleTarget,
+    Action, Actions, FocusTarget, HubAction, MonitorTarget, MoveTarget, TabDirection, ToggleTarget,
 };
 use crate::font::FontConfig;
 use crate::theme::{Flavor, Theme};
@@ -82,7 +82,7 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
             modifiers: Modifiers::CMD,
         },
         Actions::new(vec![Action::Hub(HubAction::Toggle {
-            target: ToggleTarget::SpawnDirection,
+            target: ToggleTarget::Spawn,
         })]),
     );
     keymaps.insert(
@@ -154,7 +154,9 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
             modifiers: Modifiers::CMD,
         },
         Actions::new(vec![Action::Hub(HubAction::Focus {
-            target: FocusTarget::PrevTab,
+            target: FocusTarget::Tab {
+                direction: TabDirection::Prev,
+            },
         })]),
     );
     keymaps.insert(
@@ -163,7 +165,9 @@ fn default_keymaps() -> HashMap<Keymap, Actions> {
             modifiers: Modifiers::CMD,
         },
         Actions::new(vec![Action::Hub(HubAction::Focus {
-            target: FocusTarget::NextTab,
+            target: FocusTarget::Tab {
+                direction: TabDirection::Next,
+            },
         })]),
     );
     keymaps.insert(

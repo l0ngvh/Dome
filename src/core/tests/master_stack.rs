@@ -329,7 +329,7 @@ fn increase_decrease_master_ratio() {
     hub.insert_tiling();
 
     // Increase ratio: master gets wider
-    hub.handle_tiling_action(TilingAction::IncreaseMasterRatio);
+    hub.handle_tiling_action(TilingAction::GrowMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -370,8 +370,8 @@ fn increase_decrease_master_ratio() {
     ");
 
     // Decrease twice to go below default
-    hub.handle_tiling_action(TilingAction::DecreaseMasterRatio);
-    hub.handle_tiling_action(TilingAction::DecreaseMasterRatio);
+    hub.handle_tiling_action(TilingAction::ShrinkMaster);
+    hub.handle_tiling_action(TilingAction::ShrinkMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -413,7 +413,7 @@ fn increase_decrease_master_ratio() {
 
     // Clamp at 0.1: decrease many times
     for _ in 0..20 {
-        hub.handle_tiling_action(TilingAction::DecreaseMasterRatio);
+        hub.handle_tiling_action(TilingAction::ShrinkMaster);
     }
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -456,7 +456,7 @@ fn increase_decrease_master_ratio() {
 
     // Clamp at 0.9: increase many times
     for _ in 0..20 {
-        hub.handle_tiling_action(TilingAction::IncreaseMasterRatio);
+        hub.handle_tiling_action(TilingAction::GrowMaster);
     }
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -506,7 +506,7 @@ fn increment_decrement_master_count() {
     hub.insert_tiling(); // W2
 
     // Increment master_count to 2: two masters on left, one stack on right
-    hub.handle_tiling_action(TilingAction::IncrementMasterCount);
+    hub.handle_tiling_action(TilingAction::MoreMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -548,7 +548,7 @@ fn increment_decrement_master_count() {
     ");
 
     // Decrement back to 1
-    hub.handle_tiling_action(TilingAction::DecrementMasterCount);
+    hub.handle_tiling_action(TilingAction::FewerMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -590,7 +590,7 @@ fn increment_decrement_master_count() {
     ");
 
     // Decrement below 1 is no-op
-    hub.handle_tiling_action(TilingAction::DecrementMasterCount);
+    hub.handle_tiling_action(TilingAction::FewerMaster);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -641,7 +641,7 @@ fn master_count_exceeds_window_count() {
 
     // Set master_count to 5 (exceeds 3 windows): all windows fill screen
     for _ in 0..4 {
-        hub.handle_tiling_action(TilingAction::IncrementMasterCount);
+        hub.handle_tiling_action(TilingAction::MoreMaster);
     }
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))

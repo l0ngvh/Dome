@@ -128,8 +128,8 @@ This would move the focused window to workspace 1, then switch to it.
 | `cmd+k` | `focus up` | Focus the window above |
 | `cmd+l` | `focus right` | Focus the window to the right |
 | `cmd+p` | `focus parent` | Focus the parent container |
-| `cmd+[` | `focus prev_tab` | Focus the previous tab |
-| `cmd+]` | `focus next_tab` | Focus the next tab |
+| `cmd+[` | `focus tab prev` | Focus the previous tab |
+| `cmd+]` | `focus tab next` | Focus the next tab |
 
 #### Move Window
 
@@ -162,7 +162,7 @@ This would move the focused window to workspace 1, then switch to it.
 
 | Key | Command | Description |
 |-----|---------|-------------|
-| `cmd+e` | `toggle spawn_direction` | Toggle the spawn direction between horizontal, vertical, and tabbed |
+| `cmd+e` | `toggle spawn` | Toggle the spawn direction between horizontal, vertical, and tabbed |
 | `cmd+d` | `toggle direction` | Flip the split direction between horizontal and vertical |
 | `cmd+b` | `toggle layout` | Toggle the parent container between split and tabbed |
 | `cmd+shift+f` | `toggle float` | Toggle focused window between tiling and floating |
@@ -173,7 +173,7 @@ This would move the focused window to workspace 1, then switch to it.
 |-----|---------|
 | `cmd+shift+q` | `exit` |
 
-Note: the default keybindings do not include `exec`, `toggle fullscreen`, or `toggle minimize_picker` bindings. The example config at `examples/config.toml` includes these as examples: `"cmd+return" = ["exec open -a Terminal"]` (macOS), `"cmd+shift+return" = ["toggle fullscreen"]`, and `"cmd+m" = ["toggle minimize_picker"]`. Users who want these bindings must add them to their `[keymaps]` section. Keeping the defaults focused on core navigation means Dome is useful immediately and customizable later.
+Note: the default keybindings do not include `exec`, `toggle fullscreen`, or `toggle minimized` bindings. The example config at `examples/config.toml` includes these as examples: `"cmd+return" = ["exec open -a Terminal"]` (macOS), `"cmd+shift+return" = ["toggle fullscreen"]`, and `"cmd+m" = ["toggle minimized"]`. Users who want these bindings must add them to their `[keymaps]` section. Keeping the defaults focused on core navigation means Dome is useful immediately and customizable later.
 
 ## Window Rules
 

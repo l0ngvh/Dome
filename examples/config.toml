@@ -55,7 +55,7 @@ max_height = "50%"  # 50% of screen height
 "cmd+shift+7" = ["move workspace 7"]
 "cmd+shift+8" = ["move workspace 8"]
 "cmd+shift+9" = ["move workspace 9"]
-"cmd+e" = ["toggle spawn_direction"]
+"cmd+e" = ["toggle spawn"]
 "cmd+d" = ["toggle direction"]
 "cmd+b" = ["toggle layout"]
 "cmd+p" = ["focus parent"]
@@ -63,8 +63,8 @@ max_height = "50%"  # 50% of screen height
 "cmd+j" = ["focus down"]
 "cmd+k" = ["focus up"]
 "cmd+l" = ["focus right"]
-"cmd+[" = ["focus prev_tab"]
-"cmd+]" = ["focus next_tab"]
+"cmd+[" = ["focus tab prev"]
+"cmd+]" = ["focus tab next"]
 "cmd+shift+h" = ["move left"]
 "cmd+shift+j" = ["move down"]
 "cmd+shift+k" = ["move up"]
@@ -81,7 +81,7 @@ max_height = "50%"  # 50% of screen height
 "cmd+shift+return" = ["toggle fullscreen"]
 "cmd+shift+q" = ["exit"]
 "cmd+return" = ["exec open -a Terminal"]
-# "cmd+m" = ["toggle minimize_picker"]
+# "cmd+m" = ["toggle minimized"]
 
 # Window rules to ignore windows or run actions on open
 # All specified fields must match (AND logic)
