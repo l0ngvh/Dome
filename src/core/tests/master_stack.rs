@@ -14,6 +14,7 @@ fn setup_master_stack() -> Hub {
             width: 150.0,
             height: 30.0,
         },
+        1.0,
         HubConfig::default(),
         Box::new(MasterStackStrategy::new()),
     )

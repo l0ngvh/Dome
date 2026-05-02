@@ -754,6 +754,7 @@ pub(super) fn setup_hub() -> Hub {
             width: ASCII_WIDTH as f32,
             height: ASCII_HEIGHT as f32,
         },
+        1.0,
         HubConfig::default(),
     )
 }
@@ -772,6 +773,7 @@ pub(super) fn setup_with_auto_tile() -> Hub {
             width: ASCII_WIDTH as f32,
             height: ASCII_HEIGHT as f32,
         },
+        1.0,
         HubConfig {
             auto_tile: true,
             ..Default::default()

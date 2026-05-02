@@ -1,11 +1,12 @@
 mod drift;
 mod lifecycle;
 mod placement;
+mod render;
 mod transitions;
 mod zorder;
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -36,6 +37,7 @@ fn default_screen() -> ScreenInfo {
             height: SCREEN_HEIGHT,
         },
         is_primary: true,
+        scale: 1.0,
     }
 }
 
@@ -50,6 +52,7 @@ fn second_screen() -> ScreenInfo {
             height: 1440.0,
         },
         is_primary: false,
+        scale: 1.0,
     }
 }
 
@@ -82,7 +85,12 @@ struct TestEnv {
     float_overlay_apply_font_count: Rc<Cell<u32>>,
     tiling_overlay_apply_font_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
+    picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
     z_model: ZOrderModel,
+    last_tiling_overlay_scale: Rc<Cell<f32>>,
+    last_float_overlay_scale: Rc<Cell<f32>>,
+    last_picker_scale: Rc<Cell<f32>>,
+    tiling_overlay_scales: Rc<RefCell<Vec<f32>>>,
 }
 
 impl TestEnv {
@@ -91,7 +99,10 @@ impl TestEnv {
     }
 
     fn new_with_config(config: Config) -> Self {
-        let screens = vec![default_screen()];
+        Self::new_with_screens(config, vec![default_screen()])
+    }
+
+    fn new_with_screens(config: Config, screens: Vec<ScreenInfo>) -> Self {
         let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
         let display = MockDisplay {
             screens,
@@ -106,7 +117,12 @@ impl TestEnv {
         let float_overlay_apply_font_count = Rc::new(Cell::new(0));
         let tiling_overlay_apply_font_count = Rc::new(Cell::new(0));
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
+        let picker_loaded_icons = Rc::new(RefCell::new(HashSet::new()));
         let z_model = ZOrderModel::new();
+        let last_tiling_overlay_scale = Rc::new(Cell::new(0.0));
+        let last_float_overlay_scale = Rc::new(Cell::new(0.0));
+        let last_picker_scale = Rc::new(Cell::new(0.0));
+        let tiling_overlay_scales = Rc::new(RefCell::new(Vec::new()));
         let dome = Dome::new(
             config.clone(),
             Rc::new(NoopTaskbar),
@@ -119,7 +135,12 @@ impl TestEnv {
                 float_overlay_apply_font_count: float_overlay_apply_font_count.clone(),
                 tiling_overlay_apply_font_count: tiling_overlay_apply_font_count.clone(),
                 picker_entries: picker_entries.clone(),
+                picker_loaded_icons: picker_loaded_icons.clone(),
                 z_model: z_model.clone(),
+                last_tiling_overlay_scale: last_tiling_overlay_scale.clone(),
+                last_float_overlay_scale: last_float_overlay_scale.clone(),
+                last_picker_scale: last_picker_scale.clone(),
+                tiling_overlay_scales: tiling_overlay_scales.clone(),
             }),
             Box::new(display),
             Box::new(NoopKeyboardSink {
@@ -141,7 +162,12 @@ impl TestEnv {
             float_overlay_apply_font_count,
             tiling_overlay_apply_font_count,
             picker_entries,
+            picker_loaded_icons,
             z_model,
+            last_tiling_overlay_scale,
+            last_float_overlay_scale,
+            last_picker_scale,
+            tiling_overlay_scales,
         }
     }
 
@@ -325,6 +351,40 @@ impl TestEnv {
 
     fn tiling_overlay_apply_font_count(&self) -> u32 {
         self.tiling_overlay_apply_font_count.get()
+    }
+
+    fn last_tiling_overlay_scale(&self) -> f32 {
+        self.last_tiling_overlay_scale.get()
+    }
+
+    fn tiling_overlay_creation_scales(&self) -> Vec<f32> {
+        self.tiling_overlay_scales.borrow().clone()
+    }
+
+    fn last_float_overlay_scale(&self) -> f32 {
+        self.last_float_overlay_scale.get()
+    }
+
+    fn last_picker_scale(&self) -> f32 {
+        self.last_picker_scale.get()
+    }
+
+    fn picker_loaded_icons(&self) -> HashSet<String> {
+        self.picker_loaded_icons.borrow().clone()
+    }
+
+    fn picker_icons_to_load(&mut self) -> Vec<(String, HwndId)> {
+        self.dome.picker_icons_to_load()
+    }
+
+    fn picker_receive_icon(&mut self, app_id: String) {
+        // Use a 1x1 dummy image; the noop picker ignores the pixel data.
+        let image = egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]);
+        self.dome.picker_receive_icon(app_id, image);
+    }
+
+    fn picker_scale(&self) -> Option<f32> {
+        self.dome.picker_scale()
     }
 
     fn add_screen(&mut self, screen: ScreenInfo) {
@@ -685,11 +745,13 @@ struct NoopFloatOverlay {
     overlay_update_count: Rc<Cell<u32>>,
     apply_theme_count: Rc<Cell<u32>>,
     apply_font_count: Rc<Cell<u32>>,
+    last_scale: Rc<Cell<f32>>,
 }
 impl FloatOverlayApi for NoopFloatOverlay {
-    fn update(&mut self, _: &crate::core::FloatWindowPlacement, _: &Config, _: ZOrder) {
+    fn update(&mut self, _: &crate::core::FloatWindowPlacement, _: &Config, _: ZOrder, scale: f32) {
         self.overlay_update_count
             .set(self.overlay_update_count.get() + 1);
+        self.last_scale.set(scale);
     }
     fn hide(&mut self) {}
     fn apply_theme(&mut self, _flavor: crate::theme::Flavor) {
@@ -705,6 +767,7 @@ struct NoopTilingOverlay {
     clear_count: Rc<Cell<u32>>,
     apply_theme_count: Rc<Cell<u32>>,
     apply_font_count: Rc<Cell<u32>>,
+    last_scale: Rc<Cell<f32>>,
 }
 
 impl TilingOverlayApi for NoopTilingOverlay {
@@ -713,8 +776,10 @@ impl TilingOverlayApi for NoopTilingOverlay {
         _: Dimension,
         _: &[crate::core::TilingWindowPlacement],
         _: &[(crate::core::ContainerPlacement, Vec<String>)],
+        scale: f32,
     ) {
         self.update_count.set(self.update_count.get() + 1);
+        self.last_scale.set(scale);
     }
     fn clear(&mut self) {
         self.clear_count.set(self.clear_count.get() + 1);
@@ -731,12 +796,20 @@ impl TilingOverlayApi for NoopTilingOverlay {
 struct NoopPicker {
     visible: bool,
     entries: Rc<RefCell<Vec<PickerEntry>>>,
+    last_scale: Rc<Cell<f32>>,
+    loaded_icons: Rc<RefCell<HashSet<String>>>,
 }
 
 impl PickerApi for NoopPicker {
-    fn show(&mut self, entries: Vec<PickerEntry>, _monitor_dim: Dimension) {
+    fn show(&mut self, entries: Vec<PickerEntry>, _monitor_dim: Dimension, scale: f32) {
         *self.entries.borrow_mut() = entries;
         self.visible = true;
+        // Clear cached icons when the monitor scale changes so icons are
+        // re-captured at the new physical density (mirrors PickerWindow::show).
+        if self.last_scale.get() != scale {
+            self.loaded_icons.borrow_mut().clear();
+        }
+        self.last_scale.set(scale);
     }
 
     fn hide(&mut self) {
@@ -749,12 +822,30 @@ impl PickerApi for NoopPicker {
 
     fn icons_to_load(
         &mut self,
-        _lookup_hwnd: &dyn Fn(crate::core::WindowId) -> Option<HwndId>,
+        lookup_hwnd: &dyn Fn(crate::core::WindowId) -> Option<HwndId>,
     ) -> Vec<(String, HwndId)> {
-        Vec::new()
+        let entries = self.entries.borrow();
+        let mut loaded = self.loaded_icons.borrow_mut();
+        let mut result = Vec::new();
+        for entry in entries.iter() {
+            let Some(app_id) = entry.app_id.as_ref() else {
+                continue;
+            };
+            if loaded.contains(app_id) {
+                continue;
+            }
+            let Some(hwnd_id) = lookup_hwnd(entry.id) else {
+                continue;
+            };
+            loaded.insert(app_id.clone());
+            result.push((app_id.clone(), hwnd_id));
+        }
+        result
     }
 
-    fn receive_icon(&mut self, _app_id: String, _image: egui::ColorImage) {}
+    fn receive_icon(&mut self, app_id: String, _image: egui::ColorImage) {
+        self.loaded_icons.borrow_mut().insert(app_id);
+    }
 
     fn rerender(&mut self) {}
 }
@@ -768,11 +859,26 @@ struct NoopOverlays {
     float_overlay_apply_font_count: Rc<Cell<u32>>,
     tiling_overlay_apply_font_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
+    picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
     z_model: ZOrderModel,
+    last_tiling_overlay_scale: Rc<Cell<f32>>,
+    last_float_overlay_scale: Rc<Cell<f32>>,
+    last_picker_scale: Rc<Cell<f32>>,
+    /// Records the scale passed at tiling overlay creation time, so tests can
+    /// assert that new() receives the monitor's scale (not a placeholder).
+    tiling_overlay_scales: Rc<RefCell<Vec<f32>>>,
 }
 
 impl CreateOverlay for NoopOverlays {
-    fn create_tiling_overlay(&self, _: Config) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
+    fn create_tiling_overlay(
+        &self,
+        _: Config,
+        _monitor: Dimension,
+        scale: f32,
+    ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
+        // Record creation-time scale so tests can assert new() gets the
+        // monitor's real scale instead of a placeholder.
+        self.tiling_overlay_scales.borrow_mut().push(scale);
         // Seed the overlay at the top of the normal band, mirroring Win32
         // CreateWindowExW. Subsequent tiling windows placed with ZOrder::Top
         // push it down.
@@ -782,17 +888,21 @@ impl CreateOverlay for NoopOverlays {
             clear_count: self.tiling_overlay_clear_count.clone(),
             apply_theme_count: self.tiling_overlay_apply_theme_count.clone(),
             apply_font_count: self.tiling_overlay_apply_font_count.clone(),
+            last_scale: self.last_tiling_overlay_scale.clone(),
         }))
     }
     fn create_float_overlay(
         &self,
         _flavor: crate::theme::Flavor,
         _font: &crate::font::FontConfig,
+        _scale: f32,
+        _visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         Ok(Box::new(NoopFloatOverlay {
             overlay_update_count: self.overlay_update_count.clone(),
             apply_theme_count: self.float_overlay_apply_theme_count.clone(),
             apply_font_count: self.float_overlay_apply_font_count.clone(),
+            last_scale: self.last_float_overlay_scale.clone(),
         }))
     }
     fn create_picker(
@@ -801,12 +911,15 @@ impl CreateOverlay for NoopOverlays {
         monitor_dim: Dimension,
         _flavor: crate::theme::Flavor,
         _font: &crate::font::FontConfig,
+        scale: f32,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
         let mut picker = NoopPicker {
             visible: false,
             entries: self.picker_entries.clone(),
+            last_scale: self.last_picker_scale.clone(),
+            loaded_icons: self.picker_loaded_icons.clone(),
         };
-        picker.show(entries, monitor_dim);
+        picker.show(entries, monitor_dim, scale);
         Ok(Box::new(picker))
     }
 }

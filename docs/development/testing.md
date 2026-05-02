@@ -38,15 +38,16 @@ Both macOS and Windows have test directories (`src/platform/macos/tests/`, `src/
 
 **macOS**: `MockAXWindow` implements `AXWindowApi`, `TestSender` implements `FrameSender` (captures the latest `HubMessage::Frame` into a shared `FrameState`). Tests create a `Dome` with mock windows and a `TestSender`, then call Dome methods and assert on window state transitions and move logs.
 
-**Windows**: `MockExternalHwnd` implements `ManageExternalHwnd`, `MockDisplay` implements `QueryDisplay`, `NoopTaskbar` implements `ManageTaskbar`, `NoopOverlays` implements `CreateOverlay` (with `NoopTilingOverlay` and `NoopFloatOverlay`); `NoopKeyboardSink` implements `KeyboardSinkApi`. `TestEnv` wraps everything for convenient test setup. `NoopFloatOverlay` increments a shared `overlay_update_count` on each `update()` call; `TestEnv::overlay_update_count()` returns the current count, letting tests verify overlay re-renders happen (or don't) without real GL contexts.
+**Windows**: `MockExternalHwnd` implements `ManageExternalHwnd`, `MockDisplay` implements `QueryDisplay`, `NoopTaskbar` implements `ManageTaskbar`, `NoopOverlays` implements `CreateOverlay` (with `NoopTilingOverlay` and `NoopFloatOverlay`); `NoopKeyboardSink` implements `KeyboardSinkApi`. `TestEnv` wraps everything for convenient test setup. `NoopFloatOverlay` increments a shared `overlay_update_count` on each `update()` call; `TestEnv::overlay_update_count()` returns the current count, letting tests verify overlay re-renders happen (or don't) without real GL contexts. `NoopPicker` implements `PickerApi`, recording the scale passed to `show` into a shared `Rc<Cell<f32>>` readable via `TestEnv::last_picker_scale()`; the `picker_show_passes_monitor_scale` test in `render.rs` uses it to verify DPI scale plumbing.
 
 Test files are organized by concern:
-- `lifecycle.rs` -- window add/remove (both platforms)
+- `lifecycle.rs` -- window add/remove, live DPI transitions (both platforms; DPI tests are Windows-only)
 - `transitions.rs` -- WindowState transition tests (both platforms)
 - `placement.rs` -- drift correction, constraint detection (both platforms)
 - `uncooperative.rs` -- windows that resist placement (macOS only)
 - `drift.rs` -- drift retry logic (Windows only)
 - `zorder.rs` -- z-order chain correctness (Windows only)
+- `render.rs` -- render-path scale plumbing (Windows only)
 
 Platform tests don't use snapshots -- they assert on concrete state values and mock call counts.
 

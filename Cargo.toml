@@ -2,6 +2,7 @@
 name = "dome"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [dependencies]
 anyhow = "1.0.100"
@@ -46,6 +47,9 @@ egui-wgpu = "0.32"
 wgpu = { version = "25", features = ["dx12"] }
 pollster = "0.4"
 rayon = "1.10"
+
+[build-dependencies]
+embed-resource = "3"
 
 [dev-dependencies]
 insta = "1.44.3"

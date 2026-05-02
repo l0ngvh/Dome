@@ -982,6 +982,7 @@ fn block_all_on_unfocused_window_does_not_block() {
             width: 150.0,
             height: 30.0,
         },
+        1.0,
     );
     // Put a tiling window on the second monitor's workspace.
     hub.focus_monitor(&MonitorTarget::Right);
@@ -1088,6 +1089,7 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
             width: 150.0,
             height: 30.0,
         },
+        1.0,
     );
     let w0 = hub.insert_tiling();
     hub.insert_tiling();

@@ -12,6 +12,7 @@ fn sync_config_updates_tab_bar_height() {
             width: 50.0,
             height: 50.0,
         },
+        1.0,
         HubConfig {
             tab_bar_height: 10.0,
             auto_tile: true,
@@ -46,6 +47,7 @@ fn sync_config_recalculates_all_workspaces() {
             width: 50.0,
             height: 50.0,
         },
+        1.0,
         HubConfig {
             tab_bar_height: 10.0,
             auto_tile: true,

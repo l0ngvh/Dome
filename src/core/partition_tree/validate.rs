@@ -219,7 +219,11 @@ impl PartitionTreeStrategy {
                 }
             }
             None => {
-                let expected_height = dim.height - hub.config.tab_bar_height;
+                let scale = hub
+                    .monitors
+                    .get(hub.workspaces.get(container.workspace).monitor)
+                    .scale;
+                let expected_height = dim.height - hub.config.tab_bar_height * scale;
                 for (i, (child_dim, _, child_max)) in constraints.iter().enumerate() {
                     let allows_smaller_w = child_max.0 > 0.0 && child_max.0 < dim.width;
                     let allows_smaller_h = child_max.1 > 0.0 && child_max.1 < expected_height;

@@ -36,6 +36,7 @@ use crate::platform::windows::external::{
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
 pub(crate) const OFFSCREEN_POS: f32 = -32000.0;
 
+/// Returns the window rect as a `Dimension` in PHYSICAL pixels (PMv2).
 pub(crate) fn get_dimension(hwnd: HWND) -> Dimension {
     let mut rect = RECT::default();
     unsafe { GetWindowRect(hwnd, &mut rect).ok() };
@@ -47,6 +48,7 @@ pub(crate) fn get_dimension(hwnd: HWND) -> Dimension {
     }
 }
 
+/// Returns the invisible border widths (left, top, right, bottom) in PHYSICAL pixels (PMv2).
 pub(crate) fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
     let mut window_rect = RECT::default();
     let mut frame_rect = RECT::default();
@@ -138,11 +140,8 @@ pub(crate) fn should_float(hwnd: HWND) -> bool {
     false
 }
 
-/// Returns (min_width, min_height, max_width, max_height) constraints
-/// with invisible borders subtracted.
-///
-/// This can be slow, due to the fact that external windows may take time to respond or even
-/// hang
+/// Returns physical-pixel constraints as f32. Raw WM_GETMINMAXINFO values are
+/// physical on PMv2; this function subtracts invisible borders before casting.
 pub(crate) fn get_size_constraints(hwnd: HWND) -> (f32, f32, f32, f32) {
     let mut info = MINMAXINFO::default();
     let mut result = 0usize;
@@ -157,12 +156,11 @@ pub(crate) fn get_size_constraints(hwnd: HWND) -> (f32, f32, f32, f32) {
             Some(&mut result),
         )
     };
-    let (left, top, right, bottom) = get_invisible_border(hwnd);
-    (
-        (info.ptMinTrackSize.x - left - right).max(0) as f32,
-        (info.ptMinTrackSize.y - top - bottom).max(0) as f32,
-        (info.ptMaxTrackSize.x - left - right).max(0) as f32,
-        (info.ptMaxTrackSize.y - top - bottom).max(0) as f32,
+    let border = get_invisible_border(hwnd);
+    crate::platform::windows::dpi::constraints_to_physical(
+        (info.ptMinTrackSize.x, info.ptMinTrackSize.y),
+        (info.ptMaxTrackSize.x, info.ptMaxTrackSize.y),
+        border,
     )
 }
 
@@ -520,6 +518,8 @@ impl InspectExternalHwnd for ExternalHwnd {
         get_size_constraints(self.0)
     }
 
+    /// Returns (x, y, width, height) in PHYSICAL pixels (PMv2). Consumed by
+    /// drift detection which also operates in physical pixels.
     fn get_visible_rect(&self) -> (i32, i32, i32, i32) {
         let mut frame_rect = RECT::default();
         if unsafe {

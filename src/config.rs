@@ -352,9 +352,14 @@ impl Default for SizeConstraint {
 }
 
 impl SizeConstraint {
-    pub(crate) fn resolve(&self, screen_size: f32) -> f32 {
+    /// Resolves to a frame-unit length.
+    ///
+    /// `Pixels` is a config-denominated absolute length, so it is multiplied
+    /// by `scale` to reach the frame unit. `Percent` is a ratio of
+    /// `screen_size` (already in frame units), so `scale` does not apply.
+    pub(crate) fn resolve(&self, screen_size: f32, scale: f32) -> f32 {
         match self {
-            SizeConstraint::Pixels(px) => *px,
+            SizeConstraint::Pixels(px) => *px * scale,
             SizeConstraint::Percent(pct) => screen_size * pct / 100.0,
         }
     }
@@ -837,9 +842,12 @@ mod tests {
 
     #[test]
     fn size_constraint_resolve() {
-        assert_eq!(SizeConstraint::Pixels(200.0).resolve(1000.0), 200.0);
-        assert_eq!(SizeConstraint::Percent(10.0).resolve(1000.0), 100.0);
-        assert_eq!(SizeConstraint::Percent(5.0).resolve(1920.0), 96.0);
+        assert_eq!(SizeConstraint::Pixels(200.0).resolve(1000.0, 1.0), 200.0);
+        assert_eq!(SizeConstraint::Pixels(200.0).resolve(1000.0, 1.5), 300.0);
+        // scale must not affect Percent
+        assert_eq!(SizeConstraint::Percent(10.0).resolve(1000.0, 1.0), 100.0);
+        assert_eq!(SizeConstraint::Percent(10.0).resolve(1000.0, 2.0), 100.0);
+        assert_eq!(SizeConstraint::Percent(5.0).resolve(1920.0, 1.0), 96.0);
     }
 
     #[test]

@@ -203,6 +203,7 @@ mod tests {
                 width: 100.0,
                 height: 100.0,
             },
+            1.0,
             Config::default().into(),
         )
     }

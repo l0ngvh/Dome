@@ -8,6 +8,7 @@ use windows::core::BOOL;
 
 use crate::core::Dimension;
 use crate::platform::windows::dome::QueryDisplay;
+use crate::platform::windows::dpi::scale_for_monitor;
 use crate::platform::windows::external::HwndId;
 
 use super::ScreenInfo;
@@ -57,6 +58,8 @@ fn get_all_screens() -> anyhow::Result<Vec<ScreenInfo>> {
                     .collect::<Vec<_>>(),
             );
 
+            let scale = scale_for_monitor(hmonitor);
+
             monitors.push(ScreenInfo {
                 handle: hmonitor.0 as isize,
                 name,
@@ -67,6 +70,7 @@ fn get_all_screens() -> anyhow::Result<Vec<ScreenInfo>> {
                     height: (rc.bottom - rc.top) as f32,
                 },
                 is_primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+                scale,
             });
         }
         BOOL(1)

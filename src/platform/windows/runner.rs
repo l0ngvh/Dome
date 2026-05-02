@@ -305,6 +305,14 @@ impl Runner {
         self.dome.apply_layout();
     }
 
+    pub(super) fn handle_dpi_change(&mut self, handle: isize, dpi: u32) {
+        self.dome.monitor_dpi_changed(handle, dpi);
+        // apply_layout is idempotent: runs even when monitor_dpi_changed
+        // early-returns on same-scale, because stored targets are physical
+        // and Hub state is unchanged so positions match.
+        self.dome.apply_layout();
+    }
+
     fn dispatch_constraint_read(&mut self, hwnd_id: HwndId) {
         let Some(id) = self.dome.registry_get_id(hwnd_id) else {
             return;
@@ -324,11 +332,15 @@ impl Runner {
 
     fn dispatch_picker_icons(&mut self) {
         let to_load = self.dome.picker_icons_to_load();
+        // Fallback 2.0 matches the legacy 48-physical-pixel capture
+        // (ICON_PX_LOGICAL * 2.0 = 48). Only observable during a racy shutdown
+        // where the picker hides between action-fire and rayon-dispatch.
+        let scale = self.dome.picker_scale().unwrap_or(2.0);
         for (app_id, hwnd_id) in to_load {
             self.dispatcher.dispatch(
                 move || {
                     let hwnd = windows::Win32::Foundation::HWND::from(hwnd_id);
-                    crate::platform::windows::dome::icon::load_app_icon(hwnd)
+                    crate::platform::windows::dome::icon::load_app_icon(hwnd, scale)
                         .map(|image| (app_id, image))
                 },
                 move |result, runner| {

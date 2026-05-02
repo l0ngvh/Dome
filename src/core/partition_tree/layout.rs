@@ -14,10 +14,9 @@ impl PartitionTreeStrategy {
             return;
         };
         let Some(root) = ws_state.root else { return };
-        let screen = hub
-            .monitors
-            .get(hub.workspaces.get(ws_id).monitor)
-            .dimension;
+        let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
+        let screen = monitor.dimension;
+        let scale = monitor.scale;
 
         let Child::Container(root_id) = root else {
             self.set_root_dimension(hub, root, screen);
@@ -39,7 +38,7 @@ impl PartitionTreeStrategy {
 
         // Update minimum sizes bottom-up, as parent's minimum size depends on children's
         for &cid in order.iter().rev() {
-            self.update_container_min_size(hub, cid);
+            self.update_container_min_size(hub, cid, scale);
         }
 
         self.set_root_dimension(hub, root, screen);
@@ -50,7 +49,7 @@ impl PartitionTreeStrategy {
             let direction = container.direction();
             for (child, child_dim) in children
                 .iter()
-                .zip(self.layout_split_children(hub, &children, dim, direction))
+                .zip(self.layout_split_children(hub, &children, dim, direction, scale))
             {
                 self.set_split_child_dimension(hub, *child, child_dim);
             }
@@ -74,6 +73,7 @@ impl PartitionTreeStrategy {
         children: &[Child],
         dim: Dimension,
         direction: Option<Direction>,
+        scale: f32,
     ) -> Vec<Dimension> {
         let constraints = self.collect_constraints(hub, children);
 
@@ -123,8 +123,9 @@ impl PartitionTreeStrategy {
                 result
             }
             None => {
-                let content_y = dim.y + hub.config.tab_bar_height;
-                let content_height = dim.height - hub.config.tab_bar_height;
+                let tab_bar = hub.config.tab_bar_height * scale;
+                let content_y = dim.y + tab_bar;
+                let content_height = dim.height - tab_bar;
 
                 let mut result = Vec::with_capacity(children.len());
                 for (_, max_w, _, max_h) in constraints {
@@ -220,7 +221,12 @@ impl PartitionTreeStrategy {
         self.set_split_child_dimension(hub, root, dim);
     }
 
-    fn update_container_min_size(&mut self, hub: &HubAccess, container_id: ContainerId) {
+    fn update_container_min_size(
+        &mut self,
+        hub: &HubAccess,
+        container_id: ContainerId,
+        scale: f32,
+    ) {
         let container = self.containers.get(container_id);
         let children = container.children.clone();
         let direction = container.direction();
@@ -247,7 +253,7 @@ impl PartitionTreeStrategy {
             None => {
                 let max_w = child_mins.iter().map(|(w, _)| *w).fold(0.0, f32::max);
                 let max_h = child_mins.iter().map(|(_, h)| *h).fold(0.0, f32::max);
-                (max_w, max_h + hub.config.tab_bar_height)
+                (max_w, max_h + hub.config.tab_bar_height * scale)
             }
         };
 
@@ -307,12 +313,11 @@ impl PartitionTreeStrategy {
             Child::Window(id) => hub.windows.get(id).workspace,
             Child::Container(id) => self.containers.get(id).workspace,
         };
-        let screen = hub
-            .monitors
-            .get(hub.workspaces.get(ws_id).monitor)
-            .dimension;
-        let global_min_w = hub.config.min_width.resolve(screen.width);
-        let global_min_h = hub.config.min_height.resolve(screen.height);
+        let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
+        let screen = monitor.dimension;
+        let scale = monitor.scale;
+        let global_min_w = hub.config.min_width.resolve(screen.width, scale);
+        let global_min_h = hub.config.min_height.resolve(screen.height, scale);
 
         match child {
             Child::Window(id) => {
@@ -320,8 +325,8 @@ impl PartitionTreeStrategy {
                 let (win_min_w, win_min_h) = window.min_size();
                 let (win_max_w, win_max_h) = window.max_size();
 
-                let global_max_w = hub.config.max_width.resolve(screen.width);
-                let global_max_h = hub.config.max_height.resolve(screen.height);
+                let global_max_w = hub.config.max_width.resolve(screen.width, scale);
+                let global_max_h = hub.config.max_height.resolve(screen.height, scale);
 
                 let max_w = if win_max_w > 0.0 {
                     win_max_w

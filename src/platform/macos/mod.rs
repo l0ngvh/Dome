@@ -164,6 +164,9 @@ pub(in crate::platform::macos) struct MonitorInfo {
     pub(in crate::platform::macos) dimension: Dimension,
     pub(in crate::platform::macos) full_height: f32,
     pub(in crate::platform::macos) is_primary: bool,
+    /// NSScreen.backingScaleFactor — used for egui render density only.
+    /// This is NOT core Monitor.scale (which is always 1.0 on macOS because
+    /// AppKit already reports points, so no DPI conversion is needed).
     pub(in crate::platform::macos) scale: f64,
 }
 

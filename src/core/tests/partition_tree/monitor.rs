@@ -16,6 +16,7 @@ fn move_container_to_monitor() {
             width: 100.0,
             height: 30.0,
         },
+        1.0,
     );
     hub.focus_parent();
     hub.move_focused_to_monitor(&MonitorTarget::Right);
@@ -44,6 +45,7 @@ fn move_container_to_monitor_no_target() {
             width: 100.0,
             height: 30.0,
         },
+        1.0,
     );
     hub.focus_parent();
     // No monitor to the left, should be a no-op
@@ -108,6 +110,7 @@ fn move_container_to_monitor_with_floats_on_workspace() {
             width: 100.0,
             height: 30.0,
         },
+        1.0,
     );
     // Should move the tiling container (W0+W2), not the float W1
     hub.move_focused_to_monitor(&MonitorTarget::Right);

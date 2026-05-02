@@ -18,10 +18,23 @@ impl std::fmt::Display for MonitorId {
     }
 }
 
+/// Core is coordinate-system-agnostic: `dimension` holds whatever rect
+/// the platform supplies in its own native frame (logical on macOS,
+/// physical on Windows). Core never characterises or converts the
+/// unit -- all layout math is unit-agnostic.
 #[derive(Debug, Clone)]
 pub(crate) struct Monitor {
     pub(super) name: String,
     pub(super) dimension: Dimension,
+    /// Multiplier applied to config-denominated lengths before use in
+    /// layout math on this monitor.
+    ///
+    /// - macOS: always `1.0`. AppKit, AX, and Core Graphics all express
+    ///   window geometry in logical points, which is also the config unit.
+    /// - Windows: the monitor's DPI scale (e.g. `1.5` at 150%). PMv2
+    ///   reports rects in physical pixels, but config values are logical
+    ///   pixels, so they must be multiplied to reach the frame unit.
+    pub(super) scale: f32,
     pub(super) active_workspace: WorkspaceId,
 }
 

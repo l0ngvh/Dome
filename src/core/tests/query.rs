@@ -78,6 +78,7 @@ fn focused_vs_visible_multi_monitor() {
             width: 100.0,
             height: 30.0,
         },
+        1.0,
     );
     hub.focus_monitor(&MonitorTarget::Name("secondary".into()));
     hub.insert_tiling();
@@ -167,6 +168,7 @@ fn multi_monitor_no_windows() {
             width: 100.0,
             height: 30.0,
         },
+        1.0,
     );
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);

@@ -34,6 +34,14 @@ cargo install --path .
 
 This compiles Dome in release mode and installs the `dome` binary to `~/.cargo/bin/`, which should be in your `PATH` if Rust was installed via rustup.
 
+**Cross-compiling for Windows from macOS:** The Windows build embeds resources (application manifest, icon) via `windres`. Install mingw-w64 so the resource compiler is available:
+
+```bash
+brew install mingw-w64
+```
+
+This is required for `cargo clippy --target=x86_64-pc-windows-gnu --tests` and any Windows-targeted build from a macOS host. See [Windows Platform Details](development/windows.md#cross-compile-prerequisite) for more.
+
 ## macOS App Bundle
 
 To produce a `Dome.app` bundle with a dock icon:

@@ -98,12 +98,12 @@ impl Dome {
         sender: Box<dyn FrameSender>,
     ) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
-        let mut hub = Hub::new(primary.dimension, config.clone().into());
+        let mut hub = Hub::new(primary.dimension, 1.0, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for screen in screens {
             if screen.display_id != primary.display_id {
-                let id = hub.add_monitor(screen.name.clone(), screen.dimension);
+                let id = hub.add_monitor(screen.name.clone(), screen.dimension, 1.0);
                 monitor_registry.insert(screen, id);
             }
         }
@@ -656,7 +656,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
     if let Some(new_primary) = screens.iter().find(|s| s.is_primary) {
         if !registry.contains(new_primary.display_id) {
             registry.replace_primary(new_primary);
-            hub.update_monitor_dimension(registry.primary_monitor_id(), new_primary.dimension);
+            hub.update_monitor(registry.primary_monitor_id(), new_primary.dimension, 1.0);
         } else {
             registry.set_primary_display_id(new_primary.display_id);
         }
@@ -665,7 +665,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
     // Add new monitors first to prevent exhausting all monitors
     for screen in screens {
         if !registry.contains(screen.display_id) {
-            let id = hub.add_monitor(screen.name.clone(), screen.dimension);
+            let id = hub.add_monitor(screen.name.clone(), screen.dimension, 1.0);
             registry.insert(screen, id);
             tracing::info!(%screen, "Monitor added");
         }
@@ -688,7 +688,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
                     "Monitor dimension changed"
                 );
             }
-            hub.update_monitor_dimension(monitor_id, screen.dimension);
+            hub.update_monitor(monitor_id, screen.dimension, 1.0);
         }
     }
 }
