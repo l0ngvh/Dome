@@ -6,7 +6,7 @@ use super::node::{
     ContainerId, Dimension, DisplayMode, Monitor, MonitorId, Window, WindowId, WindowRestrictions,
     Workspace, WorkspaceId,
 };
-use super::partition_tree::{Child, PartitionTreeStrategy};
+use super::partition_tree::PartitionTreeStrategy;
 use super::strategy::{TilingAction, TilingStrategy, clip};
 
 /// Result of `get_visible_placements()`. Bundles per-monitor placements with
@@ -46,13 +46,6 @@ pub(crate) struct ContainerPlacement {
     pub(crate) is_tabbed: bool,
     pub(crate) active_tab_index: usize,
     pub(crate) titles: Vec<String>,
-    /// Children of this container, so snapshot/rendering code can build tab
-    /// labels without reaching into strategy internals.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used in test snapshot rendering")
-    )]
-    pub(super) children: Vec<Child>,
 }
 
 pub(crate) struct MonitorPlacements {

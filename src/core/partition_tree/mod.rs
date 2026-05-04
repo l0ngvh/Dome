@@ -365,7 +365,6 @@ impl TilingStrategy for PartitionTreeStrategy {
                                 Child::Container(_) => "Container".to_string(),
                             })
                             .collect(),
-                        children: container.children().to_vec(),
                     });
                     if let Some(active) = container.active_tab() {
                         stack.push(active);

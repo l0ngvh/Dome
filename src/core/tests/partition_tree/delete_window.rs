@@ -770,12 +770,12 @@ fn promote_child_to_tabbed_grandparent() {
 
     // Create 3 nested containers: tabbed grandparent > split parent > split child
     // tabbed: [W0] [[W1] [W2 W3]]
-    hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    hub.insert_tiling_titled();
+    let w1 = hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
 
     // Make grandparent tabbed
     hub.focus_parent();
@@ -788,13 +788,13 @@ fn promote_child_to_tabbed_grandparent() {
         Window(id=WindowId(3), x=75.00, y=16.00, w=75.00, h=14.00)
         Window(id=WindowId(2), x=0.00, y=16.00, w=75.00, h=14.00)
         Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=14.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[, Container])
-        Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, titles=[, Container])
-        Container(id=ContainerId(2), x=0.00, y=16.00, w=150.00, h=14.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[W0, Container])
+        Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, titles=[W1, Container])
+        Container(id=ContainerId(2), x=0.00, y=16.00, w=150.00, h=14.00, titles=[W2, W3])
       )
 
     ******************************************************************************************************************************************************
-    *                                   W0                                     |                                 [C1]                                    *
+    *                                   W0                                     |                              [Container]                                *
     *----------------------------------------------------------------------------------------------------------------------------------------------------*
     *                                                                                                                                                    *
     *                                                                                                                                                    *
@@ -833,12 +833,12 @@ fn promote_child_to_tabbed_grandparent() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=75.00, y=2.00, w=75.00, h=28.00)
         Window(id=WindowId(2), x=0.00, y=2.00, w=75.00, h=28.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[, Container])
-        Container(id=ContainerId(2), x=0.00, y=2.00, w=150.00, h=28.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[W0, Container])
+        Container(id=ContainerId(2), x=0.00, y=2.00, w=150.00, h=28.00, titles=[W2, W3])
       )
 
     ******************************************************************************************************************************************************
-    *                                   W0                                     |                                 [C2]                                    *
+    *                                   W0                                     |                              [Container]                                *
     *-------------------------------------------------------------------------++-------------------------------------------------------------------------*
     *                                                                         ||                                                                         *
     *                                                                         ||                                                                         *
@@ -876,12 +876,12 @@ fn promote_child_from_tabbed_parent_to_split_grandparent_does_nothing_when_direc
 
     // Create 3 nested containers: split grandparent > tabbed parent > split child
     // [W0] [tabbed: [W1] [W2 W3]]
-    hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    hub.insert_tiling_titled();
+    let w1 = hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling();
+    let w2 = hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
 
     // Make parent tabbed
     hub.focus_parent();
@@ -897,13 +897,13 @@ fn promote_child_from_tabbed_parent_to_split_grandparent_does_nothing_when_direc
         Window(id=WindowId(3), x=75.00, y=16.00, w=75.00, h=14.00)
         Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=14.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[, Container])
-        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W1, Container])
+        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, titles=[W2, W3])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
-    |                                                                         ||                W1                  |               [C2]                 |
+    |                                                                         ||                W1                  |            [Container]             |
     |                                                                         |***************************************************************************
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
@@ -943,8 +943,8 @@ fn promote_child_from_tabbed_parent_to_split_grandparent_does_nothing_when_direc
         Window(id=WindowId(3), x=75.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=15.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
+        Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=30.00, titles=[W2, W3])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -986,12 +986,12 @@ fn promote_tabbed_child_to_split_grandparent() {
 
     // Create 3 nested containers: split grandparent > split parent > tabbed child
     // [W0] [[W1] [tabbed: W2 W3]]
-    hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    hub.insert_tiling_titled();
+    let w1 = hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
 
     // Make child tabbed
     hub.focus_parent();
@@ -1002,9 +1002,9 @@ fn promote_tabbed_child_to_split_grandparent() {
         Window(id=WindowId(3), x=75.00, y=17.00, w=75.00, h=13.00)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[W1, Container])
+        Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[W2, W3])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -1047,8 +1047,8 @@ fn promote_tabbed_child_to_split_grandparent() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=75.00, y=2.00, w=75.00, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
+        Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=right, titles=[W2, W3])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************

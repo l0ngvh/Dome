@@ -352,14 +352,14 @@ fn move_container_to_tabbed_workspace() {
     let mut hub = setup();
 
     // Create container with 2 windows on workspace 0
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.focus_parent();
 
     // Create tabbed container on workspace 1
     hub.focus_workspace("1");
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
@@ -378,12 +378,12 @@ fn move_container_to_tabbed_workspace() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=2.00, w=75.00, h=28.00)
         Window(id=WindowId(0), x=0.00, y=2.00, w=75.00, h=28.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=2, titles=[, , Container])
-        Container(id=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right, titles=[, ])
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=2, titles=[W2, W3, Container])
+        Container(id=ContainerId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right, titles=[W0, W1])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                       W2                        |                      W3                        |                     [C0]                        |
+    |                       W2                        |                      W3                        |                  [Container]                    |
     ******************************************************************************************************************************************************
     *                                                                         ||                                                                         *
     *                                                                         ||                                                                         *

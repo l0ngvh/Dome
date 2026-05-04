@@ -649,11 +649,11 @@ fn swap_down_in_vertical_container() {
 #[test]
 fn move_from_tabbed_parent_goes_to_grandparent() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_container_layout();
     hub.focus_prev_tab();
 
@@ -664,8 +664,8 @@ fn move_from_tabbed_parent_goes_to_grandparent() {
         Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=50.00, y=2.00, w=50.00, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
-        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=0, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container, W2])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=0, titles=[W1, W3])
       )
 
     +------------------------------------------------++------------------------------------------------+**************************************************
@@ -704,28 +704,28 @@ fn move_from_tabbed_parent_goes_to_grandparent() {
 #[test]
 fn move_from_nested_container_skip_tabbed_grandparent() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_container_layout();
     hub.focus_prev_tab();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
     insta::assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=112.50, y=2.00, w=37.50, h=28.00, highlighted, spawn=right)
         Window(id=WindowId(2), x=75.00, y=2.00, w=37.50, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[, Container, ])
-        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W1, Container, W3])
+        Container(id=ContainerId(2), x=75.00, y=2.00, w=75.00, h=28.00, titles=[W2, W4])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
-    |                                                                         ||          W1            |        [C2]           |          W3            |
+    |                                                                         ||          W1            |     [Container]       |          W3            |
     |                                                                         |+------------------------------------+*************************************
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
@@ -763,8 +763,8 @@ fn move_from_nested_container_skip_tabbed_grandparent() {
         Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(2), x=50.00, y=2.00, w=50.00, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
-        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=1, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container, W4])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=1, titles=[W1, W2, W3])
       )
 
     +------------------------------------------------++------------------------------------------------+**************************************************

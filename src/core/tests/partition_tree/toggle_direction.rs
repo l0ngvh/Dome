@@ -157,17 +157,17 @@ fn toggle_direction_on_window_nested() {
 fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(7))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -177,13 +177,13 @@ fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
         Window(id=WindowId(4), x=100.00, y=2.00, w=12.50, h=28.00)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
-        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=2, titles=[, , Container])
-        Container(id=ContainerId(2), x=100.00, y=2.00, w=50.00, h=28.00, titles=[, , , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, W1, Container])
+        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=2, titles=[W2, W3, Container])
+        Container(id=ContainerId(2), x=100.00, y=2.00, w=50.00, h=28.00, titles=[W4, W5, W6, W7])
       )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
-    |                                                ||                                                ||      W2        |     W3        |    [C2]       |
+    |                                                ||                                                ||      W2        |     W3        | [Container]   |
     |                                                ||                                                |+----------++-----------++----------+*************
     |                                                ||                                                ||          ||           ||          |*           *
     |                                                ||                                                ||          ||           ||          |*           *
@@ -225,13 +225,13 @@ fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
         Window(id=WindowId(4), x=100.00, y=2.00, w=50.00, h=7.00)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
-        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=2, titles=[, , Container])
-        Container(id=ContainerId(2), x=100.00, y=2.00, w=50.00, h=28.00, titles=[, , , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, W1, Container])
+        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=2, titles=[W2, W3, Container])
+        Container(id=ContainerId(2), x=100.00, y=2.00, w=50.00, h=28.00, titles=[W4, W5, W6, W7])
       )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
-    |                                                ||                                                ||      W2        |     W3        |    [C2]       |
+    |                                                ||                                                ||      W2        |     W3        | [Container]   |
     |                                                ||                                                |+------------------------------------------------+
     |                                                ||                                                ||                                                |
     |                                                ||                                                ||                                                |
@@ -267,15 +267,15 @@ fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
 fn toggle_direction_skips_nested_tabbed_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    let w1 = hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    let w1 = hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
     hub.set_focus(w1);
 
     assert_snapshot!(snapshot(&hub), @"
@@ -285,13 +285,13 @@ fn toggle_direction_skips_nested_tabbed_container() {
         Window(id=WindowId(4), x=100.00, y=2.00, w=25.00, h=28.00)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
-        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=2, titles=[, , Container])
-        Container(id=ContainerId(2), x=100.00, y=2.00, w=50.00, h=28.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, W1, Container])
+        Container(id=ContainerId(1), x=100.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=2, titles=[W2, W3, Container])
+        Container(id=ContainerId(2), x=100.00, y=2.00, w=50.00, h=28.00, titles=[W4, W5])
       )
 
     +------------------------------------------------+**************************************************+------------------------------------------------+
-    |                                                |*                                                *|      W2        |     W3        |    [C2]       |
+    |                                                |*                                                *|      W2        |     W3        | [Container]   |
     |                                                |*                                                *+-----------------------++-----------------------+
     |                                                |*                                                *|                       ||                       |
     |                                                |*                                                *|                       ||                       |
@@ -331,9 +331,9 @@ fn toggle_direction_skips_nested_tabbed_container() {
         Window(id=WindowId(4), x=0.00, y=22.00, w=75.00, h=8.00)
         Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=10.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , Container])
-        Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, tabbed, active_tab=2, titles=[, , Container])
-        Container(id=ContainerId(2), x=0.00, y=22.00, w=150.00, h=8.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, W1, Container])
+        Container(id=ContainerId(1), x=0.00, y=20.00, w=150.00, h=10.00, tabbed, active_tab=2, titles=[W2, W3, Container])
+        Container(id=ContainerId(2), x=0.00, y=22.00, w=150.00, h=8.00, titles=[W4, W5])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -357,7 +357,7 @@ fn toggle_direction_skips_nested_tabbed_container() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                       W2                        |                      W3                        |                     [C2]                        |
+    |                       W2                        |                      W3                        |                  [Container]                    |
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||                                                                         |
     |                                                                         ||                                                                         |
@@ -373,25 +373,25 @@ fn toggle_direction_skips_nested_tabbed_container() {
 fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    let w1 = hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    let w1 = hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.set_focus(w1);
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    let w6 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w6 = hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.set_focus(w6);
 
     assert_snapshot!(snapshot(&hub), @"
@@ -404,17 +404,17 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
         Window(id=WindowId(6), x=66.67, y=2.00, w=16.67, h=28.00, highlighted, spawn=right)
         Window(id=WindowId(5), x=50.00, y=2.00, w=16.67, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
-        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=3, titles=[, , , Container])
-        Container(id=ContainerId(2), x=50.00, y=2.00, w=50.00, h=28.00, titles=[, , Container])
-        Container(id=ContainerId(3), x=83.33, y=2.00, w=16.67, h=28.00, tabbed, active_tab=2, titles=[, , Container])
-        Container(id=ContainerId(4), x=83.33, y=4.00, w=16.67, h=26.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container, W2])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=3, titles=[W1, W3, W4, Container])
+        Container(id=ContainerId(2), x=50.00, y=2.00, w=50.00, h=28.00, titles=[W5, W6, Container])
+        Container(id=ContainerId(3), x=83.33, y=2.00, w=16.67, h=28.00, tabbed, active_tab=2, titles=[W7, W8, Container])
+        Container(id=ContainerId(4), x=83.33, y=4.00, w=16.67, h=26.00, titles=[W9, W10, W11])
       )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
-    |                                                ||    W1      |   W3      |   W4      |  [C2]     ||                                                |
+    |                                                ||    W1      |   W3      |   W4      [Container] ||                                                |
     |                                                |+---------------+****************+---------------+|                                                |
-    |                                                ||               |*              *| W7  |W8  [C4] ||                                                |
+    |                                                ||               |*              *| W7  |W[Contain||                                                |
     |                                                ||               |*              *+----++---++----+|                                                |
     |                                                ||               |*              *|    ||   ||    ||                                                |
     |                                                ||               |*              *|    ||   ||    ||                                                |
@@ -455,15 +455,15 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
         Window(id=WindowId(6), x=50.00, y=11.33, w=50.00, h=9.33, highlighted, spawn=right)
         Window(id=WindowId(5), x=50.00, y=2.00, w=50.00, h=9.33)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container, ])
-        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=3, titles=[, , , Container])
-        Container(id=ContainerId(2), x=50.00, y=2.00, w=50.00, h=28.00, titles=[, , Container])
-        Container(id=ContainerId(3), x=50.00, y=20.67, w=50.00, h=9.33, tabbed, active_tab=2, titles=[, , Container])
-        Container(id=ContainerId(4), x=50.00, y=22.67, w=50.00, h=7.33, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container, W2])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=3, titles=[W1, W3, W4, Container])
+        Container(id=ContainerId(2), x=50.00, y=2.00, w=50.00, h=28.00, titles=[W5, W6, Container])
+        Container(id=ContainerId(3), x=50.00, y=20.67, w=50.00, h=9.33, tabbed, active_tab=2, titles=[W7, W8, Container])
+        Container(id=ContainerId(4), x=50.00, y=22.67, w=50.00, h=7.33, titles=[W9, W10, W11])
       )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
-    |                                                ||    W1      |   W3      |   W4      |  [C2]     ||                                                |
+    |                                                ||    W1      |   W3      |   W4      [Container] ||                                                |
     |                                                |+------------------------------------------------+|                                                |
     |                                                ||                                                ||                                                |
     |                                                ||                                                ||                                                |
@@ -484,7 +484,7 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     |                                                |*                                                *|                                                |
     |                                                |**************************************************|                                                |
     |                                                |+------------------------------------------------+|                                                |
-    |                                                ||      W7        |     W8        |    [C4]       ||                                                |
+    |                                                ||      W7        |     W8        | [Container]   ||                                                |
     |                                                |+---------------++--------------++---------------+|                                                |
     |                                                ||               ||              ||               ||                                                |
     |                                                ||               ||              ||               ||                                                |

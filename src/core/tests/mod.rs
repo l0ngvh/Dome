@@ -16,7 +16,6 @@ use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Dimension, Direction, WindowId, Workspace, WorkspaceId};
-use crate::core::partition_tree::Child;
 use crate::core::strategy::TilingAction;
 
 const ASCII_WIDTH: usize = 150;
@@ -83,16 +82,15 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     // Draw tab bars
     for cp in containers {
         if cp.is_tabbed {
-            let labels: Vec<String> = cp
-                .children
-                .iter()
-                .map(|child| match child {
-                    Child::Window(wid) => format!("W{}", wid.get()),
-                    Child::Container(cid) => format!("C{}", cid.get()),
-                })
-                .collect();
             let d = cp.visible_frame;
-            draw_tab_bar(&mut grid, d.x, d.y, d.width, &labels, cp.active_tab_index);
+            draw_tab_bar(
+                &mut grid,
+                d.x,
+                d.y,
+                d.width,
+                &cp.titles,
+                cp.active_tab_index,
+            );
         }
     }
 
@@ -714,6 +712,18 @@ impl Hub {
 
     pub(crate) fn toggle_container_layout(&mut self) {
         self.handle_tiling_action(TilingAction::ToggleContainerLayout);
+    }
+
+    /// Inserts a tiling window and seeds its title to `W<id>` so the ASCII
+    /// tab bar in `snapshot()` (which reads `ContainerPlacement::titles`)
+    /// shows readable per-tab labels. Call this instead of `insert_tiling` in
+    /// `#[test]` functions whose inline snapshot contains `tabbed, active_tab=`.
+    /// Non-tabbed tests should keep calling `insert_tiling` directly to avoid
+    /// churning the `titles=[...]` textual line in their snapshots.
+    pub(crate) fn insert_tiling_titled(&mut self) -> WindowId {
+        let id = self.insert_tiling();
+        self.set_window_title(id, format!("W{}", id.get()));
+        id
     }
 }
 

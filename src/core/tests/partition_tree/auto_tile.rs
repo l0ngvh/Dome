@@ -120,18 +120,18 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
 #[test]
 fn auto_tile_preserves_tab_spawn_mode() {
     let mut hub = setup_with_auto_tile();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=75.00, y=2.00, w=75.00, h=28.00, highlighted, spawn=top)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W1, W2])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -223,16 +223,16 @@ fn auto_tile_adjusts_after_toggle_direction() {
 #[test]
 fn auto_tile_with_tab_spawn_mode() {
     let mut hub = setup_with_auto_tile();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=top)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=2, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=2, titles=[W0, W1, W2])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -271,12 +271,12 @@ fn auto_tile_with_tab_spawn_mode() {
 #[test]
 fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
     let mut hub = setup_with_auto_tile();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    let w2 = hub.insert_tiling();
+    hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
+    let w2 = hub.insert_tiling_titled();
     hub.focus_left();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling_titled();
     hub.toggle_container_layout();
     hub.focus_parent();
     hub.toggle_spawn_mode();
@@ -287,8 +287,8 @@ fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=75.00, y=2.00, w=75.00, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=top, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, highlighted, spawn=top, titles=[W1, W3])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -329,12 +329,12 @@ fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=75.00, y=2.00, w=75.00, h=28.00, highlighted, spawn=top)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=2, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=2, titles=[W1, W3, ])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
-    |                                                                         ||          W1            |         W3            |         [W4]           |
+    |                                                                         ||          W1            |         W3            |          []            |
     |                                                                         |***************************************************************************
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *

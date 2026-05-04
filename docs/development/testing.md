@@ -26,7 +26,7 @@ fn two_windows_split_evenly() {
 - `focused_tiling` is reachable from the workspace root via the focus chain.
 - If root exists, `focused_tiling` is `Some`.
 
-Generic validators (float/fullscreen/minimized consistency, monitor validity, visible placement correctness) stay in `src/core/tests/mod.rs`. The minimized validator checks that every window in `minimized_windows` has mode `Minimized` and does not appear in any workspace's float or fullscreen lists. Snapshot and format functions work with `WindowPlacement` and `ContainerPlacement` from `get_visible_placements()`. `snapshot()` reads `cp.children` for tab bar labels instead of accessing container internals directly. If any minimized windows exist, the snapshot text appends a sorted `Minimized: [...]` line.
+Generic validators (float/fullscreen/minimized consistency, monitor validity, visible placement correctness) stay in `src/core/tests/mod.rs`. The minimized validator checks that every window in `minimized_windows` has mode `Minimized` and does not appear in any workspace's float or fullscreen lists. Snapshot and format functions work with `WindowPlacement` and `ContainerPlacement` from `get_visible_placements()`. `snapshot()` reads `cp.titles` for tab bar labels instead of accessing container internals directly. Use `hub.insert_tiling_titled()` in tests that snapshot a tabbed container so the ASCII tab bar carries readable `W<id>` labels; other tests should keep calling `hub.insert_tiling()`. If any minimized windows exist, the snapshot text appends a sorted `Minimized: [...]` line.
 
 These run on every snapshot, so invariant violations are caught immediately rather than causing subtle downstream bugs.
 
