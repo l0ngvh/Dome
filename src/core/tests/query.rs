@@ -1,6 +1,6 @@
 use crate::action::MonitorTarget;
 use crate::core::WorkspaceInfo;
-use crate::core::node::{Dimension, WindowRestrictions};
+use crate::core::node::{Dimension, Length, WindowRestrictions};
 use crate::core::tests::setup;
 
 #[test]
@@ -52,12 +52,12 @@ fn multiple_workspaces() {
 fn workspace_with_floats_and_fullscreen() {
     let mut hub = setup();
     hub.insert_tiling();
-    hub.insert_float(Dimension {
-        x: 0.0,
-        y: 0.0,
-        width: 200.0,
-        height: 100.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(0.0),
+        Length::new(0.0),
+        Length::new(200.0),
+        Length::new(100.0),
+    ));
     let third = hub.insert_tiling();
     hub.set_fullscreen(third, WindowRestrictions::None);
     let ws = hub.query_workspaces();
@@ -72,12 +72,13 @@ fn focused_vs_visible_multi_monitor() {
     hub.insert_tiling();
     hub.add_monitor(
         "secondary".to_string(),
-        Dimension {
-            x: 200.0,
-            y: 0.0,
-            width: 100.0,
-            height: 30.0,
-        },
+        Dimension::new(
+            Length::new(200.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(30.0),
+        ),
+        1.0,
     );
     hub.focus_monitor(&MonitorTarget::Name("secondary".into()));
     hub.insert_tiling();
@@ -126,18 +127,18 @@ fn workspace_info_json_shape() {
 #[test]
 fn workspace_with_only_floats() {
     let mut hub = setup();
-    hub.insert_float(Dimension {
-        x: 0.0,
-        y: 0.0,
-        width: 200.0,
-        height: 100.0,
-    });
-    hub.insert_float(Dimension {
-        x: 0.0,
-        y: 0.0,
-        width: 200.0,
-        height: 100.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(0.0),
+        Length::new(0.0),
+        Length::new(200.0),
+        Length::new(100.0),
+    ));
+    hub.insert_float(Dimension::new(
+        Length::new(0.0),
+        Length::new(0.0),
+        Length::new(200.0),
+        Length::new(100.0),
+    ));
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 1);
     assert_eq!(ws[0].window_count, 2);
@@ -161,12 +162,13 @@ fn multi_monitor_no_windows() {
     let mut hub = setup();
     hub.add_monitor(
         "secondary".to_string(),
-        Dimension {
-            x: 200.0,
-            y: 0.0,
-            width: 100.0,
-            height: 30.0,
-        },
+        Dimension::new(
+            Length::new(200.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(30.0),
+        ),
+        1.0,
     );
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);

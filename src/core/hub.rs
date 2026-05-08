@@ -3,8 +3,8 @@ use crate::config::SizeConstraint;
 
 use super::allocator::{Allocator, NodeId};
 use super::node::{
-    ContainerId, Dimension, DisplayMode, Monitor, MonitorId, Window, WindowId, WindowRestrictions,
-    Workspace, WorkspaceId,
+    ContainerId, Dimension, DisplayMode, Length, Logical, Monitor, MonitorId, Window, WindowId,
+    WindowRestrictions, Workspace, WorkspaceId,
 };
 use super::partition_tree::PartitionTreeStrategy;
 use super::strategy::{TilingAction, TilingStrategy, clip};
@@ -112,13 +112,14 @@ pub(crate) struct Hub {
 }
 
 impl Hub {
-    pub(crate) fn new(primary_screen: Dimension, config: HubConfig) -> Self {
+    pub(crate) fn new(primary_screen: Dimension, primary_scale: f32, config: HubConfig) -> Self {
         let mut monitors: Allocator<Monitor> = Allocator::new();
         let mut workspaces: Allocator<Workspace> = Allocator::new();
 
         let primary_id = monitors.allocate(Monitor {
             name: "primary".to_string(),
             dimension: primary_screen,
+            scale: primary_scale,
             active_workspace: WorkspaceId::new(0),
         });
 
@@ -143,6 +144,7 @@ impl Hub {
     #[cfg(test)]
     pub(crate) fn new_with_strategy(
         primary_screen: Dimension,
+        primary_scale: f32,
         config: HubConfig,
         strategy: Box<dyn TilingStrategy>,
     ) -> Self {
@@ -152,6 +154,7 @@ impl Hub {
         let primary_id = monitors.allocate(Monitor {
             name: "primary".to_string(),
             dimension: primary_screen,
+            scale: primary_scale,
             active_workspace: WorkspaceId::new(0),
         });
 
@@ -330,10 +333,16 @@ impl Hub {
         self.access.monitors.all_active()
     }
 
-    pub(crate) fn add_monitor(&mut self, name: String, dimension: Dimension) -> MonitorId {
+    pub(crate) fn add_monitor(
+        &mut self,
+        name: String,
+        dimension: Dimension,
+        scale: f32,
+    ) -> MonitorId {
         let monitor_id = self.access.monitors.allocate(Monitor {
             name: name.clone(),
             dimension,
+            scale,
             active_workspace: WorkspaceId::new(0),
         });
         let ws_id = self
@@ -370,8 +379,15 @@ impl Hub {
         self.access.monitors.delete(monitor_id);
     }
 
-    pub(crate) fn update_monitor_dimension(&mut self, monitor_id: MonitorId, dimension: Dimension) {
-        self.access.monitors.get_mut(monitor_id).dimension = dimension;
+    pub(crate) fn update_monitor(
+        &mut self,
+        monitor_id: MonitorId,
+        dimension: Dimension,
+        scale: f32,
+    ) {
+        let monitor = self.access.monitors.get_mut(monitor_id);
+        monitor.dimension = dimension;
+        monitor.scale = scale;
         // Collect IDs first to avoid borrowing self.access.workspaces while
         // passing &mut self.access to the strategy.
         let ws_ids: Vec<WorkspaceId> = self
@@ -703,13 +719,15 @@ impl Hub {
                         let dy = my - cy;
 
                         let valid = match direction {
-                            MonitorTarget::Left => dx < 0.0,
-                            MonitorTarget::Right => dx > 0.0,
-                            MonitorTarget::Up => dy < 0.0,
-                            MonitorTarget::Down => dy > 0.0,
+                            MonitorTarget::Left => dx < Length::ZERO,
+                            MonitorTarget::Right => dx > Length::ZERO,
+                            MonitorTarget::Up => dy < Length::ZERO,
+                            MonitorTarget::Down => dy > Length::ZERO,
                             MonitorTarget::Name(_) => false,
                         };
-                        valid.then_some((*id, dx * dx + dy * dy))
+                        // Use raw f32 for distance² comparison (unit is irrelevant for ordering)
+                        let dist_sq = dx.value() * dx.value() + dy.value() * dy.value();
+                        valid.then_some((*id, dist_sq))
                     })
                     .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
                     .map(|(id, _)| id)
@@ -720,7 +738,7 @@ impl Hub {
 
 #[derive(Debug, Clone)]
 pub(crate) struct HubConfig {
-    pub(super) tab_bar_height: f32,
+    pub(super) tab_bar_height: Length<Logical>,
     pub(super) auto_tile: bool,
     pub(super) min_width: SizeConstraint,
     pub(super) min_height: SizeConstraint,

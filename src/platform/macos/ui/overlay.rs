@@ -1,3 +1,8 @@
+// Coordinate system: logical points throughout (AppKit, AX, and Core Graphics are all
+// logical-point-native). Renderer::render passes pixels_per_point = backingScaleFactor; shell
+// passes core Dimension (= Dimension<Logical> on macOS) directly with no
+// physical-to-logical division at any boundary.
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -18,9 +23,13 @@ use objc2_quartz_core::CAMetalLayer;
 use super::super::dome::HubEvent;
 use super::renderer::{MetalBackend, Renderer};
 use crate::config::Config;
-use crate::core::{ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement};
+use crate::core::{
+    ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, TilingWindowPlacement,
+};
 use crate::font::FontConfig;
-use crate::overlay;
+use crate::overlay::{
+    self, BorderMetrics, LogicalTiledContainer, LogicalTiledWindow, OverlayMetrics,
+};
 use crate::theme::Flavor;
 
 define_class!(
@@ -154,13 +163,15 @@ impl FloatOverlay {
 
         // Content area offset by the border inset within the frame
         self.visible_content_bounds = Some([
-            content_dim.x - placement.frame.x,
-            content_dim.y - placement.frame.y,
-            content_dim.width,
-            content_dim.height,
+            (content_dim.x - placement.frame.x).logical(),
+            (content_dim.y - placement.frame.y).logical(),
+            content_dim.width.logical(),
+            content_dim.height.logical(),
         ]);
 
         let config = &self.config;
+        let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let theme = config.theme();
         let mr = self.visible_content_bounds;
         self.renderer.render(scale as f32, Vec::new(), mr, |ctx| {
             // layer_painter bypasses egui's Area sizing pass, avoiding
@@ -172,8 +183,8 @@ impl FloatOverlay {
             let clip = egui::Rect::from_min_size(
                 egui::pos2(0.0, 0.0),
                 egui::vec2(
-                    placement.visible_frame.width,
-                    placement.visible_frame.height,
+                    placement.visible_frame.width.logical(),
+                    placement.visible_frame.height.logical(),
                 ),
             );
             overlay::paint_window_border(
@@ -182,7 +193,8 @@ impl FloatOverlay {
                 placement.visible_frame,
                 placement.is_highlighted,
                 None,
-                config,
+                &theme,
+                border,
                 egui::Vec2::ZERO,
             );
         });
@@ -193,6 +205,8 @@ impl FloatOverlay {
         self.config = config;
         if let Some(placement) = self.placement {
             let config = &self.config;
+            let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+            let theme = config.theme();
             let mr = self.visible_content_bounds;
             self.renderer
                 .render(self.scale as f32, Vec::new(), mr, |ctx| {
@@ -203,8 +217,8 @@ impl FloatOverlay {
                     let clip = egui::Rect::from_min_size(
                         egui::pos2(0.0, 0.0),
                         egui::vec2(
-                            placement.visible_frame.width,
-                            placement.visible_frame.height,
+                            placement.visible_frame.width.logical(),
+                            placement.visible_frame.height.logical(),
                         ),
                     );
                     overlay::paint_window_border(
@@ -213,7 +227,8 @@ impl FloatOverlay {
                         placement.visible_frame,
                         placement.is_highlighted,
                         None,
-                        config,
+                        &theme,
+                        border,
                         egui::Vec2::ZERO,
                     );
                 });
@@ -232,6 +247,8 @@ impl FloatOverlay {
         self.renderer.set_mirror_surface(surface);
         if let Some(placement) = self.placement {
             let config = &self.config;
+            let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+            let theme = config.theme();
             let mr = self.visible_content_bounds;
             self.renderer
                 .render(self.scale as f32, Vec::new(), mr, |ctx| {
@@ -242,8 +259,8 @@ impl FloatOverlay {
                     let clip = egui::Rect::from_min_size(
                         egui::pos2(0.0, 0.0),
                         egui::vec2(
-                            placement.visible_frame.width,
-                            placement.visible_frame.height,
+                            placement.visible_frame.width.logical(),
+                            placement.visible_frame.height.logical(),
                         ),
                     );
                     overlay::paint_window_border(
@@ -252,7 +269,8 @@ impl FloatOverlay {
                         placement.visible_frame,
                         placement.is_highlighted,
                         None,
-                        config,
+                        &theme,
+                        border,
                         egui::Vec2::ZERO,
                     );
                 });
@@ -540,10 +558,11 @@ impl TilingOverlayView {
         ivars.scale.set(scale);
         *ivars.windows.borrow_mut() = windows.to_vec();
         *ivars.containers.borrow_mut() = containers.to_vec();
-        ivars
-            .renderer
-            .borrow()
-            .resize(monitor.width as f64, monitor.height as f64, scale);
+        ivars.renderer.borrow().resize(
+            monitor.width.logical() as f64,
+            monitor.height.logical() as f64,
+            scale,
+        );
         self.render_now();
     }
 
@@ -574,11 +593,50 @@ impl TilingOverlayView {
         let config = ivars.config.borrow();
         let events = std::mem::take(&mut *ivars.events.borrow_mut());
         let scale = ivars.scale.get();
+
+        let monitor_logical = monitor;
+        let windows_logical: Vec<LogicalTiledWindow> = windows
+            .iter()
+            .map(|wp| LogicalTiledWindow {
+                id: wp.id,
+                frame: wp.frame,
+                visible_frame: wp.visible_frame,
+                is_highlighted: wp.is_highlighted,
+                spawn_indicator: wp.spawn_indicator,
+            })
+            .collect();
+        let containers_logical: Vec<LogicalTiledContainer> = containers
+            .iter()
+            .map(|(cp, titles)| LogicalTiledContainer {
+                id: cp.id,
+                frame: cp.frame,
+                visible_frame: cp.visible_frame,
+                is_highlighted: cp.is_highlighted,
+                spawn_indicator: cp.spawn_indicator,
+                is_tabbed: cp.is_tabbed,
+                active_tab_index: cp.active_tab_index,
+                titles: titles.clone(),
+            })
+            .collect();
+        let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let metrics = OverlayMetrics {
+            border,
+            tab_bar_height: config.tab_bar_height,
+        };
+        let theme = config.theme();
+
         let clicked_tabs = ivars
             .renderer
             .borrow_mut()
             .render(scale as f32, events, None, |ctx| {
-                overlay::paint_tiling_overlay(ctx, monitor, &windows, &containers, &config)
+                overlay::paint_tiling_overlay(
+                    ctx,
+                    monitor_logical,
+                    &windows_logical,
+                    &containers_logical,
+                    &theme,
+                    metrics,
+                )
             });
         for (container_id, tab_idx) in clicked_tabs {
             ivars

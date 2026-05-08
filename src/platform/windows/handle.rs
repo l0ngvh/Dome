@@ -6,7 +6,7 @@ use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
 };
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
@@ -14,40 +14,190 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
+use windows::Win32::UI::HiDpi::{
+    AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow,
+    GetWindowDpiAwarenessContext,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor,
     GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, HWND_BOTTOM,
-    IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE,
-    SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW,
-    SetForegroundWindow, SetWindowPos, ShowWindow, ShowWindowAsync, WM_GETMINMAXINFO, WM_GETTEXT,
-    WM_GETTEXTLENGTH, WS_CHILD, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
+    IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, SET_WINDOW_POS_FLAGS, SMTO_ABORTIFHUNG,
+    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE,
+    SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow, SetWindowPos, ShowWindow,
+    ShowWindowAsync, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_DLGMODALFRAME,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, PWSTR, w};
 
-use crate::core::Dimension;
+use crate::core::{Dimension, Length, Physical};
 use crate::platform::windows::external::{
     HwndId, InspectExternalHwnd, ManageExternalHwnd, ShowCmd, ZOrder,
 };
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
-pub(crate) const OFFSCREEN_POS: f32 = -32000.0;
+pub(crate) const OFFSCREEN_POS: Length<Physical> = Length::new(-32000.0);
 
+/// Returns the window's physical-pixel frame.
+///
+/// # Cross-process DPI behaviour
+///
+/// Because Dome is Per-Monitor v2 DPI-aware (see `resources/windows/dome.manifest`),
+/// GetWindowRect returns physical pixels regardless of the target HWND's own
+/// DPI awareness. Windows virtualizes the return based on the CALLER's
+/// awareness, not the target's. This is documented in the Microsoft Learn
+/// "PhysicalToLogicalPointForPerMonitorDPI" page:
+///
+/// > Consider two applications, one has a PROCESS_DPI_AWARENESS value of
+/// > PROCESS_DPI_UNAWARE and the other has a value of PROCESS_PER_MONITOR_AWARE.
+/// > The PROCESS_PER_MONITOR_AWARE app creates a window on a single monitor
+/// > where the scale factor is 200% (192 DPI). If both apps call GetWindowRect
+/// > on this window, they will receive different values. The PROCESS_DPI_UNAWARE
+/// > app will receive a rect based on 96 DPI coordinates, while the
+/// > PROCESS_PER_MONITOR_AWARE app will receive coordinates matching the actual
+/// > DPI of the monitor.
+///
+/// Corroborating sources:
+/// - MS Learn, GetWindowRect: "GetWindowRect is virtualized for DPI."
+///   https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowrect
+/// - MS Learn, PhysicalToLogicalPointForPerMonitorDPI: "The system returns
+///   all points to an application in its own coordinate space." Also: "since
+///   a PROCESS_PER_MONITOR_AWARE uses the actual DPI of the monitor, logical
+///   and physical coordinates are identical."
+///   https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-physicaltologicalpointforpermonitordpi
+/// - Stack Overflow (Cody Gray, 2016): "if you call GetWindowRect or GetClientRect
+///   from a high-DPI aware application, you will get the actual values in
+///   screen coordinates. This will be true not only for windows belonging to
+///   your application's process, but also for windows belonging to other
+///   processes, regardless of that other process's DPI awareness setting."
+///   https://stackoverflow.com/a/37829235
+///
+/// Upshot: typing this as `Dimension<Physical>` is honest unconditionally
+/// for PMv2 callers. Separate from this, WM_GETMINMAXINFO is NOT virtualized
+/// in the same way -- see `target_scale_to_physical`.
 pub(crate) fn get_dimension(hwnd: HWND) -> Dimension {
     let mut rect = RECT::default();
     unsafe { GetWindowRect(hwnd, &mut rect).ok() };
-    Dimension {
-        x: rect.left as f32,
-        y: rect.top as f32,
-        width: (rect.right - rect.left) as f32,
-        height: (rect.bottom - rect.top) as f32,
+    rect_to_dimension(rect)
+}
+
+/// Converts a Win32 `RECT` (left, top, right, bottom edges) into a `Dimension<Physical>`
+/// with (x, y, width, height). This is the single site for the `RECT -> Dimension` crossing;
+/// callers in `display.rs` and within this module use it instead of ad-hoc arithmetic.
+pub(crate) fn rect_to_dimension(rect: RECT) -> Dimension {
+    Dimension::new(
+        Length::new(rect.left as f32),
+        Length::new(rect.top as f32),
+        Length::new((rect.right - rect.left) as f32),
+        Length::new((rect.bottom - rect.top) as f32),
+    )
+}
+
+/// Returns the DWM extended frame bounds (the visible rect excluding invisible borders)
+/// in physical pixels. Returns `None` if the DWM attribute query fails (e.g. on Classic
+/// theme or non-DWM windows).
+pub(crate) fn dwm_frame_bounds(hwnd: HWND) -> Option<Dimension> {
+    let mut frame_rect = RECT::default();
+    unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame_rect as *mut _ as *mut _,
+            std::mem::size_of::<RECT>() as u32,
+        )
+        .ok()?;
+    }
+    Some(rect_to_dimension(frame_rect))
+}
+
+/// Returns the work-area dimension for the given monitor handle.
+/// Returns `None` if `GetMonitorInfoW` fails (e.g. stale or null `HMONITOR`).
+pub(crate) fn monitor_info_work_area(hmonitor: HMONITOR) -> Option<Dimension> {
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !unsafe { GetMonitorInfoW(hmonitor, &mut info) }.as_bool() {
+        return None;
+    }
+    Some(rect_to_dimension(info.rcWork))
+}
+
+/// Positions `hwnd` at `OFFSCREEN_POS` with z-order HWND_BOTTOM.
+///
+/// Uses `SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS` and deliberately
+/// omits `SWP_NOZORDER` so the z-drop to HWND_BOTTOM takes effect. This ensures
+/// offscreen windows cannot occlude visible windows and the reposition does not
+/// steal foreground activation.
+pub(crate) fn move_window_offscreen(hwnd: HWND) {
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(HWND_BOTTOM),
+            OFFSCREEN_POS.value() as i32,
+            OFFSCREEN_POS.value() as i32,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
+        )
+        .ok()
+    };
+}
+
+/// Positions `hwnd` with border compensation and child-window offset propagation.
+///
+/// This is the single `.value() as i32` site for all `SetWindowPos` placement calls
+/// that go through the managed-window path. The caller passes the VISIBLE content
+/// rect in `dim`; this function compensates for invisible borders (the gap between
+/// `GetWindowRect` and `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`) and
+/// moves any thread-owned child windows by the same delta.
+pub(crate) fn set_window_pos(hwnd: HWND, z: ZOrder, dim: Dimension, flags: SET_WINDOW_POS_FLAGS) {
+    let old = get_dimension(hwnd);
+    let (bl, bt, br, bb) = get_invisible_border(hwnd);
+    let x = dim.x.value() as i32 - bl;
+    let y = dim.y.value() as i32 - bt;
+    let cx = dim.width.value() as i32 + bl + br;
+    let cy = dim.height.value() as i32 + bt + bb;
+
+    let insert_after: Option<HWND> = z.into();
+    let mut flags = flags;
+    if insert_after.is_none() {
+        flags |= SWP_NOZORDER;
+    }
+
+    unsafe { SetWindowPos(hwnd, insert_after, x, y, cx, cy, flags).ok() };
+
+    // Propagate the position delta to owned child windows so they stay anchored
+    // relative to the parent. Short-circuits on windows with no owned children.
+    let dx = x - old.x.value() as i32;
+    let dy = y - old.y.value() as i32;
+    if dx != 0 || dy != 0 {
+        for_each_owned(hwnd, |child| {
+            let mut rect = RECT::default();
+            if unsafe { GetWindowRect(child, &mut rect).is_ok() } {
+                unsafe {
+                    SetWindowPos(
+                        child,
+                        None,
+                        rect.left + dx,
+                        rect.top + dy,
+                        0,
+                        0,
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
+                    )
+                    .ok()
+                };
+            }
+        });
     }
 }
 
-pub(crate) fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
+/// Returns the invisible border widths (left, top, right, bottom) as raw i32 in physical pixels.
+/// Used internally by `set_window_pos` for border compensation and by `get_size_constraints`
+/// for track-size adjustment.
+fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
     let mut window_rect = RECT::default();
     let mut frame_rect = RECT::default();
     unsafe {
@@ -97,7 +247,7 @@ pub(crate) fn is_manageable(hwnd: HWND) -> bool {
         return false;
     }
     let dim = get_dimension(hwnd);
-    if dim.width == 0.0 || dim.height == 0.0 {
+    if dim.width == Length::ZERO || dim.height == Length::ZERO {
         return false;
     }
     true
@@ -138,12 +288,65 @@ pub(crate) fn should_float(hwnd: HWND) -> bool {
     false
 }
 
-/// Returns (min_width, min_height, max_width, max_height) constraints
-/// with invisible borders subtracted.
+/// Target-dependent scale factor for values returned by WM_GETMINMAXINFO.
 ///
-/// This can be slow, due to the fact that external windows may take time to respond or even
-/// hang
+/// MINMAXINFO fields are filled by the target HWND's wndproc, which runs
+/// under the DPI-awareness context the HWND was created with (per Windows'
+/// Mixed-Mode DPI rules). For a PMv2 target matching Dome's PMv2 caller
+/// context, the values are already physical pixels. For legacy DPI-unaware
+/// or System-DPI-aware targets, the values are in the target's own context
+/// (96-DPI logical or system-DPI-logical); Dome must scale them to match
+/// its own physical-pixel coordinate system.
+///
+/// This wrapper detects the target's awareness via GetWindowDpiAwarenessContext
+/// and, when it differs from PMv2, uses GetDpiForWindow to derive the scale
+/// factor target_dpi / 96.0. This fixes a pre-existing bug where legacy
+/// target apps reported size constraints in the wrong unit.
+fn target_scale_to_physical(hwnd: HWND) -> f32 {
+    // SAFETY: GetWindowDpiAwarenessContext works across processes (Win10 1607+).
+    let ctx = unsafe { GetWindowDpiAwarenessContext(hwnd) };
+    let is_pmv2 =
+        unsafe { AreDpiAwarenessContextsEqual(ctx, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) }
+            .as_bool();
+    if is_pmv2 {
+        1.0
+    } else {
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        target_scale_to_physical_inner(dpi)
+    }
+}
+
+fn target_scale_to_physical_inner(target_dpi: u32) -> f32 {
+    debug_assert!(
+        target_dpi > 0,
+        "target_dpi must be positive, got {target_dpi}"
+    );
+    target_dpi as f32 / 96.0
+}
+
+/// Subtracts invisible border widths from raw min/max track-size pairs, returning
+/// the content-area constraints as f32. Negative results are clamped to zero.
+fn constraints_subtract_border(
+    min_track: (i32, i32),
+    max_track: (i32, i32),
+    border: (i32, i32, i32, i32),
+) -> (f32, f32, f32, f32) {
+    let h_border = border.0 + border.2;
+    let v_border = border.1 + border.3;
+    (
+        (min_track.0 - h_border).max(0) as f32,
+        (min_track.1 - v_border).max(0) as f32,
+        (max_track.0 - h_border).max(0) as f32,
+        (max_track.1 - v_border).max(0) as f32,
+    )
+}
+
+/// Returns physical-pixel constraints as f32. Applies `target_scale_to_physical`
+/// to handle legacy-DPI-unaware targets, then subtracts invisible borders.
 pub(crate) fn get_size_constraints(hwnd: HWND) -> (f32, f32, f32, f32) {
+    // MINMAXINFO is an in/out parameter to WM_GETMINMAXINFO.
+    // Zero-initialisation is the documented initial state: the target wndproc
+    // fills all fields before returning. See Win32 docs for WM_GETMINMAXINFO.
     let mut info = MINMAXINFO::default();
     let mut result = 0usize;
     unsafe {
@@ -157,13 +360,17 @@ pub(crate) fn get_size_constraints(hwnd: HWND) -> (f32, f32, f32, f32) {
             Some(&mut result),
         )
     };
-    let (left, top, right, bottom) = get_invisible_border(hwnd);
-    (
-        (info.ptMinTrackSize.x - left - right).max(0) as f32,
-        (info.ptMinTrackSize.y - top - bottom).max(0) as f32,
-        (info.ptMaxTrackSize.x - left - right).max(0) as f32,
-        (info.ptMaxTrackSize.y - top - bottom).max(0) as f32,
-    )
+    let scale = target_scale_to_physical(hwnd);
+    let min_track = (
+        (info.ptMinTrackSize.x as f32 * scale) as i32,
+        (info.ptMinTrackSize.y as f32 * scale) as i32,
+    );
+    let max_track = (
+        (info.ptMaxTrackSize.x as f32 * scale) as i32,
+        (info.ptMaxTrackSize.y as f32 * scale) as i32,
+    );
+    let border = get_invisible_border(hwnd);
+    constraints_subtract_border(min_track, max_track, border)
 }
 
 pub(crate) fn enum_windows<F>(mut callback: F) -> windows::core::Result<()>
@@ -381,62 +588,12 @@ impl ManageExternalHwnd for ExternalHwnd {
         unsafe { IsIconic(self.0) }.as_bool()
     }
 
-    fn set_position(&self, z: ZOrder, x: i32, y: i32, cx: i32, cy: i32) {
-        let old = get_dimension(self.0);
-        let (left, top, right, bottom) = get_invisible_border(self.0);
-        let insert_after: Option<HWND> = z.into();
-        let mut flags = SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS;
-        if insert_after.is_none() {
-            flags |= SWP_NOZORDER;
-        }
-        unsafe {
-            SetWindowPos(
-                self.0,
-                insert_after,
-                x - left,
-                y - top,
-                cx + left + right,
-                cy + top + bottom,
-                flags,
-            )
-            .ok()
-        };
-        let dx = (x - left) - old.x as i32;
-        let dy = (y - top) - old.y as i32;
-        if dx != 0 || dy != 0 {
-            for_each_owned(self.0, |child| {
-                let mut rect = RECT::default();
-                if unsafe { GetWindowRect(child, &mut rect).is_ok() } {
-                    unsafe {
-                        SetWindowPos(
-                            child,
-                            None,
-                            rect.left + dx,
-                            rect.top + dy,
-                            0,
-                            0,
-                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
-                        )
-                        .ok()
-                    };
-                }
-            });
-        }
+    fn set_position(&self, z: ZOrder, dim: Dimension) {
+        set_window_pos(self.0, z, dim, SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
     }
 
     fn move_offscreen(&self) {
-        unsafe {
-            SetWindowPos(
-                self.0,
-                Some(HWND_BOTTOM),
-                OFFSCREEN_POS as i32,
-                OFFSCREEN_POS as i32,
-                0,
-                0,
-                SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
-            )
-            .ok()
-        };
+        move_window_offscreen(self.0);
     }
 
     fn show_cmd(&self, cmd: ShowCmd) {
@@ -520,53 +677,91 @@ impl InspectExternalHwnd for ExternalHwnd {
         get_size_constraints(self.0)
     }
 
-    fn get_visible_rect(&self) -> (i32, i32, i32, i32) {
-        let mut frame_rect = RECT::default();
-        if unsafe {
-            DwmGetWindowAttribute(
-                self.0,
-                DWMWA_EXTENDED_FRAME_BOUNDS,
-                &mut frame_rect as *mut _ as *mut _,
-                std::mem::size_of::<RECT>() as u32,
-            )
-        }
-        .is_ok()
-        {
-            (
-                frame_rect.left,
-                frame_rect.top,
-                frame_rect.right - frame_rect.left,
-                frame_rect.bottom - frame_rect.top,
-            )
-        } else {
-            let dim = get_dimension(self.0);
-            (
-                dim.x as i32,
-                dim.y as i32,
-                dim.width as i32,
-                dim.height as i32,
-            )
-        }
+    /// Returns the DWM extended frame bounds in physical pixels. Falls back to
+    /// `GetWindowRect` if the DWM attribute is unavailable.
+    fn get_visible_rect(&self) -> Dimension {
+        dwm_frame_bounds(self.0).unwrap_or_else(|| get_dimension(self.0))
     }
 
     fn is_fullscreen(&self) -> bool {
         let dim = get_dimension(self.0);
         let monitor = unsafe { MonitorFromWindow(self.0, MONITOR_DEFAULTTONEAREST) };
-        let mut info = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+        let Some(work) = monitor_info_work_area(monitor) else {
             return false;
-        }
-        let rc = info.rcWork;
-        dim.x <= rc.left as f32
-            && dim.y <= rc.top as f32
-            && dim.x + dim.width >= rc.right as f32
-            && dim.y + dim.height >= rc.bottom as f32
+        };
+        dim.x <= work.x
+            && dim.y <= work.y
+            && dim.x + dim.width >= work.x + work.width
+            && dim.y + dim.height >= work.y + work.height
     }
 
     fn get_app_display_name(&self) -> Option<String> {
         get_app_display_name(self.0)
+    }
+
+    // `MonitorFromWindow` is non-blocking and safe to call on external HWNDs.
+    fn get_monitor(&self) -> isize {
+        unsafe { MonitorFromWindow(self.0, MONITOR_DEFAULTTONEAREST) }.0 as isize
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constraints_to_physical_subtracts_border() {
+        assert_eq!(
+            constraints_subtract_border((200, 200), (1600, 1200), (0, 0, 0, 0)),
+            (200.0, 200.0, 1600.0, 1200.0)
+        );
+        assert_eq!(
+            constraints_subtract_border((420, 320), (2060, 1160), (10, 10, 10, 10)),
+            (400.0, 300.0, 2040.0, 1140.0)
+        );
+    }
+
+    #[test]
+    fn target_scale_to_physical_inner_at_96_dpi() {
+        assert_eq!(target_scale_to_physical_inner(96), 1.0);
+    }
+
+    #[test]
+    fn target_scale_to_physical_inner_at_192_dpi() {
+        assert_eq!(target_scale_to_physical_inner(192), 2.0);
+    }
+
+    #[test]
+    fn target_scale_to_physical_inner_at_144_dpi() {
+        assert_eq!(target_scale_to_physical_inner(144), 1.5);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic]
+    fn target_scale_to_physical_inner_rejects_zero_dpi_in_debug() {
+        let _ = target_scale_to_physical_inner(0);
+    }
+
+    #[test]
+    fn rect_to_dimension_roundtrip() {
+        let rect = RECT {
+            left: 100,
+            top: 200,
+            right: 400,
+            bottom: 500,
+        };
+        let dim = rect_to_dimension(rect);
+        assert_eq!(dim.x, Length::new(100.0));
+        assert_eq!(dim.y, Length::new(200.0));
+        assert_eq!(dim.width, Length::new(300.0));
+        assert_eq!(dim.height, Length::new(300.0));
+    }
+
+    #[test]
+    fn monitor_info_work_area_none_on_null_handle() {
+        // Null HMONITOR should fail GetMonitorInfoW and return None.
+        let result = monitor_info_work_area(HMONITOR(std::ptr::null_mut()));
+        assert!(result.is_none());
     }
 }

@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 
-use objc2_foundation::{NSPoint, NSRect, NSSize};
-
-use crate::core::{Dimension, MonitorLayout, MonitorPlacements, WindowId};
+use crate::core::{Length, MonitorLayout, MonitorPlacements, Unit, WindowId};
+use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
 use super::events::{FloatShow, HubMessage, MonitorTilingData, RenderFrame};
@@ -118,7 +117,10 @@ impl Dome {
                     MonitorTilingData {
                         monitor_id: mp.monitor_id,
                         monitor_dim: screen.dimension,
-                        cocoa_frame: to_ns_rect(self.primary_full_height, screen.dimension),
+                        cocoa_frame: dimension_to_ns_rect_cocoa(
+                            Length::new(self.primary_full_height),
+                            screen.dimension,
+                        ),
                         scale: screen.scale,
                         windows: Vec::new(),
                         containers: Vec::new(),
@@ -131,7 +133,8 @@ impl Dome {
                 float_windows,
                 containers,
             } => {
-                let border_size = self.config.border_size;
+                let border_size = Length::<Unit>::new(self.config.border_size);
+                // macOS scale is always 1.0, so no to_unit(scale) needed for border.
                 let screen = &self.monitor_registry.get_entry(mp.monitor_id).screen;
                 let monitor_dim = screen.dimension;
                 let scale = screen.scale;
@@ -168,7 +171,10 @@ impl Dome {
                     float_shows.push(FloatShow {
                         cg_id: entry.cg_id,
                         placement: *wp,
-                        cocoa_frame: to_ns_rect(self.primary_full_height, wp.frame),
+                        cocoa_frame: dimension_to_ns_rect_cocoa(
+                            Length::new(self.primary_full_height),
+                            wp.frame,
+                        ),
                         scale,
                         content_dim,
                     });
@@ -184,7 +190,10 @@ impl Dome {
                     MonitorTilingData {
                         monitor_id: mp.monitor_id,
                         monitor_dim,
-                        cocoa_frame: to_ns_rect(self.primary_full_height, monitor_dim),
+                        cocoa_frame: dimension_to_ns_rect_cocoa(
+                            Length::new(self.primary_full_height),
+                            monitor_dim,
+                        ),
                         scale,
                         windows: placed_tiling,
                         containers: container_data,
@@ -194,15 +203,4 @@ impl Dome {
             }
         }
     }
-}
-
-// Quartz uses top-left origin, Cocoa uses bottom-left origin
-pub(super) fn to_ns_rect(primary_full_height: f32, dim: Dimension) -> NSRect {
-    NSRect::new(
-        NSPoint::new(
-            dim.x as f64,
-            (primary_full_height - dim.y - dim.height) as f64,
-        ),
-        NSSize::new(dim.width as f64, dim.height as f64),
-    )
 }

@@ -20,7 +20,8 @@ use crate::action::{
 };
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
-    ContainerId, Dimension, Direction, Hub, TilingAction, WindowId, WindowRestrictions,
+    ContainerId, Dimension, Direction, Hub, Length, Logical, TilingAction, WindowId,
+    WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 use crate::platform::macos::MonitorInfo;
@@ -98,12 +99,12 @@ impl Dome {
         sender: Box<dyn FrameSender>,
     ) -> Self {
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
-        let mut hub = Hub::new(primary.dimension, config.clone().into());
+        let mut hub = Hub::new(primary.dimension, 1.0, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for screen in screens {
             if screen.display_id != primary.display_id {
-                let id = hub.add_monitor(screen.name.clone(), screen.dimension);
+                let id = hub.add_monitor(screen.name.clone(), screen.dimension, 1.0);
                 monitor_registry.insert(screen, id);
             }
         }
@@ -327,8 +328,8 @@ impl Dome {
     pub(in crate::platform::macos) fn exit_native_fullscreen(
         &mut self,
         cg_id: CGWindowID,
-        pos: (i32, i32),
-        size: (i32, i32),
+        pos: (Length<Logical>, Length<Logical>),
+        size: (Length<Logical>, Length<Logical>),
     ) {
         if let Some(entry) = self.registry.get(cg_id)
             && matches!(entry.state, WindowState::NativeFullscreen)
@@ -337,10 +338,10 @@ impl Dome {
             let now = Instant::now();
             self.window_moved(
                 window_id,
-                pos.0,
-                pos.1,
-                size.0,
-                size.1,
+                pos.0.value() as i32,
+                pos.1.value() as i32,
+                size.0.value() as i32,
+                size.1.value() as i32,
                 DebounceBurst {
                     first: now,
                     last: now,
@@ -451,7 +452,10 @@ impl Dome {
         let screen = &self.monitor_registry.get_entry(focused_monitor).screen;
         let monitor_dim = screen.dimension;
         let scale = screen.scale;
-        let cocoa_frame = layout::to_ns_rect(self.primary_full_height, monitor_dim);
+        let cocoa_frame = crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa(
+            Length::new(self.primary_full_height),
+            monitor_dim,
+        );
         self.sender.send(HubMessage::PickerToggle {
             entries,
             monitor_dim,
@@ -572,10 +576,10 @@ impl Dome {
         let is_borderless_fullscreen = monitor.is_some_and(|m| {
             let mon = &m.dimension;
             let tolerance = 2;
-            (dim.x - mon.x as i32).abs() <= tolerance
-                && (dim.y - mon.y as i32).abs() <= tolerance
-                && (dim.width - mon.width as i32).abs() <= tolerance
-                && (dim.height - mon.height as i32).abs() <= tolerance
+            (dim.x - mon.x.value() as i32).abs() <= tolerance
+                && (dim.y - mon.y.value() as i32).abs() <= tolerance
+                && (dim.width - mon.width.value() as i32).abs() <= tolerance
+                && (dim.height - mon.height.value() as i32).abs() <= tolerance
         });
         if is_borderless_fullscreen {
             let window_id = self
@@ -656,7 +660,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
     if let Some(new_primary) = screens.iter().find(|s| s.is_primary) {
         if !registry.contains(new_primary.display_id) {
             registry.replace_primary(new_primary);
-            hub.update_monitor_dimension(registry.primary_monitor_id(), new_primary.dimension);
+            hub.update_monitor(registry.primary_monitor_id(), new_primary.dimension, 1.0);
         } else {
             registry.set_primary_display_id(new_primary.display_id);
         }
@@ -665,7 +669,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
     // Add new monitors first to prevent exhausting all monitors
     for screen in screens {
         if !registry.contains(screen.display_id) {
-            let id = hub.add_monitor(screen.name.clone(), screen.dimension);
+            let id = hub.add_monitor(screen.name.clone(), screen.dimension, 1.0);
             registry.insert(screen, id);
             tracing::info!(%screen, "Monitor added");
         }
@@ -688,7 +692,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
                     "Monitor dimension changed"
                 );
             }
-            hub.update_monitor_dimension(monitor_id, screen.dimension);
+            hub.update_monitor(monitor_id, screen.dimension, 1.0);
         }
     }
 }

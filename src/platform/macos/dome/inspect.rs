@@ -76,7 +76,13 @@ pub(in crate::platform::macos) fn compute_reconciliation(
             if let (Ok((x, y)), Ok((w, h))) =
                 (entry.ax.get_position(marker), entry.ax.get_size(marker))
             {
-                to_unminimize.push(UnminimizedWindow { cg_id, x, y, w, h });
+                to_unminimize.push(UnminimizedWindow {
+                    cg_id,
+                    x: x.value() as i32,
+                    y: y.value() as i32,
+                    w: w.value() as i32,
+                    h: h.value() as i32,
+                });
             }
         }
     }
@@ -120,10 +126,10 @@ pub(in crate::platform::macos) fn compute_reconciliation(
             continue;
         };
         to_add.push(NewWindow {
-            x,
-            y,
-            w,
-            h,
+            x: x.value() as i32,
+            y: y.value() as i32,
+            w: w.value() as i32,
+            h: h.value() as i32,
             is_native_fullscreen: ax.is_native_fullscreen(),
             app_name,
             bundle_id,
@@ -165,10 +171,10 @@ pub(in crate::platform::macos) fn compute_window_positions(
         };
         existing.push(ExistingWindow {
             cg_id: ax.cg_id(),
-            x,
-            y,
-            w,
-            h,
+            x: x.value() as i32,
+            y: y.value() as i32,
+            w: w.value() as i32,
+            h: h.value() as i32,
             is_native_fullscreen: window.ax.is_native_fullscreen(marker),
         });
     }

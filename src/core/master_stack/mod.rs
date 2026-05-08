@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::core::hub::{HubAccess, TilingWindowPlacement};
-use crate::core::node::{Dimension, Direction, WindowId, WorkspaceId};
+use crate::core::node::{Dimension, Direction, Length, WindowId, WorkspaceId};
 use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, clip, translate};
 
 /// XMonad-style tiling: a master area on the left and a stack on the right.
@@ -56,53 +56,36 @@ impl MasterStackStrategy {
         let h = screen.height;
 
         if n <= self.master_count {
-            let each_h = (h / n as f32).floor();
+            let each_h = Length::new((h / n as f32).value().floor());
             for (i, &wid) in state.windows.iter().enumerate() {
                 let y = each_h * i as f32;
                 let this_h = if i == n - 1 { h - y } else { each_h };
-                self.window_dimensions.insert(
-                    wid,
-                    Dimension {
-                        x: 0.0,
-                        y,
-                        width: w,
-                        height: this_h,
-                    },
-                );
+                self.window_dimensions
+                    .insert(wid, Dimension::new(Length::ZERO, y, w, this_h));
             }
         } else {
-            let master_w = (w * self.master_ratio).floor();
+            let master_w = Length::new((w * self.master_ratio).value().floor());
             let stack_w = w - master_w;
             let mc = self.master_count;
             let sc = n - mc;
 
-            let master_each_h = (h / mc as f32).floor();
+            let master_each_h = Length::new((h / mc as f32).value().floor());
             for i in 0..mc {
                 let y = master_each_h * i as f32;
                 let this_h = if i == mc - 1 { h - y } else { master_each_h };
                 self.window_dimensions.insert(
                     state.windows[i],
-                    Dimension {
-                        x: 0.0,
-                        y,
-                        width: master_w,
-                        height: this_h,
-                    },
+                    Dimension::new(Length::ZERO, y, master_w, this_h),
                 );
             }
 
-            let stack_each_h = (h / sc as f32).floor();
+            let stack_each_h = Length::new((h / sc as f32).value().floor());
             for i in 0..sc {
                 let y = stack_each_h * i as f32;
                 let this_h = if i == sc - 1 { h - y } else { stack_each_h };
                 self.window_dimensions.insert(
                     state.windows[mc + i],
-                    Dimension {
-                        x: master_w,
-                        y,
-                        width: stack_w,
-                        height: this_h,
-                    },
+                    Dimension::new(master_w, y, stack_w, this_h),
                 );
             }
         }
@@ -155,6 +138,8 @@ impl TilingStrategy for MasterStackStrategy {
             });
         state.windows.push(id);
         state.focused_index = Some(state.windows.len() - 1);
+        // Zero placeholder -- the layout_workspace call below computes the real rect
+        // before any reader observes this entry.
         self.window_dimensions.insert(id, Dimension::default());
         hub.workspaces.get_mut(ws_id).is_float_focused = false;
         self.layout_workspace(hub, ws_id);
@@ -167,13 +152,19 @@ impl TilingStrategy for MasterStackStrategy {
             .get(hub.workspaces.get(ws_id).monitor)
             .dimension;
 
-        let Some(state) = self.workspaces.get_mut(&ws_id) else {
-            return Dimension::default();
-        };
+        let state = self.workspaces.get_mut(&ws_id).unwrap_or_else(|| {
+            panic!(
+                "master_stack: detach_window called for {id:?} but workspace {ws_id} has no state"
+            )
+        });
 
-        let Some(idx) = state.windows.iter().position(|&w| w == id) else {
-            return Dimension::default();
-        };
+        let idx = state
+            .windows
+            .iter()
+            .position(|&w| w == id)
+            .unwrap_or_else(|| {
+                panic!("master_stack: detach_window called for {id:?} but window is not in workspace {ws_id} state.windows")
+            });
         state.windows.remove(idx);
         Self::adjust_focus_after_removal(state, idx);
 
@@ -182,13 +173,13 @@ impl TilingStrategy for MasterStackStrategy {
             ws.is_float_focused = !ws.float_windows.is_empty();
         }
 
-        let dim = self.window_dimensions.remove(&id).unwrap_or_default();
+        let dim = self.window_dimensions.remove(&id).unwrap_or_else(|| {
+            panic!(
+                "master_stack: detach_window called for {id:?} but window_dimensions has no entry"
+            )
+        });
         // Translate layout-space coords to screen-absolute by adding monitor origin
-        let result = Dimension {
-            x: dim.x + screen.x,
-            y: dim.y + screen.y,
-            ..dim
-        };
+        let result = Dimension::new(dim.x + screen.x, dim.y + screen.y, dim.width, dim.height);
 
         self.layout_workspace(hub, ws_id);
         result
@@ -235,12 +226,10 @@ impl TilingStrategy for MasterStackStrategy {
 
         let mut windows = Vec::with_capacity(state.windows.len());
         for (i, &wid) in state.windows.iter().enumerate() {
-            let dim = self
-                .window_dimensions
-                .get(&wid)
-                .copied()
-                .unwrap_or_default();
-            let frame = translate(dim, 0.0, 0.0, screen);
+            let dim = *self.window_dimensions.get(&wid).expect(
+                "master_stack: window present in state.windows but missing from window_dimensions",
+            );
+            let frame = translate(dim, Length::ZERO, Length::ZERO, screen);
             if let Some(visible_frame) = clip(frame, screen) {
                 windows.push(TilingWindowPlacement {
                     id: wid,

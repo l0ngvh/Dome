@@ -1,5 +1,6 @@
 use crate::core::{
-    Dimension, FloatWindowPlacement, MonitorId, TilingWindowPlacement, WindowId, WindowRestrictions,
+    Dimension, FloatWindowPlacement, Length, MonitorId, Physical, TilingWindowPlacement, WindowId,
+    WindowRestrictions,
 };
 use crate::platform::windows::external::{ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
@@ -10,12 +11,12 @@ pub(super) const MAX_DRIFT_RETRIES: u8 = 5;
 
 #[derive(Clone, Copy)]
 pub(super) struct DriftState {
-    pub(super) target: (i32, i32, i32, i32),
+    pub(super) target: Dimension<Physical>,
     /// The window's last known position -- written by `window_moved`
     /// via a dispatched `get_visible_rect` read. When a window goes offscreen,
     /// this preserves its position from before the hide: "actual" means where
     /// the window currently is (or last was), not where we want it.
-    pub(super) actual: (i32, i32, i32, i32),
+    pub(super) actual: Dimension<Physical>,
     pub(super) retries: u8,
     /// Monitor this window was last placed on. `show_tiling` compares against
     /// the incoming monitor to detect cross-monitor moves.
@@ -30,7 +31,11 @@ pub(super) struct FloatPlacement {
     /// Last rect reconciled with the OS. `show_float` compares
     /// `target == new_target` to skip redundant `set_position` calls;
     /// `window_drifted` writes the observed rect back here on user drag.
-    pub(super) target: (i32, i32, i32, i32),
+    pub(super) target: Dimension<Physical>,
+    /// Tracks OS ownership via `MonitorFromWindow`, reported atomically with
+    /// the rect observation in `ObservedPosition::Visible`. Updated by
+    /// `window_drifted` whenever a drift observation arrives.
+    pub(super) monitor: MonitorId,
 }
 
 /// Tracks the platform-level visibility and fullscreen status of a managed window.
@@ -69,7 +74,7 @@ pub(super) enum PositionedState {
     /// fullscreen window).
     Offscreen {
         retries: u8,
-        actual: (i32, i32, i32, i32),
+        actual: Dimension<Physical>,
     },
 }
 
@@ -94,19 +99,18 @@ impl Dome {
         wp: &FloatWindowPlacement,
         focus_changed: bool,
         is_focused: bool,
-        // FloatPlacement doesn't track monitor (YAGNI for cross-monitor float reconciliation)
-        _monitor: MonitorId,
+        // monitor is caller-supplied (not part of FloatWindowPlacement) for DPI scale lookup.
+        monitor: MonitorId,
     ) {
+        // Hub delivers frames in the OS-native unit (physical pixels on Windows
+        // under PMv2).
+        let scale = self.monitors[&monitor].scale;
+        let border = self.physical_border(monitor);
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        let border = self.config.border_size;
         let content = apply_inset(wp.frame, border);
-        let x = content.x.round() as i32;
-        let y = content.y.round() as i32;
-        let w = content.width.round() as i32;
-        let h = content.height.round() as i32;
-        let new_target = (x, y, w, h);
+        let new_target = content.round();
 
         let (needs_topmost, settled) = match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {
@@ -134,24 +138,25 @@ impl Dome {
 
         if let Some(overlay) = self.float_overlays.get_mut(&id) {
             if needs_topmost {
-                entry.ext.set_position(ZOrder::Topmost, x, y, w, h);
-                overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()));
+                entry.ext.set_position(ZOrder::Topmost, new_target);
+                overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()), scale);
             } else if !settled {
                 // Unchanged is safe: this branch only fires for Float-to-Float
                 // position changes where the window is already visible from a
                 // prior Topmost placement.
-                entry.ext.set_position(ZOrder::Unchanged, x, y, w, h);
-                overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()));
+                entry.ext.set_position(ZOrder::Unchanged, new_target);
+                overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()), scale);
             } else if focus_changed {
                 // Full overlay update is acceptable here: typically 1-3 floats, each a single GL draw.
                 // Matches macOS which unconditionally re-renders every float overlay every frame.
-                overlay.update(wp, &self.config, ZOrder::Unchanged);
+                overlay.update(wp, &self.config, ZOrder::Unchanged, scale);
             }
         }
 
         if !settled {
             entry.state = WindowState::Positioned(PositionedState::Float(FloatPlacement {
                 target: new_target,
+                monitor,
             }));
         }
     }
@@ -162,16 +167,13 @@ impl Dome {
         wp: &TilingWindowPlacement,
         monitor: MonitorId,
     ) {
+        // Hub delivers frames in the OS-native unit (physical pixels on Windows).
+        let border = self.physical_border(monitor);
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        let border = self.config.border_size;
         let content = apply_inset(wp.frame, border);
-        let x = content.x.round() as i32;
-        let y = content.y.round() as i32;
-        let w = content.width.round() as i32;
-        let h = content.height.round() as i32;
-        let new_target = (x, y, w, h);
+        let new_target = content.round();
 
         let (z, prev_actual) = match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {
@@ -208,7 +210,7 @@ impl Dome {
             }
         };
 
-        entry.ext.set_position(z, x, y, w, h);
+        entry.ext.set_position(z, new_target);
         entry.state = WindowState::Positioned(PositionedState::Tiling(DriftState {
             target: new_target,
             actual: prev_actual,
@@ -233,15 +235,11 @@ impl Dome {
                 entry.state = WindowState::FullscreenBorderless;
             }
             WindowState::Positioned(ps) => {
-                let x = dimension.x.round() as i32;
-                let y = dimension.y.round() as i32;
-                let w = dimension.width.round() as i32;
-                let h = dimension.height.round() as i32;
-                let new_target = (x, y, w, h);
+                let new_target = dimension.round();
                 if matches!(ps, PositionedState::Tiling(d) if d.target == new_target) {
                     return;
                 }
-                entry.ext.set_position(ZOrder::Unchanged, x, y, w, h);
+                entry.ext.set_position(ZOrder::Unchanged, new_target);
                 self.float_overlays.remove(&id);
                 let prev_actual = match ps {
                     PositionedState::Tiling(d) => d.actual,
@@ -290,7 +288,7 @@ impl Dome {
                 entry.state = WindowState::Minimized;
             }
             WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => {
-                if actual.0 > OFFSCREEN_POS as i32 && actual.1 > OFFSCREEN_POS as i32 {
+                if actual.x > OFFSCREEN_POS && actual.y > OFFSCREEN_POS {
                     entry.ext.move_offscreen();
                 }
             }
@@ -317,8 +315,12 @@ impl Dome {
         }
     }
 
-    pub(super) fn window_drifted(&mut self, id: WindowId, x: i32, y: i32, w: i32, h: i32) {
-        let visible_rect = (x, y, w, h);
+    pub(super) fn window_drifted(
+        &mut self,
+        id: WindowId,
+        visible_rect: Dimension<Physical>,
+        monitor_handle: isize,
+    ) {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
@@ -341,21 +343,45 @@ impl Dome {
                     if drift.retries > MAX_DRIFT_RETRIES {
                         tracing::debug!("Drift retries exhausted, giving up");
                     } else {
-                        let (x, y, w, h) = drift.target;
-                        entry.ext.set_position(ZOrder::Unchanged, x, y, w, h);
+                        entry.ext.set_position(ZOrder::Unchanged, drift.target);
                     }
                 }
             }
             // Float windows accept the OS-reported position: the user dragged/resized
             // them, so we sync core and mark the position as settled.
+            // The observation is physical pixels (DWM extended frame bounds); stored
+            // directly since core is physical-native on Windows.
             WindowState::Positioned(PositionedState::Float(fp)) => {
+                // Look up OS-reported monitor. On miss (display-topology race with
+                // reconcile_monitors), skip the entire observation -- the next drift
+                // event after reconcile will converge.
+                let resolved = match self.monitor_handles.get(&monitor_handle) {
+                    Some(&id) => id,
+                    None => {
+                        tracing::debug!(
+                            handle = monitor_handle,
+                            %id,
+                            "MonitorFromWindow returned an HMONITOR not in monitor_handles; \
+                             skipping float-drift observation (display-topology race with \
+                             reconcile_monitors)"
+                        );
+                        return;
+                    }
+                };
+                fp.monitor = resolved;
                 fp.target = visible_rect;
-                let outer_dim = reverse_inset(visible_rect, self.config.border_size);
+                // Inlined: can't call self.physical_border() here because the
+                // mutable borrow on self.registry (via entry/fp) conflicts with
+                // the shared &self the method needs. Same expression as physical_border().
+                let border = Length::<Physical>::new(
+                    self.config.border_size * self.monitors[&fp.monitor].scale,
+                );
+                let outer_dim = reverse_inset(visible_rect, border);
                 self.hub.update_float_dimension(id, outer_dim);
             }
             WindowState::Positioned(PositionedState::Offscreen { retries, actual }) => {
                 *actual = visible_rect;
-                if actual.0 > OFFSCREEN_POS as i32 && actual.1 > OFFSCREEN_POS as i32 {
+                if actual.x > OFFSCREEN_POS && actual.y > OFFSCREEN_POS {
                     *retries = retries.saturating_add(1);
                     if *retries >= MAX_DRIFT_RETRIES {
                         tracing::debug!("Offscreen re-hide retries exhausted");
@@ -373,26 +399,33 @@ impl Dome {
         }
         self.hub.set_fullscreen(id, WindowRestrictions::BlockAll);
     }
-}
 
-fn apply_inset(dim: Dimension, border: f32) -> Dimension {
-    Dimension {
-        x: dim.x + border,
-        y: dim.y + border,
-        width: (dim.width - 2.0 * border).max(0.0),
-        height: (dim.height - 2.0 * border).max(0.0),
+    /// Physical-pixel border width for `monitor`. `config.border_size` is
+    /// a logical, config-denominated value; scaling it by the monitor's DPI
+    /// scale at this boundary is the shell's contract with `apply_inset` /
+    /// `reverse_inset`, both of which operate in physical pixels on Windows.
+    pub(super) fn physical_border(&self, monitor: MonitorId) -> Length<Physical> {
+        Length::new(self.config.border_size * self.monitors[&monitor].scale)
     }
 }
 
-/// Inverse of `apply_inset`: converts an observed content rect (post-inset, i32)
-/// back to the outer frame stored in core's `float_windows`.
-// TODO: revisit if config.border_size is ever non-integer -- round-trip can drift by +/-1 px per edge
-fn reverse_inset(visible: (i32, i32, i32, i32), border: f32) -> Dimension {
-    let (x, y, w, h) = visible;
-    Dimension {
-        x: x as f32 - border,
-        y: y as f32 - border,
-        width: w as f32 + 2.0 * border,
-        height: h as f32 + 2.0 * border,
-    }
+fn apply_inset(dim: Dimension<Physical>, border: Length<Physical>) -> Dimension<Physical> {
+    Dimension::new(
+        dim.x + border,
+        dim.y + border,
+        (dim.width - 2.0 * border).max(Length::ZERO),
+        (dim.height - 2.0 * border).max(Length::ZERO),
+    )
+}
+
+/// Inverse of `apply_inset`: converts a content rect back to the outer frame
+/// stored in core's `float_windows`. Both input and output are in physical
+/// pixels on Windows.
+fn reverse_inset(visible: Dimension<Physical>, border: Length<Physical>) -> Dimension<Physical> {
+    Dimension::new(
+        visible.x - border,
+        visible.y - border,
+        visible.width + 2.0 * border,
+        visible.height + 2.0 * border,
+    )
 }

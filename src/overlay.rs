@@ -1,52 +1,121 @@
+// Coordinate system: logical points throughout. Public entry points consume overlay-local types
+// defined in this file (Dimension<Logical>, BorderMetrics, OverlayMetrics,
+// LogicalTiledWindow, LogicalTiledContainer). On macOS, core `Dimension` is already
+// `Dimension<Logical>` so callers pass it directly. On Windows, callers produce
+// `Dimension<Logical>` via `.to_logical(scale)`. egui's pixels_per_point (set by each
+// platform shell to its monitor scale) rescales strokes, corner radii, and rects to
+// physical pixels at tessellation.
+
 use egui::{
     Align, Color32, CornerRadius, Id, LayerId, Layout, Order, Rect, RichText, Sense, Stroke,
     StrokeKind, TextStyle, pos2, vec2,
 };
 
-use crate::config::Config;
-use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, SpawnIndicator, TilingWindowPlacement,
-};
+use crate::core::{ContainerId, Dimension, Length, Logical, SpawnIndicator, WindowId};
 use crate::theme::Theme;
 
 /// Hardcoded corner radius for window borders and tabbed-container body
 /// borders. Kept private: rendering knobs should not leak into the config
 /// surface or into core, which has no view on pixels.
-const WINDOW_BORDER_RADIUS: f32 = 12.0;
+const WINDOW_BORDER_RADIUS_LOGICAL: f32 = 12.0;
+
+/// Border-drawing parameters in logical points. The two values
+/// `paint_window_border` actually consumes.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BorderMetrics {
+    pub thickness: Length<Logical>,
+    pub radius: Length<Logical>,
+}
+
+impl BorderMetrics {
+    /// Build metrics from just the border thickness; radius uses the
+    /// fixed logical value (`WINDOW_BORDER_RADIUS_LOGICAL`) that is
+    /// intentionally not user-configurable.
+    pub(crate) fn from_thickness(thickness: Length<Logical>) -> Self {
+        Self {
+            thickness,
+            radius: Length::new(WINDOW_BORDER_RADIUS_LOGICAL),
+        }
+    }
+}
+
+/// Full tiling-overlay metrics: the window border plus the tab-bar height.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OverlayMetrics {
+    pub border: BorderMetrics,
+    pub tab_bar_height: Length<Logical>,
+}
+
+/// Overlay paint input for one tiled window, in logical points.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LogicalTiledWindow {
+    pub id: WindowId,
+    pub frame: Dimension<Logical>,
+    pub visible_frame: Dimension<Logical>,
+    pub is_highlighted: bool,
+    pub spawn_indicator: Option<SpawnIndicator>,
+}
+
+/// Overlay paint input for one tiled container, in logical points. Owns its tab titles.
+#[derive(Clone, Debug)]
+pub(crate) struct LogicalTiledContainer {
+    pub id: ContainerId,
+    pub frame: Dimension<Logical>,
+    pub visible_frame: Dimension<Logical>,
+    pub is_highlighted: bool,
+    pub spawn_indicator: Option<SpawnIndicator>,
+    pub is_tabbed: bool,
+    pub active_tab_index: usize,
+    pub titles: Vec<String>,
+}
 
 /// Draws all tiling window borders and container overlays for a single monitor.
+/// All geometric inputs are in logical points; egui rescales to physical via
+/// `pixels_per_point` at tessellation.
 /// Returns `(ContainerId, tab_index)` for each tab that was clicked.
 pub(crate) fn paint_tiling_overlay(
     ctx: &egui::Context,
-    monitor: Dimension,
-    windows: &[TilingWindowPlacement],
-    containers: &[(ContainerPlacement, Vec<String>)],
-    config: &Config,
+    monitor: Dimension<Logical>,
+    windows: &[LogicalTiledWindow],
+    containers: &[LogicalTiledContainer],
+    theme: &Theme,
+    metrics: OverlayMetrics,
 ) -> Vec<(ContainerId, usize)> {
     let mut clicked = Vec::new();
 
     for wp in windows {
         let vf = wp.visible_frame;
-        let origin = vec2(vf.x - monitor.x, vf.y - monitor.y);
+        // .logical() crosses the type boundary into egui's f32 coordinate space.
+        let origin = vec2(
+            vf.x.logical() - monitor.x.logical(),
+            vf.y.logical() - monitor.y.logical(),
+        );
         // layer_painter bypasses egui's Area sizing pass, which makes first-frame
         // output invisible. Window borders are pure painting with no interaction,
         // so Area is unnecessary.
         let painter = ctx.layer_painter(LayerId::new(Order::Middle, Id::new(("border", wp.id))));
-        let clip = Rect::from_min_size(origin.to_pos2(), vec2(vf.width, vf.height));
+        let clip = Rect::from_min_size(
+            origin.to_pos2(),
+            vec2(vf.width.logical(), vf.height.logical()),
+        );
         paint_window_border(
             &painter.with_clip_rect(clip),
             wp.frame,
             wp.visible_frame,
             wp.is_highlighted,
             wp.spawn_indicator,
-            config,
+            theme,
+            metrics.border,
             origin,
         );
     }
 
-    for (cp, titles) in containers {
+    for cp in containers {
         let vf = cp.visible_frame;
-        let origin = vec2(vf.x - monitor.x, vf.y - monitor.y);
+        let origin = vec2(
+            vf.x.logical() - monitor.x.logical(),
+            vf.y.logical() - monitor.y.logical(),
+        );
         egui::Area::new(egui::Id::new(("container", cp.id)))
             .order(egui::Order::Foreground)
             .fixed_pos(origin.to_pos2())
@@ -62,9 +131,9 @@ pub(crate) fn paint_tiling_overlay(
                 }
                 ui.set_clip_rect(Rect::from_min_size(
                     origin.to_pos2(),
-                    vec2(vf.width, vf.height),
+                    vec2(vf.width.logical(), vf.height.logical()),
                 ));
-                if let Some(tab) = show_container(ui, cp, titles, config, origin) {
+                if let Some(tab) = show_container(ui, cp, theme, metrics, origin) {
                     clicked.push((cp.id, tab));
                 }
             });
@@ -77,23 +146,27 @@ pub(crate) fn paint_tiling_overlay(
 /// `origin` is the visible_frame's top-left in canvas coordinates.
 /// For per-window overlays (floats), pass `Vec2::ZERO`.
 /// For the tiling overlay, pass `vec2(vf.x - monitor.x, vf.y - monitor.y)`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "drawing params that must travel together"
+)]
 pub(crate) fn paint_window_border(
     painter: &egui::Painter,
-    frame: Dimension,
-    visible_frame: Dimension,
+    frame: Dimension<Logical>,
+    visible_frame: Dimension<Logical>,
     is_highlighted: bool,
     spawn_indicator: Option<SpawnIndicator>,
-    config: &Config,
+    theme: &Theme,
+    border: BorderMetrics,
     origin: egui::Vec2,
 ) {
-    let theme = config.theme();
-    let colors = border_colors(is_highlighted, spawn_indicator, &theme);
+    let colors = border_colors(is_highlighted, spawn_indicator, theme);
     paint_border_edges(
         painter,
         frame,
         visible_frame,
-        config.border_size,
-        WINDOW_BORDER_RADIUS,
+        border.thickness.logical(),
+        border.radius.logical(),
         colors,
         theme.focused_border,
         origin,
@@ -102,33 +175,33 @@ pub(crate) fn paint_window_border(
 
 /// Draws container borders and an inline tab bar. Returns `Some(tab_index)` if a tab was clicked.
 /// `origin` is the visible_frame's top-left in canvas coordinates (same as `paint_window_border`).
-pub(crate) fn show_container(
+fn show_container(
     ui: &mut egui::Ui,
-    placement: &ContainerPlacement,
-    tab_titles: &[String],
-    config: &Config,
+    placement: &LogicalTiledContainer,
+    theme: &Theme,
+    metrics: OverlayMetrics,
     origin: egui::Vec2,
 ) -> Option<usize> {
     let vf = placement.visible_frame;
     let f = placement.frame;
-    let ox = origin.x + f.x - vf.x;
-    let oy = origin.y + f.y - vf.y;
-    let b = config.border_size;
-    let w = f.width;
-    let h = f.height;
-    let is_tabbed = placement.is_tabbed && !tab_titles.is_empty();
-    let th = config.tab_bar_height;
-    let r = effective_radius(WINDOW_BORDER_RADIUS, w, h);
-    let theme = config.theme();
+    let ox = origin.x + f.x.logical() - vf.x.logical();
+    let oy = origin.y + f.y.logical() - vf.y.logical();
+    let b = metrics.border.thickness.logical();
+    let w = f.width.logical();
+    let h = f.height.logical();
+    let is_tabbed = placement.is_tabbed && !placement.titles.is_empty();
+    let th = metrics.tab_bar_height.logical();
+    let r = effective_radius(metrics.border.radius.logical(), w, h);
 
     let border_c = if placement.is_highlighted {
         theme.focused_border
     } else {
         theme.unfocused_border
     };
+    let tab_titles = &placement.titles;
 
     if placement.is_highlighted {
-        let colors = border_colors(true, placement.spawn_indicator, &theme);
+        let colors = border_colors(true, placement.spawn_indicator, theme);
         let focused = theme.focused_border;
         let painter = ui.painter();
 
@@ -232,7 +305,7 @@ pub(crate) fn show_container(
                 f,
                 vf,
                 b,
-                WINDOW_BORDER_RADIUS,
+                WINDOW_BORDER_RADIUS_LOGICAL,
                 colors,
                 focused,
                 origin,
@@ -400,18 +473,18 @@ fn active_tab_corner_radius(index: usize, tab_count: usize, tab_cr: f32) -> Corn
 )]
 fn paint_border_edges(
     painter: &egui::Painter,
-    frame: Dimension,
-    visible_frame: Dimension,
+    frame: Dimension<Logical>,
+    visible_frame: Dimension<Logical>,
     b: f32,
     r: f32,
     colors: [Color32; 4],
     focused: Color32,
     origin: egui::Vec2,
 ) {
-    let ox = origin.x + frame.x - visible_frame.x;
-    let oy = origin.y + frame.y - visible_frame.y;
-    let w = frame.width;
-    let h = frame.height;
+    let ox = origin.x + frame.x.logical() - visible_frame.x.logical();
+    let oy = origin.y + frame.y.logical() - visible_frame.y.logical();
+    let w = frame.width.logical();
+    let h = frame.height.logical();
     let r = effective_radius(r, w, h);
 
     // When r==0, clip rects for the 8-region approach collapse to zero dimensions
@@ -575,6 +648,7 @@ fn corner_colors(edge_colors: [Color32; 4], focused: Color32) -> [Color32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Length;
 
     #[test]
     fn effective_radius_no_clamp() {
@@ -722,5 +796,19 @@ mod tests {
     #[test]
     fn tab_bar_corner_radius_zero_height() {
         assert_eq!(tab_bar_corner_radius(0.0), 0.0);
+    }
+
+    #[test]
+    fn logical_dimension_constructor_sanity() {
+        let ld = Dimension::<Logical>::new(
+            Length::new(1.0),
+            Length::new(2.0),
+            Length::new(3.0),
+            Length::new(4.0),
+        );
+        assert_eq!(ld.x, Length::new(1.0));
+        assert_eq!(ld.y, Length::new(2.0));
+        assert_eq!(ld.width, Length::new(3.0));
+        assert_eq!(ld.height, Length::new(4.0));
     }
 }

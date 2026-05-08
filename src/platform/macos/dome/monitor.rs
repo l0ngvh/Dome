@@ -136,7 +136,10 @@ impl MonitorRegistry {
             .values()
             .find(|e| {
                 let d = &e.screen.dimension;
-                x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height
+                x >= d.x.value()
+                    && x < (d.x + d.width).value()
+                    && y >= d.y.value()
+                    && y < (d.y + d.height).value()
             })
             .map(|e| &e.screen)
     }

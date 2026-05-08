@@ -1,29 +1,43 @@
+// Coordinate systems: wgpu surface sizing (SurfaceConfiguration.width/height) and SetWindowPos
+// use physical pixels (cached as width_phys/height_phys via Dimension<Physical>::to_surface_size).
+// The overlay paint boundary (TilingOverlay::rerender, FloatOverlay::update) projects physical
+// Dimensions via .to_logical(scale) and passes
+// pixels_per_point = scale so egui rescales back to physical. BorderMetrics/OverlayMetrics pass
+// through unscaled -- never pre-multiply thickness/radius/tab-bar-height here.
+
 use std::sync::Arc;
 
+use crate::config::Config;
 use crate::font::FontConfig;
-use crate::platform::windows::HubSender;
+use crate::platform::windows::{HubSender, WM_APP_DPI_CHANGE, WM_GETDPISCALEDSIZE};
 use crate::theme::Flavor;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
 };
-use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, EndPaint, MONITOR_DEFAULTTONEAREST, MonitorFromWindow, PAINTSTRUCT,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetWindowLongPtrW, SW_HIDE,
-    SW_SHOWNA, SWP_NOACTIVATE, SWP_NOREDRAW, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, WINDOW_EX_STYLE, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_PAINT, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetClientRect,
+    GetWindowLongPtrW, PostThreadMessageW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOREDRAW,
+    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_DPICHANGED,
+    WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WS_EX_NOACTIVATE,
+    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Interface, PCWSTR};
 
 use super::HubEvent;
-use crate::config::Config;
 use crate::core::{
-    ContainerPlacement, Dimension, FloatWindowPlacement, TilingWindowPlacement, WindowId,
+    ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
+    TilingWindowPlacement, WindowId,
 };
 use crate::overlay;
 use crate::picker::PickerEntry;
+use crate::platform::windows::dome::CreateOverlay;
+use crate::platform::windows::dome::picker;
 use crate::platform::windows::external::{HwndId, ZOrder};
 
 /// Owns an HWND and calls `DestroyWindow` on drop.
@@ -35,17 +49,24 @@ pub(super) struct OwnedHwnd {
 }
 
 impl OwnedHwnd {
-    pub(super) fn new(class: PCWSTR, ex_style: WINDOW_EX_STYLE) -> anyhow::Result<Self> {
+    pub(super) fn new(
+        class: PCWSTR,
+        ex_style: WINDOW_EX_STYLE,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<Self> {
         let hwnd = unsafe {
             CreateWindowExW(
                 ex_style | WS_EX_NOREDIRECTIONBITMAP,
                 class,
                 windows::core::w!(""),
                 WS_POPUP,
-                0,
-                0,
-                1,
-                1,
+                x,
+                y,
+                width as i32,
+                height as i32,
                 None,
                 None,
                 Some(GetModuleHandleW(None)?.into()),
@@ -109,10 +130,7 @@ pub(super) struct Renderer {
 }
 
 impl Renderer {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "flavor added for sub-plan B theming; restructuring Renderer::new is out of scope"
-    )]
+    #[expect(clippy::too_many_arguments, reason = "TODO: refactor")]
     pub(super) fn new(
         instance: &wgpu::Instance,
         device: Arc<wgpu::Device>,
@@ -321,11 +339,15 @@ pub(in crate::platform::windows) struct TilingOverlay {
     renderer: Renderer,
     events: Vec<egui::Event>,
     monitor: Dimension,
+    // Physical-pixel cache for the last `surface_size_from_physical` result.
+    width_phys: u32,
+    height_phys: u32,
     windows: Vec<TilingWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
     config: Config,
     hub_sender: HubSender,
     window: OwnedHwnd,
+    scale: f32,
 }
 
 impl TilingOverlay {
@@ -335,34 +357,94 @@ impl TilingOverlay {
         queue: Arc<wgpu::Queue>,
         config: Config,
         hub_sender: HubSender,
+        monitor: Dimension,
+        scale: f32,
     ) -> anyhow::Result<Box<Self>> {
         let flavor = config.theme;
         let font = &config.font;
-        let window = OwnedHwnd::new(TILING_OVERLAY_CLASS, WS_EX_TOOLWINDOW)?;
+        // Initialize the wgpu surface at the monitor's physical size so the
+        // overlay is ready to render without a preceding update() call.
+        // Monitor dimensions are already physical under the agnostic-core
+        // design, so this is a cast-only conversion (same as update()).
+        let (x_phys, y_phys, init_w, init_h) = monitor.to_surface_size();
+        let mut window = OwnedHwnd::new(
+            TILING_OVERLAY_CLASS,
+            WS_EX_TOOLWINDOW,
+            x_phys,
+            y_phys,
+            init_w,
+            init_h,
+        )?;
         let hwnd = window.hwnd();
-        let renderer = Renderer::new(instance, device, queue, hwnd, 1, 1, false, flavor, font)?;
+        let renderer = Renderer::new(
+            instance, device, queue, hwnd, init_w, init_h, false, flavor, font,
+        )?;
+        window.show();
         let mut boxed = Box::new(Self {
             renderer,
             events: Vec::new(),
-            monitor: Dimension::default(),
+            monitor,
+            width_phys: init_w,
+            height_phys: init_h,
             windows: Vec::new(),
             containers: Vec::new(),
             config,
             hub_sender,
             window,
+            scale,
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
         Ok(boxed)
     }
 
     fn rerender(&mut self) {
-        let monitor = self.monitor;
+        let scale = self.scale;
+        let monitor_logical = self.monitor.to_logical(scale);
+        let windows_logical: Vec<overlay::LogicalTiledWindow> = self
+            .windows
+            .iter()
+            .map(|wp| overlay::LogicalTiledWindow {
+                id: wp.id,
+                frame: wp.frame.to_logical(scale),
+                visible_frame: wp.visible_frame.to_logical(scale),
+                is_highlighted: wp.is_highlighted,
+                spawn_indicator: wp.spawn_indicator,
+            })
+            .collect();
+        let containers_logical: Vec<overlay::LogicalTiledContainer> = self
+            .containers
+            .iter()
+            .map(|(cp, titles)| overlay::LogicalTiledContainer {
+                id: cp.id,
+                frame: cp.frame.to_logical(scale),
+                visible_frame: cp.visible_frame.to_logical(scale),
+                is_highlighted: cp.is_highlighted,
+                spawn_indicator: cp.spawn_indicator,
+                is_tabbed: cp.is_tabbed,
+                active_tab_index: cp.active_tab_index,
+                titles: titles.clone(),
+            })
+            .collect();
         let config = &self.config;
+        let theme = config.theme();
+        let metrics = overlay::OverlayMetrics {
+            border: overlay::BorderMetrics::from_thickness(Length::<Logical>::new(
+                config.border_size,
+            )),
+            tab_bar_height: config.tab_bar_height,
+        };
         let events = std::mem::take(&mut self.events);
-        let w = monitor.width.max(1.0) as u32;
-        let h = monitor.height.max(1.0) as u32;
-        let clicked_tabs = self.renderer.render(w, h, 1.0, events, |ctx| {
-            overlay::paint_tiling_overlay(ctx, monitor, &self.windows, &self.containers, config)
+        let w_phys = self.width_phys;
+        let h_phys = self.height_phys;
+        let clicked_tabs = self.renderer.render(w_phys, h_phys, scale, events, |ctx| {
+            overlay::paint_tiling_overlay(
+                ctx,
+                monitor_logical,
+                &windows_logical,
+                &containers_logical,
+                &theme,
+                metrics,
+            )
         });
         for (container_id, tab_idx) in clicked_tabs {
             self.hub_sender
@@ -377,31 +459,35 @@ impl TilingOverlayApi for TilingOverlay {
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
+        scale: f32,
     ) {
-        let w = monitor.width.max(1.0) as u32;
-        let h = monitor.height.max(1.0) as u32;
+        let (x_phys, y_phys, w_phys, h_phys) = monitor.to_surface_size();
 
         if self.monitor != monitor {
-            self.renderer.resize(w, h);
+            self.renderer.resize(w_phys, h_phys);
             unsafe {
                 SetWindowPos(
                     self.window.hwnd(),
                     None,
-                    monitor.x as i32,
-                    monitor.y as i32,
-                    w as i32,
-                    h as i32,
+                    x_phys,
+                    y_phys,
+                    w_phys as i32,
+                    h_phys as i32,
                     SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOZORDER,
                 )
                 .ok();
             }
             self.window.show();
-            self.monitor = monitor;
         }
 
-        // Data assignments must precede rerender().
+        // All state assignments must precede rerender(), which reads cached
+        // physical dimensions.
+        self.monitor = monitor;
+        self.width_phys = w_phys;
+        self.height_phys = h_phys;
         self.windows = windows.to_vec();
         self.containers = containers.to_vec();
+        self.scale = scale;
         self.rerender();
     }
 
@@ -439,6 +525,33 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
     lparam: LPARAM,
 ) -> LRESULT {
     if msg == WM_ERASEBKGND {
+        return LRESULT(1);
+    }
+    // WM_DPICHANGED is per-window. Duplicate posts from multiple Dome
+    // wnd-procs on the same monitor are absorbed by monitor_dpi_changed.
+    if msg == WM_DPICHANGED {
+        let dpi = (wparam.0 & 0xFFFF) as u32;
+        let handle = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) }.0 as isize;
+        unsafe {
+            PostThreadMessageW(
+                GetCurrentThreadId(),
+                WM_APP_DPI_CHANGE,
+                WPARAM(dpi as usize),
+                LPARAM(handle),
+            )
+            .ok()
+        };
+        return LRESULT(0);
+    }
+    if msg == WM_GETDPISCALEDSIZE {
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect).ok() };
+        let size = SIZE {
+            cx: rect.right - rect.left,
+            cy: rect.bottom - rect.top,
+        };
+        let out = lparam.0 as *mut SIZE;
+        unsafe { *out = crate::platform::windows::wm_getdpiscaledsize_reply(size) };
         return LRESULT(1);
     }
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut TilingOverlay;
@@ -491,7 +604,7 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
 }
 
 pub(in crate::platform::windows) trait FloatOverlayApi {
-    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder);
+    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder, scale: f32);
     fn hide(&mut self);
     // &mut self keeps the receiver consistent with the other trait
     // methods; apply_theme only needs &self on the underlying Renderer.
@@ -505,6 +618,7 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
+        scale: f32,
     );
     fn clear(&mut self);
     fn set_config(&mut self, config: Config);
@@ -515,7 +629,7 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
 }
 
 pub(in crate::platform::windows) trait PickerApi {
-    fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension);
+    fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension, scale: f32);
     fn hide(&mut self);
     fn is_visible(&self) -> bool;
     fn icons_to_load(
@@ -529,64 +643,68 @@ pub(in crate::platform::windows) trait PickerApi {
 pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =
     windows::core::w!("DomeFloatOverlay");
 
-pub(in crate::platform::windows) fn create_float_overlay(
-    instance: &wgpu::Instance,
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    flavor: Flavor,
-    font: &FontConfig,
-) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
-    Ok(Box::new(FloatOverlay::new(
-        instance, device, queue, flavor, font,
-    )?))
-}
-
 struct FloatOverlay {
     renderer: Renderer,
-    width: u32,
-    height: u32,
+    // Physical-pixel cache for the last `SetWindowPos` / `renderer.resize`.
+    // Asserted positive on construction and update (zero would be a logic bug).
+    width_phys: u32,
+    height_phys: u32,
     window: OwnedHwnd,
 }
 
 impl FloatOverlay {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "x, y added for birth-at-rect invariant; restructuring deferred"
+    )]
     fn new(
         instance: &wgpu::Instance,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         flavor: Flavor,
         font: &FontConfig,
+        x: i32,
+        y: i32,
+        width_phys: u32,
+        height_phys: u32,
     ) -> anyhow::Result<Self> {
-        let window = OwnedHwnd::new(FLOAT_OVERLAY_CLASS, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)?;
+        let window = OwnedHwnd::new(
+            FLOAT_OVERLAY_CLASS,
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            x,
+            y,
+            width_phys,
+            height_phys,
+        )?;
         let renderer = Renderer::new(
             instance,
             device,
             queue,
             window.hwnd(),
-            1,
-            1,
+            width_phys,
+            height_phys,
             false,
             flavor,
             font,
         )?;
         Ok(Self {
             renderer,
-            width: 1,
-            height: 1,
+            width_phys,
+            height_phys,
             window,
         })
     }
 }
 
 impl FloatOverlayApi for FloatOverlay {
-    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder) {
+    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder, scale: f32) {
         let vf = wp.visible_frame;
-        let w = vf.width.max(1.0) as u32;
-        let h = vf.height.max(1.0) as u32;
+        let (x_phys, y_phys, w_phys, h_phys) = vf.to_surface_size();
 
-        if self.width != w || self.height != h {
-            self.renderer.resize(w, h);
-            self.width = w;
-            self.height = h;
+        if self.width_phys != w_phys || self.height_phys != h_phys {
+            self.renderer.resize(w_phys, h_phys);
+            self.width_phys = w_phys;
+            self.height_phys = h_phys;
         }
 
         // ORDERING INVARIANT: SetWindowPos, show, render.
@@ -599,10 +717,10 @@ impl FloatOverlayApi for FloatOverlay {
             SetWindowPos(
                 self.window.hwnd(),
                 z_after,
-                vf.x as i32,
-                vf.y as i32,
-                w as i32,
-                h as i32,
+                x_phys,
+                y_phys,
+                w_phys as i32,
+                h_phys as i32,
                 flags,
             )
             .ok();
@@ -611,22 +729,32 @@ impl FloatOverlayApi for FloatOverlay {
         // Show before render so the window is visible when the first frame presents.
         self.window.show();
 
-        self.renderer.render(w, h, 1.0, vec![], |ctx| {
+        let vf_logical = vf.to_logical(scale);
+        let frame_logical = wp.frame.to_logical(scale);
+        let theme = config.theme();
+        let border =
+            overlay::BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let is_highlighted = wp.is_highlighted;
+
+        self.renderer.render(w_phys, h_phys, scale, vec![], |ctx| {
             // layer_painter bypasses egui's Area sizing pass, avoiding
             // black/invisible borders on the first frame.
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
                 egui::Id::new("border"),
             ));
-            let clip =
-                egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(vf.width, vf.height));
+            let clip = egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(vf_logical.width.logical(), vf_logical.height.logical()),
+            );
             overlay::paint_window_border(
                 &painter.with_clip_rect(clip),
-                wp.frame,
-                wp.visible_frame,
-                wp.is_highlighted,
+                frame_logical,
+                vf_logical,
+                is_highlighted,
                 None,
-                config,
+                &theme,
+                border,
                 egui::vec2(0.0, 0.0),
             );
         });
@@ -642,5 +770,104 @@ impl FloatOverlayApi for FloatOverlay {
 
     fn apply_font(&mut self, font: &FontConfig) {
         self.renderer.apply_font(font);
+    }
+}
+
+pub(in crate::platform::windows) struct WgpuOverlayFactory {
+    pub(in crate::platform::windows) instance: wgpu::Instance,
+    pub(in crate::platform::windows) device: Arc<wgpu::Device>,
+    pub(in crate::platform::windows) queue: Arc<wgpu::Queue>,
+    pub(in crate::platform::windows) hub_sender: HubSender,
+}
+
+impl CreateOverlay for WgpuOverlayFactory {
+    fn create_tiling_overlay(
+        &self,
+        config: Config,
+        monitor: Dimension,
+        scale: f32,
+    ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
+        Ok(TilingOverlay::new(
+            &self.instance,
+            Arc::clone(&self.device),
+            Arc::clone(&self.queue),
+            config,
+            self.hub_sender.clone(),
+            monitor,
+            scale,
+        )?)
+    }
+    fn create_float_overlay(
+        &self,
+        flavor: crate::theme::Flavor,
+        font: &crate::font::FontConfig,
+        _scale: f32,
+        visible_frame: Dimension,
+    ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
+        let (x_phys, y_phys, w_phys, h_phys) = visible_frame.to_surface_size();
+        Ok(Box::new(FloatOverlay::new(
+            &self.instance,
+            Arc::clone(&self.device),
+            Arc::clone(&self.queue),
+            flavor,
+            font,
+            x_phys,
+            y_phys,
+            w_phys,
+            h_phys,
+        )?))
+    }
+    fn create_picker(
+        &self,
+        entries: Vec<PickerEntry>,
+        monitor_dim: Dimension,
+        flavor: crate::theme::Flavor,
+        font: &crate::font::FontConfig,
+        scale: f32,
+    ) -> anyhow::Result<Box<dyn PickerApi>> {
+        Ok(picker::PickerWindow::new(
+            &self.instance,
+            Arc::clone(&self.device),
+            Arc::clone(&self.queue),
+            entries,
+            monitor_dim,
+            self.hub_sender.clone(),
+            flavor,
+            font,
+            scale,
+        )?)
+    }
+}
+
+/// Windows-only conversions on physical-pixel dimensions for the wgpu/egui overlay pipeline.
+trait PhysicalDimensionExt {
+    fn to_logical(self, scale: f32) -> Dimension<Logical>;
+    fn to_surface_size(self) -> (i32, i32, u32, u32);
+}
+
+impl PhysicalDimensionExt for Dimension<Physical> {
+    fn to_logical(self, scale: f32) -> Dimension<Logical> {
+        debug_assert!(scale > 0.0, "scale must be positive, got {scale}");
+        Dimension::new(
+            Length::new(self.x.value() / scale),
+            Length::new(self.y.value() / scale),
+            Length::new(self.width.value() / scale),
+            Length::new(self.height.value() / scale),
+        )
+    }
+
+    fn to_surface_size(self) -> (i32, i32, u32, u32) {
+        let w = self.width.round().value() as u32;
+        let h = self.height.round().value() as u32;
+        assert!(
+            w > 0 && h > 0,
+            "overlay surface size must be positive; got {w}x{h}"
+        );
+        (
+            self.x.round().value() as i32,
+            self.y.round().value() as i32,
+            w,
+            h,
+        )
     }
 }

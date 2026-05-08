@@ -133,7 +133,7 @@ The split prevents blocking the CGEvent tap, which would throttle keyboard input
 
 - **Main thread**: bare Win32 message pump for hooks, WinEvent hooks (`SetWinEventHook`), IPC, config watching.
 - **Keyboard hook thread**: minimal message pump for `WH_KEYBOARD_LL`. Looks up keymap, sends matched actions to dome thread. Isolated because Windows skips slow hook callbacks.
-- **Dome thread**: `GetMessageW` pump, owns `Dome`, processes events, positions windows and overlays. Events arrive via `PostThreadMessageW` with custom `WM_APP` carrying a boxed `HubEvent`.
+- **Dome thread**: `GetMessageW` pump, owns `Dome`, processes events, positions windows and overlays. Events arrive via `PostThreadMessageW` with custom `WM_APP` messages: `WM_APP_HUBEVENT` (boxed `HubEvent`), `WM_APP_DISPLAY_CHANGE` (monitor topology), `WM_APP_DPI_CHANGE` (live DPI scale change from any Dome-owned wnd-proc), `WM_APP_DISPATCH_RESULT` (thread-pool results).
 
 The dome thread dispatches blocking Win32 reads to a thread pool, receives results via `PostThreadMessageW` — analogous to macOS GCD dispatch.
 
@@ -150,6 +150,20 @@ Accessibility API (`AXUIElement`) via `AXWindowApi` trait for position, size, fo
 DWM invisible borders affect positioning. `DwmGetWindowAttribute` queries extended frame bounds; `SetWindowPos` compensates.
 
 **Keyboard sink.** A 1x1 invisible HWND (`WS_POPUP | WS_EX_TOOLWINDOW`, moved offscreen) holds Win32 foreground when no managed window is focused (empty workspace, `focus_parent` container highlight). Activating this HWND instead of the tiling overlay avoids disturbing tiling window z-order, since `SetForegroundWindow` raises the target window. macOS doesn't need this because tiling overlay windows there are one window level behind normal windows.
+
+### FFI Wrapper Boundary
+
+Three modules own all conversions between unit-typed coordinates (`Dimension<Logical>`, `Dimension<Physical>`, `Length<U>`) and OS-primitive types (`NSRect`, `CGRect`, `CGPoint`, `CGSize`, `RECT`, `POINT`, `SIZE`, `i32`, `f64`). Consumer modules pass typed values into these wrappers and receive typed values back. The `.value() as <primitive>` cast and raw OS type construction happen exclusively inside the wrapper:
+
+| Wrapper module | OS types owned | Typed interface |
+|---|---|---|
+| `src/platform/macos/objc2_wrapper.rs` | `NSRect`, `CGRect`, `NSPoint`, `NSSize` | `Dimension<Logical>` in/out. Owns the Cocoa-origin Y-flip (`dimension_to_ns_rect_cocoa`) and CG rect packing (`dimension_to_cg_rect`). |
+| `src/platform/macos/accessibility.rs` | `CGPoint`, `CGSize` (as `f64` for AX) | `Dimension<Logical>` and `Length<Logical>` on the `AXWindowApi` trait surface (`set_frame`, `hide_at`, `get_position`, `get_size`). Private `set_position`/`set_size` methods own the `.value() as f64` casts. |
+| `src/platform/windows/handle.rs` | `RECT` (plus `HWND` / `HMONITOR` handles) | `Dimension<Physical>` in/out. `set_window_pos` handles border compensation and child propagation. `rect_to_dimension`, `monitor_info_work_area`, `dwm_frame_bounds` convert OS rects to typed values. `move_window_offscreen` owns the offscreen convention. |
+
+Raw `RECT` / `NSRect` / `CGRect` / `POINT` / `SIZE` construction outside these modules is a bug. This discipline is maintained by convention and code review.
+
+A few non-FFI `.value()` call sites in consumer modules are intentional: `RoundedDimension` construction (needs integer output), `max_by_key` comparisons (needs `Ord` which `Length` lacks), tolerance comparisons against OS-returned `i32`, and scalar size/position casts inside Dome-owned overlay/picker windows (WS_POPUP, borderless, no child windows) where the full `set_window_pos` helper's border compensation and child propagation would be no-ops. These are not FFI-boundary violations because they don't construct OS types. `Length<Logical>::logical()` is a parallel escape hatch consumed only by egui paint paths (overlay UI), which work natively in logical points; see the `Length<Logical>::logical` doc comment in `src/core/node.rs` for the authoritative rule.
 
 ### Window State Machines
 
@@ -214,7 +228,7 @@ Float windows are persistent overlays users rarely type into. macOS can't contro
 
 `SetWindowPos` sets z-order of any window -- no mirroring needed. Both tiling and float overlays sit behind their managed windows (mirroring macOS), so managed windows naturally occlude the overlay interior and no region clipping is needed. For topmost floats, the overlay is placed just below the managed window in the topmost band.
 
-**Tiling z-order.** Windows tiling z-order is state-driven in `show_tiling`: newly-appearing tiling windows raise to `Top` above the overlay; same-monitor stable windows early-return with no `SetWindowPos`. The overlay is positioned once at creation and never re-raised. Sibling order follows Win32 foreground activation.
+**Tiling z-order.** Windows tiling z-order is state-driven in `show_tiling`: newly-appearing tiling windows raise to `Top` above the overlay; same-monitor stable windows early-return with no `SetWindowPos`. The overlay HWND is created at its monitor's physical rect via `CreateWindowExW` and shown (`ShowWindow(SW_SHOWNA)`) in `TilingOverlay::new` before returning, so tab bars and borders render on the first frame without waiting for an `update()` call. The overlay is never re-raised after creation. Sibling order follows Win32 foreground activation.
 
 Auto-float: windows without `WS_THICKFRAME`, or with `WS_POPUP`, `WS_EX_TOPMOST`, `WS_EX_DLGMODALFRAME` are inserted as float.
 
@@ -279,6 +293,158 @@ Resume on screen unlock only, not screen wake (screen can wake while locked). Ke
 
 Cocoa uses bottom-left origin; Hub uses top-left. Conversion via primary monitor height. AX already uses top-left, so only overlay positioning needs the flip.
 
+### DPI Scaling (Windows)
+
+Dome runs as Per-Monitor DPI Aware v2 (PMv2) and refuses to start if the OS downgraded awareness to a lower level.
+
+Core is coordinate-system-agnostic in principle: `Monitor.dimension` holds whatever rect the platform supplies in its native frame, and all layout math works in that frame without knowing the unit. On macOS, that frame is logical points (AppKit, AX, Core Graphics). On Windows under PMv2, that frame is physical pixels (from `GetMonitorInfoW`'s `rcWork`). Core never converts between units.
+
+`Dimension<U>` is phantom-tagged with a compile-time unit marker (`Logical` or `Physical`). A cfg-aliased `type Unit` pins the default to `Physical` on Windows and `Logical` on macOS, so bare `Dimension` (used throughout core and DTOs) resolves to the platform's native unit without explicit generics. The tag prevents accidental mixing of physical and logical rectangles at compile time. Conversion helpers (`to_logical`, `to_surface_size`) live in a private `PhysicalDimensionExt` extension trait inside `src/platform/windows/dome/overlay.rs`, scoped to the Windows overlay where they are used.
+
+`Length<U>` is the 1D counterpart to `Dimension<U>`: a zero-sized-phantom-tagged newtype over `f32`, parameterised by the same `Logical`/`Physical` markers and the same cfg-aliased `Unit` default. The inner value is private, forcing all consumers through a typed conversion boundary.
+
+A `UnitKind` trait on the unit markers drives the conversion: `Logical::from_logical(l, _s)` is identity; `Physical::from_logical(l, s)` multiplies by scale. `Length<Logical>::to_unit(scale) -> Length<Unit>` is the single crossing point from config space to frame space. Since `Dimension<U>` fields are `Length<U>`, core layout code operates on typed lengths directly (addition, subtraction, comparison). The `.to_unit(scale).value()` pattern is for converting config-sourced `Length<Logical>` values to frame-space `f32` at shell boundaries.
+
+Config values that represent 1D lengths are typed as `Length<Logical>` (e.g. `HubConfig.tab_bar_height`). The TOML wire format remains a plain `f32`; a `Deserialize<'de> for Length<Logical>` impl in `src/core/node.rs` parses and rejects negative values. `border_size` remains raw `f32` on the config surface; the shell wraps it as `Length<Unit>` before passing to `apply_inset` / `reverse_inset`, which take `Length<Unit>` on both platforms. `Dimension<U>` fields are themselves `Length<U>`, so this wrap is the only raw-to-typed boundary for border arithmetic.
+
+`SizeConstraint::Pixels(Length<Logical>)` stores absolute pixel constraints in logical units. `SizeConstraint::resolve(screen_size, scale) -> Length<Unit>` crosses the boundary: `Pixels` delegates to `Length::to_unit(scale)`; `Percent` wraps a ratio of `screen_size` (already in frame units) directly as `Length<Unit>`. The typed return prevents raw `f32` constraint results from silently mixing with unscaled config values.
+
+`Monitor.scale` is the config-to-frame multiplier. Config values (like `border_size`, `min_width`) are authored in logical pixels. On macOS, `scale` is always 1.0 because the config unit matches the frame unit. On Windows, `scale` is the monitor's DPI scale (1.25 at 125%, 1.5 at 150%, 2.0 at 200%). Window-hint size constraints from `WM_GETMINMAXINFO` arrive pre-scaled (already physical) from the shell.
+
+#### Startup Awareness Contract
+
+`ensure_per_monitor_v2_awareness()` runs at the top of `run_app`, before any HWND is created. It calls `SetProcessDpiAwarenessContext(PMv2)` and, on failure, probes the current process awareness with `GetDpiAwarenessContextForProcess` + `AreDpiAwarenessContextsEqual`. If the process is already at PMv2 (set by a manifest, user compatibility shim, or prior call), startup continues with an `info` log. If awareness is pinned to a different level, startup aborts with an `anyhow::bail!` because every downstream geometry and rendering assumption depends on PMv2. The abort is cheap -- no user state has been committed at this point.
+
+#### Scale Map
+
+`Dome` stores per-monitor state in a private `monitors: HashMap<MonitorId, MonitorState>`. `MonitorState` bundles `dimension: Dimension`, `scale: f32`, and `displayed: HashSet<WindowId>` into a single struct. `ScreenInfo.dimension` holds physical pixels on Windows. `reconcile_monitors` keeps entries in sync with the OS topology.
+
+- **Populated** in `Dome::new` from `ScreenInfo` (primary insert + non-primary loop).
+- **Maintained** by `reconcile_monitors`: inserted on new monitor, removed on dropped monitor, updated when either dimension or scale changes. The changed-screen predicate triggers on a dimension diff OR a scale diff, so a scale-only change (same physical `rcWork`, different effective DPI) is handled.
+- **Read** via direct indexing: `self.monitors[&id].scale`. `HashMap::Index` panics on lookup miss, preserving the fail-fast contract -- a miss means a bug in monitor lifecycle management (every caller passes a `MonitorId` obtained from Hub, which only returns IDs for registered monitors).
+
+`self.monitors[&id].scale` is the single read path for all downstream DPI consumers (placement border scaling, overlay sizing, renderer resize, icon capture). It is used in `show_tiling`, `show_float`, and `window_drifted` in `dome/window.rs` for border scaling, in the overlay/picker creation and update sites for render-surface sizing, in overlay unit conversion (`PhysicalDimensionExt::to_logical(scale)` applied to monitor / frame / visible_frame inputs at the `TilingOverlay::rerender` and `FloatOverlay::update` boundaries), and indirectly via `Dome::picker_scale()` for icon capture density. `monitor_dpi_changed` does not use this path; it writes `MonitorState.scale` directly because it needs the old value for same-scale dedup before updating.
+
+Each monitor's DPI scale is stored per-monitor on both `ScreenInfo` (populated at enumeration) and `MonitorState.scale` (maintained through `reconcile_monitors`).
+
+**Scale guarantees.** Scale values originate from `display::scale_for_monitor` (calls `GetDpiForMonitor`). The wrapper returns a strictly positive `f32` (minimum 1.0 on API failure), logs `tracing::warn!` on failure so operators can diagnose from `dome.log`, and never returns 0, so the `debug_assert!(scale > 0.0)` in the conversion helpers holds at every production call site. These wrapper-level fallbacks are distinct from the `monitors[&id]` indexing, which panics on unknown monitor ID. The wrapper handles Win32 API failures (rare, hardware-level); the map indexing enforces that callers only ask about monitors Dome knows about (a logic invariant).
+
+#### DPI Helpers (Distributed)
+
+The former `src/platform/windows/dpi.rs` module has been dissolved. Its helpers now live next to their consumers:
+
+| Helper | Location | Purpose |
+|---|---|---|
+| `PhysicalDimensionExt::to_logical(scale) -> Dimension<Logical>` | `src/platform/windows/dome/overlay.rs` | Project physical pixels to logical points at the shell-to-overlay boundary. Private extension trait on `Dimension<Physical>`. |
+| `PhysicalDimensionExt::to_surface_size() -> (i32, i32, u32, u32)` | `src/platform/windows/dome/overlay.rs` | Cast physical `Dimension` to integer surface coords. Private extension trait on `Dimension<Physical>`. |
+| `scale_for_monitor(hmonitor) -> f32` | `src/platform/windows/display.rs` | `GetDpiForMonitor` wrapper (with `BASE_DPI` constant). |
+| `constraints_subtract_border` + `get_size_constraints` | `src/platform/windows/handle.rs` | WM_GETMINMAXINFO constraints minus invisible borders, with DPI-awareness scaling via `target_scale_to_physical`. |
+| `picker_physical_rect(scale, Dimension<Physical>) -> (i32, i32, u32, u32)` | `src/platform/windows/dome/picker.rs` | Centre 400x300 logical picker on physical monitor, scale and clamp. |
+| `icon_px_for_scale(scale) -> i32` | `src/platform/windows/dome/icon.rs` | `ICON_PX_LOGICAL` (24) x scale, floor 16 physical px. |
+
+The old `PhysicalDimension` / `LogicalDimension` DTO structs are replaced by `Dimension<Physical>` / `Dimension<Logical>` from core. The `PhysicalPixel` newtype has been absorbed: `Dimension<U>` fields are `Length<U>`, which carries the unit tag at the type level.
+
+#### Core-to-Shell Boundary
+
+Because both core and Win32 APIs work in physical pixels under PMv2, there is no unit conversion at the core-to-shell boundary. Hub delivers placement frames (from `get_visible_placements`) as `Dimension<Physical>`; `show_tiling`, `show_float`, and `show_fullscreen_window` pass these to `handle::set_window_pos()`, which owns the `i32` cast and border compensation (see [FFI Wrapper Boundary](#ffi-wrapper-boundary)). Callers `.round()` in the shell before passing to the wrapper — rounding is a semantics choice, not a unit crossing. Float drift observations (physical DWM extended frame bounds) flow back as `Dimension<Physical>` via `handle::rect_to_dimension` and sync to Hub without conversion. Size constraints from `WM_GETMINMAXINFO` are already physical; `get_size_constraints` (in `handle.rs`) subtracts invisible borders, applies DPI-awareness scaling for legacy-unaware target windows via `target_scale_to_physical`, and casts to `f32` for Hub.
+
+The remaining DPI-sensitive boundaries are:
+
+- **Config-sourced lengths** (e.g. `border_size`). These are logical (config-denominated) values, multiplied by `MonitorState.scale` at the point of use in `show_tiling`, `show_float`, and `window_drifted`.
+- **wgpu surface sizing.** `TilingOverlay` and `FloatOverlay` cache physical surface dimensions in `width_phys` / `height_phys` from `PhysicalDimensionExt::to_surface_size()` on `update` (and on `new` for `TilingOverlay`). `rerender` / `render` forward the cache verbatim to `Renderer::render` with `pixels_per_point = monitor.scale`. The overlay paint module (`src/overlay.rs`) is logical throughout -- the shell projects core `Dimension<Physical>` values (monitor, frame, visible_frame) via `.to_logical(scale)` before handing them to `paint_tiling_overlay` / `paint_window_border`, and passes `BorderMetrics` / `OverlayMetrics` unscaled. egui rescales everything (strokes, corner radii, rects) to physical at tessellation.
+- **Picker window sizing.** `picker_physical_rect` scales the 400x300 logical picker size by the monitor's DPI scale and centres it within the physical monitor rect.
+- **Icon capture.** `icon_px_for_scale` multiplies `ICON_PX_LOGICAL` (24) by the monitor scale for capture density.
+
+`DriftState.target` stays in physical pixels. Both sides of the drift comparison (target and observation) are physical, so the tolerance threshold works without conversion.
+
+Functions that stay physical (no conversion needed): `get_visible_rect`, `get_dimension`, `rect_to_dimension`, `set_window_pos`, `move_window_offscreen`. All return or accept `Dimension<Physical>`. The offscreen coordinate convention is physical and internal to `move_window_offscreen`.
+
+#### Scale Flow Through Overlays
+
+Per-monitor scale flows from `self.monitors[&id].scale` through the `CreateOverlay` factories, `TilingOverlayApi::update`, `FloatOverlayApi::update`, and `PickerApi::show` as a `scale: f32` parameter. Each overlay render site converts its physical `Dimension` to `(x, y, u32_w, u32_h)` via `PhysicalDimensionExt::to_surface_size()` and passes `scale` as `pixels_per_point` to the renderer. The picker converts via `picker_physical_rect` (in `dome/picker.rs`) and passes `scale` as `pixels_per_point` to egui; icon capture scales with the picker's monitor via `icon_px_for_scale` (in `dome/icon.rs`). `TilingOverlay` caches `width_phys`, `height_phys`, and `scale` because its `rerender` method fires independently (from `WM_LBUTTONUP` and `clear`) without a `Dome` reference. `FloatOverlay` caches only `width_phys`/`height_phys` for change detection -- it has no `rerender` path, so `scale` flows directly from the `update` parameter to `renderer.render`.
+
+#### Live DPI Transitions
+
+Scale state stays current through two paths: `reconcile_monitors` on `WM_DISPLAYCHANGE` (hardware topology changes), and live `WM_DPICHANGED` handling (user changes display scale in Settings without hardware changes).
+
+When a user changes a monitor's display scale in Settings, Windows posts `WM_DPICHANGED` to affected top-level windows. Unlike `WM_DISPLAYCHANGE` (which is broadcast to every top-level window), `WM_DPICHANGED` is per-window: only HWNDs whose hosting monitor's DPI changed receive it. This means a single wnd-proc on the primary monitor cannot observe a DPI change on a secondary monitor. Every Dome-owned wnd-proc must handle the message independently.
+
+**Entry path.** All four Dome-owned wnd-procs (`app_wnd_proc`, `float_overlay_wnd_proc`, `tiling_overlay_wnd_proc`, `picker_wnd_proc`) handle `WM_DPICHANGED` identically:
+
+1. Extract new DPI from `LOWORD(wparam)`. X and Y DPI are equal on conforming displays; `HIWORD` is discarded.
+2. Resolve the reporting monitor via `MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)`.
+3. Post `WM_APP_DPI_CHANGE` (WPARAM = DPI, LPARAM = HMONITOR handle) to the dome thread.
+4. Return `LRESULT(0)` to suppress `DefWindowProcW`'s auto-resize to the suggested RECT.
+
+The dome-thread message loop decodes `WM_APP_DPI_CHANGE` and calls `Runner::handle_dpi_change(handle, dpi)`, which delegates to `Dome::monitor_dpi_changed` then calls `apply_layout`.
+
+`monitor_dpi_changed` looks up the HMONITOR handle in `monitor_handles`, computes the new scale from the DPI value, and updates `MonitorState.scale`. It then calls `self.hub.update_monitor(id, current_dimension, new_scale)` to propagate the new scale into core so layout math uses the updated multiplier when the caller-scheduled `apply_layout` reruns. It does not touch `MonitorState.dimension` because a scale-only change does not alter the physical `rcWork` rect.
+
+**Same-scale dedup.** On the primary monitor, all four Dome-owned HWNDs receive `WM_DPICHANGED` and each posts `WM_APP_DPI_CHANGE` with the same `(dpi, handle)` pair. `monitor_dpi_changed` early-returns when the computed scale equals the stored scale, so the first post updates state and logs; subsequent posts are silent no-ops. `apply_layout` still runs on each post (it is unconditional in `Runner::handle_dpi_change`) but is idempotent.
+
+On secondary monitors, only the overlay HWNDs sitting on that monitor receive the message, so this dedup rarely triggers there.
+
+**WM_GETDPISCALEDSIZE suppression.** Windows 11 (23H2+) auto-resizes PMv2 windows to a scaled suggested RECT on `WM_DPICHANGED`, even when the handler returns 0 without calling `DefWindowProcW`. The suggested RECT is derived from the size reported in `WM_GETDPISCALEDSIZE`, which arrives before `WM_DPICHANGED`.
+
+Every Dome-owned wnd-proc handles `WM_GETDPISCALEDSIZE` by writing the current window size (via `GetClientRect`) into the reply `SIZE*` and returning `LRESULT(1)`. This identity reply is correct under the agnostic-core model: core stores physical pixels on Windows, so the OS's suggested physical size is already the final frame unit and no rescaling is needed. The effect is that Windows resizes to the "current" size, holding geometry stable until `apply_layout` produces the correct new-scale placement.
+
+The helper `wm_getdpiscaledsize_reply(current: SIZE) -> SIZE` returns its argument unchanged. It exists as a unit-testable seam documenting Dome's "suppress OS auto-resize" intent. Because all four Dome HWNDs are borderless `WS_POPUP` with no non-client area, `GetClientRect` equals window size. Future window classes with a title bar must not copy this pattern without adding the non-client delta.
+
+Windows 10 also delivers `WM_GETDPISCALEDSIZE` (introduced in 1703) but does not auto-resize on `WM_DPICHANGED`, so the reply has no visible effect there. The arm is cheap to carry and keeps behavior uniform.
+
+**WM_GETDPISCALEDSIZE constant.** `WM_GETDPISCALEDSIZE` (0x02E4) is manually defined in `src/platform/windows/mod.rs` because the `windows` crate (v0.62) does not export it. The constant is defined in `WinUser.h`. If a future `windows` crate version adds it, the manual definition should be removed to avoid drift.
+
+**Thread-message design.** `WM_APP_DPI_CHANGE` (`WM_APP + 3`) follows the same pattern as `WM_APP_DISPLAY_CHANGE`: the wnd-proc posts, the dome-thread message loop decodes, and the runner mutates state. Direct state mutation inside a wnd-proc arm is unsafe because `apply_layout` calls `SetWindowPos`, which can dispatch synchronous messages back into the wnd-proc and produce unbounded re-entry. The thread-message hop breaks this re-entrancy chain. DPI events mutate only Dome's own state and enqueue `apply_layout`; no cross-process `SendMessage` variants are used in this path.
+
+No `HubEvent` variant was added. DPI change is platform-owned and carries Windows-specific payload (HMONITOR + raw DPI) that has no meaning on macOS. The dome-thread message loop already demultiplexes platform-only events; `WM_APP_DPI_CHANGE` fits the same slot.
+
+**Cross-monitor tile moves.** When a tiled window moves between monitors with different scales, the move flows through `HubAction::Move` and inherits the destination monitor's scale via the normal placement path (`show_tiling` indexing `self.monitors[&id].scale`). There is no DPI-specific code path for cross-monitor moves; the boundary-site table above covers it.
+
+**Wnd-proc maintenance rule.** Every new Dome-owned window class must add both `WM_DPICHANGED` (post `WM_APP_DPI_CHANGE` and return 0) and `WM_GETDPISCALEDSIZE` (reply current size and return 1) arms. A forgotten arm silently drops DPI changes for that class's hosting monitor or produces a wrongly-sized frame flash on Windows 11.
+
+#### Picker & Icon Capture
+
+The picker window and its icon captures are scale-aware.
+
+**Sizing.** `PICKER_WIDTH_LOGICAL` (400) and `PICKER_HEIGHT_LOGICAL` (300) are module-private constants in `dome/picker.rs`. `picker_physical_rect(scale, monitor_physical)` scales the logical picker size to physical, then centres and clamps within the physical monitor rect. Both `PickerWindow::new` and `PickerWindow::show` call this helper instead of using fixed physical constants.
+
+**Icon capture.** `load_app_icon(hwnd, scale)` captures at `icon_px_for_scale(scale)` physical pixels per edge. The helper (in `dome/icon.rs`) multiplies the logical icon size (`ICON_PX_LOGICAL` = 24, matching `ICON_SIZE` in `src/picker.rs`) by the monitor scale and applies a 16-physical-pixel floor (below 16px, shared HICONs lose recognisable shape). `Dome::picker_scale()` returns the visible picker's monitor scale (`None` when hidden); `dispatch_picker_icons` in `runner.rs` is gated on `picker_visible()` and panics if `picker_scale()` returns `None`, since both check the same picker state on the same thread and a mismatch indicates a state desync bug.
+
+**Cache invalidation.** `PickerWindow::show` clears `icon_textures` when the incoming scale differs from the stored `pixels_per_point`. This forces re-capture at the new density when the picker moves between monitors of different scales. No multi-resolution cache: the one-frame re-capture cost at scale boundaries is acceptable and keeps the cache shape matching macOS.
+
+**HICON source cap.** `DrawIconEx` captures from the shared HICON returned by `WM_GETICON(ICON_BIG)`, typically a 32x32 handle. Captures above ~48 physical pixels (scale > 2.0) show interpolation blur because `DrawIconEx` has only that 32x32 source to work from. This is a known limitation. The follow-up APIs are `PrivateExtractIconsW` (user32) and `LoadIconWithScaleDown` (commctrl.h), which can select higher-resolution authored variants from the PE resources.
+
+#### EXE Resources
+
+`build.rs` compiles `resources/windows/dome.rc` into a linkable resource object via the [`embed-resource`](https://crates.io/crates/embed-resource) crate (v3). The resource script is the single source of truth for what gets embedded into `dome.exe`.
+
+| File | Purpose |
+|---|---|
+| `resources/windows/dome.rc` | Resource script. References manifest and icon by filename. |
+| `resources/windows/dome.manifest` | PMv2 application manifest (XML). Sets DPI awareness (with `PerMonitorV2,PerMonitor` graceful-degradation fallback), supported OS GUIDs, and `asInvoker` execution level. |
+| `resources/windows/Dome.ico` | Application icon. Placeholder until final artwork lands. Swap is a single-file change, no build-pipeline change needed. |
+
+**Why both manifest and runtime check.** The manifest and `ensure_per_monitor_v2_awareness()` cover disjoint failure modes:
+
+- **Manifest**: read by the Windows loader before any code runs, including DLL-injected code in `DllMain`. Covers HWNDs created by screen readers, input methods, AV hooks, etc. before `main`.
+- **Runtime check**: catches AppCompat shims, group-policy overrides, and per-exe user overrides that can override a manifest after process init.
+
+Both stay.
+
+**Cross-compile prerequisite.** `embed-resource` invokes `windres` for `*-pc-windows-gnu` targets. Cross-compiling from macOS requires mingw-w64:
+
+```bash
+brew install mingw-w64
+```
+
+This puts `x86_64-w64-mingw32-windres` on `PATH`. Without it, `build.rs` fails fast (via `.manifest_required().unwrap()`) with a diagnostic error. This prerequisite applies to `cargo clippy --target=x86_64-pc-windows-gnu --tests` as well, since the build script runs during that check.
+
+**Version drift.** `assemblyIdentity/@version` in `dome.manifest` is hand-synced with `Cargo.toml`. Drift is a known cold bug until a release-tooling plan automates it.
+
+#### Coordinate and Font Invariant
+
+Core `Dimension<Unit>` carries platform-native positioning coordinates (logical on macOS matching `NSWindow.setFrame:display:`, physical on Windows matching `SetWindowPos`); canonical reference at `src/core/node.rs`. The overlay paint module (`src/overlay.rs`) is logical throughout: each platform shell projects frames into `Dimension<Logical>` at the overlay boundary. Font-size invariant: `config.font.text_size` flows to egui unchanged and is rasterised at `text_size * pixels_per_point` physical pixels. See the module-level comments in `src/overlay.rs`, `src/platform/windows/dome/overlay.rs`, `src/platform/macos/ui/overlay.rs`, and `src/font.rs` for per-file coordinate contracts.
+
 ### Fullscreen Detection
 
 #### macOS
@@ -307,10 +473,10 @@ Borders are drawn with `rect_stroke` + `StrokeKind::Inside` (stroke stays within
 
 `PickerEntry` holds `id: WindowId`, `title: String`, and `app_id: Option<String>`. `build_picker_entries()` maps the raw `(WindowId, String)` list from `hub.minimized_window_entries()` into `Vec<PickerEntry>`, resolving `app_id` via a platform-provided closure. On macOS the closure looks up `bundle_id` from the registry; on Windows it looks up the process name. Registry lookups (`Registry::by_id`/`by_id_mut` on macOS, `WindowRegistry::get`/`get_mut` on Windows) return `Option` because a window can become unmanaged between picker open and icon dispatch. All callers handle the `None` case with early returns or `continue`.
 
-**Icon loading.** Each row shows a 24x24 application icon (loaded at 48x48, downscaled by egui). Icon loading differs by platform because of threading constraints:
+**Icon loading.** Each row shows a 24x24 application icon. Icon loading differs by platform because of threading constraints and capture sizing:
 
-- **macOS** (synchronous, `src/platform/macos/ui/icon.rs`): `load_app_icon(bundle_id)` runs on the main thread during `render_now`. NSImage is thread-unsafe per Apple docs, so GCD dispatch is not an option. Loading is fast (< 1ms per icon, system-cached), so synchronous loading for the typical < 10 minimized windows is imperceptible. Icons are cached in `icon_textures: RefCell<HashMap<String, Option<TextureHandle>>>` on the picker view. `None` entries are failed-load sentinels, never retried within a session. On reopen, `None` entries are cleared so relaunched apps can be retried.
-- **Windows** (background dispatch, `src/platform/windows/dome/icon.rs`): `load_app_icon(hwnd)` uses `SendMessageTimeoutW(WM_GETICON)` with a 100ms timeout, which can block, so it runs on the thread pool via `ReadDispatcher`. `collect_icons_to_load()` determines which `app_id`s need loading and inserts `None` sentinels into `icon_textures` to prevent duplicate dispatches. Background threads return `ColorImage` results into `pending_icons: Vec<(String, ColorImage)>` because `TextureHandle` creation requires the egui context during render. The next `rerender` drains `pending_icons`, converts to `TextureHandle`s inside the render closure, and inserts into `icon_textures`. `pending_icons` is cleared on reopen to discard stale in-flight results.
+- **macOS** (synchronous, `src/platform/macos/ui/icon.rs`): `load_app_icon(bundle_id)` runs on the main thread during `render_now`. NSImage is thread-unsafe per Apple docs, so GCD dispatch is not an option. Icons are loaded at a fixed 48x48 and downscaled by egui. Loading is fast (< 1ms per icon, system-cached), so synchronous loading for the typical < 10 minimized windows is imperceptible. Icons are cached in `icon_textures: RefCell<HashMap<String, Option<TextureHandle>>>` on the picker view. `None` entries are failed-load sentinels, never retried within a session. On reopen, `None` entries are cleared so relaunched apps can be retried.
+- **Windows** (background dispatch, `src/platform/windows/dome/icon.rs`): `load_app_icon(hwnd, scale)` uses `SendMessageTimeoutW(WM_GETICON)` with a 100ms timeout, which can block, so it runs on the thread pool via `ReadDispatcher`. The capture size is scale-aware via `icon_px_for_scale` (24px at 100% scale, 48px at 200%, etc.). `collect_icons_to_load()` determines which `app_id`s need loading and inserts `None` sentinels into `icon_textures` to prevent duplicate dispatches. Background threads return `ColorImage` results into `pending_icons: Vec<(String, ColorImage)>` because `TextureHandle` creation requires the egui context during render. The next `rerender` drains `pending_icons`, converts to `TextureHandle`s inside the render closure, and inserts into `icon_textures`. `pending_icons` is cleared on reopen to discard stale in-flight results.
 
 `paint_picker()` takes `&[PickerEntry]` and `&HashMap<String, Option<TextureHandle>>`. For each entry, it looks up the icon by `app_id`. Present icons render as `Image`; missing icons get `allocate_space` for stable layout alignment.
 
@@ -333,6 +499,8 @@ Win32 windows with DirectComposition, egui_wgpu (wgpu/DX12). Tab bars use DWM bl
 #### Windows Rendering Model
 
 **DWM + wgpu/DX12.** With DWM (always on since Windows 8), each window renders to an offscreen surface via DirectComposition. wgpu presents to a DComp swap chain, which DWM composites to screen at vsync. `WM_PAINT`/`BeginPaint`/`EndPaint` are irrelevant to actual screen content -- DWM picks up content from the swap chain, not from the GDI paint cycle.
+
+**Surface sizing invariant.** On wgpu + egui-wgpu + DX12/DComp, `SurfaceConfiguration.width/height` must be physical pixels, `ScreenDescriptor.size_in_pixels` must equal the surface config dimensions, and `pixels_per_point` must match the monitor's DPI scale. All three render sites (tiling overlay, float overlay, picker) satisfy this: tiling and float overlays extract physical dimensions via `PhysicalDimensionExt::to_surface_size()` (cast-only, since monitor dimensions are already physical on Windows); the picker converts via `picker_physical_rect` (in `dome/picker.rs`). The macOS renderer (`src/platform/macos/ui/renderer.rs`) embodies the same invariant with Metal. Note: this codebase uses the `egui-wgpu` crate (`ScreenDescriptor` with `size_in_pixels`/`pixels_per_point`), not the unrelated `egui_wgpu_backend` crate.
 
 **Per-pixel alpha.** Transparent overlays use `WS_EX_NOREDIRECTIONBITMAP` + DirectComposition. The window has no GDI surface; wgpu renders to a DComp swap chain with `DXGI_ALPHA_MODE_PREMULTIPLIED` (via `CompositeAlphaMode::PreMultiplied`). DWM composites the swap chain output directly, giving native per-pixel alpha without the old `DwmEnableBlurBehindWindow` hack.
 

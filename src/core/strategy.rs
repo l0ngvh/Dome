@@ -1,5 +1,5 @@
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
-use crate::core::node::{ContainerId, Dimension, Direction, WindowId, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
 
 /// Actions that are specific to the tiling strategy. Hub routes these through
 /// `TilingStrategy::handle_action` after checking window restrictions.
@@ -110,22 +110,22 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
 /// Convert layout-space coordinates to screen-absolute. Layout positions are
 /// relative to workspace origin (0,0); this applies viewport offset and
 /// monitor origin.
-pub(crate) fn translate(
-    dim: Dimension,
-    offset_x: f32,
-    offset_y: f32,
-    screen: Dimension,
-) -> Dimension {
-    Dimension {
-        x: dim.x - offset_x + screen.x,
-        y: dim.y - offset_y + screen.y,
-        width: dim.width,
-        height: dim.height,
-    }
+pub(crate) fn translate<U>(
+    dim: Dimension<U>,
+    offset_x: Length<U>,
+    offset_y: Length<U>,
+    screen: Dimension<U>,
+) -> Dimension<U> {
+    Dimension::new(
+        dim.x - offset_x + screen.x,
+        dim.y - offset_y + screen.y,
+        dim.width,
+        dim.height,
+    )
 }
 
 /// Clip a dimension to screen bounds. Returns None if entirely outside.
-pub(crate) fn clip(dim: Dimension, bounds: Dimension) -> Option<Dimension> {
+pub(crate) fn clip<U>(dim: Dimension<U>, bounds: Dimension<U>) -> Option<Dimension<U>> {
     let x1 = dim.x.max(bounds.x);
     let y1 = dim.y.max(bounds.y);
     let x2 = (dim.x + dim.width).min(bounds.x + bounds.width);
@@ -133,10 +133,5 @@ pub(crate) fn clip(dim: Dimension, bounds: Dimension) -> Option<Dimension> {
     if x1 >= x2 || y1 >= y2 {
         return None;
     }
-    Some(Dimension {
-        x: x1,
-        y: y1,
-        width: x2 - x1,
-        height: y2 - y1,
-    })
+    Some(Dimension::new(x1, y1, x2 - x1, y2 - y1))
 }

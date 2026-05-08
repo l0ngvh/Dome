@@ -102,12 +102,12 @@ fn float_window_moved_by_user() {
         .expect("float should be in workspace");
     assert_eq!(
         *stored_dim,
-        Dimension {
-            x: 200.0 - border,
-            y: 150.0 - border,
-            width: 600.0 + 2.0 * border,
-            height: 400.0 + 2.0 * border,
-        }
+        Dimension::new(
+            Length::new(200.0 - border),
+            Length::new(150.0 - border),
+            Length::new(600.0 + 2.0 * border),
+            Length::new(400.0 + 2.0 * border),
+        )
     );
 
     // Idempotence: a follow-up settle should issue no new set_frame calls for cg2
@@ -165,12 +165,12 @@ fn float_window_replaced_after_drag_issues_set_frame() {
     // Use a clearly different outer frame
     dome.hub.update_float_dimension(
         float_wid,
-        Dimension {
-            x: initial_frame.0 as f32 - border,
-            y: initial_frame.1 as f32 - border,
-            width: initial_frame.2 as f32 + 2.0 * border,
-            height: initial_frame.3 as f32 + 2.0 * border,
-        },
+        Dimension::new(
+            Length::new(initial_frame.0 as f32 - border),
+            Length::new(initial_frame.1 as f32 - border),
+            Length::new(initial_frame.2 as f32 + 2.0 * border),
+            Length::new(initial_frame.3 as f32 + 2.0 * border),
+        ),
     );
     dome.flush_layout();
 

@@ -2,18 +2,19 @@ use super::{snapshot, validate_hub};
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig};
 use crate::core::master_stack::MasterStackStrategy;
-use crate::core::node::{Dimension, WindowId};
+use crate::core::node::{Dimension, Length, WindowId};
 use crate::core::strategy::TilingAction;
 use insta::assert_snapshot;
 
 fn setup_master_stack() -> Hub {
     Hub::new_with_strategy(
-        Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: 150.0,
-            height: 30.0,
-        },
+        Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(150.0),
+            Length::new(30.0),
+        ),
+        1.0,
         HubConfig::default(),
         Box::new(MasterStackStrategy::new()),
     )

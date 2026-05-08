@@ -20,26 +20,28 @@ use std::thread;
 use crate::logging::Logger;
 use anyhow::Result;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, EndPaint, MONITOR_DEFAULTTONEAREST, MonitorFromWindow, PAINTSTRUCT,
+};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::Console::{
     CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, SetConsoleCtrlHandler,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThreadId};
 use windows::Win32::UI::HiDpi::{
-    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+    AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    GetDpiAwarenessContextForProcess, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetForegroundWindow, GetMessageW, HWND_TOP,
-    IDC_ARROW, LoadCursorW, MSG, PostThreadMessageW, RegisterClassW, SW_SHOWNA, SWP_NOACTIVATE,
-    SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow, TranslateMessage, WM_APP,
-    WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW,
-    WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetForegroundWindow,
+    GetMessageW, IDC_ARROW, LoadCursorW, MSG, PostThreadMessageW, RegisterClassW, SW_SHOWNA,
+    SetForegroundWindow, ShowWindow, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_DPICHANGED,
+    WM_ERASEBKGND, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR};
 
@@ -47,8 +49,9 @@ use crate::config::{Config, start_config_watcher};
 use crate::core::Dimension;
 use crate::ipc;
 use crate::keymap::KeymapState;
-use crate::picker::PickerEntry;
-use dome::overlay::{FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, tiling_overlay_wnd_proc};
+use dome::overlay::{
+    FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, WgpuOverlayFactory, tiling_overlay_wnd_proc,
+};
 use dome::picker::{PICKER_OVERLAY_CLASS, picker_wnd_proc};
 use dome::{Dome, HubEvent, KeyboardSinkApi};
 use event_listener::install_event_hooks;
@@ -64,11 +67,65 @@ pub(super) struct ScreenInfo {
     pub name: String,
     pub dimension: Dimension,
     pub is_primary: bool,
+    /// DPI scale factor for this monitor (e.g. 1.5 for 150%). Always > 0.
+    pub scale: f32,
+}
+
+/// Verifies the process is running at Per-Monitor V2 DPI awareness.
+///
+/// Tries to set PMv2 via `SetProcessDpiAwarenessContext`. On success, returns Ok.
+/// On error (e.g. awareness already pinned by a manifest, compat shim, or prior call),
+/// probes the current process awareness and accepts it if it is already PMv2.
+/// Aborts with an error otherwise, because every downstream geometry and rendering
+/// assumption requires PMv2. See BRD risk #6.
+fn ensure_per_monitor_v2_awareness() -> anyhow::Result<()> {
+    let result =
+        unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+    if result.is_ok() {
+        return Ok(());
+    }
+    let err = result.unwrap_err();
+
+    // Probe-and-compare: if something else already set awareness to PMv2
+    // (manifest, user compat-shim dialog, prior call), that is fine.
+    // GetDpiAwarenessContextForProcess + AreDpiAwarenessContextsEqual require
+    // Windows 10 1803+ (build 17134). On older builds this path is unreachable
+    // because PMv2 itself requires 1703+, and the Set call would have succeeded
+    // unless awareness was pinned -- which only happens via manifest/shim on 1803+.
+    let current_ctx = unsafe { GetDpiAwarenessContextForProcess(GetCurrentProcess()) };
+    let is_pmv2 = unsafe {
+        AreDpiAwarenessContextsEqual(current_ctx, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+    };
+    if is_pmv2.as_bool() {
+        tracing::info!(
+            err = %err,
+            "DPI awareness already PMv2 (likely manifest or compat shim); continuing"
+        );
+        return Ok(());
+    }
+
+    tracing::error!(
+        err = %err,
+        "Failed to set PMv2 DPI awareness; refusing to start because geometry would be wrong"
+    );
+    anyhow::bail!(
+        "Process DPI awareness is not Per-Monitor V2. \
+         Dome requires PMv2 for correct geometry. \
+         Check compatibility settings or application manifest. Original error: {err}"
+    );
 }
 
 pub(super) const WM_APP_HUBEVENT: u32 = WM_APP;
 pub(super) const WM_APP_DISPLAY_CHANGE: u32 = WM_APP + 1;
 pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 2;
+/// Thread-message for live DPI changes. WPARAM = new DPI (u32 as usize),
+/// LPARAM = HMONITOR handle (isize). Posted by every Dome-owned wnd-proc
+/// on WM_DPICHANGED; decoded by the dome-thread message loop.
+pub(super) const WM_APP_DPI_CHANGE: u32 = WM_APP + 3;
+/// Not exported by the windows crate as of 0.62. Defined in WinUser.h.
+/// Sent before WM_DPICHANGED; the handler writes the desired scaled window
+/// size into the SIZE* at lparam and returns TRUE.
+pub(super) const WM_GETDPISCALEDSIZE: u32 = 0x02E4;
 
 static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -150,7 +207,7 @@ unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
 }
 
 pub fn run_app(config_path: Option<String>) -> Result<()> {
-    unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).ok() };
+    ensure_per_monitor_v2_awareness()?;
 
     // COM needed for shell APIs on main thread
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
@@ -267,57 +324,22 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     Ok(())
 }
 
-struct WgpuOverlayFactory {
-    instance: wgpu::Instance,
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    hub_sender: HubSender,
-}
-
-impl dome::CreateOverlay for WgpuOverlayFactory {
-    fn create_tiling_overlay(
-        &self,
-        config: Config,
-    ) -> anyhow::Result<Box<dyn dome::overlay::TilingOverlayApi>> {
-        Ok(dome::overlay::TilingOverlay::new(
-            &self.instance,
-            Arc::clone(&self.device),
-            Arc::clone(&self.queue),
-            config,
-            self.hub_sender.clone(),
-        )?)
-    }
-    fn create_float_overlay(
-        &self,
-        flavor: crate::theme::Flavor,
-        font: &crate::font::FontConfig,
-    ) -> anyhow::Result<Box<dyn dome::overlay::FloatOverlayApi>> {
-        dome::overlay::create_float_overlay(
-            &self.instance,
-            Arc::clone(&self.device),
-            Arc::clone(&self.queue),
-            flavor,
-            font,
-        )
-    }
-    fn create_picker(
-        &self,
-        entries: Vec<PickerEntry>,
-        monitor_dim: Dimension,
-        flavor: crate::theme::Flavor,
-        font: &crate::font::FontConfig,
-    ) -> anyhow::Result<Box<dyn dome::overlay::PickerApi>> {
-        Ok(dome::picker::PickerWindow::new(
-            &self.instance,
-            Arc::clone(&self.device),
-            Arc::clone(&self.queue),
-            entries,
-            monitor_dim,
-            self.hub_sender.clone(),
-            flavor,
-            font,
-        )?)
-    }
+/// Returns the current window size unchanged. Called from every Dome-owned
+/// wnd-proc's WM_GETDPISCALEDSIZE handler to suppress Windows 11's automatic
+/// DPI resize. By reporting the current size as the "desired scaled size",
+/// Windows' auto-resize becomes a no-op and apply_layout drives final geometry.
+///
+/// This is correct under the agnostic-core design: core stores physical pixels
+/// on Windows, so the OS's suggested physical size is already what core would
+/// assign. The identity reply avoids duplicating the OS's own arithmetic.
+///
+/// Dome's HWNDs are borderless WS_POPUP with no non-client area, so
+/// GetClientRect == window size. Future window classes with a title bar or
+/// border must NOT copy this pattern without adding the non-client delta.
+pub(super) fn wm_getdpiscaledsize_reply(
+    current: windows::Win32::Foundation::SIZE,
+) -> windows::Win32::Foundation::SIZE {
+    current
 }
 
 unsafe extern "system" fn app_wnd_proc(
@@ -339,6 +361,38 @@ unsafe extern "system" fn app_wnd_proc(
             };
             LRESULT(0)
         }
+        // WM_DPICHANGED is per-window (not broadcast). Duplicate posts from
+        // multiple Dome wnd-procs on the same monitor are absorbed by
+        // monitor_dpi_changed's same-scale early return.
+        WM_DPICHANGED => {
+            // X and Y DPI are equal on conforming displays; HIWORD discarded.
+            let dpi = (wparam.0 & 0xFFFF) as u32;
+            let handle = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) }.0 as isize;
+            unsafe {
+                PostThreadMessageW(
+                    GetCurrentThreadId(),
+                    WM_APP_DPI_CHANGE,
+                    WPARAM(dpi as usize),
+                    LPARAM(handle),
+                )
+                .ok()
+            };
+            // Return 0 to suppress DefWindowProcW's auto-resize to the suggested RECT.
+            LRESULT(0)
+        }
+        // Suppresses Windows 11's automatic DPI resize by reporting current
+        // size as the desired scaled size. See wm_getdpiscaledsize_reply.
+        WM_GETDPISCALEDSIZE => {
+            let mut rect = RECT::default();
+            unsafe { GetClientRect(hwnd, &mut rect).ok() };
+            let size = SIZE {
+                cx: rect.right - rect.left,
+                cy: rect.bottom - rect.top,
+            };
+            let out = lparam.0 as *mut SIZE;
+            unsafe { *out = wm_getdpiscaledsize_reply(size) };
+            LRESULT(1)
+        }
         // App window is 1x1 offscreen; these arms are defensive only.
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => LRESULT(0),
@@ -353,6 +407,33 @@ unsafe extern "system" fn float_overlay_wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
+        // WM_DPICHANGED is per-window. Duplicate posts from multiple Dome
+        // wnd-procs on the same monitor are absorbed by monitor_dpi_changed.
+        WM_DPICHANGED => {
+            let dpi = (wparam.0 & 0xFFFF) as u32;
+            let handle = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) }.0 as isize;
+            unsafe {
+                PostThreadMessageW(
+                    GetCurrentThreadId(),
+                    WM_APP_DPI_CHANGE,
+                    WPARAM(dpi as usize),
+                    LPARAM(handle),
+                )
+                .ok()
+            };
+            LRESULT(0)
+        }
+        WM_GETDPISCALEDSIZE => {
+            let mut rect = RECT::default();
+            unsafe { GetClientRect(hwnd, &mut rect).ok() };
+            let size = SIZE {
+                cx: rect.right - rect.left,
+                cy: rect.bottom - rect.top,
+            };
+            let out = lparam.0 as *mut SIZE;
+            unsafe { *out = wm_getdpiscaledsize_reply(size) };
+            LRESULT(1)
+        }
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
@@ -428,19 +509,12 @@ fn run_dome(config: Config, main_thread_id: u32, keymap_state: Arc<RwLock<Keymap
     }
     .expect("Failed to create app window");
 
-    // Move offscreen so activating it is invisible. Same coordinate move_offscreen uses.
-    unsafe {
-        SetWindowPos(
-            app_hwnd,
-            Some(HWND_TOP),
-            handle::OFFSCREEN_POS as i32,
-            handle::OFFSCREEN_POS as i32,
-            1,
-            1,
-            SWP_NOACTIVATE | SWP_NOZORDER,
-        )
-        .ok();
-    }
+    // Park the app-sink window offscreen via the unified helper. The prior code used
+    // HWND_TOP | SWP_NOZORDER | explicit 1x1 size; the helper instead drops to
+    // HWND_BOTTOM (offscreen windows must not occlude visible windows), omits the
+    // explicit 1x1 (unnecessary once out of the viewport), and adds SWP_NOACTIVATE
+    // to prevent a foreground-activation event on the hidden window.
+    handle::move_window_offscreen(app_hwnd);
     // Show without activating. Hidden windows are flaky SetForegroundWindow targets;
     // a 1x1 offscreen window makes activation reliable with no visible effect.
     unsafe { ShowWindow(app_hwnd, SW_SHOWNA).ok().ok() };
@@ -478,7 +552,7 @@ fn run_dome(config: Config, main_thread_id: u32, keymap_state: Arc<RwLock<Keymap
         hub_sender: hub_sender.clone(),
     };
 
-    let mut dome = Dome::new(
+    let dome = Dome::new(
         config.clone(),
         Rc::new(taskbar),
         Box::new(overlays),
@@ -515,6 +589,11 @@ fn run_dome(config: Config, main_thread_id: u32, keymap_state: Arc<RwLock<Keymap
                 }
                 WM_APP_DISPLAY_CHANGE => {
                     runner.handle_display_change();
+                }
+                WM_APP_DPI_CHANGE => {
+                    let dpi = msg.wParam.0 as u32;
+                    let handle = msg.lParam.0;
+                    runner.handle_dpi_change(handle, dpi);
                 }
                 WM_APP_DISPATCH_RESULT => {
                     let apply = *Box::from_raw(msg.wParam.0 as *mut runner::ApplyFn);

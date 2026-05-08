@@ -8,6 +8,7 @@ use std::str::FromStr;
 use crate::action::{
     Action, Actions, FocusTarget, HubAction, MonitorTarget, MoveTarget, TabDirection, ToggleTarget,
 };
+use crate::core::{Length, Logical, Unit};
 use crate::font::FontConfig;
 use crate::theme::{Flavor, Theme};
 
@@ -341,21 +342,29 @@ fn parse_actions(action_strs: &[String]) -> Result<Actions> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum SizeConstraint {
-    Pixels(f32),
+    Pixels(Length<Logical>),
     Percent(f32),
 }
 
 impl Default for SizeConstraint {
     fn default() -> Self {
-        SizeConstraint::Pixels(0.0)
+        SizeConstraint::Pixels(Length::new(0.0))
     }
 }
 
 impl SizeConstraint {
-    pub(crate) fn resolve(&self, screen_size: f32) -> f32 {
+    /// Resolves to a frame-unit length.
+    ///
+    /// `Pixels` is a config-denominated absolute length (logical), so it goes
+    /// through `to_unit(scale)` to reach the frame unit. `Percent` is a ratio
+    /// of `screen_size` (already in frame units), so `scale` does not apply --
+    /// the result is wrapped directly as `Length<Unit>`.
+    pub(crate) fn resolve(&self, screen_size: Length<Unit>, scale: f32) -> Length<Unit> {
         match self {
-            SizeConstraint::Pixels(px) => *px,
-            SizeConstraint::Percent(pct) => screen_size * pct / 100.0,
+            SizeConstraint::Pixels(px) => px.to_unit(scale),
+            // screen_size is already in Unit space (monitor frame dimension),
+            // so the result is directly Length<Unit> — no logical-to-unit conversion needed.
+            SizeConstraint::Percent(pct) => screen_size * (pct / 100.0),
         }
     }
 
@@ -383,7 +392,7 @@ impl<'de> Deserialize<'de> for SizeConstraint {
                 if val < 0.0 {
                     return Err(E::custom("pixel value must be non-negative"));
                 }
-                Ok(SizeConstraint::Pixels(val))
+                Ok(SizeConstraint::Pixels(Length::new(val)))
             }
 
             fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
@@ -570,7 +579,7 @@ pub(crate) struct Config {
     #[serde(default = "default_border_size")]
     pub(crate) border_size: f32,
     #[serde(default = "default_tab_bar_height")]
-    pub(crate) tab_bar_height: f32,
+    pub(crate) tab_bar_height: Length<Logical>,
     #[serde(default = "default_automatic_tiling")]
     pub(crate) automatic_tiling: bool,
     #[serde(default = "SizeConstraint::default_min")]
@@ -624,8 +633,8 @@ fn default_border_size() -> f32 {
     4.0
 }
 
-fn default_tab_bar_height() -> f32 {
-    24.0
+fn default_tab_bar_height() -> Length<Logical> {
+    Length::new(24.0)
 }
 
 fn default_automatic_tiling() -> bool {
@@ -728,16 +737,19 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
+        // Validation compares config values in logical space directly -- no scale
+        // factor exists at validation time, so `.logical()` is the correct escape
+        // hatch here (not `to_unit`).
         if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
             (self.min_width, self.max_width)
-            && max > 0.0
+            && max.logical() > 0.0
             && min > max
         {
             anyhow::bail!("min_width ({min}) cannot be greater than max_width ({max})");
         }
         if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
             (self.min_height, self.max_height)
-            && max > 0.0
+            && max.logical() > 0.0
             && min > max
         {
             anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
@@ -797,20 +809,20 @@ mod tests {
     #[test]
     fn max_size_default() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.max_width, SizeConstraint::Pixels(0.0));
-        assert_eq!(config.max_height, SizeConstraint::Pixels(0.0));
+        assert_eq!(config.max_width, SizeConstraint::Pixels(Length::new(0.0)));
+        assert_eq!(config.max_height, SizeConstraint::Pixels(Length::new(0.0)));
     }
 
     #[test]
     fn size_constraint_parses_float_as_pixels() {
         let config: Config = toml::from_str("min_width = 200.0").unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Pixels(200.0));
+        assert_eq!(config.min_width, SizeConstraint::Pixels(Length::new(200.0)));
     }
 
     #[test]
     fn size_constraint_parses_int_as_pixels() {
         let config: Config = toml::from_str("min_width = 200").unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Pixels(200.0));
+        assert_eq!(config.min_width, SizeConstraint::Pixels(Length::new(200.0)));
     }
 
     #[test]
@@ -837,9 +849,47 @@ mod tests {
 
     #[test]
     fn size_constraint_resolve() {
-        assert_eq!(SizeConstraint::Pixels(200.0).resolve(1000.0), 200.0);
-        assert_eq!(SizeConstraint::Percent(10.0).resolve(1000.0), 100.0);
-        assert_eq!(SizeConstraint::Percent(5.0).resolve(1920.0), 96.0);
+        assert_eq!(
+            SizeConstraint::Pixels(Length::new(200.0))
+                .resolve(Length::new(1000.0), 1.0)
+                .value(),
+            200.0
+        );
+        // On macOS (Unit = Logical), to_unit is identity so scale doesn't affect Pixels.
+        // On Windows (Unit = Physical), Pixels(200) * scale 1.5 = 300.
+        #[cfg(target_os = "windows")]
+        assert_eq!(
+            SizeConstraint::Pixels(Length::new(200.0))
+                .resolve(Length::new(1000.0), 1.5)
+                .value(),
+            300.0
+        );
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(
+            SizeConstraint::Pixels(Length::new(200.0))
+                .resolve(Length::new(1000.0), 1.5)
+                .value(),
+            200.0
+        );
+        // scale must not affect Percent (screen_size is already in Unit space)
+        assert_eq!(
+            SizeConstraint::Percent(10.0)
+                .resolve(Length::new(1000.0), 1.0)
+                .value(),
+            100.0
+        );
+        assert_eq!(
+            SizeConstraint::Percent(10.0)
+                .resolve(Length::new(1000.0), 2.0)
+                .value(),
+            100.0
+        );
+        assert_eq!(
+            SizeConstraint::Percent(5.0)
+                .resolve(Length::new(1920.0), 1.0)
+                .value(),
+            96.0
+        );
     }
 
     #[test]
@@ -1063,5 +1113,22 @@ mod tests {
             // Best-effort cleanup of test temp file; nothing to do if it fails.
             std::fs::remove_file(&self.0).ok();
         }
+    }
+
+    #[test]
+    fn pixels_resolve_returns_unit_length() {
+        let constraint = SizeConstraint::Pixels(Length::new(100.0));
+        let resolved = constraint.resolve(Length::new(1000.0), 1.0);
+        assert_eq!(resolved.value(), 100.0);
+    }
+
+    #[test]
+    fn percent_resolve_returns_unit_length() {
+        // screen_size is already in Unit space (monitor frame width/height),
+        // so the Percent arm directly constructs Length<Unit> without to_unit.
+        let constraint = SizeConstraint::Percent(10.0);
+        let resolved = constraint.resolve(Length::new(1000.0), 2.0);
+        // scale does not affect Percent: 10% of 1000 = 100, regardless of scale.
+        assert_eq!(resolved.value(), 100.0);
     }
 }

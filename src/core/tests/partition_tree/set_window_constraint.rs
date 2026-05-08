@@ -3,6 +3,7 @@ use insta::assert_snapshot;
 use crate::config::SizeConstraint;
 
 use crate::core::hub::HubConfig;
+use crate::core::node::{Length, Logical};
 use crate::core::tests::{setup, snapshot};
 
 #[test]
@@ -381,8 +382,8 @@ fn set_min_size_global_exceeds_screen_size() {
     hub.insert_tiling();
 
     hub.sync_config(HubConfig {
-        tab_bar_height: 2.0,
-        min_width: SizeConstraint::Pixels(100.0),
+        tab_bar_height: Length::<Logical>::new(2.0),
+        min_width: SizeConstraint::Pixels(Length::new(100.0)),
         ..Default::default()
     });
 
@@ -1289,7 +1290,7 @@ fn global_max_applies_to_all_windows() {
 
     hub.sync_config(HubConfig {
         auto_tile: true,
-        max_width: SizeConstraint::Pixels(60.0),
+        max_width: SizeConstraint::Pixels(Length::new(60.0)),
         ..Default::default()
     });
 
@@ -1342,7 +1343,7 @@ fn per_window_max_overrides_global() {
 
     hub.sync_config(HubConfig {
         auto_tile: true,
-        max_width: SizeConstraint::Pixels(60.0),
+        max_width: SizeConstraint::Pixels(Length::new(60.0)),
         ..Default::default()
     });
     hub.set_window_constraint(w0, None, None, Some(30.0), None);
@@ -1778,7 +1779,7 @@ fn window_max_smaller_than_global_min_width() {
     let w0 = hub.insert_tiling();
 
     hub.sync_config(HubConfig {
-        min_width: SizeConstraint::Pixels(300.0),
+        min_width: SizeConstraint::Pixels(Length::new(300.0)),
         ..Default::default()
     });
 
@@ -1830,7 +1831,7 @@ fn window_max_smaller_than_global_min_height() {
     let w0 = hub.insert_tiling();
 
     hub.sync_config(HubConfig {
-        min_height: SizeConstraint::Pixels(300.0),
+        min_height: SizeConstraint::Pixels(Length::new(300.0)),
         ..Default::default()
     });
 
@@ -1873,7 +1874,7 @@ fn window_max_smaller_than_global_min_multiple_windows() {
     hub.insert_tiling();
 
     hub.sync_config(HubConfig {
-        min_width: SizeConstraint::Pixels(100.0),
+        min_width: SizeConstraint::Pixels(Length::new(100.0)),
         ..Default::default()
     });
 

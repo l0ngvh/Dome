@@ -14,7 +14,7 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::action::Action;
 use crate::config::Config;
-use crate::core::{Dimension, MonitorId, WindowId};
+use crate::core::{Dimension, Length, Logical, MonitorId, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dispatcher::DispatcherMarker;
@@ -22,20 +22,15 @@ use crate::platform::macos::dome::{
     DebounceBurst, Dome, FrameSender, HubMessage, NewWindow, WindowMove,
 };
 
-const SCREEN_WIDTH: f32 = 1920.0;
-const SCREEN_HEIGHT: f32 = 1080.0;
+const SCREEN_WIDTH: Length = Length::new(1920.0);
+const SCREEN_HEIGHT: Length = Length::new(1080.0);
 
 fn default_screen() -> MonitorInfo {
     MonitorInfo {
         display_id: 1,
         name: "Test".to_string(),
-        dimension: Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: SCREEN_WIDTH,
-            height: SCREEN_HEIGHT,
-        },
-        full_height: SCREEN_HEIGHT,
+        dimension: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
+        full_height: SCREEN_HEIGHT.value(),
         is_primary: true,
         scale: 2.0,
     }
@@ -122,13 +117,22 @@ impl AXWindowApi for MockAXWindow {
     fn is_native_fullscreen(&self, _marker: &DispatcherMarker) -> bool {
         self.native_fullscreen.get()
     }
-    fn get_position(&self, _marker: &DispatcherMarker) -> Result<(i32, i32)> {
-        Ok(self.position.get())
+    fn get_position(
+        &self,
+        _marker: &DispatcherMarker,
+    ) -> Result<(Length<Logical>, Length<Logical>)> {
+        let (x, y) = self.position.get();
+        Ok((Length::new(x as f32), Length::new(y as f32)))
     }
-    fn get_size(&self, _marker: &DispatcherMarker) -> Result<(i32, i32)> {
-        Ok(self.size.get())
+    fn get_size(&self, _marker: &DispatcherMarker) -> Result<(Length<Logical>, Length<Logical>)> {
+        let (w, h) = self.size.get();
+        Ok((Length::new(w as f32), Length::new(h as f32)))
     }
-    fn set_frame(&self, x: i32, y: i32, w: i32, h: i32) -> Result<()> {
+    fn set_frame(&self, dim: Dimension<Logical>) -> Result<()> {
+        let x = dim.x.value() as i32;
+        let y = dim.y.value() as i32;
+        let w = dim.width.value() as i32;
+        let h = dim.height.value() as i32;
         let (x, y, w, h) = if let Some(ovr) = self.override_frame.get() {
             ovr
         } else {
@@ -152,7 +156,9 @@ impl AXWindowApi for MockAXWindow {
     fn focus(&self) -> Result<()> {
         Ok(())
     }
-    fn hide_at(&self, x: i32, y: i32) -> Result<()> {
+    fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()> {
+        let x = x.value() as i32;
+        let y = y.value() as i32;
         let (x, y, w, h) = if let Some(ovr) = self.override_frame.get() {
             ovr
         } else {
@@ -246,7 +252,7 @@ impl MacOS {
 
     fn is_offscreen(&self, cg_id: CGWindowID) -> bool {
         let (x, y, _, _) = self.window_frame(cg_id);
-        x >= SCREEN_WIDTH as i32 - 1 || y >= SCREEN_HEIGHT as i32 - 1
+        x >= SCREEN_WIDTH.value() as i32 - 1 || y >= SCREEN_HEIGHT.value() as i32 - 1
     }
 
     fn enter_native_fullscreen(&self, cg_id: CGWindowID) {

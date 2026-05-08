@@ -1,18 +1,19 @@
 mod drift;
 mod lifecycle;
+mod picker;
 mod placement;
 mod transitions;
 mod zorder;
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::action::{Action, Actions};
 use crate::config::Config;
-use crate::core::Dimension;
+use crate::core::{Dimension, Length, Physical};
 use crate::picker::PickerEntry;
 use crate::platform::windows::ScreenInfo;
 use crate::platform::windows::dome::ObservedPosition;
@@ -21,21 +22,27 @@ use crate::platform::windows::dome::{CreateOverlay, Dome, KeyboardSinkApi, Query
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
 
-const SCREEN_WIDTH: f32 = 1920.0;
-const SCREEN_HEIGHT: f32 = 1080.0;
-const OFFSCREEN_POS: f32 = -32000.0;
+const SCREEN_WIDTH: Length = Length::new(1920.0);
+const SCREEN_HEIGHT: Length = Length::new(1080.0);
+const OFFSCREEN_POS: Length = Length::new(-32000.0);
+
+/// Test helper: construct a `Dimension<Physical>` from integer coords.
+fn dim(x: i32, y: i32, w: i32, h: i32) -> Dimension<Physical> {
+    Dimension::new(
+        Length::new(x as f32),
+        Length::new(y as f32),
+        Length::new(w as f32),
+        Length::new(h as f32),
+    )
+}
 
 fn default_screen() -> ScreenInfo {
     ScreenInfo {
         handle: 1,
         name: "Test".to_string(),
-        dimension: Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: SCREEN_WIDTH,
-            height: SCREEN_HEIGHT,
-        },
+        dimension: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
         is_primary: true,
+        scale: 1.0,
     }
 }
 
@@ -43,13 +50,14 @@ fn second_screen() -> ScreenInfo {
     ScreenInfo {
         handle: 2,
         name: "External".to_string(),
-        dimension: Dimension {
-            x: SCREEN_WIDTH,
-            y: 0.0,
-            width: 2560.0,
-            height: 1440.0,
-        },
+        dimension: Dimension::new(
+            SCREEN_WIDTH,
+            Length::ZERO,
+            Length::new(2560.0),
+            Length::new(1440.0),
+        ),
         is_primary: false,
+        scale: 1.0,
     }
 }
 
@@ -82,6 +90,7 @@ struct TestEnv {
     float_overlay_apply_font_count: Rc<Cell<u32>>,
     tiling_overlay_apply_font_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
+    picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
     z_model: ZOrderModel,
 }
 
@@ -91,7 +100,10 @@ impl TestEnv {
     }
 
     fn new_with_config(config: Config) -> Self {
-        let screens = vec![default_screen()];
+        Self::new_with_screens(config, vec![default_screen()])
+    }
+
+    fn new_with_screens(config: Config, screens: Vec<ScreenInfo>) -> Self {
         let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
         let display = MockDisplay {
             screens,
@@ -106,7 +118,9 @@ impl TestEnv {
         let float_overlay_apply_font_count = Rc::new(Cell::new(0));
         let tiling_overlay_apply_font_count = Rc::new(Cell::new(0));
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
+        let picker_loaded_icons = Rc::new(RefCell::new(HashSet::new()));
         let z_model = ZOrderModel::new();
+
         let dome = Dome::new(
             config.clone(),
             Rc::new(NoopTaskbar),
@@ -119,6 +133,7 @@ impl TestEnv {
                 float_overlay_apply_font_count: float_overlay_apply_font_count.clone(),
                 tiling_overlay_apply_font_count: tiling_overlay_apply_font_count.clone(),
                 picker_entries: picker_entries.clone(),
+                picker_loaded_icons: picker_loaded_icons.clone(),
                 z_model: z_model.clone(),
             }),
             Box::new(display),
@@ -141,6 +156,7 @@ impl TestEnv {
             float_overlay_apply_font_count,
             tiling_overlay_apply_font_count,
             picker_entries,
+            picker_loaded_icons,
             z_model,
         }
     }
@@ -160,19 +176,17 @@ impl TestEnv {
             return;
         }
         let dim = ext.get_dim();
-        let observation = if dim.x <= 0.0
-            && dim.y <= 0.0
+        let observation = if dim.x <= Length::ZERO
+            && dim.y <= Length::ZERO
             && dim.width >= SCREEN_WIDTH
             && dim.height >= SCREEN_HEIGHT
         {
             ObservedPosition::Fullscreen
         } else {
-            ObservedPosition::Visible(
-                dim.x as i32,
-                dim.y as i32,
-                dim.width as i32,
-                dim.height as i32,
-            )
+            ObservedPosition::Visible {
+                rect: dim,
+                monitor: 1,
+            }
         };
         let on_open = self.dome.try_manage_window(
             ext.clone(),
@@ -203,14 +217,19 @@ impl TestEnv {
             if pending.is_empty() {
                 return;
             }
-            let mut last_pos: HashMap<HwndId, (i32, i32, i32, i32)> = HashMap::new();
-            for (id, x, y, w, h) in pending {
-                last_pos.insert(id, (x, y, w, h));
+            let mut last_pos: HashMap<HwndId, Dimension> = HashMap::new();
+            for (id, dim) in pending {
+                last_pos.insert(id, dim);
             }
-            for (hwnd_id, (x, y, w, h)) in last_pos {
+            for (hwnd_id, dim) in last_pos {
                 self.dome.placement_timeout(hwnd_id);
-                self.dome
-                    .window_moved(hwnd_id, ObservedPosition::Visible(x, y, w, h));
+                self.dome.window_moved(
+                    hwnd_id,
+                    ObservedPosition::Visible {
+                        rect: dim,
+                        monitor: 1,
+                    },
+                );
             }
             self.dome.apply_layout();
             if i == limit - 1 {
@@ -229,14 +248,19 @@ impl TestEnv {
         if pending.is_empty() {
             return;
         }
-        let mut last_pos: HashMap<HwndId, (i32, i32, i32, i32)> = HashMap::new();
-        for (id, x, y, w, h) in pending {
-            last_pos.insert(id, (x, y, w, h));
+        let mut last_pos: HashMap<HwndId, Dimension> = HashMap::new();
+        for (id, dim) in pending {
+            last_pos.insert(id, dim);
         }
-        for (hwnd_id, (x, y, w, h)) in last_pos {
+        for (hwnd_id, dim) in last_pos {
             self.dome.placement_timeout(hwnd_id);
-            self.dome
-                .window_moved(hwnd_id, ObservedPosition::Visible(x, y, w, h));
+            self.dome.window_moved(
+                hwnd_id,
+                ObservedPosition::Visible {
+                    rect: dim,
+                    monitor: 1,
+                },
+            );
         }
         self.dome.apply_layout();
     }
@@ -244,12 +268,12 @@ impl TestEnv {
     /// Configure a window to resist repositioning and report it at `pos`.
     fn simulate_resist(&self, ext: &Arc<MockExternalHwnd>, pos: (i32, i32, i32, i32)) {
         ext.set_override_position(Some(pos));
-        *ext.dimension.lock().unwrap() = Dimension {
-            x: pos.0 as f32,
-            y: pos.1 as f32,
-            width: pos.2 as f32,
-            height: pos.3 as f32,
-        };
+        *ext.dimension.lock().unwrap() = Dimension::new(
+            Length::new(pos.0 as f32),
+            Length::new(pos.1 as f32),
+            Length::new(pos.2 as f32),
+            Length::new(pos.3 as f32),
+        );
         ext.simulate_external_move();
     }
 
@@ -327,6 +351,24 @@ impl TestEnv {
         self.tiling_overlay_apply_font_count.get()
     }
 
+    fn picker_loaded_icons(&self) -> HashSet<String> {
+        self.picker_loaded_icons.borrow().clone()
+    }
+
+    fn picker_icons_to_load(&mut self) -> Vec<(String, HwndId)> {
+        self.dome.picker_icons_to_load()
+    }
+
+    fn picker_receive_icon(&mut self, app_id: String) {
+        // Use a 1x1 dummy image; the noop picker ignores the pixel data.
+        let image = egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]);
+        self.dome.picker_receive_icon(app_id, image);
+    }
+
+    fn picker_scale(&self) -> Option<f32> {
+        self.dome.picker_scale()
+    }
+
     fn add_screen(&mut self, screen: ScreenInfo) {
         let mut screens = vec![default_screen()];
         screens.push(screen);
@@ -348,12 +390,7 @@ impl TestEnv {
 }
 
 fn fullscreen_dim() -> Dimension {
-    Dimension {
-        x: 0.0,
-        y: 0.0,
-        width: SCREEN_WIDTH,
-        height: SCREEN_HEIGHT,
-    }
+    Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -363,7 +400,7 @@ enum ZOrderState {
     Topmost,
 }
 
-type MoveLog = Arc<Mutex<Vec<(HwndId, i32, i32, i32, i32)>>>;
+type MoveLog = Arc<Mutex<Vec<(HwndId, Dimension)>>>;
 
 struct ZOrderStack {
     topmost: Vec<HwndId>,
@@ -485,12 +522,12 @@ impl MockExternalHwnd {
             title: Some(title.to_string()),
             process: process.to_string(),
             app_name: None,
-            dimension: Mutex::new(Dimension {
-                x: 0.0,
-                y: 0.0,
-                width: 800.0,
-                height: 600.0,
-            }),
+            dimension: Mutex::new(Dimension::new(
+                Length::ZERO,
+                Length::ZERO,
+                Length::new(800.0),
+                Length::new(600.0),
+            )),
             override_position: Mutex::new(None),
             should_float: false,
             iconic: AtomicBool::new(false),
@@ -507,6 +544,11 @@ impl MockExternalHwnd {
         self
     }
 
+    fn with_min_size(mut self, w: f32, h: f32) -> Self {
+        self.min_size = (w, h);
+        self
+    }
+
     fn with_dimension(self, dim: Dimension) -> Self {
         *self.dimension.lock().unwrap() = dim;
         self
@@ -516,16 +558,10 @@ impl MockExternalHwnd {
         *self.override_position.lock().unwrap() = pos;
     }
 
-    /// Simulate the app moving itself — push current dimension to the move log.
+    /// Simulate the app moving itself -- push current dimension to the move log.
     fn simulate_external_move(&self) {
         let dim = self.get_dim();
-        self.moves.lock().unwrap().push((
-            self.hwnd_id,
-            dim.x as i32,
-            dim.y as i32,
-            dim.width as i32,
-            dim.height as i32,
-        ));
+        self.moves.lock().unwrap().push((self.hwnd_id, dim));
     }
 
     fn get_dim(&self) -> Dimension {
@@ -559,19 +595,17 @@ impl ManageExternalHwnd for MockExternalHwnd {
         self.iconic.load(Ordering::Relaxed)
     }
 
-    fn set_position(&self, z: ZOrder, x: i32, y: i32, cx: i32, cy: i32) {
+    fn set_position(&self, z: ZOrder, dim: Dimension) {
         self.iconic.store(false, Ordering::Relaxed);
-        let (x, y, cx, cy) = self
-            .override_position
-            .lock()
-            .unwrap()
-            .unwrap_or((x, y, cx, cy));
-        *self.dimension.lock().unwrap() = Dimension {
-            x: x as f32,
-            y: y as f32,
-            width: cx as f32,
-            height: cy as f32,
-        };
+        let dim = self.override_position.lock().unwrap().map_or(dim, |pos| {
+            Dimension::new(
+                Length::new(pos.0 as f32),
+                Length::new(pos.1 as f32),
+                Length::new(pos.2 as f32),
+                Length::new(pos.3 as f32),
+            )
+        });
+        *self.dimension.lock().unwrap() = dim;
         let mut z_state = self.z_state.lock().unwrap();
         match z {
             ZOrder::Topmost => *z_state = ZOrderState::Topmost,
@@ -580,38 +614,28 @@ impl ManageExternalHwnd for MockExternalHwnd {
             ZOrder::Unchanged => {}
         }
         self.z_model.apply(self.hwnd_id, z);
-        self.moves
-            .lock()
-            .unwrap()
-            .push((self.hwnd_id, x, y, cx, cy));
+        self.moves.lock().unwrap().push((self.hwnd_id, dim));
     }
 
     fn move_offscreen(&self) {
-        let pos = if let Some((x, y, w, h)) = *self.override_position.lock().unwrap() {
-            *self.dimension.lock().unwrap() = Dimension {
-                x: x as f32,
-                y: y as f32,
-                width: w as f32,
-                height: h as f32,
-            };
-            (x, y, w, h)
+        let dim = if let Some((x, y, w, h)) = *self.override_position.lock().unwrap() {
+            let d = Dimension::new(
+                Length::new(x as f32),
+                Length::new(y as f32),
+                Length::new(w as f32),
+                Length::new(h as f32),
+            );
+            *self.dimension.lock().unwrap() = d;
+            d
         } else {
-            let mut dim = self.dimension.lock().unwrap();
-            dim.x = OFFSCREEN_POS;
-            dim.y = OFFSCREEN_POS;
-            (
-                OFFSCREEN_POS as i32,
-                OFFSCREEN_POS as i32,
-                dim.width as i32,
-                dim.height as i32,
-            )
+            let mut d = self.dimension.lock().unwrap();
+            d.x = OFFSCREEN_POS;
+            d.y = OFFSCREEN_POS;
+            *d
         };
         *self.z_state.lock().unwrap() = ZOrderState::Bottom;
         self.z_model.move_to_bottom(self.hwnd_id);
-        self.moves
-            .lock()
-            .unwrap()
-            .push((self.hwnd_id, pos.0, pos.1, pos.2, pos.3));
+        self.moves.lock().unwrap().push((self.hwnd_id, dim));
     }
 
     fn show_cmd(&self, cmd: ShowCmd) {
@@ -629,8 +653,8 @@ impl ManageExternalHwnd for MockExternalHwnd {
 
     fn recover(&self, _was_maximized: bool) {
         let mut dim = self.dimension.lock().unwrap();
-        dim.x = 100.0;
-        dim.y = 100.0;
+        dim.x = Length::new(100.0);
+        dim.y = Length::new(100.0);
     }
 }
 
@@ -642,22 +666,27 @@ impl Drop for MockExternalHwnd {
 
 /// Assert that windows tile horizontally across the screen.
 fn assert_h_tiled(dims: &[Dimension], screen: Dimension, border: f32) {
+    let border_len = Length::new(border);
     assert!(!dims.is_empty());
     for (i, d) in dims.iter().enumerate() {
-        assert_eq!(d.y, border, "window {i} y");
-        assert_eq!(d.height, screen.height - 2.0 * border, "window {i} height");
-        assert!(d.width > 0.0, "window {i} width");
+        assert_eq!(d.y, border_len, "window {i} y");
+        assert_eq!(
+            d.height,
+            screen.height - Length::new(2.0 * border),
+            "window {i} height"
+        );
+        assert!(d.width > Length::new(0.0), "window {i} width");
     }
-    assert_eq!(dims[0].x, border, "first window x");
+    assert_eq!(dims[0].x, border_len, "first window x");
     let last = dims.last().unwrap();
     assert!(
-        (last.x + last.width - (screen.width - border)).abs() < 1.0,
+        (last.x + last.width - (screen.width - border_len)).abs() < Length::new(1.0),
         "last window right edge"
     );
     for i in 1..dims.len() {
         let gap = dims[i].x - (dims[i - 1].x + dims[i - 1].width);
         assert!(
-            (gap - 2.0 * border).abs() < 2.0,
+            (gap - Length::new(2.0 * border)).abs() < Length::new(2.0),
             "gap between window {} and {}",
             i - 1,
             i
@@ -687,7 +716,13 @@ struct NoopFloatOverlay {
     apply_font_count: Rc<Cell<u32>>,
 }
 impl FloatOverlayApi for NoopFloatOverlay {
-    fn update(&mut self, _: &crate::core::FloatWindowPlacement, _: &Config, _: ZOrder) {
+    fn update(
+        &mut self,
+        _: &crate::core::FloatWindowPlacement,
+        _: &Config,
+        _: ZOrder,
+        _scale: f32,
+    ) {
         self.overlay_update_count
             .set(self.overlay_update_count.get() + 1);
     }
@@ -713,6 +748,7 @@ impl TilingOverlayApi for NoopTilingOverlay {
         _: Dimension,
         _: &[crate::core::TilingWindowPlacement],
         _: &[(crate::core::ContainerPlacement, Vec<String>)],
+        _scale: f32,
     ) {
         self.update_count.set(self.update_count.get() + 1);
     }
@@ -731,10 +767,11 @@ impl TilingOverlayApi for NoopTilingOverlay {
 struct NoopPicker {
     visible: bool,
     entries: Rc<RefCell<Vec<PickerEntry>>>,
+    loaded_icons: Rc<RefCell<HashSet<String>>>,
 }
 
 impl PickerApi for NoopPicker {
-    fn show(&mut self, entries: Vec<PickerEntry>, _monitor_dim: Dimension) {
+    fn show(&mut self, entries: Vec<PickerEntry>, _monitor_dim: Dimension, _scale: f32) {
         *self.entries.borrow_mut() = entries;
         self.visible = true;
     }
@@ -749,12 +786,30 @@ impl PickerApi for NoopPicker {
 
     fn icons_to_load(
         &mut self,
-        _lookup_hwnd: &dyn Fn(crate::core::WindowId) -> Option<HwndId>,
+        lookup_hwnd: &dyn Fn(crate::core::WindowId) -> Option<HwndId>,
     ) -> Vec<(String, HwndId)> {
-        Vec::new()
+        let entries = self.entries.borrow();
+        let mut loaded = self.loaded_icons.borrow_mut();
+        let mut result = Vec::new();
+        for entry in entries.iter() {
+            let Some(app_id) = entry.app_id.as_ref() else {
+                continue;
+            };
+            if loaded.contains(app_id) {
+                continue;
+            }
+            let Some(hwnd_id) = lookup_hwnd(entry.id) else {
+                continue;
+            };
+            loaded.insert(app_id.clone());
+            result.push((app_id.clone(), hwnd_id));
+        }
+        result
     }
 
-    fn receive_icon(&mut self, _app_id: String, _image: egui::ColorImage) {}
+    fn receive_icon(&mut self, app_id: String, _image: egui::ColorImage) {
+        self.loaded_icons.borrow_mut().insert(app_id);
+    }
 
     fn rerender(&mut self) {}
 }
@@ -768,11 +823,17 @@ struct NoopOverlays {
     float_overlay_apply_font_count: Rc<Cell<u32>>,
     tiling_overlay_apply_font_count: Rc<Cell<u32>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
+    picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
     z_model: ZOrderModel,
 }
 
 impl CreateOverlay for NoopOverlays {
-    fn create_tiling_overlay(&self, _: Config) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
+    fn create_tiling_overlay(
+        &self,
+        _: Config,
+        _monitor: Dimension,
+        _scale: f32,
+    ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         // Seed the overlay at the top of the normal band, mirroring Win32
         // CreateWindowExW. Subsequent tiling windows placed with ZOrder::Top
         // push it down.
@@ -788,6 +849,8 @@ impl CreateOverlay for NoopOverlays {
         &self,
         _flavor: crate::theme::Flavor,
         _font: &crate::font::FontConfig,
+        _scale: f32,
+        _visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         Ok(Box::new(NoopFloatOverlay {
             overlay_update_count: self.overlay_update_count.clone(),
@@ -801,12 +864,14 @@ impl CreateOverlay for NoopOverlays {
         monitor_dim: Dimension,
         _flavor: crate::theme::Flavor,
         _font: &crate::font::FontConfig,
+        scale: f32,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
         let mut picker = NoopPicker {
             visible: false,
             entries: self.picker_entries.clone(),
+            loaded_icons: self.picker_loaded_icons.clone(),
         };
-        picker.show(entries, monitor_dim);
+        picker.show(entries, monitor_dim, scale);
         Ok(Box::new(picker))
     }
 }

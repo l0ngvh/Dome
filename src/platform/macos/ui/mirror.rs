@@ -4,7 +4,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{AnyThread, DefinedClass, define_class, msg_send};
 use objc2_app_kit::NSApplication;
-use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
+use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::{CGWindowID, kCGColorSpaceSRGB};
 use objc2_core_media::CMSampleBuffer;
 use objc2_foundation::{MainThreadMarker, NSError, NSObject, NSObjectProtocol};
@@ -15,7 +15,8 @@ use objc2_screen_capture_kit::{
 };
 
 use super::AppDelegate;
-use crate::core::Dimension;
+use crate::core::{Dimension, Length};
+use crate::platform::macos::objc2_wrapper::dimension_to_cg_rect;
 
 pub(super) struct WindowCapture {
     stream: Retained<SCStream>,
@@ -31,21 +32,22 @@ impl WindowCapture {
     /// `content_dim` is the window content area (frame minus border).
     /// `scale` is passed separately because the original window may be hidden on a different monitor.
     pub(super) fn start(&mut self, cg_id: CGWindowID, content_dim: Dimension, scale: f64) {
-        let width = (content_dim.width as f64 * scale) as usize;
-        let height = (content_dim.height as f64 * scale) as usize;
+        let width = (content_dim.width.value() as f64 * scale) as usize;
+        let height = (content_dim.height.value() as f64 * scale) as usize;
 
         let config = unsafe { SCStreamConfiguration::new() };
         unsafe {
             config.setWidth(width);
             config.setHeight(height);
-            // Full content, no sub-rect clipping needed for floats
-            config.setSourceRect(CGRect {
-                origin: CGPoint { x: 0.0, y: 0.0 },
-                size: CGSize {
-                    width: content_dim.width as f64,
-                    height: content_dim.height as f64,
-                },
-            });
+            // Full content, no sub-rect clipping needed for floats.
+            // Origin is (0, 0) because the rect is relative to the window content.
+            let source_dim = Dimension::new(
+                Length::ZERO,
+                Length::ZERO,
+                content_dim.width,
+                content_dim.height,
+            );
+            config.setSourceRect(dimension_to_cg_rect(source_dim));
             config.setPixelFormat(u32::from_be_bytes(*b"BGRA"));
             config.setColorSpaceName(kCGColorSpaceSRGB);
             config.setCapturesAudio(false);

@@ -1,5 +1,5 @@
 use crate::core::allocator::Node;
-use crate::core::node::{ContainerId, Dimension, Direction, WindowId, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
 
 /// Contain the windows
 /// Must maintain these invariants:
@@ -26,8 +26,8 @@ pub(crate) struct Container {
     spawn_mode: SpawnMode,
     pub(super) is_tabbed: bool,
     pub(super) active_tab_index: usize,
-    pub(super) min_width: f32,
-    pub(super) min_height: f32,
+    pub(super) min_width: Length,
+    pub(super) min_height: Length,
 }
 
 impl Node for Container {
@@ -57,8 +57,8 @@ impl Container {
             spawn_mode,
             is_tabbed: false,
             active_tab_index: 0,
-            min_width: 0.0,
-            min_height: 0.0,
+            min_width: Length::ZERO,
+            min_height: Length::ZERO,
         }
     }
 
@@ -79,8 +79,8 @@ impl Container {
             spawn_mode: SpawnMode::tabbed(),
             is_tabbed: true,
             active_tab_index: 0,
-            min_width: 0.0,
-            min_height: 0.0,
+            min_width: Length::ZERO,
+            min_height: Length::ZERO,
         }
     }
 
@@ -134,7 +134,7 @@ impl Container {
         &self.children
     }
 
-    pub(crate) fn min_size(&self) -> (f32, f32) {
+    pub(crate) fn min_size(&self) -> (Length, Length) {
         (self.min_width, self.min_height)
     }
 

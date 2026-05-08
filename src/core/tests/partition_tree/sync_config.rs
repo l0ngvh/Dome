@@ -1,19 +1,21 @@
 use insta::assert_snapshot;
 
 use crate::core::hub::HubConfig;
+use crate::core::node::{Length, Logical};
 use crate::core::{Dimension, Hub, tests::snapshot_text};
 
 #[test]
 fn sync_config_updates_tab_bar_height() {
     let mut hub = Hub::new(
-        Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: 50.0,
-            height: 50.0,
-        },
+        Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(50.0),
+            Length::new(50.0),
+        ),
+        1.0,
         HubConfig {
-            tab_bar_height: 10.0,
+            tab_bar_height: Length::<Logical>::new(10.0),
             auto_tile: true,
             ..Default::default()
         },
@@ -23,7 +25,7 @@ fn sync_config_updates_tab_bar_height() {
     hub.toggle_container_layout();
 
     hub.sync_config(HubConfig {
-        tab_bar_height: 10.0,
+        tab_bar_height: Length::<Logical>::new(10.0),
         auto_tile: true,
         ..Default::default()
     });
@@ -40,14 +42,15 @@ fn sync_config_updates_tab_bar_height() {
 #[test]
 fn sync_config_recalculates_all_workspaces() {
     let mut hub = Hub::new(
-        Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: 50.0,
-            height: 50.0,
-        },
+        Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(50.0),
+            Length::new(50.0),
+        ),
+        1.0,
         HubConfig {
-            tab_bar_height: 10.0,
+            tab_bar_height: Length::<Logical>::new(10.0),
             auto_tile: true,
             ..Default::default()
         },
@@ -62,7 +65,7 @@ fn sync_config_recalculates_all_workspaces() {
     hub.toggle_container_layout();
 
     hub.sync_config(HubConfig {
-        tab_bar_height: 5.0,
+        tab_bar_height: Length::<Logical>::new(5.0),
         auto_tile: true,
         ..Default::default()
     });

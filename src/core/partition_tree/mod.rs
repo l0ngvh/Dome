@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, SpawnIndicator, TilingWindowPlacement};
-use crate::core::node::{Dimension, WindowId, WorkspaceId};
+use crate::core::node::{Dimension, Length, WindowId, WorkspaceId};
 use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, clip, translate};
 
 impl SpawnIndicator {
@@ -50,7 +50,7 @@ struct WorkspaceTilingState {
     /// `focused == X`. Walking `container.focused` from root reaches X directly.
     /// Established by `set_focus_child`, preserved by `replace_split_child_focus`.
     focused_tiling: Option<Child>,
-    viewport_offset: (f32, f32),
+    viewport_offset: (Length, Length),
 }
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
@@ -110,6 +110,8 @@ impl PartitionTreeStrategy {
                 wid,
                 TilingWindowData {
                     parent: Parent::Workspace(ws_id),
+                    // Zero placeholder -- layout_workspace at the end of this function
+                    // computes the real rect before any reader observes this entry.
                     dimension: Dimension::default(),
                     spawn_mode: SpawnMode::default(),
                 },
@@ -249,11 +251,12 @@ impl TilingStrategy for PartitionTreeStrategy {
         // Convert layout-space coordinates to screen-absolute. Layout positions are
         // relative to workspace origin (0,0) plus viewport offset; screen-absolute
         // includes the monitor's origin.
-        Dimension {
-            x: child_dim.x - offset_x + screen.x,
-            y: child_dim.y - offset_y + screen.y,
-            ..child_dim
-        }
+        Dimension::new(
+            child_dim.x - offset_x + screen.x,
+            child_dim.y - offset_y + screen.y,
+            child_dim.width,
+            child_dim.height,
+        )
     }
 
     fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction) {

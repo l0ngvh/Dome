@@ -370,8 +370,8 @@ impl PickerPopup {
         font: &FontConfig,
     ) -> Self {
         let (monitor_dim, cocoa_frame, scale) = monitor;
-        let pw = PICKER_WIDTH.min(monitor_dim.width as f64);
-        let ph = PICKER_HEIGHT.min(monitor_dim.height as f64);
+        let pw = PICKER_WIDTH.min(monitor_dim.width.value() as f64);
+        let ph = PICKER_HEIGHT.min(monitor_dim.height.value() as f64);
         // Center on the monitor's Cocoa frame
         let x = cocoa_frame.origin.x + (cocoa_frame.size.width - pw) / 2.0;
         let y = cocoa_frame.origin.y + (cocoa_frame.size.height - ph) / 2.0;
@@ -431,8 +431,8 @@ impl PickerPopup {
         cocoa_frame: NSRect,
         scale: f64,
     ) {
-        let pw = PICKER_WIDTH.min(monitor_dim.width as f64);
-        let ph = PICKER_HEIGHT.min(monitor_dim.height as f64);
+        let pw = PICKER_WIDTH.min(monitor_dim.width.value() as f64);
+        let ph = PICKER_HEIGHT.min(monitor_dim.height.value() as f64);
         let x = cocoa_frame.origin.x + (cocoa_frame.size.width - pw) / 2.0;
         let y = cocoa_frame.origin.y + (cocoa_frame.size.height - ph) / 2.0;
         let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(pw, ph));

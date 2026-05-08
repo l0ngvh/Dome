@@ -1,5 +1,5 @@
 use crate::core::hub::HubAccess;
-use crate::core::node::{ContainerId, Dimension, Direction, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 use crate::core::partition_tree::{Child, SpawnMode};
 
 use super::PartitionTreeStrategy;
@@ -14,10 +14,9 @@ impl PartitionTreeStrategy {
             return;
         };
         let Some(root) = ws_state.root else { return };
-        let screen = hub
-            .monitors
-            .get(hub.workspaces.get(ws_id).monitor)
-            .dimension;
+        let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
+        let screen = monitor.dimension;
+        let scale = monitor.scale;
 
         let Child::Container(root_id) = root else {
             self.set_root_dimension(hub, root, screen);
@@ -39,7 +38,7 @@ impl PartitionTreeStrategy {
 
         // Update minimum sizes bottom-up, as parent's minimum size depends on children's
         for &cid in order.iter().rev() {
-            self.update_container_min_size(hub, cid);
+            self.update_container_min_size(hub, cid, scale);
         }
 
         self.set_root_dimension(hub, root, screen);
@@ -50,7 +49,7 @@ impl PartitionTreeStrategy {
             let direction = container.direction();
             for (child, child_dim) in children
                 .iter()
-                .zip(self.layout_split_children(hub, &children, dim, direction))
+                .zip(self.layout_split_children(hub, &children, dim, direction, scale))
             {
                 self.set_split_child_dimension(hub, *child, child_dim);
             }
@@ -74,68 +73,61 @@ impl PartitionTreeStrategy {
         children: &[Child],
         dim: Dimension,
         direction: Option<Direction>,
+        scale: f32,
     ) -> Vec<Dimension> {
         let constraints = self.collect_constraints(hub, children);
 
         match direction {
             Some(Direction::Horizontal) => {
-                let height = dim
-                    .height
-                    .max(constraints.iter().map(|c| c.2).fold(0.0, f32::max));
+                let height = dim.height.max(
+                    constraints
+                        .iter()
+                        .map(|c| c.2)
+                        .fold(Length::ZERO, Length::max),
+                );
                 let width_constraints: Vec<_> = constraints.iter().map(|c| (c.0, c.1)).collect();
                 let widths = distribute_space(&width_constraints, dim.width);
-                let mut x = dim.x + (dim.width - widths.iter().sum::<f32>()) / 2.0;
+                let mut x = dim.x + (dim.width - widths.iter().copied().sum::<Length>()) / 2.0;
 
                 let mut result = Vec::with_capacity(children.len());
                 for i in 0..children.len() {
                     let (_, _, _, max_h) = constraints[i];
                     let (h, y_off) = apply_max_constraint(max_h, height);
-                    result.push(Dimension {
-                        x,
-                        y: dim.y + y_off,
-                        width: widths[i],
-                        height: h,
-                    });
+                    result.push(Dimension::new(x, dim.y + y_off, widths[i], h));
                     x += widths[i];
                 }
                 result
             }
             Some(Direction::Vertical) => {
-                let width = dim
-                    .width
-                    .max(constraints.iter().map(|c| c.0).fold(0.0, f32::max));
+                let width = dim.width.max(
+                    constraints
+                        .iter()
+                        .map(|c| c.0)
+                        .fold(Length::ZERO, Length::max),
+                );
                 let height_constraints: Vec<_> = constraints.iter().map(|c| (c.2, c.3)).collect();
                 let heights = distribute_space(&height_constraints, dim.height);
-                let mut y = dim.y + (dim.height - heights.iter().sum::<f32>()) / 2.0;
+                let mut y = dim.y + (dim.height - heights.iter().copied().sum::<Length>()) / 2.0;
 
                 let mut result = Vec::with_capacity(children.len());
                 for i in 0..children.len() {
                     let (_, max_w, _, _) = constraints[i];
                     let (w, x_off) = apply_max_constraint(max_w, width);
-                    result.push(Dimension {
-                        x: dim.x + x_off,
-                        y,
-                        width: w,
-                        height: heights[i],
-                    });
+                    result.push(Dimension::new(dim.x + x_off, y, w, heights[i]));
                     y += heights[i];
                 }
                 result
             }
             None => {
-                let content_y = dim.y + hub.config.tab_bar_height;
-                let content_height = dim.height - hub.config.tab_bar_height;
+                let tab_bar = hub.config.tab_bar_height.to_unit(scale).value();
+                let content_y = dim.y + Length::new(tab_bar);
+                let content_height = dim.height - Length::new(tab_bar);
 
                 let mut result = Vec::with_capacity(children.len());
                 for (_, max_w, _, max_h) in constraints {
                     let (w, x_off) = apply_max_constraint(max_w, dim.width);
                     let (h, y_off) = apply_max_constraint(max_h, content_height);
-                    result.push(Dimension {
-                        x: dim.x + x_off,
-                        y: content_y + y_off,
-                        width: w,
-                        height: h,
-                    });
+                    result.push(Dimension::new(dim.x + x_off, content_y + y_off, w, h));
                 }
                 result
             }
@@ -161,14 +153,14 @@ impl PartitionTreeStrategy {
         if focused_dim.x - offset_x + focused_dim.width > screen.width {
             offset_x = focused_dim.x + focused_dim.width - screen.width;
         }
-        if focused_dim.x - offset_x < 0.0 {
+        if focused_dim.x - offset_x < Length::ZERO {
             offset_x = focused_dim.x;
         }
 
         if focused_dim.y - offset_y + focused_dim.height > screen.height {
             offset_y = focused_dim.y + focused_dim.height - screen.height;
         }
-        if focused_dim.y - offset_y < 0.0 {
+        if focused_dim.y - offset_y < Length::ZERO {
             offset_y = focused_dim.y;
         }
 
@@ -189,43 +181,49 @@ impl PartitionTreeStrategy {
             Some(Child::Window(id)) => self.tiling_data(id).dimension,
             Some(Child::Container(id)) => self.containers.get(id).dimension,
             None => {
-                self.ws_state_mut(workspace_id).viewport_offset = (0.0, 0.0);
+                self.ws_state_mut(workspace_id).viewport_offset = (Length::ZERO, Length::ZERO);
                 return;
             }
         };
 
-        offset_x = offset_x.clamp(0.0, (root_dim.width - screen.width).max(0.0));
-        offset_y = offset_y.clamp(0.0, (root_dim.height - screen.height).max(0.0));
+        offset_x = offset_x.clamp(
+            Length::ZERO,
+            (root_dim.width - screen.width).max(Length::ZERO),
+        );
+        offset_y = offset_y.clamp(
+            Length::ZERO,
+            (root_dim.height - screen.height).max(Length::ZERO),
+        );
         self.ws_state_mut(workspace_id).viewport_offset = (offset_x, offset_y);
     }
 
     fn set_root_dimension(&mut self, hub: &mut HubAccess, root: Child, screen: Dimension) {
         let (min_w, min_h, max_w, max_h) = self.get_effective_constraints(hub, root);
-        let base_dim = Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: screen.width.max(min_w),
-            height: screen.height.max(min_h),
-        };
+        let base_dim: Dimension = Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            screen.width.max(min_w),
+            screen.height.max(min_h),
+        );
 
         let (w, x_off) = apply_max_constraint(max_w, base_dim.width);
         let (h, y_off) = apply_max_constraint(max_h, base_dim.height);
-        let dim = Dimension {
-            x: base_dim.x + x_off,
-            y: base_dim.y + y_off,
-            width: w,
-            height: h,
-        };
+        let dim = Dimension::new(base_dim.x + x_off, base_dim.y + y_off, w, h);
 
         self.set_split_child_dimension(hub, root, dim);
     }
 
-    fn update_container_min_size(&mut self, hub: &HubAccess, container_id: ContainerId) {
+    fn update_container_min_size(
+        &mut self,
+        hub: &HubAccess,
+        container_id: ContainerId,
+        scale: f32,
+    ) {
         let container = self.containers.get(container_id);
         let children = container.children.clone();
         let direction = container.direction();
 
-        let child_mins: Vec<(f32, f32)> = children
+        let child_mins: Vec<(Length, Length)> = children
             .iter()
             .map(|&c| {
                 let (min_w, min_h, _, _) = self.get_effective_constraints(hub, c);
@@ -235,19 +233,34 @@ impl PartitionTreeStrategy {
 
         let (min_w, min_h) = match direction {
             Some(Direction::Horizontal) => {
-                let sum_w: f32 = child_mins.iter().map(|(w, _)| *w).sum();
-                let max_h = child_mins.iter().map(|(_, h)| *h).fold(0.0, f32::max);
+                let sum_w: Length = child_mins.iter().map(|(w, _)| *w).sum();
+                let max_h = child_mins
+                    .iter()
+                    .map(|(_, h)| *h)
+                    .fold(Length::ZERO, Length::max);
                 (sum_w, max_h)
             }
             Some(Direction::Vertical) => {
-                let max_w = child_mins.iter().map(|(w, _)| *w).fold(0.0, f32::max);
-                let sum_h: f32 = child_mins.iter().map(|(_, h)| *h).sum();
+                let max_w = child_mins
+                    .iter()
+                    .map(|(w, _)| *w)
+                    .fold(Length::ZERO, Length::max);
+                let sum_h: Length = child_mins.iter().map(|(_, h)| *h).sum();
                 (max_w, sum_h)
             }
             None => {
-                let max_w = child_mins.iter().map(|(w, _)| *w).fold(0.0, f32::max);
-                let max_h = child_mins.iter().map(|(_, h)| *h).fold(0.0, f32::max);
-                (max_w, max_h + hub.config.tab_bar_height)
+                let max_w = child_mins
+                    .iter()
+                    .map(|(w, _)| *w)
+                    .fold(Length::ZERO, Length::max);
+                let max_h = child_mins
+                    .iter()
+                    .map(|(_, h)| *h)
+                    .fold(Length::ZERO, Length::max);
+                (
+                    max_w,
+                    max_h + Length::new(hub.config.tab_bar_height.to_unit(scale).value()),
+                )
             }
         };
 
@@ -267,7 +280,7 @@ impl PartitionTreeStrategy {
         &self,
         hub: &HubAccess,
         children: &[Child],
-    ) -> Vec<(f32, f32, f32, f32)> {
+    ) -> Vec<(Length, Length, Length, Length)> {
         children
             .iter()
             .map(|&c| {
@@ -302,45 +315,53 @@ impl PartitionTreeStrategy {
     }
 
     /// Returns (min_w, min_h, max_w, max_h). Window-specific max takes precedence over global min.
-    fn get_effective_constraints(&self, hub: &HubAccess, child: Child) -> (f32, f32, f32, f32) {
+    fn get_effective_constraints(
+        &self,
+        hub: &HubAccess,
+        child: Child,
+    ) -> (Length, Length, Length, Length) {
         let ws_id = match child {
             Child::Window(id) => hub.windows.get(id).workspace,
             Child::Container(id) => self.containers.get(id).workspace,
         };
-        let screen = hub
-            .monitors
-            .get(hub.workspaces.get(ws_id).monitor)
-            .dimension;
-        let global_min_w = hub.config.min_width.resolve(screen.width);
-        let global_min_h = hub.config.min_height.resolve(screen.height);
+        let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
+        let screen = monitor.dimension;
+        let scale = monitor.scale;
+        let global_min_w = hub.config.min_width.resolve(screen.width, scale);
+        let global_min_h = hub.config.min_height.resolve(screen.height, scale);
 
         match child {
             Child::Window(id) => {
                 let window = hub.windows.get(id);
-                let (win_min_w, win_min_h) = window.min_size();
-                let (win_max_w, win_max_h) = window.max_size();
+                // Window.min_*/max_* are raw f32 (pre-scaled platform hints); wrap at this Dimension seam.
+                let (win_min_w_raw, win_min_h_raw) = window.min_size();
+                let (win_max_w_raw, win_max_h_raw) = window.max_size();
+                let win_min_w = Length::new(win_min_w_raw);
+                let win_min_h = Length::new(win_min_h_raw);
+                let win_max_w = Length::new(win_max_w_raw);
+                let win_max_h = Length::new(win_max_h_raw);
 
-                let global_max_w = hub.config.max_width.resolve(screen.width);
-                let global_max_h = hub.config.max_height.resolve(screen.height);
+                let global_max_w = hub.config.max_width.resolve(screen.width, scale);
+                let global_max_h = hub.config.max_height.resolve(screen.height, scale);
 
-                let max_w = if win_max_w > 0.0 {
+                let max_w = if win_max_w > Length::ZERO {
                     win_max_w
                 } else {
                     global_max_w
                 };
-                let max_h = if win_max_h > 0.0 {
+                let max_h = if win_max_h > Length::ZERO {
                     win_max_h
                 } else {
                     global_max_h
                 };
 
                 // Window-specific max caps the effective min
-                let min_w = if max_w > 0.0 {
+                let min_w = if max_w > Length::ZERO {
                     win_min_w.max(global_min_w).min(max_w)
                 } else {
                     win_min_w.max(global_min_w)
                 };
-                let min_h = if max_h > 0.0 {
+                let min_h = if max_h > Length::ZERO {
                     win_min_h.max(global_min_h).min(max_h)
                 } else {
                     win_min_h.max(global_min_h)
@@ -350,54 +371,58 @@ impl PartitionTreeStrategy {
             }
             Child::Container(id) => {
                 let (min_w, min_h) = self.containers.get(id).min_size();
-                (min_w, min_h, 0.0, 0.0)
+                (min_w, min_h, Length::ZERO, Length::ZERO)
             }
         }
     }
 }
 
 /// Returns (size, offset) where offset is for centering within available space.
-fn apply_max_constraint(max: f32, available: f32) -> (f32, f32) {
-    if max > 0.0 && max < available {
+fn apply_max_constraint(max: Length, available: Length) -> (Length, Length) {
+    if max > Length::ZERO && max < available {
         (max, (available - max) / 2.0)
     } else {
-        (available, 0.0)
+        (available, Length::ZERO)
     }
 }
 
-fn distribute_space(constraints: &[(f32, f32)], container_size: f32) -> Vec<f32> {
-    let constraints: Vec<(f32, f32)> = constraints
+fn distribute_space(constraints: &[(Length, Length)], container_size: Length) -> Vec<Length> {
+    let constraints: Vec<(Length, Length)> = constraints
         .iter()
         .map(|&(min, max)| {
-            let max = if max == 0.0 { f32::INFINITY } else { max };
+            let max = if max == Length::ZERO {
+                Length::new(f32::INFINITY)
+            } else {
+                max
+            };
             (min, max)
         })
         .collect();
 
-    let sum_mins: f32 = constraints.iter().map(|(min, _)| min).sum();
+    let sum_mins: Length = constraints.iter().map(|(min, _)| *min).sum();
     if sum_mins >= container_size {
         return constraints.iter().map(|(min, _)| *min).collect();
     }
 
-    let all_finite = constraints.iter().all(|(_, max)| max.is_finite());
+    let all_finite = constraints.iter().all(|(_, max)| max.value().is_finite());
     if all_finite {
-        let sum_maxes: f32 = constraints.iter().map(|(_, max)| max).sum();
+        let sum_maxes: Length = constraints.iter().map(|(_, max)| *max).sum();
         if sum_maxes <= container_size {
             return constraints.iter().map(|(_, max)| *max).collect();
         }
     }
 
-    let mut low = 0.0;
-    let mut high = container_size;
+    let mut low = 0.0_f32;
+    let mut high = container_size.value();
     const EPSILON: f32 = 0.001;
 
     while high - low > EPSILON {
         let mid = (low + high) / 2.0;
         let total: f32 = constraints
             .iter()
-            .map(|(min, max)| mid.clamp(*min, *max))
+            .map(|(min, max)| mid.clamp(min.value(), max.value()))
             .sum();
-        if total > container_size {
+        if total > container_size.value() {
             high = mid;
         } else {
             low = mid;
@@ -406,6 +431,6 @@ fn distribute_space(constraints: &[(f32, f32)], container_size: f32) -> Vec<f32>
 
     constraints
         .iter()
-        .map(|(min, max)| low.clamp(*min, *max))
+        .map(|(min, max)| Length::new(low.clamp(min.value(), max.value())))
         .collect()
 }

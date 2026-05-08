@@ -237,8 +237,9 @@ impl Runner {
                 let observation = if inspect.is_fullscreen() {
                     ObservedPosition::Fullscreen
                 } else {
-                    let (x, y, w, h) = inspect.get_visible_rect();
-                    ObservedPosition::Visible(x, y, w, h)
+                    let rect = inspect.get_visible_rect();
+                    let monitor = inspect.get_monitor();
+                    ObservedPosition::Visible { rect, monitor }
                 };
                 Some((
                     inspect.get_window_title(),
@@ -283,8 +284,9 @@ impl Runner {
                 if inspect.is_fullscreen() {
                     ObservedPosition::Fullscreen
                 } else {
-                    let (x, y, w, h) = inspect.get_visible_rect();
-                    ObservedPosition::Visible(x, y, w, h)
+                    let rect = inspect.get_visible_rect();
+                    let monitor = inspect.get_monitor();
+                    ObservedPosition::Visible { rect, monitor }
                 }
             },
             move |observation, runner| {
@@ -302,6 +304,14 @@ impl Runner {
         for hwnd_id in to_refresh {
             self.dispatch_constraint_read(hwnd_id);
         }
+        self.dome.apply_layout();
+    }
+
+    pub(super) fn handle_dpi_change(&mut self, handle: isize, dpi: u32) {
+        self.dome.monitor_dpi_changed(handle, dpi);
+        // apply_layout is idempotent: runs even when monitor_dpi_changed
+        // early-returns on same-scale, because stored targets are physical
+        // and Hub state is unchanged so positions match.
         self.dome.apply_layout();
     }
 
@@ -324,11 +334,14 @@ impl Runner {
 
     fn dispatch_picker_icons(&mut self) {
         let to_load = self.dome.picker_icons_to_load();
+        let scale = self.dome.picker_scale().unwrap_or_else(|| {
+            panic!("dispatch_picker_icons: picker_visible() was true but picker_scale() returned None -- picker state desynced")
+        });
         for (app_id, hwnd_id) in to_load {
             self.dispatcher.dispatch(
                 move || {
                     let hwnd = windows::Win32::Foundation::HWND::from(hwnd_id);
-                    crate::platform::windows::dome::icon::load_app_icon(hwnd)
+                    crate::platform::windows::dome::icon::load_app_icon(hwnd, scale)
                         .map(|image| (app_id, image))
                 },
                 move |result, runner| {

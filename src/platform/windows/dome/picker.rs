@@ -3,19 +3,23 @@ use std::sync::Arc;
 
 use egui::TextureHandle;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWM_WINDOW_CORNER_PREFERENCE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     DwmSetWindowAttribute,
 };
-use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, EndPaint, MONITOR_DEFAULTTONEAREST, MonitorFromWindow, PAINTSTRUCT,
+};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, SWP_NOACTIVATE, SWP_NOZORDER,
-    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, WM_ERASEBKGND, WM_KEYDOWN, WM_KILLFOCUS,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
+    DefWindowProcW, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, PostThreadMessageW,
+    SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
+    WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_PAINT,
 };
 use windows::core::PCWSTR;
 
@@ -39,18 +43,39 @@ fn configure_picker_dwm(hwnd: HWND) {
 use super::HubEvent;
 use super::overlay::{OwnedHwnd, PickerApi, Renderer};
 use crate::action::{Action, Actions};
-use crate::core::{Dimension, WindowId};
+use crate::core::{Dimension, Physical, WindowId};
 use crate::font::FontConfig;
 use crate::picker::{PickerEntry, PickerResult};
 use crate::platform::windows::HubSender;
 use crate::platform::windows::external::HwndId;
+use crate::platform::windows::{WM_APP_DPI_CHANGE, WM_GETDPISCALEDSIZE};
 use crate::theme::{Flavor, Theme};
+
+const PICKER_WIDTH_LOGICAL: f32 = 400.0;
+const PICKER_HEIGHT_LOGICAL: f32 = 300.0;
+
+/// Compute centred physical-pixel rect for the picker window.
+/// Scales the logical 400x300 picker size to physical at entry, then clamps
+/// and centres within the (already physical) monitor rect.
+/// The `.max(1)` floor on dimensions prevents wgpu surface validation failure
+/// at degenerate scales.
+fn picker_physical_rect(scale: f32, monitor_physical: Dimension<Physical>) -> (i32, i32, u32, u32) {
+    let picker_w = PICKER_WIDTH_LOGICAL * scale;
+    let picker_h = PICKER_HEIGHT_LOGICAL * scale;
+    let w = picker_w.min(monitor_physical.width.value());
+    let h = picker_h.min(monitor_physical.height.value());
+    let x = monitor_physical.x.value() + (monitor_physical.width.value() - w) / 2.0;
+    let y = monitor_physical.y.value() + (monitor_physical.height.value() - h) / 2.0;
+    (
+        x.round() as i32,
+        y.round() as i32,
+        w.round().max(1.0) as u32,
+        h.round().max(1.0) as u32,
+    )
+}
 
 pub(in crate::platform::windows) const PICKER_OVERLAY_CLASS: PCWSTR =
     windows::core::w!("DomePickerOverlay");
-
-const PICKER_WIDTH: u32 = 400;
-const PICKER_HEIGHT: u32 = 300;
 
 /// Returns `(app_id, hwnd_id)` pairs for entries that need icon loading.
 /// Skips entries with no `app_id` and entries already present in `icon_textures`
@@ -82,8 +107,8 @@ pub(in crate::platform::windows) struct PickerWindow {
     selected_index: usize,
     hub_sender: HubSender,
     window: OwnedHwnd,
-    width: u32,
-    height: u32,
+    width_phys: u32,
+    height_phys: u32,
     pixels_per_point: f32,
     icon_textures: HashMap<String, Option<TextureHandle>>,
     /// Background threads cannot create TextureHandle (requires egui Context
@@ -107,20 +132,24 @@ impl PickerWindow {
         hub_sender: HubSender,
         flavor: Flavor,
         font: &FontConfig,
+        scale: f32,
     ) -> anyhow::Result<Box<Self>> {
-        let w = PICKER_WIDTH.min(monitor_dim.width as u32);
-        let h = PICKER_HEIGHT.min(monitor_dim.height as u32);
-        let x = monitor_dim.x as i32 + (monitor_dim.width as i32 - w as i32) / 2;
-        let y = monitor_dim.y as i32 + (monitor_dim.height as i32 - h as i32) / 2;
+        let (x, y, w_phys, h_phys) = picker_physical_rect(scale, monitor_dim);
 
         let window = OwnedHwnd::new(
             PICKER_OVERLAY_CLASS,
             windows::Win32::UI::WindowsAndMessaging::WS_EX_TOOLWINDOW
                 | windows::Win32::UI::WindowsAndMessaging::WS_EX_TOPMOST,
+            x,
+            y,
+            w_phys,
+            h_phys,
         )?;
         let hwnd = window.hwnd();
         configure_picker_dwm(hwnd);
-        let renderer = Renderer::new(instance, device, queue, hwnd, w, h, false, flavor, font)?;
+        let renderer = Renderer::new(
+            instance, device, queue, hwnd, w_phys, h_phys, false, flavor, font,
+        )?;
         let theme = Theme::from_flavor(flavor);
         // Renderer::new called set_theme with this flavor, which wrote catppuccin
         // values into egui Visuals. The set_visuals call below fully overwrites
@@ -137,26 +166,14 @@ impl PickerWindow {
             selected_index: 0,
             hub_sender,
             window,
-            width: w,
-            height: h,
-            pixels_per_point: 1.0,
+            width_phys: w_phys,
+            height_phys: h_phys,
+            pixels_per_point: scale,
             icon_textures: HashMap::new(),
             pending_icons: Vec::new(),
             flavor,
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
-        unsafe {
-            SetWindowPos(
-                hwnd,
-                None,
-                x,
-                y,
-                w as i32,
-                h as i32,
-                SWP_NOACTIVATE | SWP_NOZORDER,
-            )
-            .ok();
-        }
         boxed.window.show();
         if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
             tracing::warn!("SetForegroundWindow failed for picker window");
@@ -165,30 +182,33 @@ impl PickerWindow {
         Ok(boxed)
     }
 
-    fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension) {
-        let w = PICKER_WIDTH.min(monitor_dim.width as u32);
-        let h = PICKER_HEIGHT.min(monitor_dim.height as u32);
-        let x = monitor_dim.x as i32 + (monitor_dim.width as i32 - w as i32) / 2;
-        let y = monitor_dim.y as i32 + (monitor_dim.height as i32 - h as i32) / 2;
+    fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension, scale: f32) {
+        let (x, y, w_phys, h_phys) = picker_physical_rect(scale, monitor_dim);
         unsafe {
             SetWindowPos(
                 self.window.hwnd(),
                 None,
                 x,
                 y,
-                w as i32,
-                h as i32,
+                w_phys as i32,
+                h_phys as i32,
                 SWP_NOACTIVATE | SWP_NOZORDER,
             )
             .ok();
         }
-        if self.width != w || self.height != h {
-            self.renderer.resize(w, h);
-            self.width = w;
-            self.height = h;
+        // Clear cached icon textures when the monitor scale changes so icons
+        // are re-captured at the new physical density.
+        if self.pixels_per_point != scale {
+            self.icon_textures.clear();
+        }
+        if self.width_phys != w_phys || self.height_phys != h_phys {
+            self.renderer.resize(w_phys, h_phys);
+            self.width_phys = w_phys;
+            self.height_phys = h_phys;
         }
         self.entries = entries;
         self.selected_index = 0;
+        self.pixels_per_point = scale;
         self.pending_icons.clear();
         self.window.show();
         if !unsafe { SetForegroundWindow(self.window.hwnd()) }.as_bool() {
@@ -209,8 +229,8 @@ impl PickerWindow {
 /// Delegates to inherent methods via fully-qualified syntax (`PickerWindow::show`)
 /// to avoid infinite recursion, since the trait methods have the same names.
 impl PickerApi for PickerWindow {
-    fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension) {
-        PickerWindow::show(self, entries, monitor_dim);
+    fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension, scale: f32) {
+        PickerWindow::show(self, entries, monitor_dim, scale);
     }
 
     fn hide(&mut self) {
@@ -245,8 +265,8 @@ impl PickerApi for PickerWindow {
         let flavor = self.flavor;
         let mut pending_opt = Some(pending);
         let (result, new_textures) = self.renderer.render(
-            self.width,
-            self.height,
+            self.width_phys,
+            self.height_phys,
             self.pixels_per_point,
             events,
             |ctx| {
@@ -302,6 +322,33 @@ pub(in crate::platform::windows) unsafe extern "system" fn picker_wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     if msg == WM_ERASEBKGND {
+        return LRESULT(1);
+    }
+    // WM_DPICHANGED is per-window. Duplicate posts from multiple Dome
+    // wnd-procs on the same monitor are absorbed by monitor_dpi_changed.
+    if msg == WM_DPICHANGED {
+        let dpi = (wparam.0 & 0xFFFF) as u32;
+        let handle = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) }.0 as isize;
+        unsafe {
+            PostThreadMessageW(
+                GetCurrentThreadId(),
+                WM_APP_DPI_CHANGE,
+                WPARAM(dpi as usize),
+                LPARAM(handle),
+            )
+            .ok()
+        };
+        return LRESULT(0);
+    }
+    if msg == WM_GETDPISCALEDSIZE {
+        let mut rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut rect).ok() };
+        let size = SIZE {
+            cx: rect.right - rect.left,
+            cy: rect.bottom - rect.top,
+        };
+        let out = lparam.0 as *mut SIZE;
+        unsafe { *out = crate::platform::windows::wm_getdpiscaledsize_reply(size) };
         return LRESULT(1);
     }
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut PickerWindow;
@@ -397,17 +444,18 @@ pub(in crate::platform::windows) unsafe extern "system" fn picker_wnd_proc(
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::core::{Dimension, Hub};
+    use crate::core::{Dimension, Hub, Length, Physical};
     use crate::platform::windows::external::HwndId;
 
     fn test_hub() -> Hub {
         Hub::new(
-            Dimension {
-                x: 0.0,
-                y: 0.0,
-                width: 100.0,
-                height: 100.0,
-            },
+            Dimension::new(
+                Length::new(0.0),
+                Length::new(0.0),
+                Length::new(100.0),
+                Length::new(100.0),
+            ),
+            1.0,
             Config::default().into(),
         )
     }
@@ -476,5 +524,71 @@ mod tests {
         // Second call should return empty
         let result2 = collect_icons_to_load(&entries, &icon_textures, lookup_hwnd);
         assert!(result2.is_empty());
+    }
+
+    #[test]
+    fn picker_physical_rect_100() {
+        let monitor = Dimension::<Physical>::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(1920.0),
+            Length::new(1080.0),
+        );
+        assert_eq!(picker_physical_rect(1.0, monitor), (760, 390, 400, 300));
+    }
+
+    #[test]
+    fn picker_physical_rect_150() {
+        let monitor = Dimension::<Physical>::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(2880.0),
+            Length::new(1620.0),
+        );
+        assert_eq!(picker_physical_rect(1.5, monitor), (1140, 585, 600, 450));
+    }
+
+    #[test]
+    fn picker_physical_rect_200() {
+        let monitor = Dimension::<Physical>::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(3840.0),
+            Length::new(2160.0),
+        );
+        assert_eq!(picker_physical_rect(2.0, monitor), (1520, 780, 800, 600));
+    }
+
+    #[test]
+    fn picker_physical_rect_centers_offset_origin() {
+        let monitor = Dimension::<Physical>::new(
+            Length::new(200.0),
+            Length::new(100.0),
+            Length::new(3840.0),
+            Length::new(2160.0),
+        );
+        assert_eq!(picker_physical_rect(2.0, monitor), (1720, 880, 800, 600));
+    }
+
+    #[test]
+    fn picker_physical_rect_clamped_to_monitor() {
+        let monitor = Dimension::<Physical>::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(400.0),
+            Length::new(200.0),
+        );
+        assert_eq!(picker_physical_rect(2.0, monitor), (0, 0, 400, 200));
+    }
+
+    #[test]
+    fn picker_physical_rect_exact_monitor_match() {
+        let monitor = Dimension::<Physical>::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(400.0),
+            Length::new(300.0),
+        );
+        assert_eq!(picker_physical_rect(1.0, monitor), (0, 0, 400, 300));
     }
 }

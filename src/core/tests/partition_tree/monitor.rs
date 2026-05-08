@@ -1,5 +1,5 @@
 use crate::action::MonitorTarget;
-use crate::core::node::Dimension;
+use crate::core::node::{Dimension, Length};
 use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
@@ -10,12 +10,13 @@ fn move_container_to_monitor() {
     hub.insert_tiling();
     hub.add_monitor(
         "monitor-1".to_string(),
-        Dimension {
-            x: 150.0,
-            y: 0.0,
-            width: 100.0,
-            height: 30.0,
-        },
+        Dimension::new(
+            Length::new(150.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(30.0),
+        ),
+        1.0,
     );
     hub.focus_parent();
     hub.move_focused_to_monitor(&MonitorTarget::Right);
@@ -38,12 +39,13 @@ fn move_container_to_monitor_no_target() {
     hub.insert_tiling();
     hub.add_monitor(
         "monitor-1".to_string(),
-        Dimension {
-            x: 150.0,
-            y: 0.0,
-            width: 100.0,
-            height: 30.0,
-        },
+        Dimension::new(
+            Length::new(150.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(30.0),
+        ),
+        1.0,
     );
     hub.focus_parent();
     // No monitor to the left, should be a no-op
@@ -102,12 +104,13 @@ fn move_container_to_monitor_with_floats_on_workspace() {
     hub.focus_parent();
     hub.add_monitor(
         "monitor-1".to_string(),
-        Dimension {
-            x: 150.0,
-            y: 0.0,
-            width: 100.0,
-            height: 30.0,
-        },
+        Dimension::new(
+            Length::new(150.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(30.0),
+        ),
+        1.0,
     );
     // Should move the tiling container (W0+W2), not the float W1
     hub.move_focused_to_monitor(&MonitorTarget::Right);

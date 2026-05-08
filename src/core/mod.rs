@@ -18,7 +18,11 @@ pub(crate) use hub::{
     TilingWindowPlacement,
 };
 pub(crate) use node::Direction;
-pub(crate) use node::{ContainerId, Dimension, MonitorId, WindowId, WindowRestrictions};
+#[cfg(target_os = "windows")]
+pub(crate) use node::Physical;
+pub(crate) use node::{
+    ContainerId, Dimension, Length, Logical, MonitorId, Unit, WindowId, WindowRestrictions,
+};
 pub(crate) use strategy::TilingAction;
 
 pub(crate) use dto::WorkspaceInfo;

@@ -193,16 +193,17 @@ pub(crate) fn paint_picker(
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::core::{Dimension, Hub};
+    use crate::core::{Dimension, Hub, Length};
 
     fn test_hub() -> Hub {
         Hub::new(
-            Dimension {
-                x: 0.0,
-                y: 0.0,
-                width: 100.0,
-                height: 100.0,
-            },
+            Dimension::new(
+                Length::new(0.0),
+                Length::new(0.0),
+                Length::new(100.0),
+                Length::new(100.0),
+            ),
+            1.0,
             Config::default().into(),
         )
     }

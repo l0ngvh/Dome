@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crate::core::{Dimension, MonitorId, WindowId, WindowRestrictions};
+use crate::core::{Dimension, Length, MonitorId, Unit, WindowId, WindowRestrictions};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 
@@ -57,7 +57,7 @@ impl OffscreenPlacement {
     fn record_drift(&mut self, new_actual: RoundedDimension, monitors: &[MonitorInfo]) -> bool {
         self.actual = new_actual;
         let (hidden_x, hidden_y) = hidden_position(monitors);
-        if new_actual.x == hidden_x || new_actual.y == hidden_y {
+        if new_actual.x == hidden_x.value() as i32 || new_actual.y == hidden_y.value() as i32 {
             return false;
         }
         self.retries = self.retries.saturating_add(1);
@@ -216,25 +216,25 @@ impl Placement {
     }
 }
 
-pub(super) fn apply_inset(dim: Dimension, border: f32) -> Dimension {
-    Dimension {
-        x: dim.x + border,
-        y: dim.y + border,
-        width: (dim.width - 2.0 * border).max(0.0),
-        height: (dim.height - 2.0 * border).max(0.0),
-    }
+pub(super) fn apply_inset(dim: Dimension, border: Length<Unit>) -> Dimension {
+    Dimension::new(
+        dim.x + border,
+        dim.y + border,
+        (dim.width - border * 2.0).max(Length::ZERO),
+        (dim.height - border * 2.0).max(Length::ZERO),
+    )
 }
 
 /// Inverse of `apply_inset`: converts an observed content rect (post-inset, i32)
 /// back to the outer frame stored in core's `float_windows`.
 // TODO: revisit if config.border_size is ever non-integer -- round-trip can drift by +/-1 px per edge
-fn reverse_inset(rounded: RoundedDimension, border: f32) -> Dimension {
-    Dimension {
-        x: rounded.x as f32 - border,
-        y: rounded.y as f32 - border,
-        width: rounded.width as f32 + 2.0 * border,
-        height: rounded.height as f32 + 2.0 * border,
-    }
+fn reverse_inset(rounded: RoundedDimension, border: Length<Unit>) -> Dimension {
+    Dimension::new(
+        Length::new(rounded.x as f32) - border,
+        Length::new(rounded.y as f32) - border,
+        Length::new(rounded.width as f32) + border * 2.0,
+        Length::new(rounded.height as f32) + border * 2.0,
+    )
 }
 
 struct RawConstraint {
@@ -255,12 +255,26 @@ pub(super) struct RoundedDimension {
     pub(super) height: i32,
 }
 
+impl RoundedDimension {
+    /// Reconstruct a `Dimension<Logical>` from the stored i32 fields.
+    /// Used for drift correction: the stored target must be sent back to
+    /// `set_frame` which now speaks `Dimension<Logical>`.
+    fn to_dimension(self) -> Dimension {
+        Dimension::new(
+            Length::new(self.x as f32),
+            Length::new(self.y as f32),
+            Length::new(self.width as f32),
+            Length::new(self.height as f32),
+        )
+    }
+}
+
 fn round_dim(dim: Dimension) -> RoundedDimension {
     RoundedDimension {
-        x: dim.x.round() as i32,
-        y: dim.y.round() as i32,
-        width: dim.width.round() as i32,
-        height: dim.height.round() as i32,
+        x: dim.x.round().value() as i32,
+        y: dim.y.round().value() as i32,
+        width: dim.width.round().value() as i32,
+        height: dim.height.round().value() as i32,
     }
 }
 
@@ -277,12 +291,7 @@ pub(super) fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimen
     let y = rect.y.max(bounds.y);
     let right = (rect.x + rect.width).min(bounds.x + bounds.width);
     let bottom = (rect.y + rect.height).min(bounds.y + bounds.height);
-    Some(Dimension {
-        x,
-        y,
-        width: right - x,
-        height: bottom - y,
-    })
+    Some(Dimension::new(x, y, right - x, bottom - y))
 }
 
 pub(super) fn move_offscreen(
@@ -293,7 +302,7 @@ pub(super) fn move_offscreen(
     let (hidden_x, hidden_y) = hidden_position(monitors);
     // When spaces change or monitors are connected/disconnected, hidden windows
     // may be moved to visible state, so we need to re-hide them
-    if actual.x == hidden_x || actual.y == hidden_y {
+    if actual.x == hidden_x.value() as i32 || actual.y == hidden_y.value() as i32 {
         return Ok(());
     }
     ax.hide_at(hidden_x, hidden_y)
@@ -307,17 +316,21 @@ pub(super) fn hidden_monitor(monitors: &[MonitorInfo]) -> &MonitorInfo {
     monitors
         .iter()
         .max_by_key(|m| {
-            (m.dimension.x + m.dimension.width) as i32 + (m.dimension.y + m.dimension.height) as i32
+            (m.dimension.x + m.dimension.width).value() as i32
+                + (m.dimension.y + m.dimension.height).value() as i32
         })
         .unwrap()
 }
 
-fn hidden_position(monitors: &[MonitorInfo]) -> (i32, i32) {
+fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
     // MacOS doesn't allow completely set windows offscreen, so we need to leave at
     // least one pixel left
     // https://nikitabobko.github.io/AeroSpace/guide#emulation-of-virtual-workspaces
     let d = &hidden_monitor(monitors).dimension;
-    ((d.x + d.width - 1.0) as i32, (d.y + d.height - 1.0) as i32)
+    (
+        d.x + d.width - Length::new(1.0),
+        d.y + d.height - Length::new(1.0),
+    )
 }
 
 impl Dome {
@@ -334,20 +347,14 @@ impl Dome {
         match &mut window.state {
             WindowState::Positioned(PositionedState::Tiling(p)) if !is_float => {
                 if p.set_target(target)
-                    && let Err(e) =
-                        window
-                            .ax
-                            .set_frame(target.x, target.y, target.width, target.height)
+                    && let Err(e) = window.ax.set_frame(dim.round())
                 {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
             WindowState::Positioned(PositionedState::Float(fp)) if is_float => {
                 if fp.set_target(target)
-                    && let Err(e) =
-                        window
-                            .ax
-                            .set_frame(target.x, target.y, target.width, target.height)
+                    && let Err(e) = window.ax.set_frame(dim.round())
                 {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
@@ -364,10 +371,7 @@ impl Dome {
                         Placement::new(target, target),
                     ));
                 }
-                if let Err(e) = window
-                    .ax
-                    .set_frame(target.x, target.y, target.width, target.height)
-                {
+                if let Err(e) = window.ax.set_frame(dim.round()) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
@@ -382,10 +386,7 @@ impl Dome {
                         Placement::new(actual, target),
                     ));
                 }
-                if let Err(e) = window
-                    .ax
-                    .set_frame(target.x, target.y, target.width, target.height)
-                {
+                if let Err(e) = window.ax.set_frame(dim.round()) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
@@ -419,21 +420,14 @@ impl Dome {
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     actual, target,
                 )));
-                if let Err(err) =
-                    window
-                        .ax
-                        .set_frame(target.x, target.y, target.width, target.height)
-                {
+                if let Err(err) = window.ax.set_frame(screen_dim.round()) {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
             }
             WindowState::Positioned(PositionedState::Tiling(p)) => {
                 let target = round_dim(screen_dim);
                 if p.set_target(target)
-                    && let Err(err) =
-                        window
-                            .ax
-                            .set_frame(target.x, target.y, target.width, target.height)
+                    && let Err(err) = window.ax.set_frame(screen_dim.round())
                 {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
@@ -441,10 +435,7 @@ impl Dome {
             WindowState::Positioned(PositionedState::Float(fp)) => {
                 let target = round_dim(screen_dim);
                 if fp.set_target(target)
-                    && let Err(err) =
-                        window
-                            .ax
-                            .set_frame(target.x, target.y, target.width, target.height)
+                    && let Err(err) = window.ax.set_frame(screen_dim.round())
                 {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
@@ -490,10 +481,10 @@ impl Dome {
         let is_borderless_fullscreen = monitor.is_some_and(|m| {
             let mon = &m.dimension;
             let tolerance = 2;
-            (new_placement.x - mon.x as i32).abs() <= tolerance
-                && (new_placement.y - mon.y as i32).abs() <= tolerance
-                && (new_placement.width - mon.width as i32).abs() <= tolerance
-                && (new_placement.height - mon.height as i32).abs() <= tolerance
+            (new_placement.x - mon.x.value() as i32).abs() <= tolerance
+                && (new_placement.y - mon.y.value() as i32).abs() <= tolerance
+                && (new_placement.width - mon.width.value() as i32).abs() <= tolerance
+                && (new_placement.height - mon.height.value() as i32).abs() <= tolerance
         });
 
         tracing::Span::current().record("window", window.to_string());
@@ -547,10 +538,7 @@ impl Dome {
                 if observed_at.first <= p.placed_at + Duration::from_secs(1) {
                     if p.has_drifted(new_placement) {
                         if let Some(target) = p.observe_drift(new_placement)
-                            && let Err(e) =
-                                window
-                                    .ax
-                                    .set_frame(target.x, target.y, target.width, target.height)
+                            && let Err(e) = window.ax.set_frame(target.to_dimension())
                         {
                             tracing::trace!("Window {} set_frame failed: {e}", window);
                         }
@@ -577,10 +565,7 @@ impl Dome {
                     // This is likely not caused by Dome calling AX's set_frame but by app
                     // resizing itself or user move actions.
                     if let Some(target) = p.observe_drift(new_placement)
-                        && let Err(e) =
-                            window
-                                .ax
-                                .set_frame(target.x, target.y, target.width, target.height)
+                        && let Err(e) = window.ax.set_frame(target.to_dimension())
                     {
                         tracing::trace!("Window {} set_frame failed: {e}", window);
                     }
@@ -608,7 +593,8 @@ impl Dome {
                 // Write target directly -- placed_at is NOT bumped because
                 // this is an observation, not an outbound set_frame.
                 fp.target = new_placement;
-                let outer_dim = reverse_inset(new_placement, self.config.border_size);
+                let outer_dim =
+                    reverse_inset(new_placement, Length::<Unit>::new(self.config.border_size));
                 self.hub.update_float_dimension(window_id, outer_dim);
             }
             WindowState::Minimized => {

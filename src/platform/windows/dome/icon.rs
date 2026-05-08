@@ -9,18 +9,32 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SendMessageTimeoutW, WM_GETICON,
 };
 
-const ICON_PX: i32 = 48;
 const MSG_TIMEOUT_MS: u32 = 100;
 
+/// Logical icon edge length matching `ICON_SIZE` in `src/picker.rs`.
+/// Used by `icon_px_for_scale` to derive the physical capture size.
+const ICON_PX_LOGICAL: i32 = 24;
+
+/// Physical icon capture size for a given monitor scale.
+/// Scales `ICON_PX_LOGICAL` by the monitor scale factor, with a 16-physical-pixel
+/// floor because `DrawIconEx` rasterising a shared HICON below ~16px loses
+/// recognisable shape.
+pub(in crate::platform::windows) fn icon_px_for_scale(scale: f32) -> i32 {
+    ((ICON_PX_LOGICAL as f32 * scale).round() as i32).max(16)
+}
+
 /// Loads the application icon for a window via `WM_GETICON` with a 100ms timeout,
-/// falling back to `GetClassLongPtrW`. Returns a 48x48 RGBA `ColorImage`.
+/// falling back to `GetClassLongPtrW`. Returns an RGBA `ColorImage` sized by
+/// [`icon_px_for_scale`] (`ICON_PX_LOGICAL` x
+/// monitor scale, clamped to a 16-physical-pixel floor).
 ///
 /// Runs on a background thread because `SendMessageTimeoutW` can block up to
 /// `MSG_TIMEOUT_MS` per window.
 ///
 /// Does NOT call `DestroyIcon` on the returned HICON -- these are shared handles
 /// owned by the window class.
-pub(in crate::platform::windows) fn load_app_icon(hwnd: HWND) -> Option<ColorImage> {
+pub(in crate::platform::windows) fn load_app_icon(hwnd: HWND, scale: f32) -> Option<ColorImage> {
+    let icon_px = icon_px_for_scale(scale);
     let hicon = get_icon_handle(hwnd)?;
 
     let screen_dc = unsafe { CreateCompatibleDC(None) };
@@ -29,7 +43,7 @@ pub(in crate::platform::windows) fn load_app_icon(hwnd: HWND) -> Option<ColorIma
     }
     let _dc_guard = DcGuard(screen_dc);
 
-    let hbm = unsafe { CreateCompatibleBitmap(screen_dc, ICON_PX, ICON_PX) };
+    let hbm = unsafe { CreateCompatibleBitmap(screen_dc, icon_px, icon_px) };
     if hbm.is_invalid() {
         return None;
     }
@@ -45,8 +59,8 @@ pub(in crate::platform::windows) fn load_app_icon(hwnd: HWND) -> Option<ColorIma
         old: old_bm,
     };
 
-    // Draw the icon into the memory DC at ICON_PX x ICON_PX.
-    if unsafe { DrawIconEx(mem_dc, 0, 0, hicon, ICON_PX, ICON_PX, 0, None, DI_NORMAL) }.is_err() {
+    // Draw the icon into the memory DC at icon_px x icon_px.
+    if unsafe { DrawIconEx(mem_dc, 0, 0, hicon, icon_px, icon_px, 0, None, DI_NORMAL) }.is_err() {
         return None;
     }
 
@@ -54,8 +68,8 @@ pub(in crate::platform::windows) fn load_app_icon(hwnd: HWND) -> Option<ColorIma
     let mut bmi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: ICON_PX,
-            biHeight: -ICON_PX, // top-down
+            biWidth: icon_px,
+            biHeight: -icon_px, // top-down
             biPlanes: 1,
             biBitCount: 32,
             biCompression: BI_RGB.0,
@@ -63,14 +77,14 @@ pub(in crate::platform::windows) fn load_app_icon(hwnd: HWND) -> Option<ColorIma
         },
         ..Default::default() // no color table for 32-bit
     };
-    let pixel_count = (ICON_PX * ICON_PX) as usize;
+    let pixel_count = (icon_px * icon_px) as usize;
     let mut buf = vec![0u8; pixel_count * 4];
     let rows = unsafe {
         GetDIBits(
             mem_dc,
             hbm,
             0,
-            ICON_PX as u32,
+            icon_px as u32,
             Some(buf.as_mut_ptr().cast()),
             &mut bmi,
             DIB_RGB_COLORS,
@@ -86,7 +100,7 @@ pub(in crate::platform::windows) fn load_app_icon(hwnd: HWND) -> Option<ColorIma
     }
 
     Some(ColorImage::from_rgba_unmultiplied(
-        [ICON_PX as usize, ICON_PX as usize],
+        [icon_px as usize, icon_px as usize],
         &buf,
     ))
 }

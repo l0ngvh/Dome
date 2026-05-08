@@ -29,7 +29,7 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSNumber, NSString};
 
 use crate::config::{Config, start_config_watcher};
-use crate::core::Dimension;
+use crate::core::{Dimension, Length};
 use crate::ipc;
 use crate::keymap::KeymapState;
 use crate::logging::Logger;
@@ -164,6 +164,9 @@ pub(in crate::platform::macos) struct MonitorInfo {
     pub(in crate::platform::macos) dimension: Dimension,
     pub(in crate::platform::macos) full_height: f32,
     pub(in crate::platform::macos) is_primary: bool,
+    /// NSScreen.backingScaleFactor — used for egui render density only.
+    /// This is NOT core Monitor.scale (which is always 1.0 on macOS because
+    /// AppKit already reports points, so no DPI conversion is needed).
     pub(in crate::platform::macos) scale: f64,
 }
 
@@ -207,12 +210,12 @@ fn get_all_screens(mtm: MainThreadMarker) -> Vec<MonitorInfo> {
             MonitorInfo {
                 display_id,
                 name,
-                dimension: Dimension {
-                    x: bounds.origin.x as f32,
-                    y: (bounds.origin.y + top_inset) as f32,
-                    width: bounds.size.width as f32,
-                    height: (bounds.size.height - top_inset - bottom_inset) as f32,
-                },
+                dimension: Dimension::new(
+                    Length::new(bounds.origin.x as f32),
+                    Length::new((bounds.origin.y + top_inset) as f32),
+                    Length::new(bounds.size.width as f32),
+                    Length::new((bounds.size.height - top_inset - bottom_inset) as f32),
+                ),
                 full_height: bounds.size.height as f32,
                 is_primary: display_id == primary_id,
                 scale: screen.backingScaleFactor(),

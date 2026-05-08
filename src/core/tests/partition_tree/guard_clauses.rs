@@ -1,4 +1,4 @@
-use crate::core::node::Dimension;
+use crate::core::node::{Dimension, Length};
 use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
@@ -68,12 +68,12 @@ fn move_in_direction_noop() {
     assert_eq!(before, snapshot(&hub));
 
     let mut hub = setup();
-    hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(30.0),
+        Length::new(20.0),
+    ));
     let before = snapshot(&hub);
     assert_snapshot!(&before, @"
     Hub(focused=WindowId(0))
@@ -197,12 +197,12 @@ fn focus_tab_noop() {
     assert_eq!(before, snapshot(&hub));
 
     let mut hub = setup();
-    hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(30.0),
+        Length::new(20.0),
+    ));
     let before = snapshot(&hub);
     assert_snapshot!(&before, @"
     Hub(focused=WindowId(0))
@@ -345,12 +345,12 @@ fn toggle_container_layout_noop() {
     assert_eq!(before, snapshot(&hub));
 
     let mut hub = setup();
-    hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(30.0),
+        Length::new(20.0),
+    ));
     let before = snapshot(&hub);
     assert_snapshot!(&before, @"
     Hub(focused=WindowId(0))
@@ -442,12 +442,12 @@ fn toggle_direction_noop() {
     assert_eq!(before, snapshot(&hub));
 
     let mut hub = setup();
-    hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(30.0),
+        Length::new(20.0),
+    ));
     let before = snapshot(&hub);
     assert_snapshot!(&before, @"
     Hub(focused=WindowId(0))
@@ -497,12 +497,12 @@ fn toggle_spawn_mode_noop() {
     assert_eq!(before, snapshot(&hub));
 
     let mut hub = setup();
-    hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(30.0),
+        Length::new(20.0),
+    ));
     let before = snapshot(&hub);
     assert_snapshot!(&before, @"
     Hub(focused=WindowId(0))
@@ -552,12 +552,12 @@ fn focus_parent_noop() {
     assert_eq!(before, snapshot(&hub));
 
     let mut hub = setup();
-    hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 30.0,
-        height: 20.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(30.0),
+        Length::new(20.0),
+    ));
     let before = snapshot(&hub);
     assert_snapshot!(&before, @"
     Hub(focused=WindowId(0))

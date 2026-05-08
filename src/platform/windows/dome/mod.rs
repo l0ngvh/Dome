@@ -17,7 +17,7 @@ use crate::action::{
 use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, MonitorId,
-    MonitorLayout, TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
+    MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::font::{FontConfig, font_changed};
 use crate::picker::{PickerEntry, build_picker_entries};
@@ -32,7 +32,10 @@ use self::window::{PositionedState, WindowState};
 #[derive(Clone, Copy)]
 pub(super) enum ObservedPosition {
     Fullscreen,
-    Visible(i32, i32, i32, i32),
+    Visible {
+        rect: Dimension<Physical>,
+        monitor: isize,
+    },
 }
 use super::ScreenInfo;
 use super::external::{HwndId, ManageExternalHwnd, ShowCmd};
@@ -58,8 +61,12 @@ pub(super) enum HubEvent {
     Shutdown,
 }
 
-struct DisplayedMonitor {
-    window_ids: HashSet<WindowId>,
+/// Per-monitor state: physical dimension, DPI scale, and the set of windows
+/// currently laid out on this monitor (rebuilt each `apply_layout` pass).
+pub(super) struct MonitorState {
+    dimension: Dimension,
+    scale: f32,
+    displayed: HashSet<WindowId>,
 }
 
 struct MonitorPositionData {
@@ -71,11 +78,18 @@ struct MonitorPositionData {
 }
 
 pub(super) trait CreateOverlay {
-    fn create_tiling_overlay(&self, config: Config) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
+    fn create_tiling_overlay(
+        &self,
+        config: Config,
+        monitor: Dimension,
+        scale: f32,
+    ) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
     fn create_float_overlay(
         &self,
         flavor: Flavor,
         font: &FontConfig,
+        scale: f32,
+        visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
     fn create_picker(
         &self,
@@ -83,6 +97,7 @@ pub(super) trait CreateOverlay {
         monitor_dim: Dimension,
         flavor: Flavor,
         font: &FontConfig,
+        scale: f32,
     ) -> anyhow::Result<Box<dyn overlay::PickerApi>>;
 }
 
@@ -109,8 +124,7 @@ pub(super) struct Dome {
     hub: Hub,
     registry: WindowRegistry,
     monitor_handles: HashMap<isize, MonitorId>,
-    monitor_dimensions: HashMap<MonitorId, Dimension>,
-    displayed: HashMap<MonitorId, DisplayedMonitor>,
+    monitors: HashMap<MonitorId, MonitorState>,
     config: Config,
     taskbar: Rc<dyn ManageTaskbar>,
     overlay_factory: Box<dyn CreateOverlay>,
@@ -143,14 +157,23 @@ impl Dome {
         let screens = display.get_all_screens()?;
         anyhow::ensure!(!screens.is_empty(), "No monitors detected");
         let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
-        let mut hub = Hub::new(primary.dimension, config.clone().into());
+        let mut hub = Hub::new(primary.dimension, primary.scale, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_handles = HashMap::new();
-        let mut monitor_dimensions = HashMap::new();
+        let mut monitors = HashMap::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
         monitor_handles.insert(primary.handle, primary_monitor_id);
-        monitor_dimensions.insert(primary_monitor_id, primary.dimension);
-        if let Ok(overlay) = overlay_factory.create_tiling_overlay(config.clone()) {
+        monitors.insert(
+            primary_monitor_id,
+            MonitorState {
+                dimension: primary.dimension,
+                scale: primary.scale,
+                displayed: HashSet::new(),
+            },
+        );
+        if let Ok(overlay) =
+            overlay_factory.create_tiling_overlay(config.clone(), primary.dimension, primary.scale)
+        {
             tiling_overlays.insert(primary_monitor_id, overlay);
         }
         tracing::info!(
@@ -162,10 +185,21 @@ impl Dome {
 
         for screen in &screens {
             if screen.handle != primary.handle {
-                let id = hub.add_monitor(screen.name.clone(), screen.dimension);
+                let id = hub.add_monitor(screen.name.clone(), screen.dimension, screen.scale);
                 monitor_handles.insert(screen.handle, id);
-                monitor_dimensions.insert(id, screen.dimension);
-                if let Ok(overlay) = overlay_factory.create_tiling_overlay(config.clone()) {
+                monitors.insert(
+                    id,
+                    MonitorState {
+                        dimension: screen.dimension,
+                        scale: screen.scale,
+                        displayed: HashSet::new(),
+                    },
+                );
+                if let Ok(overlay) = overlay_factory.create_tiling_overlay(
+                    config.clone(),
+                    screen.dimension,
+                    screen.scale,
+                ) {
                     tiling_overlays.insert(id, overlay);
                 }
                 tracing::info!(
@@ -181,8 +215,7 @@ impl Dome {
             hub,
             registry: WindowRegistry::new(),
             monitor_handles,
-            monitor_dimensions,
-            displayed: HashMap::new(),
+            monitors,
             config,
             taskbar: taskbar.clone(),
             overlay_factory,
@@ -267,7 +300,8 @@ impl Dome {
         if let Some(entry) = self.registry.get_mut(id) {
             entry.state = WindowState::Positioned(PositionedState::Offscreen {
                 retries: 0,
-                actual: (0, 0, 0, 0),
+                // Zero placeholder: next apply_layout will position this window.
+                actual: Dimension::default(),
             });
         }
     }
@@ -352,19 +386,13 @@ impl Dome {
                 self.hub
                     .insert_fullscreen(WindowRestrictions::ProtectFullscreen),
             ),
-            ObservedPosition::Visible(x, y, w, h) => {
-                let dim = Dimension {
-                    x: x as f32,
-                    y: y as f32,
-                    width: w as f32,
-                    height: h as f32,
-                };
+            ObservedPosition::Visible { rect, .. } => {
                 let offscreen = WindowState::Positioned(PositionedState::Offscreen {
                     retries: 0,
-                    actual: (x, y, w, h),
+                    actual: rect,
                 });
                 if ext.should_float() {
-                    (offscreen, self.hub.insert_float(dim))
+                    (offscreen, self.hub.insert_float(rect))
                 } else {
                     (offscreen, self.hub.insert_tiling())
                 }
@@ -399,15 +427,27 @@ impl Dome {
         if let Some(id) = self.registry.remove_by_hwnd(id_key) {
             tracing::info!(%id, "Window removed");
             self.float_overlays.remove(&id);
-            for dm in self.displayed.values_mut() {
-                dm.window_ids.remove(&id);
+            for ms in self.monitors.values_mut() {
+                ms.displayed.remove(&id);
             }
             self.hub.delete_window(id);
         }
     }
 
+    fn resolve_window_monitor(&self, id: WindowId) -> MonitorId {
+        match self.registry.get(id).map(|e| e.state) {
+            Some(WindowState::Positioned(PositionedState::Tiling(d))) => d.monitor,
+            Some(WindowState::Positioned(PositionedState::Float(fp))) => fp.monitor,
+            // Offscreen, FullscreenBorderless, FullscreenExclusive, Minimized,
+            // UserMinimized, or unregistered: best-effort fallback to focused monitor.
+            // The next apply_layout retriggers set_constraints via the Tiling/Float branch.
+            _ => self.hub.focused_monitor(),
+        }
+    }
+
     pub(super) fn set_constraints(&mut self, id: WindowId, constraints: (f32, f32, f32, f32)) {
-        let border = self.config.border_size;
+        let monitor = self.resolve_window_monitor(id);
+        let border = self.physical_border(monitor).value();
         let (min_w, min_h, max_w, max_h) = constraints;
         if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
             let to_frame = |v: f32| {
@@ -456,7 +496,7 @@ impl Dome {
         };
         match observation {
             ObservedPosition::Fullscreen => self.window_entered_borderless_fullscreen(id),
-            ObservedPosition::Visible(x, y, w, h) => self.window_drifted(id, x, y, w, h),
+            ObservedPosition::Visible { rect, monitor } => self.window_drifted(id, rect, monitor),
         }
     }
 
@@ -554,8 +594,10 @@ impl Dome {
                     (Some(e.process.clone()), Some(display))
                 });
                 let focused_monitor = self.hub.focused_monitor();
-                let monitor_dim = self.monitor_dimensions[&focused_monitor];
-                pw.show(entries, monitor_dim);
+                let ms = &self.monitors[&focused_monitor];
+                let monitor_dim = ms.dimension;
+                let scale = ms.scale;
+                pw.show(entries, monitor_dim, scale);
             }
             None => {
                 let minimized = self.hub.minimized_window_entries();
@@ -571,12 +613,13 @@ impl Dome {
                     (Some(e.process.clone()), Some(display))
                 });
                 let focused_monitor = self.hub.focused_monitor();
-                let monitor_dim = self.monitor_dimensions[&focused_monitor];
+                let monitor_dim = self.monitors[&focused_monitor].dimension;
                 match self.overlay_factory.create_picker(
                     entries,
                     monitor_dim,
                     self.config.theme,
                     &self.config.font,
+                    self.monitors[&focused_monitor].scale,
                 ) {
                     Ok(pw) => {
                         self.picker = Some(pw);
@@ -607,6 +650,15 @@ impl Dome {
         self.picker.as_ref().is_some_and(|p| p.is_visible())
     }
 
+    pub(super) fn picker_scale(&self) -> Option<f32> {
+        let picker = self.picker.as_ref()?;
+        if !picker.is_visible() {
+            return None;
+        }
+        let focused = self.hub.focused_monitor();
+        Some(self.monitors[&focused].scale)
+    }
+
     pub(super) fn picker_rerender(&mut self) {
         if let Some(picker) = &mut self.picker {
             picker.rerender();
@@ -627,7 +679,8 @@ impl Dome {
             entry.ext.show_cmd(ShowCmd::Restore);
             entry.state = WindowState::Positioned(PositionedState::Offscreen {
                 retries: 0,
-                actual: (0, 0, 0, 0),
+                // Zero placeholder: next apply_layout will position this window.
+                actual: Dimension::default(),
             });
         }
     }
@@ -642,10 +695,10 @@ impl Dome {
         let focused = focused_window;
 
         let mut per_monitor: Vec<MonitorPositionData> = Vec::new();
-        let mut new_displayed: HashMap<MonitorId, DisplayedMonitor> = HashMap::new();
+        let mut new_displayed: HashMap<MonitorId, HashSet<WindowId>> = HashMap::new();
 
         for mp in result.monitors {
-            let dimension = self.monitor_dimensions[&mp.monitor_id];
+            let dimension = self.monitors[&mp.monitor_id].dimension;
 
             let mut window_ids = HashSet::new();
 
@@ -695,21 +748,17 @@ impl Dome {
                 }
             }
 
-            new_displayed.insert(mp.monitor_id, DisplayedMonitor { window_ids });
+            new_displayed.insert(mp.monitor_id, window_ids);
         }
 
         // Global diff
         let old_window_ids: HashSet<WindowId> = self
-            .displayed
+            .monitors
             .values()
-            .flat_map(|m| &m.window_ids)
+            .flat_map(|ms| &ms.displayed)
             .copied()
             .collect();
-        let new_window_ids: HashSet<WindowId> = new_displayed
-            .values()
-            .flat_map(|m| &m.window_ids)
-            .copied()
-            .collect();
+        let new_window_ids: HashSet<WindowId> = new_displayed.values().flatten().copied().collect();
         let to_hide: Vec<WindowId> = old_window_ids
             .difference(&new_window_ids)
             .copied()
@@ -719,7 +768,16 @@ impl Dome {
             .copied()
             .collect();
 
-        self.displayed = new_displayed;
+        // Update displayed state on each monitor.
+        // Clear all first, then set the ones that have placements this pass.
+        for ms in self.monitors.values_mut() {
+            ms.displayed.clear();
+        }
+        for (mid, dm) in new_displayed {
+            if let Some(ms) = self.monitors.get_mut(&mid) {
+                ms.displayed = dm;
+            }
+        }
 
         // Hide
         for &id in &to_hide {
@@ -793,10 +851,12 @@ impl Dome {
                     continue;
                 }
                 if !self.float_overlays.contains_key(&wp.id) {
-                    match self
-                        .overlay_factory
-                        .create_float_overlay(self.config.theme, &self.config.font)
-                    {
+                    match self.overlay_factory.create_float_overlay(
+                        self.config.theme,
+                        &self.config.font,
+                        self.monitors[&data.monitor_id].scale,
+                        wp.visible_frame,
+                    ) {
                         Ok(o) => {
                             self.float_overlays.insert(wp.id, o);
                         }
@@ -837,10 +897,16 @@ impl Dome {
                 }
                 self.show_tiling(wp.id, wp, data.monitor_id);
             }
+            let scale = self.monitors[&data.monitor_id].scale;
             self.tiling_overlays
                 .get_mut(&data.monitor_id)
                 .unwrap()
-                .update(data.dimension, &data.tiling_windows, &data.containers);
+                .update(
+                    data.dimension,
+                    &data.tiling_windows,
+                    &data.containers,
+                    scale,
+                );
         }
     }
 
@@ -879,13 +945,23 @@ impl Dome {
 
         for screen in &screens {
             if !self.monitor_handles.contains_key(&screen.handle) {
-                let id = self.hub.add_monitor(screen.name.clone(), screen.dimension);
+                let id = self
+                    .hub
+                    .add_monitor(screen.name.clone(), screen.dimension, screen.scale);
                 self.monitor_handles.insert(screen.handle, id);
-                self.monitor_dimensions.insert(id, screen.dimension);
-                if let Ok(overlay) = self
-                    .overlay_factory
-                    .create_tiling_overlay(self.config.clone())
-                {
+                self.monitors.insert(
+                    id,
+                    MonitorState {
+                        dimension: screen.dimension,
+                        scale: screen.scale,
+                        displayed: HashSet::new(),
+                    },
+                );
+                if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
+                    self.config.clone(),
+                    screen.dimension,
+                    screen.scale,
+                ) {
                     self.tiling_overlays.insert(id, overlay);
                 }
                 tracing::info!(
@@ -915,7 +991,7 @@ impl Dome {
             {
                 self.hub.remove_monitor(monitor_id, fallback_id);
                 self.monitor_handles.retain(|_, &mut id| id != monitor_id);
-                self.monitor_dimensions.remove(&monitor_id);
+                self.monitors.remove(&monitor_id);
                 self.tiling_overlays.remove(&monitor_id);
                 tracing::info!(%monitor_id, fallback = %fallback_id, "Monitor removed");
             }
@@ -923,19 +999,54 @@ impl Dome {
 
         for screen in &screens {
             if let Some(&id) = self.monitor_handles.get(&screen.handle)
-                && self.monitor_dimensions.get(&id) != Some(&screen.dimension)
+                && let Some(ms) = self.monitors.get(&id)
+                && (ms.dimension != screen.dimension || ms.scale != screen.scale)
             {
-                let old_dim = self.monitor_dimensions.get(&id).copied();
+                let old_dim = Some(ms.dimension);
+                let old_scale = Some(ms.scale);
                 tracing::info!(
                     name = %screen.name,
                     ?old_dim,
                     new_dim = ?screen.dimension,
+                    ?old_scale,
+                    new_scale = ?screen.scale,
                     "Monitor dimension changed"
                 );
-                self.monitor_dimensions.insert(id, screen.dimension);
-                self.hub.update_monitor_dimension(id, screen.dimension);
+                let ms = self.monitors.get_mut(&id).expect("just checked");
+                ms.dimension = screen.dimension;
+                ms.scale = screen.scale;
+                self.hub.update_monitor(id, screen.dimension, screen.scale);
             }
         }
+    }
+
+    /// Updates the DPI scale for a monitor identified by its Win32 HMONITOR handle.
+    /// Called from the dome-thread message loop when WM_APP_DPI_CHANGE arrives.
+    ///
+    /// Early-returns silently when the computed scale equals the stored value.
+    /// This absorbs duplicate posts from multiple Dome-owned wnd-procs on the
+    /// same monitor (all four HWNDs default to the primary monitor, so a
+    /// primary-monitor DPI change posts WM_APP_DPI_CHANGE four times).
+    pub(super) fn monitor_dpi_changed(&mut self, handle: isize, dpi: u32) {
+        let Some(&id) = self.monitor_handles.get(&handle) else {
+            tracing::warn!(handle, dpi, "DPI change for unknown monitor handle");
+            return;
+        };
+        let scale = dpi as f32 / crate::platform::windows::display::BASE_DPI;
+        // Same-scale early return: absorbs duplicate posts without log noise.
+        if self.monitors.get(&id).is_some_and(|ms| ms.scale == scale) {
+            return;
+        }
+        let previous = self.monitors.get_mut(&id).map(|ms| {
+            let prev = ms.scale;
+            ms.scale = scale;
+            prev
+        });
+        // Propagate the new scale into core so layout math uses the updated
+        // multiplier when the caller-scheduled apply_layout reruns.
+        let current_dim = self.monitors[&id].dimension;
+        self.hub.update_monitor(id, current_dim, scale);
+        tracing::info!(%id, dpi, scale, ?previous, "Monitor scale updated via DPI change");
     }
 }
 
@@ -961,20 +1072,6 @@ fn should_ignore(process: &str, title: Option<&str>, rules: &[WindowsWindow]) ->
 // FileDescription from version info when available (see get_app_display_name).
 fn display_from_process(process: &str) -> String {
     process.strip_suffix(".exe").unwrap_or(process).to_string()
-}
-
-#[cfg(test)]
-impl Dome {
-    /// Test-only: returns the outer frame dimension stored in core for a floating window.
-    pub(super) fn float_frame(&self, hwnd_id: HwndId) -> Option<Dimension> {
-        let window_id = self.registry.get_id(hwnd_id)?;
-        let ws_id = self.hub.current_workspace();
-        let ws = self.hub.get_workspace(ws_id);
-        ws.float_windows()
-            .iter()
-            .find(|&&(id, _)| id == window_id)
-            .map(|&(_, dim)| dim)
-    }
 }
 
 #[cfg(test)]

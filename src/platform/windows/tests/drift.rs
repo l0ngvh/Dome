@@ -30,7 +30,7 @@ fn drift_exhausts_retries() {
 
     // After MAX_DRIFT_RETRIES, Dome gives up — window stays at its chosen position
     let dim = w1.get_dim();
-    assert_eq!((dim.x as i32, dim.y as i32), (100, 100));
+    assert_eq!((dim.x.value() as i32, dim.y.value() as i32), (100, 100));
 }
 
 #[test]
@@ -52,9 +52,9 @@ fn drift_retries_reset_on_new_target() {
 
     let dim = w1.get_dim();
     assert!(
-        (dim.width as i32) < 1900,
+        (dim.width.value() as i32) < 1900,
         "w1 should be half-screen, got width {}",
-        dim.width as i32
+        dim.width.value() as i32
     );
 }
 
@@ -66,12 +66,12 @@ fn drift_correction_repositions_window() {
     env.settle(10);
     let expected = w1.get_dim();
 
-    *w1.dimension.lock().unwrap() = Dimension {
-        x: 50.0,
-        y: 50.0,
-        width: 800.0,
-        height: 600.0,
-    };
+    *w1.dimension.lock().unwrap() = Dimension::new(
+        Length::new(50.0),
+        Length::new(50.0),
+        Length::new(800.0),
+        Length::new(600.0),
+    );
     w1.simulate_external_move();
     env.settle(10);
 

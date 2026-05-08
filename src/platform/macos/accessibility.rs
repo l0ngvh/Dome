@@ -12,6 +12,7 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 
+use crate::core::{Dimension, Length, Logical};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::objc2_wrapper::{
     AXError, get_attribute, get_cg_window_id, is_attribute_settable,
@@ -234,13 +235,13 @@ impl AXWindow {
             .unwrap_or(false)
     }
 
-    pub(super) fn get_position(&self) -> Result<(i32, i32)> {
+    pub(super) fn get_position(&self) -> Result<(Length<Logical>, Length<Logical>)> {
         let pos = get_attribute::<AXValue>(&self.element, &kAXPositionAttribute())
             .with_context(|| format!("get_position for {self}"))?;
         let mut cg_pos = CGPoint::new(0.0, 0.0);
         let ptr = NonNull::new((&mut cg_pos as *mut CGPoint).cast()).unwrap();
         unsafe { pos.value(AXValueType::CGPoint, ptr) };
-        Ok((cg_pos.x as i32, cg_pos.y as i32))
+        Ok((Length::new(cg_pos.x as f32), Length::new(cg_pos.y as f32)))
     }
 
     /// As we're tracking windows with CGWindowID, we have to check whether a window is still valid
@@ -267,10 +268,10 @@ impl AXWindow {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(super) fn set_frame(&self, x: i32, y: i32, width: i32, height: i32) -> Result<()> {
+    pub(super) fn set_frame(&self, dim: Dimension<Logical>) -> Result<()> {
         self.with_animation_disabled(|| {
-            self.set_position(x, y)?;
-            self.set_size(width, height)
+            self.set_position(dim.x, dim.y)?;
+            self.set_size(dim.width, dim.height)
         })
         .with_context(|| format!("set_frame for {self}"))
     }
@@ -286,11 +287,11 @@ impl AXWindow {
         Ok(())
     }
 
-    /// Hide the window by moving it offscreen
+    /// Hide the window by moving it offscreen.
     /// We don't minimize windows as there is no way to disable minimizing animation. When hiding
     /// multiple windows, it gets triggered in a staggered manner, which is extremely slow, and
-    /// causes event tap to be timed out
-    pub(super) fn hide_at(&self, x: i32, y: i32) -> Result<()> {
+    /// causes event tap to be timed out.
+    pub(super) fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()> {
         self.with_animation_disabled(|| self.set_position(x, y))
             .with_context(|| format!("hide for {self}"))
     }
@@ -309,13 +310,16 @@ impl AXWindow {
         .with_context(|| format!("unminimize for {self}"))
     }
 
-    pub(super) fn get_size(&self) -> Result<(i32, i32)> {
+    pub(super) fn get_size(&self) -> Result<(Length<Logical>, Length<Logical>)> {
         let size = get_attribute::<AXValue>(&self.element, &kAXSizeAttribute())
             .with_context(|| format!("get_size for {self}"))?;
         let mut cg_size = CGSize::new(0.0, 0.0);
         let ptr = NonNull::new((&mut cg_size as *mut CGSize).cast()).unwrap();
         unsafe { size.value(AXValueType::CGSize, ptr) };
-        Ok((cg_size.width as i32, cg_size.height as i32))
+        Ok((
+            Length::new(cg_size.width as f32),
+            Length::new(cg_size.height as f32),
+        ))
     }
 
     pub(super) fn is_manageable(&self) -> bool {
@@ -393,8 +397,9 @@ impl AXWindow {
         result
     }
 
-    fn set_position(&self, x: i32, y: i32) -> Result<()> {
-        let pos_ptr: *mut CGPoint = &mut CGPoint::new(x as f64, y as f64);
+    /// FFI boundary: packs a logical position into a CGPoint for the AX API.
+    fn set_position(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()> {
+        let pos_ptr: *mut CGPoint = &mut CGPoint::new(x.value() as f64, y.value() as f64);
         let pos_ptr = NonNull::new(pos_ptr.cast()).unwrap();
         let pos_ptr = unsafe { AXValue::new(AXValueType::CGPoint, pos_ptr) }.unwrap();
         Ok(set_attribute_value(
@@ -404,8 +409,9 @@ impl AXWindow {
         )?)
     }
 
-    fn set_size(&self, width: i32, height: i32) -> Result<()> {
-        let size_ptr: *mut CGSize = &mut CGSize::new(width as f64, height as f64);
+    /// FFI boundary: packs a logical size into a CGSize for the AX API.
+    fn set_size(&self, width: Length<Logical>, height: Length<Logical>) -> Result<()> {
+        let size_ptr: *mut CGSize = &mut CGSize::new(width.value() as f64, height.value() as f64);
         let size = NonNull::new(size_ptr.cast()).unwrap();
         let size = unsafe { AXValue::new(AXValueType::CGSize, size) }.unwrap();
         Ok(set_attribute_value(
@@ -449,11 +455,12 @@ pub(super) trait AXWindowApi: Send + Sync + std::fmt::Display {
     fn cg_id(&self) -> CGWindowID;
     fn pid(&self) -> i32;
     fn is_native_fullscreen(&self, marker: &DispatcherMarker) -> bool;
-    fn get_position(&self, marker: &DispatcherMarker) -> Result<(i32, i32)>;
-    fn get_size(&self, marker: &DispatcherMarker) -> Result<(i32, i32)>;
-    fn set_frame(&self, x: i32, y: i32, width: i32, height: i32) -> Result<()>;
+    fn get_position(&self, marker: &DispatcherMarker)
+    -> Result<(Length<Logical>, Length<Logical>)>;
+    fn get_size(&self, marker: &DispatcherMarker) -> Result<(Length<Logical>, Length<Logical>)>;
+    fn set_frame(&self, dim: Dimension<Logical>) -> Result<()>;
     fn focus(&self) -> Result<()>;
-    fn hide_at(&self, x: i32, y: i32) -> Result<()>;
+    fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()>;
     fn minimize(&self) -> Result<()>;
     fn unminimize(&self) -> Result<()>;
     fn is_valid(&self, marker: &DispatcherMarker) -> bool;
@@ -477,19 +484,22 @@ impl AXWindowApi for AXWindow {
     fn is_native_fullscreen(&self, _marker: &DispatcherMarker) -> bool {
         self.is_native_fullscreen()
     }
-    fn get_position(&self, _marker: &DispatcherMarker) -> Result<(i32, i32)> {
+    fn get_position(
+        &self,
+        _marker: &DispatcherMarker,
+    ) -> Result<(Length<Logical>, Length<Logical>)> {
         self.get_position()
     }
-    fn get_size(&self, _marker: &DispatcherMarker) -> Result<(i32, i32)> {
+    fn get_size(&self, _marker: &DispatcherMarker) -> Result<(Length<Logical>, Length<Logical>)> {
         self.get_size()
     }
-    fn set_frame(&self, x: i32, y: i32, w: i32, h: i32) -> Result<()> {
-        self.set_frame(x, y, w, h)
+    fn set_frame(&self, dim: Dimension<Logical>) -> Result<()> {
+        self.set_frame(dim)
     }
     fn focus(&self) -> Result<()> {
         self.focus()
     }
-    fn hide_at(&self, x: i32, y: i32) -> Result<()> {
+    fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()> {
         self.hide_at(x, y)
     }
     fn minimize(&self) -> Result<()> {

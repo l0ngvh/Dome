@@ -2,7 +2,7 @@ use super::{hub_debug_text, setup_hub, setup_logger_with_level, validate_hub};
 use crate::action::MonitorTarget;
 use crate::core::hub::{Hub, HubConfig};
 use crate::core::master_stack::MasterStackStrategy;
-use crate::core::node::{Dimension, MonitorId, WindowId, WindowRestrictions};
+use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
 use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -111,12 +111,12 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
                     format!("InsertTiling -> {id}")
                 }
                 Op::InsertFloat => {
-                    let dim = Dimension {
-                        x: rng.random_range(0.0..100.0),
-                        y: rng.random_range(0.0..20.0),
-                        width: rng.random_range(10.0..50.0),
-                        height: rng.random_range(5.0..15.0),
-                    };
+                    let dim = Dimension::new(
+                        Length::new(rng.random_range(0.0..100.0)),
+                        Length::new(rng.random_range(0.0..20.0)),
+                        Length::new(rng.random_range(10.0..50.0)),
+                        Length::new(rng.random_range(5.0..15.0)),
+                    );
                     let id = hub.insert_float(dim);
                     windows.push(id);
                     format!("InsertFloat -> {id}")
@@ -241,12 +241,13 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
                     let x = monitors.len() as f32 * 150.0;
                     let id = hub.add_monitor(
                         format!("monitor-{}", monitors.len()),
-                        Dimension {
-                            x,
-                            y: 0.0,
-                            width: 150.0,
-                            height: 30.0,
-                        },
+                        Dimension::new(
+                            Length::new(x),
+                            Length::new(0.0),
+                            Length::new(150.0),
+                            Length::new(30.0),
+                        ),
+                        1.0,
                     );
                     monitors.push(id);
                     format!("AddMonitor({id})")
@@ -448,8 +449,8 @@ fn strategy_smoke_test() {
     assert_eq!(wp.id, id);
     assert!(wp.is_highlighted);
     // Single tiling window fills the 150x30 screen
-    assert_eq!(wp.frame.width, 150.0);
-    assert_eq!(wp.frame.height, 30.0);
+    assert_eq!(wp.frame.width, Length::new(150.0));
+    assert_eq!(wp.frame.height, Length::new(30.0));
 
     let ws = hub.current_workspace();
     assert_eq!(hub.focused_tiling_window(ws), Some(id));
@@ -457,12 +458,13 @@ fn strategy_smoke_test() {
 
 fn setup_master_stack() -> Hub {
     Hub::new_with_strategy(
-        Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: 150.0,
-            height: 30.0,
-        },
+        Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(150.0),
+            Length::new(30.0),
+        ),
+        1.0,
         HubConfig::default(),
         Box::new(MasterStackStrategy::new()),
     )

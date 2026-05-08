@@ -29,8 +29,8 @@ fn toggle_fullscreen_hides_siblings() {
     assert!(w1.is_offscreen());
     assert!(w1.is_bottom());
     let d2 = w2.get_dim();
-    assert_eq!(d2.x, 0.0);
-    assert_eq!(d2.y, 0.0);
+    assert_eq!(d2.x, Length::ZERO);
+    assert_eq!(d2.y, Length::ZERO);
     assert_eq!(d2.width, SCREEN_WIDTH);
     assert_eq!(d2.height, SCREEN_HEIGHT);
 }
@@ -101,7 +101,7 @@ fn toggle_float() {
     let d1 = w1.get_dim();
     let border = env.config.border_size;
     assert!(
-        (d1.width - (SCREEN_WIDTH - 2.0 * border)).abs() < 1.0,
+        (d1.width - (SCREEN_WIDTH - Length::new(2.0 * border))).abs() < Length::new(1.0),
         "w1 should fill screen width, got {}",
         d1.width
     );
@@ -160,12 +160,12 @@ fn window_created_as_fullscreen_borderless() {
             env.moves.clone(),
             env.z_model.clone(),
         )
-        .with_dimension(Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: SCREEN_WIDTH,
-            height: SCREEN_HEIGHT,
-        }),
+        .with_dimension(Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+        )),
     );
     env.add_window(w2.clone());
 
@@ -217,12 +217,12 @@ fn fullscreen_borderless_minimizes_on_workspace_switch() {
             env.moves.clone(),
             env.z_model.clone(),
         )
-        .with_dimension(Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: SCREEN_WIDTH,
-            height: SCREEN_HEIGHT,
-        }),
+        .with_dimension(Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+        )),
     );
     env.add_window(w1.clone());
 
@@ -596,8 +596,13 @@ fn borderless_fullscreen_exit_unblocks_commands() {
     assert_eq!(w1.get_dim(), dim_before);
 
     // Exit borderless FS: window reports non-fullscreen dimensions
-    env.dome
-        .window_moved(w1.hwnd_id, ObservedPosition::Visible(100, 100, 800, 600));
+    env.dome.window_moved(
+        w1.hwnd_id,
+        ObservedPosition::Visible {
+            rect: dim(100, 100, 800, 600),
+            monitor: 1,
+        },
+    );
     env.dome.apply_layout();
 
     // toggle_float should now work

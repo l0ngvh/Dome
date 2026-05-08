@@ -1,3 +1,8 @@
+// Font-size invariant: FontConfig::apply_to writes config.font.text_size into
+// egui::Style::text_styles unchanged. egui rasterises glyphs at text_size * pixels_per_point
+// physical pixels (text_size * monitor.scale on Windows, text_size * backingScaleFactor on macOS).
+// Same mechanism that rescales overlay strokes and corner radii -- do not multiply text_size here.
+
 use egui::{Context, FontFamily, FontId, TextStyle};
 use serde::Deserialize;
 

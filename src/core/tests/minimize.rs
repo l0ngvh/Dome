@@ -1,5 +1,5 @@
 use super::{setup, snapshot};
-use crate::core::node::{Dimension, WindowRestrictions};
+use crate::core::node::{Dimension, Length, WindowRestrictions};
 use insta::assert_snapshot;
 
 #[test]
@@ -52,12 +52,12 @@ fn minimize_tiling_window() {
 fn minimize_float_window() {
     let mut hub = setup();
     let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 40.0,
-        height: 10.0,
-    });
+    let w1 = hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(40.0),
+        Length::new(10.0),
+    ));
     hub.minimize_window(w1);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -415,12 +415,12 @@ fn minimize_last_window_on_workspace() {
 fn minimize_last_tiling_with_floats_present() {
     let mut hub = setup();
     let w0 = hub.insert_tiling();
-    let _w1 = hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 40.0,
-        height: 10.0,
-    });
+    let _w1 = hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(40.0),
+        Length::new(10.0),
+    ));
     hub.minimize_window(w0);
     assert_eq!(hub.minimized_windows().len(), 1);
     let ws_id = hub.current_workspace();

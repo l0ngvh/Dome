@@ -1,5 +1,5 @@
 use crate::core::hub::HubAccess;
-use crate::core::node::{ContainerId, Dimension, Direction, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 use crate::core::partition_tree::{Child, Container, Parent};
 
 use super::PartitionTreeStrategy;
@@ -159,7 +159,8 @@ impl PartitionTreeStrategy {
             }
             Child::Container(cid) => {
                 let c = self.containers.get(cid);
-                (c.dimension, c.min_size(), (0.0, 0.0))
+                let (min_w, min_h) = c.min_size();
+                (c.dimension, (min_w.value(), min_h.value()), (0.0, 0.0))
             }
         }
     }
@@ -180,12 +181,16 @@ impl PartitionTreeStrategy {
         match container.direction() {
             Some(dir) => {
                 let (split_label, split_limit) = match dir {
-                    Direction::Horizontal => ("width", dim.width),
-                    Direction::Vertical => ("height", dim.height),
+                    Direction::Horizontal => ("width", dim.width.value()),
+                    Direction::Vertical => ("height", dim.height.value()),
                 };
                 let split_sum: f32 = match dir {
-                    Direction::Horizontal => constraints.iter().map(|(d, _, _)| d.width).sum(),
-                    Direction::Vertical => constraints.iter().map(|(d, _, _)| d.height).sum(),
+                    Direction::Horizontal => {
+                        constraints.iter().map(|(d, _, _)| d.width.value()).sum()
+                    }
+                    Direction::Vertical => {
+                        constraints.iter().map(|(d, _, _)| d.height.value()).sum()
+                    }
                 };
                 assert!(
                     split_sum <= split_limit + 0.01,
@@ -195,15 +200,15 @@ impl PartitionTreeStrategy {
                 for (i, (child_dim, child_min, child_max)) in constraints.iter().enumerate() {
                     let (cross_child, cross_container, cross_min, cross_max, label) = match dir {
                         Direction::Horizontal => (
-                            child_dim.height,
-                            dim.height,
+                            child_dim.height.value(),
+                            dim.height.value(),
                             child_min.1,
                             child_max.1,
                             "height",
                         ),
                         Direction::Vertical => (
-                            child_dim.width,
-                            dim.width,
+                            child_dim.width.value(),
+                            dim.width.value(),
                             child_min.0,
                             child_max.0,
                             "width",
@@ -219,21 +224,27 @@ impl PartitionTreeStrategy {
                 }
             }
             None => {
-                let expected_height = dim.height - hub.config.tab_bar_height;
+                let scale = hub
+                    .monitors
+                    .get(hub.workspaces.get(container.workspace).monitor)
+                    .scale;
+                let expected_height = dim.height - hub.config.tab_bar_height.to_unit(scale);
+                let tolerance = Length::new(0.01);
                 for (i, (child_dim, _, child_max)) in constraints.iter().enumerate() {
-                    let allows_smaller_w = child_max.0 > 0.0 && child_max.0 < dim.width;
-                    let allows_smaller_h = child_max.1 > 0.0 && child_max.1 < expected_height;
+                    let allows_smaller_w = child_max.0 > 0.0 && child_max.0 < dim.width.value();
+                    let allows_smaller_h =
+                        child_max.1 > 0.0 && child_max.1 < expected_height.value();
                     assert!(
-                        (child_dim.width - dim.width).abs() < 0.01 || allows_smaller_w,
+                        (child_dim.width - dim.width).abs() < tolerance || allows_smaller_w,
                         "Container {cid} tabbed child {i} width {:.2} != container width {:.2}",
-                        child_dim.width,
-                        dim.width
+                        child_dim.width.value(),
+                        dim.width.value()
                     );
                     assert!(
-                        (child_dim.height - expected_height).abs() < 0.01 || allows_smaller_h,
+                        (child_dim.height - expected_height).abs() < tolerance || allows_smaller_h,
                         "Container {cid} tabbed child {i} height {:.2} != expected {:.2}",
-                        child_dim.height,
-                        expected_height
+                        child_dim.height.value(),
+                        expected_height.value()
                     );
                 }
             }
@@ -241,16 +252,16 @@ impl PartitionTreeStrategy {
 
         let (min_w, min_h) = container.min_size();
         assert!(
-            dim.width >= min_w - 0.01,
+            dim.width >= min_w - Length::new(0.01),
             "Container {cid} width {:.2} < min_width {:.2}",
-            dim.width,
-            min_w
+            dim.width.value(),
+            min_w.value()
         );
         assert!(
-            dim.height >= min_h - 0.01,
+            dim.height >= min_h - Length::new(0.01),
             "Container {cid} height {:.2} < min_height {:.2}",
-            dim.height,
-            min_h
+            dim.height.value(),
+            min_h.value()
         );
     }
 
@@ -308,23 +319,23 @@ impl PartitionTreeStrategy {
         let (max_w, max_h) = window.max_size();
 
         assert!(
-            dim.width >= min_w - 0.01,
+            dim.width.value() >= min_w - 0.01,
             "Window {wid} width {:.2} < min_width {:.2}",
-            dim.width,
+            dim.width.value(),
             min_w
         );
         assert!(
-            dim.height >= min_h - 0.01,
+            dim.height.value() >= min_h - 0.01,
             "Window {wid} height {:.2} < min_height {:.2}",
-            dim.height,
+            dim.height.value(),
             min_h
         );
 
         if max_w > 0.0 {
             assert!(
-                dim.width <= max_w + 0.01,
+                dim.width.value() <= max_w + 0.01,
                 "Window {wid} width {:.2} > max_width {:.2}",
-                dim.width,
+                dim.width.value(),
                 max_w
             );
             assert!(
@@ -336,9 +347,9 @@ impl PartitionTreeStrategy {
         }
         if max_h > 0.0 {
             assert!(
-                dim.height <= max_h + 0.01,
+                dim.height.value() <= max_h + 0.01,
                 "Window {wid} height {:.2} > max_height {:.2}",
-                dim.height,
+                dim.height.value(),
                 max_h
             );
             assert!(

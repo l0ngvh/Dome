@@ -1,4 +1,4 @@
-use crate::core::node::Dimension;
+use crate::core::node::{Dimension, Length};
 use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
@@ -12,12 +12,12 @@ fn focus_falls_back_to_container_focus_after_float_delete() {
     // Focus W1 (middle window)
     hub.focus_left();
 
-    let f0 = hub.insert_float(Dimension {
-        x: 50.0,
-        y: 5.0,
-        width: 40.0,
-        height: 15.0,
-    });
+    let f0 = hub.insert_float(Dimension::new(
+        Length::new(50.0),
+        Length::new(5.0),
+        Length::new(40.0),
+        Length::new(15.0),
+    ));
 
     hub.delete_window(f0);
 
@@ -72,12 +72,12 @@ fn toggle_float_to_tiling_with_nested_containers() {
     hub.insert_tiling();
     hub.toggle_spawn_mode();
     hub.insert_tiling();
-    hub.insert_float(Dimension {
-        x: 50.0,
-        y: 5.0,
-        width: 40.0,
-        height: 15.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(50.0),
+        Length::new(5.0),
+        Length::new(40.0),
+        Length::new(15.0),
+    ));
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -201,7 +201,7 @@ fn toggle_float_with_scrolled_viewport() {
         .find(|&&(id, _)| id == w2)
         .unwrap()
         .1;
-    assert_eq!(float_dim.x, 50.0);
+    assert_eq!(float_dim.x, Length::new(50.0));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

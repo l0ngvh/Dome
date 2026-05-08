@@ -2,8 +2,11 @@ use std::fmt;
 use std::ptr::NonNull;
 
 use objc2_application_services::{AXObserver, AXObserverCallback, AXUIElement};
-use objc2_core_foundation::{CFRetained, CFString, CFType};
+use objc2_core_foundation::{CFRetained, CFString, CFType, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGWindowID;
+use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+use crate::core::{Dimension, Length, Logical};
 
 type RawAXError = objc2_application_services::AXError;
 
@@ -297,6 +300,38 @@ fn decorate_raw_ax_error(error: RawAXError) -> String {
     format!("{} (code: {})", description, error.0)
 }
 
+/// Single site for the Y-flip from Quartz (top-left origin) to AppKit/Cocoa
+/// (bottom-left origin). All `Dimension -> NSRect` crossings in the platform
+/// layer go through here so the flip logic exists exactly once.
+pub(super) fn dimension_to_ns_rect_cocoa(
+    primary_full_height: Length<Logical>,
+    dim: Dimension<Logical>,
+) -> NSRect {
+    // AppKit uses f64; cast from f32 happens here at the wrapper boundary.
+    NSRect::new(
+        NSPoint::new(
+            dim.x.value() as f64,
+            (primary_full_height - dim.y - dim.height).value() as f64,
+        ),
+        NSSize::new(dim.width.value() as f64, dim.height.value() as f64),
+    )
+}
+
+/// Direct `Dimension -> CGRect` mapping (Quartz top-left origin, no Y-flip).
+/// Used for ScreenCaptureKit sourceRect and similar Quartz-native APIs.
+pub(super) fn dimension_to_cg_rect(dim: Dimension<Logical>) -> CGRect {
+    CGRect {
+        origin: CGPoint {
+            x: dim.x.value() as f64,
+            y: dim.y.value() as f64,
+        },
+        size: CGSize {
+            width: dim.width.value() as f64,
+            height: dim.height.value() as f64,
+        },
+    }
+}
+
 pub(crate) fn get_cg_window_id(element: &AXUIElement) -> Result<CGWindowID, AXError> {
     unsafe extern "C" {
         fn _AXUIElementGetWindow(element: &AXUIElement, out: *mut CGWindowID) -> RawAXError;
@@ -310,5 +345,43 @@ pub(crate) fn get_cg_window_id(element: &AXUIElement) -> Result<CGWindowID, AXEr
         Err(AXError::NullCgWindowId)
     } else {
         Err(res.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dimension_to_ns_rect_cocoa_flips_y() {
+        let dim = Dimension::new(
+            Length::new(10.0),
+            Length::new(20.0),
+            Length::new(100.0),
+            Length::new(50.0),
+        );
+        let primary_full_height = Length::new(1000.0);
+        let rect = dimension_to_ns_rect_cocoa(primary_full_height, dim);
+        // Y-flip: cocoa_y = primary_height - y - height = 1000 - 20 - 50 = 930
+        assert_eq!(rect.origin.x, 10.0);
+        assert_eq!(rect.origin.y, 930.0);
+        assert_eq!(rect.size.width, 100.0);
+        assert_eq!(rect.size.height, 50.0);
+    }
+
+    #[test]
+    fn dimension_to_cg_rect_no_flip() {
+        let dim = Dimension::new(
+            Length::new(10.0),
+            Length::new(20.0),
+            Length::new(100.0),
+            Length::new(50.0),
+        );
+        let rect = dimension_to_cg_rect(dim);
+        // No Y-flip: origin passes through unchanged
+        assert_eq!(rect.origin.x, 10.0);
+        assert_eq!(rect.origin.y, 20.0);
+        assert_eq!(rect.size.width, 100.0);
+        assert_eq!(rect.size.height, 50.0);
     }
 }

@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use crate::config::SizeConstraint;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig, MonitorLayout, SpawnIndicator};
-use crate::core::node::{Dimension, Direction, WindowId, Workspace, WorkspaceId};
+use crate::core::node::{Dimension, Direction, Length, Logical, WindowId, Workspace, WorkspaceId};
 use crate::core::strategy::TilingAction;
 
 const ASCII_WIDTH: usize = 150;
@@ -45,10 +45,10 @@ pub(super) fn snapshot(hub: &Hub) -> String {
             let screen = hub.access.monitors.get(mp.monitor_id).dimension;
             draw_rect(
                 &mut grid,
-                screen.x,
-                screen.y,
-                screen.width,
-                screen.height,
+                screen.x.value(),
+                screen.y.value(),
+                screen.width.value(),
+                screen.height.value(),
                 &format!("W{}", id.get()),
                 [false; 4],
             );
@@ -70,10 +70,10 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         let clip = clip_edges(wp.frame, wp.visible_frame);
         draw_rect(
             &mut grid,
-            d.x,
-            d.y,
-            d.width,
-            d.height,
+            d.x.value(),
+            d.y.value(),
+            d.width.value(),
+            d.height.value(),
             &format!("W{}", wp.id.get()),
             clip,
         );
@@ -85,9 +85,9 @@ pub(super) fn snapshot(hub: &Hub) -> String {
             let d = cp.visible_frame;
             draw_tab_bar(
                 &mut grid,
-                d.x,
-                d.y,
-                d.width,
+                d.x.value(),
+                d.y.value(),
+                d.width.value(),
                 &cp.titles,
                 cp.active_tab_index,
             );
@@ -100,11 +100,25 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         if let Some(wp) = tiling_windows.iter().find(|p| p.is_highlighted) {
             let d = wp.visible_frame;
             let clip = clip_edges(wp.frame, wp.visible_frame);
-            draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
+            draw_focused_border(
+                &mut grid,
+                d.x.value(),
+                d.y.value(),
+                d.width.value(),
+                d.height.value(),
+                clip,
+            );
         } else if let Some(cp) = containers.iter().find(|p| p.is_highlighted) {
             let d = cp.visible_frame;
             let clip = clip_edges(cp.frame, cp.visible_frame);
-            draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
+            draw_focused_border(
+                &mut grid,
+                d.x.value(),
+                d.y.value(),
+                d.width.value(),
+                d.height.value(),
+                clip,
+            );
         }
     }
 
@@ -114,10 +128,10 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         let clip = clip_edges(wp.frame, wp.visible_frame);
         let grid_w = grid[0].len() as isize;
         let grid_h = grid.len() as isize;
-        let x1 = d.x.round() as isize;
-        let y1 = d.y.round() as isize;
-        let x2 = (d.x + d.width).round() as isize - 1;
-        let y2 = (d.y + d.height).round() as isize - 1;
+        let x1 = d.x.round().value() as isize;
+        let y1 = d.y.round().value() as isize;
+        let x2 = (d.x + d.width).round().value() as isize - 1;
+        let y2 = (d.y + d.height).round().value() as isize - 1;
         for row in (y1 + 1).max(0)..y2.min(grid_h) {
             for col in (x1 + 1).max(0)..x2.min(grid_w) {
                 grid[row as usize][col as usize] = ' ';
@@ -125,10 +139,10 @@ pub(super) fn snapshot(hub: &Hub) -> String {
         }
         draw_rect(
             &mut grid,
-            d.x,
-            d.y,
-            d.width,
-            d.height,
+            d.x.value(),
+            d.y.value(),
+            d.width.value(),
+            d.height.value(),
             &format!("F{}", wp.id.get()),
             clip,
         );
@@ -138,7 +152,14 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     if let Some(wp) = focused_float {
         let d = wp.visible_frame;
         let clip = clip_edges(wp.frame, wp.visible_frame);
-        draw_focused_border(&mut grid, d.x, d.y, d.width, d.height, clip);
+        draw_focused_border(
+            &mut grid,
+            d.x.value(),
+            d.y.value(),
+            d.width.value(),
+            d.height.value(),
+            clip,
+        );
     }
 
     s.push('\n');
@@ -348,11 +369,12 @@ fn draw_tab_bar(
 }
 
 fn clip_edges(frame: Dimension, visible: Dimension) -> [bool; 4] {
+    let half = Length::new(0.5);
     [
-        visible.x > frame.x + 0.5,
-        (visible.x + visible.width) < (frame.x + frame.width) - 0.5,
-        visible.y > frame.y + 0.5,
-        (visible.y + visible.height) < (frame.y + frame.height) - 0.5,
+        visible.x > frame.x + half,
+        (visible.x + visible.width) < (frame.x + frame.width) - half,
+        visible.y > frame.y + half,
+        (visible.y + visible.height) < (frame.y + frame.height) - half,
     ]
 }
 
@@ -541,12 +563,7 @@ fn validate_visible_placements(hub: &Hub) {
         if x1 >= x2 || y1 >= y2 {
             return None;
         }
-        Some(Dimension {
-            x: x1,
-            y: y1,
-            width: x2 - x1,
-            height: y2 - y1,
-        })
+        Some(Dimension::new(x1, y1, x2 - x1, y2 - y1))
     }
 
     let all_placements = hub.get_visible_placements();
@@ -736,24 +753,25 @@ pub(super) fn setup_logger_with_level(level: &str) {
 impl Default for HubConfig {
     fn default() -> Self {
         Self {
-            tab_bar_height: TAB_BAR_HEIGHT,
+            tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
             auto_tile: false,
-            min_width: SizeConstraint::Pixels(0.0),
-            min_height: SizeConstraint::Pixels(0.0),
-            max_width: SizeConstraint::Pixels(0.0),
-            max_height: SizeConstraint::Pixels(0.0),
+            min_width: SizeConstraint::Pixels(Length::new(0.0)),
+            min_height: SizeConstraint::Pixels(Length::new(0.0)),
+            max_width: SizeConstraint::Pixels(Length::new(0.0)),
+            max_height: SizeConstraint::Pixels(Length::new(0.0)),
         }
     }
 }
 
 pub(super) fn setup_hub() -> Hub {
     Hub::new(
-        Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: ASCII_WIDTH as f32,
-            height: ASCII_HEIGHT as f32,
-        },
+        Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(ASCII_WIDTH as f32),
+            Length::new(ASCII_HEIGHT as f32),
+        ),
+        1.0,
         HubConfig::default(),
     )
 }
@@ -766,12 +784,13 @@ pub(super) fn setup() -> Hub {
 pub(super) fn setup_with_auto_tile() -> Hub {
     setup_logger();
     Hub::new(
-        Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: ASCII_WIDTH as f32,
-            height: ASCII_HEIGHT as f32,
-        },
+        Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(ASCII_WIDTH as f32),
+            Length::new(ASCII_HEIGHT as f32),
+        ),
+        1.0,
         HubConfig {
             auto_tile: true,
             ..Default::default()

@@ -1,0 +1,17 @@
+// Dome Windows resource script.
+// This is the single source of truth for resources compiled into dome.exe.
+// build.rs passes this file to embed-resource, which invokes rc.exe (MSVC)
+// or windres (GNU) depending on the target toolchain.
+
+// RT_MANIFEST (type 24), ID 1 = CREATEPROCESS_MANIFEST_RESOURCE_ID.
+// The Windows loader reads this ID from the EXE on process startup,
+// before any DLL code runs, to set DPI awareness and other process-wide flags.
+1 24 "dome.manifest"
+
+// Application icon, numeric ID 1. Windows Explorer, taskbar, and Alt-Tab
+// probe numeric icon IDs in ascending order; ID 1 is the conventional primary.
+// Note: named icon resources (e.g. IDI_ICON1) are a Visual Studio convention
+// defined in a local resource.h, not an SDK symbol. Using a bare identifier
+// would make both rc.exe and windres treat it as a string-named resource,
+// breaking the shell's numeric-ID lookup. Always use numeric literals here.
+1 ICON "Dome.ico"

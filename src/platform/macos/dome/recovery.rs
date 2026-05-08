@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::core::Dimension;
+use crate::core::{Dimension, Length};
 
 use super::super::accessibility::AXWindowApi;
 
@@ -51,22 +51,16 @@ impl Recovery {
 
     pub(super) fn restore_all(&self) {
         for window_state in self.state.values() {
-            let dim = window_state.original_dim;
-            let _ = window_state.window.set_frame(
-                dim.x as i32,
-                dim.y as i32,
-                dim.width as i32,
-                dim.height as i32,
-            );
+            let _ = window_state.window.set_frame(window_state.original_dim);
         }
     }
 }
 
 fn default_position(screen: Dimension, width: f32, height: f32) -> Dimension {
-    Dimension {
-        x: screen.x + (screen.width - width) / 2.0,
-        y: screen.y + (screen.height - height) / 2.0,
-        width,
-        height,
-    }
+    Dimension::new(
+        screen.x + (screen.width - Length::new(width)) / 2.0,
+        screen.y + (screen.height - Length::new(height)) / 2.0,
+        Length::new(width),
+        Length::new(height),
+    )
 }

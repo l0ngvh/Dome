@@ -194,13 +194,14 @@ fn screens_changed_updates_layout() {
     let new_screen = ScreenInfo {
         handle: 1,
         name: "Test".to_string(),
-        dimension: Dimension {
-            x: 0.0,
-            y: 0.0,
-            width: 1280.0,
-            height: 720.0,
-        },
+        dimension: Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            Length::new(1280.0),
+            Length::new(720.0),
+        ),
         is_primary: true,
+        scale: 1.0,
     };
     env.dome.screens_changed(vec![new_screen]);
     env.dome.apply_layout();
@@ -483,4 +484,163 @@ fn empty_monitor_clears_tiling_overlay() {
 
     // Monitor has zero tiling windows and zero containers, so clear must fire.
     assert!(env.tiling_overlay_clear_count() > clear_baseline);
+}
+
+#[test]
+fn monitor_dpi_changed_unknown_handle_noop() {
+    let mut env = TestEnv::new();
+    let w = env.spawn_window(1, "App", "app.exe");
+    env.add_window(w.clone());
+    let before = w.get_dim();
+
+    // Call with a bogus handle; should not panic or change placement.
+    env.dome.monitor_dpi_changed(0xDEAD_BEEF_u64 as isize, 192);
+    env.dome.apply_layout();
+
+    let after = w.get_dim();
+    assert_eq!(after.x, before.x);
+    assert_eq!(after.y, before.y);
+    assert_eq!(after.width, before.width);
+    assert_eq!(after.height, before.height);
+}
+
+#[test]
+fn monitor_dpi_changed_same_scale_is_noop() {
+    let mut env = TestEnv::new();
+    let w = env.spawn_window(1, "App", "app.exe");
+    env.add_window(w.clone());
+    let before = w.get_dim();
+
+    // DPI 96 == scale 1.0, same as the fixture default. Placement must not change.
+    env.dome.monitor_dpi_changed(1, 96);
+    env.dome.apply_layout();
+    let after1 = w.get_dim();
+    assert_eq!(after1.x, before.x);
+    assert_eq!(after1.y, before.y);
+    assert_eq!(after1.width, before.width);
+    assert_eq!(after1.height, before.height);
+
+    // Call again with the same DPI; still a no-op.
+    env.dome.monitor_dpi_changed(1, 96);
+    env.dome.apply_layout();
+    let after2 = w.get_dim();
+    assert_eq!(after2.x, before.x);
+    assert_eq!(after2.y, before.y);
+    assert_eq!(after2.width, before.width);
+    assert_eq!(after2.height, before.height);
+}
+
+#[test]
+fn dpi_change_then_apply_layout_places_at_new_scale() {
+    let mut env = TestEnv::new();
+    let w = env.spawn_window(1, "App", "app.exe");
+    env.add_window(w.clone());
+
+    let before = w.get_dim();
+    assert!(before.width > Length::new(0.0));
+
+    // Change primary monitor from 96 DPI (1.0x) to 144 DPI (1.5x).
+    env.dome.monitor_dpi_changed(1, 144);
+    env.dome.apply_layout();
+
+    let after = w.get_dim();
+    // At 1.5x, physical pixels = logical * 1.5. The window's logical rect
+    // stays the same (the Hub layout is logical), but set_position receives
+    // physical coords: each edge should be 1.5x the logical value.
+    let expected_x = (before.x * 1.5).round();
+    let expected_y = (before.y * 1.5).round();
+    let expected_w = (before.width * 1.5).round();
+    let expected_h = (before.height * 1.5).round();
+
+    assert!(
+        (after.x - expected_x).abs() < Length::new(2.0),
+        "x: expected ~{expected_x}, got {}",
+        after.x
+    );
+    assert!(
+        (after.y - expected_y).abs() < Length::new(2.0),
+        "y: expected ~{expected_y}, got {}",
+        after.y
+    );
+    assert!(
+        (after.width - expected_w).abs() < Length::new(2.0),
+        "w: expected ~{expected_w}, got {}",
+        after.width
+    );
+    assert!(
+        (after.height - expected_h).abs() < Length::new(2.0),
+        "h: expected ~{expected_h}, got {}",
+        after.height
+    );
+}
+
+#[test]
+fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
+    let mut second = second_screen();
+    second.scale = 1.0;
+    let mut env = TestEnv::new_with_screens(Config::default(), vec![default_screen(), second]);
+
+    // Add one window on primary.
+    let w_a = env.spawn_window(1, "WinA", "a.exe");
+    env.add_window(w_a.clone());
+    let before_a = w_a.get_dim();
+
+    // Add one window on secondary.
+    env.run_actions("focus workspace 1");
+    let w_b = env.spawn_window(2, "WinB", "b.exe");
+    env.add_window(w_b.clone());
+    let before_b = w_b.get_dim();
+
+    // Simulate DPI change only on secondary (192 DPI = 2.0x).
+    env.dome.monitor_dpi_changed(2, 192);
+    env.dome.apply_layout();
+
+    // Primary window placement must be unchanged (scale stayed 1.0).
+    let after_a = w_a.get_dim();
+    assert_eq!(after_a.x, before_a.x);
+    assert_eq!(after_a.y, before_a.y);
+    assert_eq!(after_a.width, before_a.width);
+    assert_eq!(after_a.height, before_a.height);
+
+    // Secondary window placement must reflect the 2.0x scale change.
+    let after_b = w_b.get_dim();
+    assert!(
+        (after_b.x - before_b.x * 2.0).abs() < Length::new(2.0),
+        "x: expected ~{}, got {}",
+        before_b.x * 2.0,
+        after_b.x
+    );
+    assert!(
+        (after_b.y - before_b.y * 2.0).abs() < Length::new(2.0),
+        "y: expected ~{}, got {}",
+        before_b.y * 2.0,
+        after_b.y
+    );
+    assert!(
+        (after_b.width - before_b.width * 2.0).abs() < Length::new(2.0),
+        "w: expected ~{}, got {}",
+        before_b.width * 2.0,
+        after_b.width
+    );
+    assert!(
+        (after_b.height - before_b.height * 2.0).abs() < Length::new(2.0),
+        "h: expected ~{}, got {}",
+        before_b.height * 2.0,
+        after_b.height
+    );
+}
+
+#[test]
+fn wm_getdpiscaledsize_reply_returns_current_size() {
+    use windows::Win32::Foundation::SIZE;
+    let input = SIZE { cx: 1920, cy: 1080 };
+    let output = crate::platform::windows::wm_getdpiscaledsize_reply(input);
+    assert_eq!(output.cx, 1920);
+    assert_eq!(output.cy, 1080);
+
+    // Zero-size edge case.
+    let zero = SIZE { cx: 0, cy: 0 };
+    let out_zero = crate::platform::windows::wm_getdpiscaledsize_reply(zero);
+    assert_eq!(out_zero.cx, 0);
+    assert_eq!(out_zero.cy, 0);
 }

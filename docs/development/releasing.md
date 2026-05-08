@@ -59,6 +59,8 @@ The release workflow produces:
 | Windows (x86_64) | `.msi` installer (via WiX), `.zip` (portable, used by Scoop) |
 | All | `checksums-sha256.txt` |
 
+`resources/windows/Dome.ico` and `resources/windows/dome.manifest` are compiled into `dome.exe` via `build.rs` and are not packaged separately by the WiX installer.
+
 ## How It Works
 
 Two workflows coordinate the release:

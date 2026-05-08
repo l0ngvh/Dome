@@ -1,6 +1,6 @@
 use crate::action::MonitorTarget;
-use crate::core::node::Dimension;
 use crate::core::node::WindowRestrictions;
+use crate::core::node::{Dimension, Length};
 use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
@@ -103,12 +103,12 @@ fn set_fullscreen_from_tiling() {
 fn set_fullscreen_from_float() {
     let mut hub = setup();
     hub.insert_tiling();
-    let w2 = hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 40.0,
-        height: 10.0,
-    });
+    let w2 = hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(40.0),
+        Length::new(10.0),
+    ));
 
     hub.set_fullscreen(w2, WindowRestrictions::None);
 
@@ -527,12 +527,12 @@ fn insert_doesnt_steal_focus_from_fullscreen() {
     ");
 
     // Insert float: fullscreen still focused
-    hub.insert_float(Dimension {
-        x: 10.0,
-        y: 5.0,
-        width: 40.0,
-        height: 10.0,
-    });
+    hub.insert_float(Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(40.0),
+        Length::new(10.0),
+    ));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -976,12 +976,13 @@ fn block_all_on_unfocused_window_does_not_block() {
     let mut hub = setup();
     hub.add_monitor(
         "second".into(),
-        Dimension {
-            x: 150.0,
-            y: 0.0,
-            width: 150.0,
-            height: 30.0,
-        },
+        Dimension::new(
+            Length::new(150.0),
+            Length::new(0.0),
+            Length::new(150.0),
+            Length::new(30.0),
+        ),
+        1.0,
     );
     // Put a tiling window on the second monitor's workspace.
     hub.focus_monitor(&MonitorTarget::Right);
@@ -1082,12 +1083,13 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
     let mut hub = setup();
     hub.add_monitor(
         "second".into(),
-        Dimension {
-            x: 150.0,
-            y: 0.0,
-            width: 150.0,
-            height: 30.0,
-        },
+        Dimension::new(
+            Length::new(150.0),
+            Length::new(0.0),
+            Length::new(150.0),
+            Length::new(30.0),
+        ),
+        1.0,
     );
     let w0 = hub.insert_tiling();
     hub.insert_tiling();
