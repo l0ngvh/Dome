@@ -5,6 +5,7 @@ mod external;
 mod handle;
 mod keyboard;
 mod login_item;
+mod process;
 mod runner;
 mod taskbar;
 mod throttle;

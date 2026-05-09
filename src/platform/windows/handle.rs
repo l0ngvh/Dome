@@ -11,9 +11,6 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
-use windows::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
-};
 use windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow,
     GetWindowDpiAwarenessContext,
@@ -30,7 +27,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     ShowWindowAsync, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_DLGMODALFRAME,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
 };
-use windows::core::{BOOL, PCWSTR, PWSTR, w};
+use windows::core::{BOOL, PCWSTR, w};
 
 use crate::core::{Dimension, Length, Physical};
 use crate::platform::windows::external::{
@@ -426,32 +423,9 @@ pub(crate) fn get_window_title(hwnd: HWND) -> Option<String> {
     Some(String::from_utf16_lossy(&buf[..copied]))
 }
 
-fn get_exe_path(hwnd: HWND) -> Option<Vec<u16>> {
-    let mut pid = 0u32;
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-    if pid == 0 {
-        return None;
-    }
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
-    let mut buf = [0u16; 260];
-    let mut len = buf.len() as u32;
-    unsafe {
-        QueryFullProcessImageNameW(
-            handle,
-            PROCESS_NAME_WIN32,
-            PWSTR(buf.as_mut_ptr()),
-            &mut len,
-        )
-    }
-    .ok()?;
-    let mut path = buf[..len as usize].to_vec();
-    path.push(0); // null-terminate for Win32 string APIs
-    Some(path)
-}
-
 pub(crate) fn get_process_name(hwnd: HWND) -> anyhow::Result<String> {
-    let path_wide =
-        get_exe_path(hwnd).ok_or_else(|| anyhow::anyhow!("could not query process image name"))?;
+    let path_wide = crate::platform::windows::process::get_exe_path(hwnd)
+        .ok_or_else(|| anyhow::anyhow!("could not query process image name"))?;
     // Strip the trailing null before converting to a Rust string
     let path = String::from_utf16_lossy(&path_wide[..path_wide.len().saturating_sub(1)]);
     path.rsplit('\\')
@@ -463,7 +437,7 @@ pub(crate) fn get_process_name(hwnd: HWND) -> anyhow::Result<String> {
 // Returns None for UWP shells, elevated processes we can't open, apps with no
 // version info, or empty FileDescription. Callers fall back to the executable name.
 pub(crate) fn get_app_display_name(hwnd: HWND) -> Option<String> {
-    let path = get_exe_path(hwnd)?;
+    let path = crate::platform::windows::process::get_exe_path(hwnd)?;
     let path_ptr = PCWSTR(path.as_ptr());
 
     let size = unsafe { GetFileVersionInfoSizeW(path_ptr, None) };
