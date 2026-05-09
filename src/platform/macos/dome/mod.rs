@@ -75,7 +75,7 @@ pub(in crate::platform::macos) trait FrameSender: Send {
 /// by the time results arrive the window may have been removed, so resolution to
 /// `WindowId` happens here where the registry can be checked.
 pub(in crate::platform::macos) struct Dome {
-    pub(in crate::platform::macos) hub: Hub,
+    hub: Hub,
     registry: Registry,
     monitor_registry: MonitorRegistry,
     config: Config,
@@ -85,7 +85,7 @@ pub(in crate::platform::macos) struct Dome {
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
     observed_pids: HashSet<i32>,
-    pub(in crate::platform::macos) sender: Box<dyn FrameSender>,
+    sender: Box<dyn FrameSender>,
     last_focused: Option<WindowId>,
     recovery: Recovery,
     pending_created: Vec<WindowId>,

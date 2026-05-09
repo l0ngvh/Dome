@@ -93,15 +93,11 @@ fn float_window_moved_by_user() {
 
     // Core should reflect the outer frame (reverse-inset of the observed content rect)
     let border = Config::default().border_size;
-    let ws_id = dome.hub.current_workspace();
-    let ws = dome.hub.get_workspace(ws_id);
-    // The most recently inserted float is cg2. Its WindowId is the last float in the workspace.
-    let (_, stored_dim) = ws
-        .float_windows()
-        .last()
-        .expect("float should be in workspace");
+    let snap = macos
+        .last_float_snapshot(cg2)
+        .expect("float snapshot should be present for focused float");
     assert_eq!(
-        *stored_dim,
+        snap.outer_frame,
         Dimension::new(
             Length::new(200.0 - border),
             Length::new(150.0 - border),
@@ -125,7 +121,7 @@ fn float_window_moved_by_user() {
 }
 
 #[test]
-fn float_window_replaced_after_drag_issues_set_frame() {
+fn float_window_reshaped_on_border_size_change() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
@@ -139,44 +135,31 @@ fn float_window_replaced_after_drag_issues_set_frame() {
     );
     macos.settle(&mut dome, 10);
 
-    // Toggle cg2 (focused) to float and settle
+    // Toggle focused cg2 to float and settle.
     send(&mut dome, "toggle float");
     macos.settle(&mut dome, 10);
 
-    // Record cg2's initial float frame
-    let initial_frame = macos.window_frame(cg2);
+    // Snapshot core's stored outer dim before the border change. Hub-dim does
+    // not change across config_changed; only the inset applied on flush_layout.
+    let snap_before = macos
+        .last_float_snapshot(cg2)
+        .expect("float snapshot must exist once cg2 is floated and visible");
 
-    // User drags the float to a new position
-    macos.simulate_external_move(&mut dome, cg2, 200, 150, 600, 400);
-    macos.settle(&mut dome, 10);
-    assert_eq!(macos.window_frame(cg2), (200, 150, 600, 400));
-
-    // Clear move log before the programmatic re-place
+    // Clear the move log so we can assert on set_frame calls caused strictly
+    // by the config change.
     macos.moves.borrow_mut().clear();
 
-    // Update core's float dimension to the ORIGINAL float frame (differs from
-    // drag position), then flush layout. This triggers place_window with a
-    // content rect different from fp.target, so FloatPlacement::set_target
-    // returns true and issues set_frame.
-    let ws_id = dome.hub.current_workspace();
-    let ws = dome.hub.get_workspace(ws_id);
-    let (float_wid, _) = *ws.float_windows().last().expect("float should exist");
-    let border = Config::default().border_size;
-    // Use a clearly different outer frame
-    dome.hub.update_float_dimension(
-        float_wid,
-        Dimension::new(
-            Length::new(initial_frame.0 as f32 - border),
-            Length::new(initial_frame.1 as f32 - border),
-            Length::new(initial_frame.2 as f32 + 2.0 * border),
-            Length::new(initial_frame.3 as f32 + 2.0 * border),
-        ),
-    );
-    dome.flush_layout();
+    // Bump border_size from the default (4.0) to 12.0, giving an 8 px delta
+    // well beyond rounding noise.
+    let mut new_config = Config::default();
+    new_config.border_size = 12.0;
+    dome.config_changed(new_config);
 
-    // Check moves before settle -- settle drains the move log via std::mem::take
-    // to feed entries back as AX observations, so the log is empty afterward.
-    let moves: Vec<_> = macos
+    // config_changed calls flush_layout, which passes the new content_dim to
+    // FloatPlacement::set_target. The new content differs from fp.target
+    // (computed with the old border), so set_target returns true and set_frame
+    // runs. Check before settle because settle drains the move log.
+    let reshape_moves: Vec<_> = macos
         .moves
         .borrow()
         .iter()
@@ -184,13 +167,43 @@ fn float_window_replaced_after_drag_issues_set_frame() {
         .copied()
         .collect();
     assert!(
-        !moves.is_empty(),
-        "expected at least one set_frame for cg2 after programmatic float move, initial_frame={initial_frame:?}"
+        !reshape_moves.is_empty(),
+        "expected at least one set_frame for cg2 after border_size change, got none"
     );
 
-    // Settle and verify the window converges to the initial float position
     macos.settle(&mut dome, 10);
-    assert_eq!(macos.window_frame(cg2), initial_frame);
+
+    // After settle: OS window converged to apply_inset(outer_stored, 12.0).
+    // Outer-frame values are exact integers by construction (default float
+    // placement rounds to whole pixels).
+    let expected_x = snap_before.outer_frame.x.value() as i32 + 12;
+    let expected_y = snap_before.outer_frame.y.value() as i32 + 12;
+    let expected_w = snap_before.outer_frame.width.value() as i32 - 24;
+    let expected_h = snap_before.outer_frame.height.value() as i32 - 24;
+    assert_eq!(
+        macos.window_frame(cg2),
+        (expected_x, expected_y, expected_w, expected_h)
+    );
+
+    // Core's stored outer dim must be unchanged: sync_config does not touch
+    // float dims (see src/core/hub.rs sync_config).
+    let snap_after = macos
+        .last_float_snapshot(cg2)
+        .expect("float snapshot must exist after re-flush");
+    assert_eq!(
+        snap_after.outer_frame, snap_before.outer_frame,
+        "border-size change must not alter the hub-stored outer dim"
+    );
+    // The RenderFrame's content_dim must reflect the new 12px border inset.
+    assert_eq!(
+        snap_after.content_dim,
+        Dimension::new(
+            Length::new(snap_before.outer_frame.x.value() + 12.0),
+            Length::new(snap_before.outer_frame.y.value() + 12.0),
+            Length::new(snap_before.outer_frame.width.value() - 24.0),
+            Length::new(snap_before.outer_frame.height.value() - 24.0),
+        )
+    );
 }
 
 #[test]

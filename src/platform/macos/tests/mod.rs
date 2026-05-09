@@ -208,6 +208,7 @@ impl MacOS {
             frame_state: Arc::new(Mutex::new(FrameState {
                 focused_window: None,
                 focused_monitor_id: None,
+                floats: HashMap::new(),
             })),
         }
     }
@@ -413,12 +414,23 @@ impl MacOS {
     fn last_frame_state(&self) -> FrameState {
         self.frame_state.lock().unwrap().clone()
     }
+
+    fn last_float_snapshot(&self, cg_id: CGWindowID) -> Option<FloatSnapshot> {
+        self.frame_state.lock().unwrap().floats.get(&cg_id).copied()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FloatSnapshot {
+    outer_frame: Dimension,
+    content_dim: Dimension,
 }
 
 #[derive(Clone)]
 struct FrameState {
     focused_window: Option<WindowId>,
     focused_monitor_id: Option<MonitorId>,
+    floats: HashMap<CGWindowID, FloatSnapshot>,
 }
 
 struct TestSender {
@@ -431,6 +443,19 @@ impl FrameSender for TestSender {
             let mut state = self.frame_state.lock().unwrap();
             state.focused_window = frame.focused_window;
             state.focused_monitor_id = Some(frame.focused_monitor_id);
+            state.floats = frame
+                .float_shows
+                .iter()
+                .map(|show| {
+                    (
+                        show.cg_id,
+                        FloatSnapshot {
+                            outer_frame: show.placement.frame,
+                            content_dim: show.content_dim,
+                        },
+                    )
+                })
+                .collect();
         }
     }
 }
