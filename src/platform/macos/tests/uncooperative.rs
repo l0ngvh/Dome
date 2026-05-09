@@ -9,7 +9,7 @@ fn one_window() -> (MacOS, Dome, CGWindowID) {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
     (macos, dome, cg1)
 }
@@ -21,7 +21,6 @@ fn two_windows() -> (MacOS, Dome, CGWindowID, CGWindowID) {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Finder", "Home");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -56,7 +55,7 @@ fn drift_retries_reset_on_new_target() {
     // Stop resisting and add a new window — target changes, retries reset
     macos.set_override_frame(cg1, None);
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg2)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg2)]);
     macos.settle(&mut dome, 10);
 
     // cg1 should now be placed at its new (half-screen) target
@@ -195,7 +194,6 @@ fn window_min_size_constraint() {
     dome.reconcile_windows(
         &[],
         &[],
-        &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
     );
     macos.settle(&mut dome, 10);
@@ -218,7 +216,6 @@ fn window_max_size_constraint() {
     macos.set_max_size(cg2, 500, 2000);
 
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -261,7 +258,7 @@ fn stale_burst_discarded() {
 
     // Add cg2 to trigger relayout -- cg1 shrinks to half-screen.
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg2)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg2)]);
     macos.settle(&mut dome, 10);
     let half_frame = macos.window_frame(cg1);
     macos.moves.borrow_mut().clear();

@@ -94,7 +94,7 @@ fn set_focus_same_workspace_tiling_and_float() {
     ");
 
     // Float: insert float, focus tiling then float
-    let f0 = hub.insert_float(Dimension::new(
+    hub.insert_float(Dimension::new(
         Length::new(10.0),
         Length::new(5.0),
         Length::new(30.0),

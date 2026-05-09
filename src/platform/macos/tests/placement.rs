@@ -6,7 +6,7 @@ fn single_window_placed_in_view() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     assert!(!macos.is_offscreen(cg1));
@@ -21,7 +21,6 @@ fn two_windows_split_horizontally() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -44,7 +43,6 @@ fn workspace_switch_hides_and_restores() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -73,7 +71,6 @@ fn float_window_moved_by_user() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -130,7 +127,6 @@ fn float_window_reshaped_on_border_size_change() {
     dome.reconcile_windows(
         &[],
         &[],
-        &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
     );
     macos.settle(&mut dome, 10);
@@ -151,8 +147,10 @@ fn float_window_reshaped_on_border_size_change() {
 
     // Bump border_size from the default (4.0) to 12.0, giving an 8 px delta
     // well beyond rounding noise.
-    let mut new_config = Config::default();
-    new_config.border_size = 12.0;
+    let new_config = Config {
+        border_size: 12.0,
+        ..Default::default()
+    };
     dome.config_changed(new_config);
 
     // config_changed calls flush_layout, which passes the new content_dim to
@@ -214,7 +212,6 @@ fn float_place_with_same_target_is_noop() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],

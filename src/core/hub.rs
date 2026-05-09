@@ -262,6 +262,7 @@ impl Hub {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
         if self.access.windows.get(window_id).mode == DisplayMode::Minimized {
             self.unminimize_window(window_id);

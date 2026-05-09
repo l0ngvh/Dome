@@ -21,7 +21,6 @@ use crate::action::{
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
     ContainerId, Dimension, Direction, Hub, Length, Logical, TilingAction, WindowId,
-    WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 use crate::platform::macos::MonitorInfo;
@@ -128,7 +127,6 @@ impl Dome {
         &mut self,
         removed: &[CGWindowID],
         minimized: &[CGWindowID],
-        unminimized: &[inspect::UnminimizedWindow],
         added: Vec<NewWindow>,
     ) -> Vec<Actions> {
         for &cg_id in removed {
@@ -137,31 +135,8 @@ impl Dome {
             }
         }
         for &cg_id in minimized {
-            let wid = match self.registry.get(cg_id).map(|e| e.window_id) {
-                Some(wid) => wid,
-                None => continue,
-            };
-            self.hub.minimize_window(wid);
-            if let Some(w) = self.registry.by_id_mut(wid) {
-                w.state = WindowState::UserMinimized;
-            }
-        }
-        for unmin in unminimized {
-            let wid = match self.registry.get(unmin.cg_id).map(|e| e.window_id) {
-                Some(wid) => wid,
-                None => continue,
-            };
-            self.hub.unminimize_window(wid);
-            let actual = RoundedDimension {
-                x: unmin.x,
-                y: unmin.y,
-                width: unmin.w,
-                height: unmin.h,
-            };
-            if let Some(w) = self.registry.by_id_mut(wid) {
-                w.state = WindowState::Positioned(PositionedState::Offscreen(
-                    OffscreenPlacement::new(actual),
-                ));
+            if let Some(entry) = self.registry.get(cg_id) {
+                self.minimize_window(entry.window_id);
             }
         }
         let mut on_open = Vec::new();
@@ -560,88 +535,6 @@ impl Dome {
                 self.hub.handle_tiling_action(action);
             }
         }
-    }
-
-    fn add_window(
-        &mut self,
-        ax: Arc<dyn AXWindowApi>,
-        dim: RoundedDimension,
-        app_name: Option<String>,
-        bundle_id: Option<String>,
-        title: Option<String>,
-    ) -> WindowId {
-        let monitor = self
-            .monitor_registry
-            .find_monitor_at(dim.x as f32, dim.y as f32);
-        let is_borderless_fullscreen = monitor.is_some_and(|m| {
-            let mon = &m.dimension;
-            let tolerance = 2;
-            (dim.x - mon.x.value() as i32).abs() <= tolerance
-                && (dim.y - mon.y.value() as i32).abs() <= tolerance
-                && (dim.width - mon.width.value() as i32).abs() <= tolerance
-                && (dim.height - mon.height.value() as i32).abs() <= tolerance
-        });
-        if is_borderless_fullscreen {
-            let window_id = self
-                .hub
-                .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
-            if let Some(title) = title.clone() {
-                self.hub.set_window_title(window_id, title);
-            }
-            self.registry.insert(
-                ax.clone(),
-                window_id,
-                WindowState::BorderlessFullscreen,
-                app_name.clone(),
-                bundle_id.clone(),
-                title.clone(),
-            );
-            tracing::info!(%window_id, "New borderless fullscreen window");
-            self.pending_created.push(window_id);
-            window_id
-        } else {
-            let window_id = self.hub.insert_tiling();
-            if let Some(title) = title.clone() {
-                self.hub.set_window_title(window_id, title);
-            }
-            self.registry.insert(
-                ax.clone(),
-                window_id,
-                WindowState::Positioned(PositionedState::Offscreen(OffscreenPlacement::new(dim))),
-                app_name,
-                bundle_id,
-                title,
-            );
-            tracing::info!(%window_id, "New tiling window");
-            self.pending_created.push(window_id);
-            window_id
-        }
-    }
-
-    fn add_native_fullscreen_window(
-        &mut self,
-        ax: Arc<dyn AXWindowApi>,
-        app_name: Option<String>,
-        bundle_id: Option<String>,
-        title: Option<String>,
-    ) -> WindowId {
-        let window_id = self
-            .hub
-            .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
-        if let Some(ref title) = title {
-            self.hub.set_window_title(window_id, title.clone());
-        }
-        self.registry.insert(
-            ax,
-            window_id,
-            WindowState::NativeFullscreen,
-            app_name,
-            bundle_id,
-            title,
-        );
-        tracing::info!(%window_id, "New native fullscreen window");
-        self.pending_created.push(window_id);
-        window_id
     }
 }
 

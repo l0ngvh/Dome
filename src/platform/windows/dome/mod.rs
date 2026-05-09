@@ -298,6 +298,7 @@ impl Dome {
         }
         self.hub.unminimize_window(id);
         if let Some(entry) = self.registry.get_mut(id) {
+            // FIXME: exclusive fullscreen windows would like to say a word
             entry.state = WindowState::Positioned(PositionedState::Offscreen {
                 retries: 0,
                 // Zero placeholder: next apply_layout will position this window.

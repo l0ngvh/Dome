@@ -481,10 +481,6 @@ unsafe extern "C-unwind" fn observer_callback(
         )
         || CFEqual(
             Some(notification),
-            Some(&*kAXWindowDeminiaturizedNotification()),
-        )
-        || CFEqual(
-            Some(notification),
             Some(&*kAXApplicationHiddenNotification()),
         )
         || CFEqual(
@@ -510,6 +506,13 @@ unsafe extern "C-unwind" fn observer_callback(
 
     if CFEqual(Some(notification), Some(&*kAXMovedNotification()))
         || CFEqual(Some(notification), Some(&*kAXResizedNotification()))
+        // Deminiaturized is treated similar to window moved, in that we need to get the window's
+        // new position/size, and a missed deminiaturized can be perfectly compensated by a
+        // standard move/resized event
+        || CFEqual(
+            Some(notification),
+            Some(&*kAXWindowDeminiaturizedNotification()),
+        )
     {
         if let Ok(pid) = get_pid(&element) {
             send_hub_event(

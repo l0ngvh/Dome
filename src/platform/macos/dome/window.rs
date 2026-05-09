@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -334,6 +335,89 @@ fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
 }
 
 impl Dome {
+    #[tracing::instrument(skip(self, ax), fields(window = %ax))]
+    pub(super) fn add_window(
+        &mut self,
+        ax: Arc<dyn AXWindowApi>,
+        dim: RoundedDimension,
+        app_name: Option<String>,
+        bundle_id: Option<String>,
+        title: Option<String>,
+    ) -> WindowId {
+        let monitor = self
+            .monitor_registry
+            .find_monitor_at(dim.x as f32, dim.y as f32);
+        let is_borderless_fullscreen = monitor.is_some_and(|m| {
+            let mon = &m.dimension;
+            let tolerance = 2;
+            (dim.x - mon.x.value() as i32).abs() <= tolerance
+                && (dim.y - mon.y.value() as i32).abs() <= tolerance
+                && (dim.width - mon.width.value() as i32).abs() <= tolerance
+                && (dim.height - mon.height.value() as i32).abs() <= tolerance
+        });
+        if is_borderless_fullscreen {
+            let window_id = self
+                .hub
+                .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
+            if let Some(title) = title.clone() {
+                self.hub.set_window_title(window_id, title);
+            }
+            self.registry.insert(
+                ax.clone(),
+                window_id,
+                WindowState::BorderlessFullscreen,
+                app_name.clone(),
+                bundle_id.clone(),
+                title.clone(),
+            );
+            tracing::info!(%window_id, "New borderless fullscreen window");
+            self.pending_created.push(window_id);
+            window_id
+        } else {
+            let window_id = self.hub.insert_tiling();
+            if let Some(title) = title.clone() {
+                self.hub.set_window_title(window_id, title);
+            }
+            self.registry.insert(
+                ax.clone(),
+                window_id,
+                WindowState::Positioned(PositionedState::Offscreen(OffscreenPlacement::new(dim))),
+                app_name,
+                bundle_id,
+                title,
+            );
+            tracing::info!(%window_id, "New tiling window");
+            self.pending_created.push(window_id);
+            window_id
+        }
+    }
+
+    #[tracing::instrument(skip(self, ax), fields(window = %ax))]
+    pub(super) fn add_native_fullscreen_window(
+        &mut self,
+        ax: Arc<dyn AXWindowApi>,
+        app_name: Option<String>,
+        bundle_id: Option<String>,
+        title: Option<String>,
+    ) -> WindowId {
+        let window_id = self
+            .hub
+            .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
+        if let Some(ref title) = title {
+            self.hub.set_window_title(window_id, title.clone());
+        }
+        self.registry.insert(
+            ax,
+            window_id,
+            WindowState::NativeFullscreen,
+            app_name,
+            bundle_id,
+            title,
+        );
+        tracing::info!(%window_id, "New native fullscreen window");
+        self.pending_created.push(window_id);
+        window_id
+    }
     #[tracing::instrument(skip(self))]
     pub(super) fn place_window(&mut self, window_id: WindowId, dim: Dimension) {
         let Some(window) = self.registry.by_id_mut(window_id) else {
@@ -390,10 +474,25 @@ impl Dome {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
-            _ => {
-                debug_assert!(
-                    false,
-                    "We can only position windows in Positioned state, it seems core's state and platform's state differ"
+            WindowState::UserMinimized => {
+                window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
+                    target, target,
+                )));
+                if let Err(e) = window.ax.set_frame(dim.round()) {
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                }
+            }
+            WindowState::NativeFullscreen => {
+                unreachable!("Native fullscreen windows must be set by `place_fullscreen_window`")
+            }
+            WindowState::BorderlessFullscreen => {
+                unreachable!(
+                    "Borderless fullscreen windows must be set by `place_fullscreen_window`"
+                )
+            }
+            WindowState::Minimized => {
+                unreachable!(
+                    "Minimized borderless fullscreen windows must be set by `place_fullscreen_window`"
                 );
             }
         }
@@ -407,7 +506,8 @@ impl Dome {
         let monitor = self.monitor_registry.get_entry_mut(monitor_id);
         let screen_dim = monitor.screen.dimension;
         match &mut window.state {
-            WindowState::Minimized | WindowState::UserMinimized => {
+            WindowState::Minimized => {
+                // BorderlessFullscreen windows previously in other workspaces. Restore it
                 if let Err(err) = window.ax.unminimize() {
                     tracing::trace!("Failed to unminimize window: {err:#}");
                 }
@@ -440,8 +540,17 @@ impl Dome {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
             }
-            // We don't touch OS managed fullscreen windows
-            _ => {}
+            WindowState::UserMinimized => {
+                // To reach this, a window must be toggled to fullscreen while being minimized, and
+                // no moved/resized events are emitted yet, otherwise window_moved must have
+                // changed the window state.
+                unreachable!("Window toggled to fullscreen while being minimized")
+            }
+            // We can't/don't need to touch native fullscreen windows
+            WindowState::NativeFullscreen => {}
+            // We shouldn't touch borderless fullscreen windows, sometimes they can be aggressive
+            // and cause infinite move/set position loop even though it's the same size
+            WindowState::BorderlessFullscreen => {}
         }
     }
 
@@ -602,6 +711,7 @@ impl Dome {
                 // notification was not fired
                 tracing::trace!("Previously minimized borderless fullscreen window reappeared");
                 if is_borderless_fullscreen {
+                    // TODO: might worth putting a retry limit here to prevent infinite loop
                     if let Err(e) = window.ax.minimize() {
                         tracing::trace!("Failed to minimize window: {e:#}");
                     }
@@ -649,8 +759,21 @@ impl Dome {
                     self.hub.unset_fullscreen(window_id);
                 }
             }
-            // User-minimized windows should not trigger move logic.
-            WindowState::UserMinimized => {}
+            WindowState::UserMinimized => {
+                // User manually brought windows back to screen.
+                self.hub.unminimize_window(window_id);
+                if is_borderless_fullscreen {
+                    self.hub
+                        .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
+                    window.state = WindowState::BorderlessFullscreen;
+                } else {
+                    let offscreen = OffscreenPlacement::new(new_placement);
+                    if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
+                        tracing::trace!("hide after unminimize failed: {e}");
+                    }
+                    window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
+                }
+            }
         }
     }
 
@@ -702,11 +825,7 @@ impl Dome {
             return;
         };
         let WindowState::Positioned(positioned_state) = window.state else {
-            debug_assert!(
-                false,
-                "Can only move windows which dome control the positions offscreen"
-            );
-            return;
+            unreachable!("Can only move windows which dome control the positions offscreen");
         };
         let monitors = self.monitor_registry.all_screens();
         match positioned_state {
@@ -741,5 +860,11 @@ impl Dome {
                 tracing::trace!("Failed to re-hide window: {e:#}");
             }
         }
+    }
+
+    pub(super) fn minimize_window(&mut self, window_id: WindowId) {
+        let window = self.registry.by_id_mut(window_id).unwrap();
+        self.hub.minimize_window(window_id);
+        window.state = WindowState::UserMinimized;
     }
 }

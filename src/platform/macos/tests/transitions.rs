@@ -10,7 +10,6 @@ fn fullscreen_window_restored_from_offscreen() {
     dome.reconcile_windows(
         &[],
         &[],
-        &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
     );
     macos.settle(&mut dome, 10);
@@ -39,7 +38,6 @@ fn borderless_fullscreen_hidden_on_workspace_switch() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -74,7 +72,6 @@ fn minimized_window_reappears_non_fullscreen() {
     dome.reconcile_windows(
         &[],
         &[],
-        &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
     );
     macos.settle(&mut dome, 10);
@@ -101,7 +98,7 @@ fn native_fullscreen_exit_to_borderless() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // Enter native fullscreen
@@ -130,7 +127,6 @@ fn offscreen_window_becomes_borderless_fullscreen() {
     dome.reconcile_windows(
         &[],
         &[],
-        &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
     );
     macos.settle(&mut dome, 10);
@@ -155,7 +151,7 @@ fn new_window_already_borderless_fullscreen() {
 
     // Window already covers the screen before Dome discovers it
     let cg1 = macos.spawn_window_at(100, "Safari", "Google", 0, 0, 1920, 1080);
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // Should stay fullscreen, not be tiled
@@ -170,7 +166,6 @@ fn float_focus_unfocus_cycle() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -203,7 +198,6 @@ fn hide_noop_for_native_fullscreen() {
     dome.reconcile_windows(
         &[],
         &[],
-        &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
     );
     macos.settle(&mut dome, 10);
@@ -230,7 +224,6 @@ fn hide_noop_for_minimized() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -260,7 +253,6 @@ fn offscreen_window_rehidden_on_external_move() {
     dome.reconcile_windows(
         &[],
         &[],
-        &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
     );
     macos.settle(&mut dome, 10);
@@ -286,7 +278,6 @@ fn borderless_fullscreen_full_lifecycle() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -327,7 +318,6 @@ fn minimized_borderless_reappears_still_fullscreen() {
     dome.reconcile_windows(
         &[],
         &[],
-        &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
     );
     macos.settle(&mut dome, 10);
@@ -351,7 +341,7 @@ fn zoom_button_triggers_borderless_fullscreen() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
@@ -366,7 +356,7 @@ fn borderless_fullscreen_exit_to_tiling() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // Enter borderless fullscreen
@@ -388,7 +378,6 @@ fn native_fullscreen_enter() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -413,7 +402,6 @@ fn native_fullscreen_exit() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -443,7 +431,6 @@ fn toggle_fullscreen_hides_siblings() {
     dome.reconcile_windows(
         &[],
         &[],
-        &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
     );
     macos.settle(&mut dome, 10);
@@ -463,7 +450,6 @@ fn toggle_fullscreen_on_and_off() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -488,7 +474,6 @@ fn native_fullscreen_blocks_toggle_float() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let cg2 = macos.spawn_window(101, "Terminal", "zsh");
     dome.reconcile_windows(
-        &[],
         &[],
         &[],
         vec![new_window(&macos, cg1), new_window(&macos, cg2)],
@@ -529,7 +514,7 @@ fn borderless_fullscreen_blocks_toggle_float() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // Zoom to borderless fullscreen
@@ -558,7 +543,7 @@ fn borderless_fullscreen_allows_move_workspace() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // Zoom to borderless fullscreen
@@ -578,7 +563,7 @@ fn native_fullscreen_exit_to_borderless_on_unfocused_workspace() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // Enter native fullscreen
@@ -607,7 +592,7 @@ fn native_fullscreen_exit_to_borderless_unfocused_then_switch_back() {
     let mut dome = macos.setup_dome();
 
     let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)]);
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
     macos.settle(&mut dome, 10);
 
     // Enter native fullscreen, switch away, exit native fullscreen
@@ -630,4 +615,189 @@ fn native_fullscreen_exit_to_borderless_unfocused_then_switch_back() {
 
     assert_eq!(macos.window_frame(cg1), (0, 0, 1920, 1080));
     assert_eq!(macos.unminimize_count(cg1), 1);
+}
+
+#[test]
+fn user_minimize_via_reconcile() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+    );
+    macos.settle(&mut dome, 10);
+
+    // User minimizes cg1 — detected by reconcile
+    dome.reconcile_windows(&[], &[cg1], vec![]);
+    macos.settle(&mut dome, 10);
+
+    // cg2 should take full screen since cg1 was removed from tiling.
+    // Width is less than 1920 due to border inset but should be close to full.
+    assert!(!macos.is_offscreen(cg2));
+    let (_, _, w, _) = macos.window_frame(cg2);
+    assert!(
+        w > 1900,
+        "cg2 should take (nearly) full screen, got width {w}"
+    );
+}
+
+#[test]
+fn user_minimized_window_receives_move_event() {
+    // Simulates kAXWindowDeminiaturizedNotification routed through the move path.
+    // A UserMinimized window receiving a move event should be moved offscreen,
+    // waiting for the focus event to trigger layout reattachment.
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+    );
+    macos.settle(&mut dome, 10);
+
+    // User minimizes cg1
+    dome.reconcile_windows(&[], &[cg1], vec![]);
+    macos.settle(&mut dome, 10);
+
+    // Deminiaturize (user clicked Dock icon) fires as a move event
+    macos.simulate_external_move(&mut dome, cg1, 200, 200, 800, 600);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg2), (4, 4, 952, 1072));
+    assert_eq!(macos.window_frame(cg1), (964, 4, 952, 1072));
+}
+
+#[test]
+fn user_minimized_unminimize_via_focus() {
+    // When set_focus is called on a minimized window (e.g. from the picker),
+    // hub.set_focus detects DisplayMode::Minimized and calls unminimize_window,
+    // reattaching to the current workspace. place_window then handles the
+    // UserMinimized state by positioning the window.
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+    );
+    macos.settle(&mut dome, 10);
+
+    // User minimizes cg1
+    dome.reconcile_windows(&[], &[cg1], vec![]);
+    macos.settle(&mut dome, 10);
+
+    // cg2 should now be full screen (border inset makes it slightly less than 1920)
+    assert_eq!(macos.window_frame(cg2), (4, 4, 1912, 1072));
+
+    // User selects cg1 from the picker → focus_window_by_cg
+    dome.focus_window_by_cg(cg1);
+    macos.settle(&mut dome, 10);
+
+    // cg1 should be placed back in a tiling layout (half screen with cg2)
+    assert_eq!(macos.window_frame(cg1), (964, 4, 952, 1072));
+}
+
+#[test]
+fn user_minimized_deminiaturize_then_focus() {
+    // Full flow: user minimizes → deminiaturize notification fires (move event) →
+    // focus event arrives. The move event transitions state to Offscreen,
+    // then focus triggers unminimize in hub and layout places the window.
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+    );
+    macos.settle(&mut dome, 10);
+
+    // Minimize cg1
+    dome.reconcile_windows(&[], &[cg1], vec![]);
+    macos.settle(&mut dome, 10);
+
+    // Deminiaturize notification arrives as move event
+    macos.simulate_external_move(&mut dome, cg1, 300, 100, 800, 600);
+    macos.settle(&mut dome, 10);
+    assert_eq!(macos.window_frame(cg1), (964, 4, 952, 1072));
+
+    // Focus arrives (Dock click also raises the window)
+    dome.focus_window_by_cg(cg1);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg1), (964, 4, 952, 1072));
+}
+
+#[test]
+fn user_minimize_single_window_then_unminimize() {
+    // Edge case: minimize the only window on a workspace, then unminimize it.
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
+    macos.settle(&mut dome, 10);
+    assert!(!macos.is_offscreen(cg1));
+
+    // Minimize the only window
+    dome.reconcile_windows(&[], &[cg1], vec![]);
+    macos.settle(&mut dome, 10);
+
+    // Unminimize via focus
+    dome.focus_window_by_cg(cg1);
+    macos.settle(&mut dome, 10);
+
+    // Should be placed full screen again (border inset makes it slightly less than 1920)
+    assert_eq!(macos.window_frame(cg1), (4, 4, 1912, 1072));
+}
+
+#[test]
+fn user_minimize_noop_on_unknown_window() {
+    // If reconcile reports a minimize for an unknown cg_id, it should not panic.
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
+    macos.settle(&mut dome, 10);
+
+    // Minimize a non-existent window — should be silently ignored
+    let unknown_cg = 999;
+    dome.reconcile_windows(&[], &[unknown_cg], vec![]);
+    macos.settle(&mut dome, 10);
+
+    // Original window should be unaffected
+    assert!(!macos.is_offscreen(cg1));
+}
+
+#[test]
+fn window_turned_borderless_fullscreen_after_user_minimize() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg1)]);
+    macos.settle(&mut dome, 10);
+
+    // Minimize cg1
+    dome.reconcile_windows(&[], &[cg1], vec![]);
+    macos.settle(&mut dome, 10);
+
+    // Zoom cg1 to borderless fullscreen
+    macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg1), (0, 0, 1920, 1080));
 }

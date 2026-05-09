@@ -236,7 +236,6 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
                 let on_open = runner.dome.reconcile_windows(
                     &result.to_remove,
                     &result.to_minimize,
-                    &result.to_unminimize,
                     result.to_add,
                 );
                 for actions in on_open {
@@ -385,7 +384,6 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
             let on_open = runner.dome.reconcile_windows(
                 &result.to_remove,
                 &result.to_minimize,
-                &result.to_unminimize,
                 result.to_add,
             );
             for actions in on_open {
