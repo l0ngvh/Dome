@@ -26,7 +26,7 @@
 
         <MediaTemplate EmbedCab="yes" />
 
-        <Icon Id="DomeIcon.ico" SourceFile="icon.ico"/>
+        <Icon Id="DomeIcon.ico" SourceFile="Dome.ico"/>
         <Property Id="ARPPRODUCTICON" Value="DomeIcon.ico" />
 
         <WixVariable Id="WixUIBannerBmp" Value="WixBanner.bmp" />
