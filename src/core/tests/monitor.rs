@@ -1,6 +1,8 @@
 use insta::assert_snapshot;
 
 #[cfg(target_os = "windows")]
+use super::default_layout_for_tests;
+#[cfg(target_os = "windows")]
 use crate::config::SizeConstraint;
 #[cfg(target_os = "windows")]
 use crate::core::hub::HubConfig;
@@ -546,12 +548,14 @@ fn monitor_scale_multiplies_config_lengths() {
         ),
         2.0,
         HubConfig {
-            tab_bar_height: Length::<Logical>::new(20.0),
-            auto_tile: true,
-            min_width: SizeConstraint::Pixels(Length::new(0.0)),
-            min_height: SizeConstraint::Pixels(Length::new(0.0)),
-            max_width: SizeConstraint::Pixels(Length::new(0.0)),
-            max_height: SizeConstraint::Pixels(Length::new(0.0)),
+            layout: crate::config::LayoutConfig {
+                partition_tree: crate::config::PartitionTreeConfig {
+                    tab_bar_height: Length::<Logical>::new(20.0),
+                    auto_tile: true,
+                },
+                ..default_layout_for_tests()
+            },
+            ..Default::default()
         },
     );
     hub.insert_tiling();
@@ -612,12 +616,15 @@ fn monitor_scale_multiplies_config_lengths() {
         ),
         2.0,
         HubConfig {
-            tab_bar_height: Length::<Logical>::new(20.0),
-            auto_tile: true,
+            layout: crate::config::LayoutConfig {
+                partition_tree: crate::config::PartitionTreeConfig {
+                    tab_bar_height: Length::<Logical>::new(20.0),
+                    auto_tile: true,
+                },
+                ..default_layout_for_tests()
+            },
             min_width: SizeConstraint::Pixels(Length::new(100.0)),
-            min_height: SizeConstraint::Pixels(Length::new(0.0)),
-            max_width: SizeConstraint::Pixels(Length::new(0.0)),
-            max_height: SizeConstraint::Pixels(Length::new(0.0)),
+            ..Default::default()
         },
     );
     for _ in 0..6 {

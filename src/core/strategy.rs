@@ -102,6 +102,9 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Remove per-workspace tiling state. Called before workspace deletion.
     fn prune_workspace(&mut self, ws_id: WorkspaceId);
 
+    /// Refresh config-derived internal state and relayout every workspace.
+    fn apply_config(&mut self, hub: &mut HubAccess);
+
     /// Validate strategy-specific structural invariants (test-only).
     #[cfg(test)]
     fn validate_tree(&self, hub: &HubAccess);

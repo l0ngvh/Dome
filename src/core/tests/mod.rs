@@ -9,10 +9,13 @@ mod partition_tree;
 mod query;
 mod set_focus;
 mod smoke;
+mod strategy_switch;
 
 use std::collections::HashSet;
 
-use crate::config::SizeConstraint;
+use crate::config::{
+    LayoutConfig, LayoutKind, MasterStackConfig, PartitionTreeConfig, SizeConstraint,
+};
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Dimension, Direction, Length, Logical, WindowId, Workspace, WorkspaceId};
@@ -750,11 +753,30 @@ pub(super) fn setup_logger_with_level(level: &str) {
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
 
+pub(super) fn default_partition_tree_config_for_tests() -> PartitionTreeConfig {
+    PartitionTreeConfig {
+        tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
+        auto_tile: false,
+    }
+}
+pub(super) fn default_master_stack_config_for_tests() -> MasterStackConfig {
+    MasterStackConfig {
+        master_ratio: 0.5,
+        master_count: 1,
+    }
+}
+pub(super) fn default_layout_for_tests() -> LayoutConfig {
+    LayoutConfig {
+        active: LayoutKind::PartitionTree,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master_stack: default_master_stack_config_for_tests(),
+    }
+}
+
 impl Default for HubConfig {
     fn default() -> Self {
         Self {
-            tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
-            auto_tile: false,
+            layout: default_layout_for_tests(),
             min_width: SizeConstraint::Pixels(Length::new(0.0)),
             min_height: SizeConstraint::Pixels(Length::new(0.0)),
             max_width: SizeConstraint::Pixels(Length::new(0.0)),
@@ -792,7 +814,13 @@ pub(super) fn setup_with_auto_tile() -> Hub {
         ),
         1.0,
         HubConfig {
-            auto_tile: true,
+            layout: crate::config::LayoutConfig {
+                partition_tree: crate::config::PartitionTreeConfig {
+                    auto_tile: true,
+                    ..default_partition_tree_config_for_tests()
+                },
+                ..default_layout_for_tests()
+            },
             ..Default::default()
         },
     )

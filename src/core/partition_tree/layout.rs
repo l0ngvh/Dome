@@ -119,7 +119,13 @@ impl PartitionTreeStrategy {
                 result
             }
             None => {
-                let tab_bar = hub.config.tab_bar_height.to_unit(scale).value();
+                let tab_bar = hub
+                    .config
+                    .layout
+                    .partition_tree
+                    .tab_bar_height
+                    .to_unit(scale)
+                    .value();
                 let content_y = dim.y + Length::new(tab_bar);
                 let content_height = dim.height - Length::new(tab_bar);
 
@@ -259,7 +265,15 @@ impl PartitionTreeStrategy {
                     .fold(Length::ZERO, Length::max);
                 (
                     max_w,
-                    max_h + Length::new(hub.config.tab_bar_height.to_unit(scale).value()),
+                    max_h
+                        + Length::new(
+                            hub.config
+                                .layout
+                                .partition_tree
+                                .tab_bar_height
+                                .to_unit(scale)
+                                .value(),
+                        ),
                 )
             }
         };
@@ -300,14 +314,14 @@ impl PartitionTreeStrategy {
             Child::Window(wid) => {
                 let td = self.tiling_data_mut(wid);
                 td.dimension = dim;
-                if hub.config.auto_tile && !td.spawn_mode.is_tab() {
+                if hub.config.layout.partition_tree.auto_tile && !td.spawn_mode.is_tab() {
                     td.spawn_mode = SpawnMode::clean(spawn_mode);
                 }
             }
             Child::Container(cid) => {
                 let c = self.containers.get_mut(cid);
                 c.dimension = dim;
-                if hub.config.auto_tile && !c.spawn_mode().is_tab() {
+                if hub.config.layout.partition_tree.auto_tile && !c.spawn_mode().is_tab() {
                     c.set_spawn_mode(spawn_mode);
                 }
             }

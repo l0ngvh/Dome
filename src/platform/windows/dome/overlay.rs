@@ -431,7 +431,7 @@ impl TilingOverlay {
             border: overlay::BorderMetrics::from_thickness(Length::<Logical>::new(
                 config.border_size,
             )),
-            tab_bar_height: config.tab_bar_height,
+            tab_bar_height: config.layout.partition_tree.tab_bar_height,
         };
         let events = std::mem::take(&mut self.events);
         let w_phys = self.width_phys;

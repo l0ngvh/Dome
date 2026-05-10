@@ -621,7 +621,7 @@ impl TilingOverlayView {
         let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
         let metrics = OverlayMetrics {
             border,
-            tab_bar_height: config.tab_bar_height,
+            tab_bar_height: config.layout.partition_tree.tab_bar_height,
         };
         let theme = config.theme();
 

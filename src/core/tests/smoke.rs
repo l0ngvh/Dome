@@ -1,7 +1,7 @@
 use super::{hub_debug_text, setup_hub, setup_logger_with_level, validate_hub};
 use crate::action::MonitorTarget;
+use crate::config::LayoutKind;
 use crate::core::hub::{Hub, HubConfig};
-use crate::core::master_stack::MasterStackStrategy;
 use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
 use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
@@ -457,7 +457,9 @@ fn strategy_smoke_test() {
 }
 
 fn setup_master_stack() -> Hub {
-    Hub::new_with_strategy(
+    let mut config = HubConfig::default();
+    config.layout.active = LayoutKind::MasterStack;
+    Hub::new(
         Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -465,8 +467,7 @@ fn setup_master_stack() -> Hub {
             Length::new(30.0),
         ),
         1.0,
-        HubConfig::default(),
-        Box::new(MasterStackStrategy::new()),
+        config,
     )
 }
 

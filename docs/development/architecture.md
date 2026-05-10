@@ -93,11 +93,24 @@ Hub delegates all tiling-specific operations to a `TilingStrategy` trait (`src/c
 
 The trait has a minimal surface: `attach_child`, `detach_child`, `handle_action`, `layout_workspace`, `set_focus`, `collect_tiling_placements`, `focused_tiling_child`, and `validate_tree` (test-only). Everything else (scroll, viewport clamping, container parent lookups, tree restructuring) is private to the strategy implementation.
 
-`PartitionTreeStrategy` (`src/core/partition_tree/`) is the default and currently only implementation. It owns the container allocator and per-window tiling state (`HashMap<WindowId, TilingWindowData>` for parent, dimension, spawn_mode), and implements i3-style manual tiling: container tree with split horizontal/vertical/tabbed layout, spawn mode routing, direction invariance. All logic that was previously in `split.rs` (deleted) and the layout portion of `workspace.rs` now lives here.
+**Strategy selection.** `Hub::new` builds the active strategy from `HubConfig.layout` via a private `build_strategy(&LayoutConfig)` helper in `src/core/hub.rs`. The `LayoutConfig.active` field (`PartitionTree` or `MasterStack`) drives the match. Strategy-specific knobs live under `[layout.<strategy>]` in config; layout-wide knobs (the four size constraints) stay at the top level on `HubConfig`. See `docs/configuration.md` for the user-facing shape.
+
+`PartitionTreeStrategy` (`src/core/partition_tree/`) is the default. It owns the container allocator and per-window tiling state (`HashMap<WindowId, TilingWindowData>` for parent, dimension, spawn_mode), and implements i3-style manual tiling: container tree with split horizontal/vertical/tabbed layout, spawn mode routing, direction invariance.
+
+`MasterStackStrategy` (`src/core/master_stack/`) is a two-area layout: master windows on the left, stack windows on the right. Constructed via `MasterStackStrategy::with_params(master_ratio, master_count)` from the config values. Its `do_layout` does not yet enforce the global `min_width`/`min_height`/`max_width`/`max_height` constraints (known TODO).
 
 Hub holds `access: HubAccess` (monitors, focused_monitor, workspaces, windows, config) and `strategy: Box<dyn TilingStrategy>` as disjoint fields. Strategy methods receive `&mut HubAccess` so they can read/write shared state without borrowing Hub. This solves the split-borrow problem.
 
 `TilingAction` is an enum of tiling-specific commands (focus/move direction, toggle spawn mode, toggle direction, toggle layout, focus parent, focus tab, master grow/shrink/more/fewer). Hub's `command.rs` does restriction checks then delegates to `strategy.handle_action`. Float and fullscreen management stay on Hub.
+
+**Hot-reload dispatch.** `Hub::sync_config` compares `self.access.config.layout.active` with the incoming config's `layout.active`. If they differ (partition-tree to master-stack or vice versa), a full strategy rebuild fires: tiling windows are snapshotted, the old strategy is dropped, a fresh one is built from config, and windows are reattached in `WindowId` order. Per-workspace container groupings and split directions are lost because the two strategies have incompatible tree topologies. Focus and `is_float_focused` are restored per workspace.
+
+When `active` is unchanged, all config changes go through `TilingStrategy::apply_config(&mut HubAccess)`. This trait method atomically refreshes any cached internal state and relayouts every workspace. The atomicity prevents a caller from copying state without relayouting or vice versa.
+
+- `MasterStackStrategy` overrides `apply_config` to copy `hub.config.layout.master_stack.{master_ratio, master_count}` into its own fields, then runs the relayout loop. Per-workspace window ordering and focus are preserved.
+- `PartitionTreeStrategy` inherits the default impl (relayout loop only) because it reads `tab_bar_height` and `auto_tile` fresh from `hub.config` on each layout pass — no internal state to copy.
+
+Runtime commands (`master grow`, `master shrink`, `master more`, `master fewer`) mutate `MasterStackStrategy`'s fields directly. On the next hot-reload, `apply_config` overwrites those fields with the TOML values — the file is always the source of truth.
 
 ### Layout
 

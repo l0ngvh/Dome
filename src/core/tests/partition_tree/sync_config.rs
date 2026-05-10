@@ -2,6 +2,7 @@ use insta::assert_snapshot;
 
 use crate::core::hub::HubConfig;
 use crate::core::node::{Length, Logical};
+use crate::core::tests::default_layout_for_tests;
 use crate::core::{Dimension, Hub, tests::snapshot_text};
 
 #[test]
@@ -15,8 +16,13 @@ fn sync_config_updates_tab_bar_height() {
         ),
         1.0,
         HubConfig {
-            tab_bar_height: Length::<Logical>::new(10.0),
-            auto_tile: true,
+            layout: crate::config::LayoutConfig {
+                partition_tree: crate::config::PartitionTreeConfig {
+                    tab_bar_height: Length::<Logical>::new(10.0),
+                    auto_tile: true,
+                },
+                ..default_layout_for_tests()
+            },
             ..Default::default()
         },
     );
@@ -25,8 +31,13 @@ fn sync_config_updates_tab_bar_height() {
     hub.toggle_container_layout();
 
     hub.sync_config(HubConfig {
-        tab_bar_height: Length::<Logical>::new(10.0),
-        auto_tile: true,
+        layout: crate::config::LayoutConfig {
+            partition_tree: crate::config::PartitionTreeConfig {
+                tab_bar_height: Length::<Logical>::new(10.0),
+                auto_tile: true,
+            },
+            ..default_layout_for_tests()
+        },
         ..Default::default()
     });
 
@@ -50,8 +61,13 @@ fn sync_config_recalculates_all_workspaces() {
         ),
         1.0,
         HubConfig {
-            tab_bar_height: Length::<Logical>::new(10.0),
-            auto_tile: true,
+            layout: crate::config::LayoutConfig {
+                partition_tree: crate::config::PartitionTreeConfig {
+                    tab_bar_height: Length::<Logical>::new(10.0),
+                    auto_tile: true,
+                },
+                ..default_layout_for_tests()
+            },
             ..Default::default()
         },
     );
@@ -65,8 +81,13 @@ fn sync_config_recalculates_all_workspaces() {
     hub.toggle_container_layout();
 
     hub.sync_config(HubConfig {
-        tab_bar_height: Length::<Logical>::new(5.0),
-        auto_tile: true,
+        layout: crate::config::LayoutConfig {
+            partition_tree: crate::config::PartitionTreeConfig {
+                tab_bar_height: Length::<Logical>::new(5.0),
+                auto_tile: true,
+            },
+            ..default_layout_for_tests()
+        },
         ..Default::default()
     });
 

@@ -4,9 +4,6 @@
 # Border size in pixels (default: 4.0)
 border_size = 4.0
 
-# Automatic tiling - automatically determine split direction based on window dimensions (default: true)
-automatic_tiling = true
-
 # Theme: one of "latte", "frappe", "macchiato", "mocha" (default: mocha)
 theme = "mocha"
 
@@ -33,6 +30,21 @@ max_height = "50%"  # 50% of screen height
 [font]
 text_size = 14.0
 subtext_size = 12.0
+
+# Tiling layout strategy. Both sub-tables are always parsed; `active` picks
+# which one takes effect. Switching `active` and saving triggers a hot reload
+# that discards the current tiling tree and re-attaches windows under the new
+# strategy. Runtime-tuned master-stack params get wiped on that reload.
+[layout]
+active = "partition_tree"   # or "master_stack"
+
+[layout.partition_tree]
+tab_bar_height = 24.0       # height of the tab bar in tabbed containers, logical pixels
+auto_tile = true            # pick split direction based on focused window dimensions
+
+[layout.master_stack]
+master_ratio = 0.5          # width of the master area, in [0.1, 0.9]
+master_count = 1            # number of master windows, >= 1
 
 [keymaps]
 "cmd+0" = ["focus workspace 0"]

@@ -420,6 +420,102 @@ impl<'de> Deserialize<'de> for SizeConstraint {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LayoutKind {
+    PartitionTree,
+    MasterStack,
+}
+
+/// Per-strategy config for the partition-tree strategy.
+///
+/// All fields are read fresh from `hub.config.layout.partition_tree` by the
+/// strategy on every layout pass (see `src/core/partition_tree/layout.rs`).
+/// No field binds to the strategy instance, so a config change triggers a
+/// relayout but never a strategy rebuild. A future field that needs to bind
+/// to the strategy instance must override `apply_config` to copy it.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PartitionTreeConfig {
+    #[serde(default = "default_tab_bar_height")]
+    pub(crate) tab_bar_height: Length<Logical>,
+    #[serde(default = "default_auto_tile")]
+    pub(crate) auto_tile: bool,
+}
+
+/// Per-strategy config for the master-stack strategy.
+///
+/// All fields flow into the running `MasterStackStrategy` via `apply_config`
+/// on hot-reload, overwriting any runtime-tuned values (e.g. from
+/// `master grow/shrink/more/fewer` commands). The TOML file is the source of
+/// truth; runtime commands are a transient override until the next reload.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MasterStackConfig {
+    #[serde(default = "default_master_ratio")]
+    pub(crate) master_ratio: f32,
+    #[serde(default = "default_master_count")]
+    pub(crate) master_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LayoutConfig {
+    #[serde(default = "default_active_layout")]
+    pub(crate) active: LayoutKind,
+    #[serde(default = "default_partition_tree_config")]
+    pub(crate) partition_tree: PartitionTreeConfig,
+    #[serde(default = "default_master_stack_config")]
+    pub(crate) master_stack: MasterStackConfig,
+}
+
+impl MasterStackConfig {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.master_ratio < 0.1 || self.master_ratio > 0.9 {
+            anyhow::bail!(
+                "layout.master_stack.master_ratio ({}) must be between 0.1 and 0.9",
+                self.master_ratio
+            );
+        }
+        if self.master_count < 1 {
+            anyhow::bail!("layout.master_stack.master_count must be >= 1");
+        }
+        Ok(())
+    }
+}
+
+fn default_active_layout() -> LayoutKind {
+    LayoutKind::PartitionTree
+}
+fn default_auto_tile() -> bool {
+    true
+}
+fn default_master_ratio() -> f32 {
+    0.5
+}
+fn default_master_count() -> usize {
+    1
+}
+fn default_partition_tree_config() -> PartitionTreeConfig {
+    PartitionTreeConfig {
+        tab_bar_height: default_tab_bar_height(),
+        auto_tile: default_auto_tile(),
+    }
+}
+fn default_master_stack_config() -> MasterStackConfig {
+    MasterStackConfig {
+        master_ratio: default_master_ratio(),
+        master_count: default_master_count(),
+    }
+}
+fn default_layout() -> LayoutConfig {
+    LayoutConfig {
+        active: default_active_layout(),
+        partition_tree: default_partition_tree_config(),
+        master_stack: default_master_stack_config(),
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct MacosWindow {
     #[serde(default)]
@@ -578,10 +674,6 @@ pub(crate) struct Config {
     pub(crate) keymaps: ModalKeymaps,
     #[serde(default = "default_border_size")]
     pub(crate) border_size: f32,
-    #[serde(default = "default_tab_bar_height")]
-    pub(crate) tab_bar_height: Length<Logical>,
-    #[serde(default = "default_automatic_tiling")]
-    pub(crate) automatic_tiling: bool,
     #[serde(default = "SizeConstraint::default_min")]
     pub(crate) min_width: SizeConstraint,
     #[serde(default = "SizeConstraint::default_min")]
@@ -590,6 +682,8 @@ pub(crate) struct Config {
     pub(crate) max_width: SizeConstraint,
     #[serde(default)]
     pub(crate) max_height: SizeConstraint,
+    #[serde(default = "default_layout")]
+    pub(crate) layout: LayoutConfig,
     #[serde(default)]
     pub(crate) theme: Flavor,
     #[serde(default)]
@@ -637,21 +731,16 @@ fn default_tab_bar_height() -> Length<Logical> {
     Length::new(24.0)
 }
 
-fn default_automatic_tiling() -> bool {
-    true
-}
-
 impl Default for Config {
     fn default() -> Self {
         Config {
             keymaps: default_keymaps(),
             border_size: default_border_size(),
-            tab_bar_height: default_tab_bar_height(),
-            automatic_tiling: default_automatic_tiling(),
             min_width: SizeConstraint::default_min(),
             min_height: SizeConstraint::default_min(),
             max_width: SizeConstraint::default(),
             max_height: SizeConstraint::default(),
+            layout: default_layout(),
             // Mocha is the darkest flavour and matches Dome's pre-theme default palette.
             theme: Flavor::default(),
             font: FontConfig::default(),
@@ -755,6 +844,9 @@ impl Config {
             anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
         }
         self.font.validate()?;
+        // Validate master_stack regardless of layout.active so toggling
+        // never hides errors in the inactive sub-table.
+        self.layout.master_stack.validate()?;
         // "default" is the reserved name for the top-level [keymaps] table.
         if self.keymaps.modes.contains_key("default") {
             anyhow::bail!("mode name 'default' is reserved for the top-level [keymaps] table");
@@ -976,6 +1068,16 @@ mod tests {
     }
 
     #[test]
+    fn removed_top_level_layout_fields_rejected() {
+        // `tab_bar_height` and `automatic_tiling` moved under
+        // [layout.partition_tree]. The old top-level keys must fail at parse
+        // time via deny_unknown_fields, matching the removed_color_field
+        // precedent.
+        assert!(toml::from_str::<Config>("tab_bar_height = 24.0").is_err());
+        assert!(toml::from_str::<Config>("automatic_tiling = true").is_err());
+    }
+
+    #[test]
     fn load_or_default_returns_defaults_when_path_missing() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1130,5 +1232,97 @@ mod tests {
         let resolved = constraint.resolve(Length::new(1000.0), 2.0);
         // scale does not affect Percent: 10% of 1000 = 100, regardless of scale.
         assert_eq!(resolved.value(), 100.0);
+    }
+
+    #[test]
+    fn partition_tree_config_parses_fields() {
+        let config: Config =
+            toml::from_str("[layout.partition_tree]\ntab_bar_height = 30.0\nauto_tile = false")
+                .unwrap();
+        assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 30.0);
+        assert!(!config.layout.partition_tree.auto_tile);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn partition_tree_config_defaults() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 24.0);
+        assert!(config.layout.partition_tree.auto_tile);
+    }
+
+    #[test]
+    fn layout_defaults_to_partition_tree() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.layout.active, LayoutKind::PartitionTree);
+        assert_eq!(config.layout.master_stack.master_ratio, 0.5);
+        assert_eq!(config.layout.master_stack.master_count, 1);
+    }
+
+    #[test]
+    fn layout_parses_master_stack_active() {
+        let config: Config = toml::from_str("[layout]\nactive = \"master_stack\"\n").unwrap();
+        assert_eq!(config.layout.active, LayoutKind::MasterStack);
+        // Sub-tables still get their defaults
+        assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 24.0);
+        assert_eq!(config.layout.master_stack.master_ratio, 0.5);
+    }
+
+    #[test]
+    fn layout_parses_master_stack_params() {
+        let config: Config =
+            toml::from_str("[layout.master_stack]\nmaster_ratio = 0.3\nmaster_count = 2").unwrap();
+        assert_eq!(config.layout.master_stack.master_ratio, 0.3);
+        assert_eq!(config.layout.master_stack.master_count, 2);
+    }
+
+    #[test]
+    fn layout_validates_master_ratio_low() {
+        let config: Config = toml::from_str("[layout.master_stack]\nmaster_ratio = 0.05").unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn layout_validates_master_ratio_high() {
+        let config: Config = toml::from_str("[layout.master_stack]\nmaster_ratio = 0.95").unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn layout_validates_master_count_zero() {
+        let config: Config = toml::from_str("[layout.master_stack]\nmaster_count = 0").unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn layout_validates_even_when_inactive() {
+        let config: Config = toml::from_str(
+            "[layout]\nactive = \"partition_tree\"\n[layout.master_stack]\nmaster_ratio = 0.05",
+        )
+        .unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn layout_rejects_unknown_active() {
+        assert!(toml::from_str::<Config>("[layout]\nactive = \"floating\"").is_err());
+    }
+
+    #[test]
+    fn layout_rejects_unknown_subfield_master_stack() {
+        assert!(toml::from_str::<Config>("[layout.master_stack]\nfoo = 1").is_err());
+    }
+
+    #[test]
+    fn layout_rejects_unknown_subfield_partition_tree() {
+        assert!(toml::from_str::<Config>("[layout.partition_tree]\nfoo = 1").is_err());
+    }
+
+    #[test]
+    fn layout_master_ratio_boundary_accepts_endpoints() {
+        let low: Config = toml::from_str("[layout.master_stack]\nmaster_ratio = 0.1").unwrap();
+        assert!(low.validate().is_ok());
+        let high: Config = toml::from_str("[layout.master_stack]\nmaster_ratio = 0.9").unwrap();
+        assert!(high.validate().is_ok());
     }
 }

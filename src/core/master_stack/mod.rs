@@ -24,12 +24,12 @@ struct MasterStackState {
 }
 
 impl MasterStackStrategy {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(master_ratio: f32, master_count: usize) -> Self {
         Self {
             workspaces: HashMap::new(),
             window_dimensions: HashMap::new(),
-            master_ratio: 0.5,
-            master_count: 1,
+            master_ratio,
+            master_count,
         }
     }
 
@@ -406,6 +406,25 @@ impl TilingStrategy for MasterStackStrategy {
             for wid in &state.windows {
                 self.window_dimensions.remove(wid);
             }
+        }
+    }
+
+    fn apply_config(&mut self, hub: &mut HubAccess) {
+        // Hot-reload overrides any runtime tuning from GrowMaster / MoreMaster
+        // etc.: the TOML file is the source of truth, runtime commands are a
+        // transient override until the next config reload.
+        self.master_ratio = hub.config.layout.master_stack.master_ratio;
+        self.master_count = hub.config.layout.master_stack.master_count;
+
+        // Relayout every workspace so the new scalars take effect.
+        let ws_ids: Vec<WorkspaceId> = hub
+            .workspaces
+            .all_active()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+        for ws_id in ws_ids {
+            self.layout_workspace(hub, ws_id);
         }
     }
 

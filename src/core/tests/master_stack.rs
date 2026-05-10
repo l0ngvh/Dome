@@ -1,13 +1,16 @@
 use super::{snapshot, validate_hub};
+use crate::config::{LayoutConfig, LayoutKind, MasterStackConfig};
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig};
-use crate::core::master_stack::MasterStackStrategy;
 use crate::core::node::{Dimension, Length, WindowId};
 use crate::core::strategy::TilingAction;
+use crate::core::tests::default_partition_tree_config_for_tests;
 use insta::assert_snapshot;
 
 fn setup_master_stack() -> Hub {
-    Hub::new_with_strategy(
+    let mut config = HubConfig::default();
+    config.layout.active = LayoutKind::MasterStack;
+    Hub::new(
         Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -15,8 +18,7 @@ fn setup_master_stack() -> Hub {
             Length::new(30.0),
         ),
         1.0,
-        HubConfig::default(),
-        Box::new(MasterStackStrategy::new()),
+        config,
     )
 }
 
@@ -1020,4 +1022,289 @@ fn prune_workspace() {
     let workspaces = hub.all_workspaces();
     assert_eq!(workspaces.len(), 1);
     validate_hub(&hub);
+}
+
+#[test]
+fn sync_config_increments_master_count() {
+    let mut hub = setup_master_stack();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
+
+    let ws = hub.current_workspace();
+    let focus_before = hub.focused_tiling_window(ws);
+
+    hub.sync_config(HubConfig {
+        layout: LayoutConfig {
+            active: LayoutKind::MasterStack,
+            partition_tree: default_partition_tree_config_for_tests(),
+            master_stack: MasterStackConfig {
+                master_ratio: 0.5,
+                master_count: 2,
+            },
+        },
+        ..Default::default()
+    });
+
+    // Window ordering and focus preserved (no rebuild, apply_config path).
+    assert_eq!(hub.focused_tiling_window(ws), focus_before);
+    // Layout reflects new master_count=2.
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(4))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
+        Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
+        Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=10.00)
+        Window(id=WindowId(3), x=75.00, y=10.00, w=75.00, h=10.00)
+        Window(id=WindowId(4), x=75.00, y=20.00, w=75.00, h=10.00, highlighted)
+      )
+
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                    W2                                   |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                    W0                                   ||                                                                         |
+    |                                                                         |+-------------------------------------------------------------------------+
+    |                                                                         |+-------------------------------------------------------------------------+
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    +-------------------------------------------------------------------------+|                                                                         |
+    +-------------------------------------------------------------------------+|                                    W3                                   |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         |+-------------------------------------------------------------------------+
+    |                                                                         |***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                    W1                                   |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                    W4                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
+
+#[test]
+fn sync_config_decrease_master_ratio() {
+    let mut hub = setup_master_stack();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
+
+    let ws = hub.current_workspace();
+    let focus_before = hub.focused_tiling_window(ws);
+
+    hub.sync_config(HubConfig {
+        layout: LayoutConfig {
+            active: LayoutKind::MasterStack,
+            partition_tree: default_partition_tree_config_for_tests(),
+            master_stack: MasterStackConfig {
+                master_ratio: 0.3,
+                master_count: 1,
+            },
+        },
+        ..Default::default()
+    });
+
+    // Window ordering and focus preserved (no rebuild, apply_config path).
+    assert_eq!(hub.focused_tiling_window(ws), focus_before);
+    // Layout reflects new master_ratio=0.3.
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=45.00, h=30.00)
+        Window(id=WindowId(1), x=45.00, y=0.00, w=105.00, h=15.00)
+        Window(id=WindowId(2), x=45.00, y=15.00, w=105.00, h=15.00, highlighted)
+      )
+
+    +-------------------------------------------++-------------------------------------------------------------------------------------------------------+
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                   W1                                                  |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           ||                                                                                                       |
+    |                                           |+-------------------------------------------------------------------------------------------------------+
+    |                     W0                    |*********************************************************************************************************
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                   W2                                                  *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    |                                           |*                                                                                                       *
+    +-------------------------------------------+*********************************************************************************************************
+    ");
+}
+
+#[test]
+fn sync_config_applies_master_stack_params_without_rebuilding() {
+    // Two workspaces with specific window orderings. Changing master_ratio
+    // via sync_config must NOT rebuild the strategy (no reattach), so each
+    // workspace's window ordering and focused window survive.
+    let mut hub = setup_master_stack();
+
+    // Workspace "0": insert 3 windows (ids allocated in order).
+    hub.insert_tiling();
+    hub.insert_tiling();
+    hub.insert_tiling();
+    let ws0 = hub.current_workspace();
+    let focus_ws0 = hub.focused_tiling_window(ws0);
+
+    // Switch to workspace "1" and insert 2 windows.
+    hub.focus_workspace("1");
+    hub.insert_tiling();
+    hub.insert_tiling();
+    let ws1 = hub.current_workspace();
+    let focus_ws1 = hub.focused_tiling_window(ws1);
+
+    // Go back to workspace "0" for the snapshot.
+    hub.focus_workspace("0");
+
+    // Change master_ratio from 0.5 to 0.4 via hot-reload.
+    hub.sync_config(HubConfig {
+        layout: LayoutConfig {
+            active: LayoutKind::MasterStack,
+            partition_tree: default_partition_tree_config_for_tests(),
+            master_stack: MasterStackConfig {
+                master_ratio: 0.4,
+                master_count: 1,
+            },
+        },
+        ..Default::default()
+    });
+
+    // Both workspaces: ordering and focus preserved.
+    assert_eq!(hub.focused_tiling_window(ws0), focus_ws0);
+    assert_eq!(hub.focused_tiling_window(ws1), focus_ws1);
+    // Layout output reflects new ratio.
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=60.00, h=30.00)
+        Window(id=WindowId(1), x=60.00, y=0.00, w=90.00, h=15.00)
+        Window(id=WindowId(2), x=60.00, y=15.00, w=90.00, h=15.00, highlighted)
+      )
+
+    +----------------------------------------------------------++----------------------------------------------------------------------------------------+
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                           W1                                           |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          ||                                                                                        |
+    |                                                          |+----------------------------------------------------------------------------------------+
+    |                            W0                            |******************************************************************************************
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                           W2                                           *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    +----------------------------------------------------------+******************************************************************************************
+    ");
+}
+
+#[test]
+fn sync_config_overrides_runtime_tuned_master_ratio() {
+    // Runtime GrowMaster tuning is a transient override. A hot-reload with
+    // the same file value resets the ratio to the file's authoritative value.
+    let mut hub = setup_master_stack();
+    hub.insert_tiling();
+    hub.insert_tiling();
+
+    // GrowMaster 3 times: 0.5 -> 0.55 -> 0.60 -> 0.65
+    hub.handle_tiling_action(TilingAction::GrowMaster);
+    hub.handle_tiling_action(TilingAction::GrowMaster);
+    hub.handle_tiling_action(TilingAction::GrowMaster);
+
+    // Hot-reload resets to file value 0.5.
+    hub.sync_config(HubConfig {
+        layout: LayoutConfig {
+            active: LayoutKind::MasterStack,
+            partition_tree: default_partition_tree_config_for_tests(),
+            master_stack: MasterStackConfig {
+                master_ratio: 0.4,
+                master_count: 1,
+            },
+        },
+        ..Default::default()
+    });
+
+    // Layout output shows ratio back to 0.5 (75px master on 150px screen).
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=60.00, h=30.00)
+        Window(id=WindowId(1), x=60.00, y=0.00, w=90.00, h=30.00, highlighted)
+      )
+
+    +----------------------------------------------------------+******************************************************************************************
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                            W0                            |*                                           W1                                           *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    |                                                          |*                                                                                        *
+    +----------------------------------------------------------+******************************************************************************************
+    ");
 }

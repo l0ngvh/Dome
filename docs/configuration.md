@@ -9,12 +9,11 @@ The config format is TOML, and the same file works on both macOS and Windows. Ch
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `border_size` | float | `4.0` | Border width around windows, in logical pixels. |
-| `tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, in logical pixels. |
-| `automatic_tiling` | boolean | `true` | When `true`, Dome chooses horizontal or vertical split based on the focused window's dimensions. When `false`, new windows always split in the current container's direction. |
 | `min_width` | float or string | `"5%"` | Minimum window width. A number means logical pixels (e.g., `200`). A string with `%` means percentage of screen width (e.g., `"10%"`). |
 | `min_height` | float or string | `"5%"` | Minimum window height. Same format as `min_width`, relative to screen height. |
 | `max_width` | float or string | `0` | Maximum window width. Same format as `min_width`. `0` means no limit. Windows that hit the max are centered within their allocated space. |
 | `max_height` | float or string | `0` | Maximum window height. Same format as `min_height`. `0` means no limit. |
+| `layout` | table | see [Layout](#layout) | Tiling layout strategy selection and per-strategy params. |
 | `theme` | string | `"mocha"` | Color theme. One of `"latte"`, `"frappe"`, `"macchiato"`, `"mocha"` ([Catppuccin](https://catppuccin.com/) flavors, light to dark). Changes apply live via hot reload. |
 | `font.text_size` | float | `14.0` | Body text size in points. Used for overlay tab titles and picker labels. Must be in `[4.0, 128.0]`. |
 | `font.subtext_size` | float | `12.0` | Secondary text size in points. Used for picker app-name subtext. Must be in `[4.0, 128.0]`. |
@@ -34,7 +33,7 @@ Both values must be between `4.0` and `128.0`. Values outside this range cause a
 
 Dome uses egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks). Custom font families are not configurable.
 
-Note: the default `text_size` of 14.0 is larger than the previous hardcoded 12pt overlay tab title. Long tab titles may truncate earlier inside a tab. `tab_bar_height` is a separate config knob and does not auto-scale with font size.
+Note: the default `text_size` of 14.0 is larger than the previous hardcoded 12pt overlay tab title. Long tab titles may truncate earlier inside a tab. `tab_bar_height` (under `[layout.partition_tree]`) is a separate config knob and does not auto-scale with font size.
 
 ## Size Constraints
 
@@ -47,12 +46,62 @@ max_width = "50%"     # 50% of screen width
 max_height = 800      # 800 logical pixels
 ```
 
+These constraints are global and apply regardless of which tiling strategy is active. The partition-tree strategy enforces them today. The master-stack strategy does not yet honor them (known gap, tracked as a TODO).
+
+## Layout
+
+The `[layout]` table selects the tiling strategy and holds per-strategy configuration. Both sub-tables (`[layout.partition_tree]` and `[layout.master_stack]`) are always parsed and validated, regardless of which strategy is active. This means a typo in the inactive block is caught immediately rather than hiding until you flip `active`.
+
+```toml
+[layout]
+active = "partition_tree"   # or "master_stack"
+
+[layout.partition_tree]
+tab_bar_height = 24.0       # logical pixels, must be >= 0
+auto_tile = true            # choose split direction based on focused window dimensions
+
+[layout.master_stack]
+master_ratio = 0.5          # fraction of screen for the master area, must be in [0.1, 0.9]
+master_count = 1            # number of windows in the master area, must be >= 1
+```
+
+When the `[layout]` table is absent, defaults apply: `active = "partition_tree"`, `tab_bar_height = 24.0`, `auto_tile = true`, `master_ratio = 0.5`, `master_count = 1`.
+
+### Partition Tree (`partition_tree`)
+
+The default strategy. i3-style manual tiling with split containers (horizontal, vertical, tabbed), spawn-mode routing, and direction invariance.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, in logical pixels. Does not auto-scale with font size. |
+| `auto_tile` | boolean | `true` | When true, Dome picks horizontal or vertical split based on the focused window's dimensions. When false, new windows split in the current container's direction. |
+
+### Master Stack (`master_stack`)
+
+A two-area layout: one or more master windows on the left, remaining windows stacked on the right.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `master_ratio` | float | `0.5` | Width of the master area as a fraction of screen width. Must be in `[0.1, 0.9]`. |
+| `master_count` | integer | `1` | Number of windows placed in the master area. Must be >= 1. |
+
+Invalid values (`master_ratio` outside `[0.1, 0.9]` or `master_count = 0`) cause a config validation error. Dome falls back to defaults until the file is fixed.
+
+At runtime, master-stack params can be adjusted via keybindings (`master grow`, `master shrink`, `master more`, `master fewer`). These runtime adjustments are transient overrides: every hot-reload resets them to the TOML file values.
+
+### Hot-Reload Behavior
+
+Config changes fall into two categories:
+
+- **Strategy rebuild** (discards tiling state): changing `active` between `"partition_tree"` and `"master_stack"`. The two strategies have incompatible tree topologies, so windows are detached, the old strategy is dropped, a fresh one is built, and windows are reattached in `WindowId` order. Container groupings, tab state, split directions, and runtime-tuned master-stack params are lost. Float, fullscreen, and minimized windows are preserved.
+- **Relayout** (preserves tiling state): any change that does not flip `active`. This includes `master_ratio`, `master_count`, `tab_bar_height`, `auto_tile`, and the top-level size constraints. Per-workspace window ordering and focused window survive. The strategy refreshes its internal state from the updated config and relayouts all workspaces.
+
+Runtime adjustments via `master grow`, `master shrink`, `master more`, `master fewer` are reset to the TOML file values on every hot-reload. The file is always the source of truth for these params.
+
 ## Full Example
 
 ```toml
 border_size = 2.0
-tab_bar_height = 24.0
-automatic_tiling = true
 min_width = "5%"
 min_height = "5%"
 max_width = 0
@@ -63,11 +112,33 @@ log_level = "info"
 [font]
 text_size = 14.0
 subtext_size = 12.0
+
+[layout]
+active = "partition_tree"
+
+[layout.partition_tree]
+tab_bar_height = 24.0
+auto_tile = true
+
+[layout.master_stack]
+master_ratio = 0.5
+master_count = 1
 ```
 
 ## Upgrading from Removed Config Fields
 
-Older versions of Dome used five separate color fields (`focused_color`, `spawn_indicator_color`, `border_color`, `tab_bar_background_color`, `active_tab_background_color`). These have been replaced by the single `theme` field. The `border_radius` field has also been removed; Dome now hardcodes window and tab-bar corner radii in the renderer. If your config still contains any of these removed fields, Dome will fail to parse your config, log a warning to `dome.log`, and fall back to built-in defaults. This means your keybindings, window rules, and other settings silently revert to defaults. Remove the old fields to clear the warning.
+Dome uses `deny_unknown_fields` on its config parser, so removed or moved fields cause a parse error. If your config contains any of these, Dome logs a warning to `dome.log` and falls back to built-in defaults. This means your keybindings, window rules, and other settings silently revert to defaults until you fix the file.
+
+**Layout fields (moved):**
+
+- `tab_bar_height` (top-level) is now `[layout.partition_tree] tab_bar_height`. Same name, nested under the strategy that uses it.
+- `automatic_tiling` (top-level) is now `[layout.partition_tree] auto_tile`. Moved and renamed.
+
+The four size-constraint keys (`min_width`, `min_height`, `max_width`, `max_height`) are unchanged and stay at the top level.
+
+**Color fields (removed):**
+
+Older versions used five separate color fields (`focused_color`, `spawn_indicator_color`, `border_color`, `tab_bar_background_color`, `active_tab_background_color`). These have been replaced by the single `theme` field. The `border_radius` field has also been removed; Dome now hardcodes window and tab-bar corner radii in the renderer.
 
 ## Log File
 

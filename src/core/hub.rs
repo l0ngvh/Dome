@@ -1,9 +1,10 @@
 use crate::action::MonitorTarget;
-use crate::config::SizeConstraint;
+use crate::config::{LayoutConfig, LayoutKind, SizeConstraint};
 
 use super::allocator::{Allocator, NodeId};
+use super::master_stack::MasterStackStrategy;
 use super::node::{
-    ContainerId, Dimension, DisplayMode, Length, Logical, Monitor, MonitorId, Window, WindowId,
+    ContainerId, Dimension, DisplayMode, Length, Monitor, MonitorId, Window, WindowId,
     WindowRestrictions, Workspace, WorkspaceId,
 };
 use super::partition_tree::PartitionTreeStrategy;
@@ -126,40 +127,7 @@ impl Hub {
         let ws_id = workspaces.allocate(Workspace::new("0".to_string(), primary_id));
         monitors.get_mut(primary_id).active_workspace = ws_id;
 
-        Self {
-            access: HubAccess {
-                monitors,
-                focused_monitor: primary_id,
-                config,
-                workspaces,
-                windows: Allocator::new(),
-            },
-            strategy: Box::new(PartitionTreeStrategy::new()),
-            minimized_windows: Vec::new(),
-        }
-    }
-
-    /// Like `new`, but accepts a custom tiling strategy. Used in tests to
-    /// exercise non-default strategies (e.g. MasterStackStrategy).
-    #[cfg(test)]
-    pub(crate) fn new_with_strategy(
-        primary_screen: Dimension,
-        primary_scale: f32,
-        config: HubConfig,
-        strategy: Box<dyn TilingStrategy>,
-    ) -> Self {
-        let mut monitors: Allocator<Monitor> = Allocator::new();
-        let mut workspaces: Allocator<Workspace> = Allocator::new();
-
-        let primary_id = monitors.allocate(Monitor {
-            name: "primary".to_string(),
-            dimension: primary_screen,
-            scale: primary_scale,
-            active_workspace: WorkspaceId::new(0),
-        });
-
-        let ws_id = workspaces.allocate(Workspace::new("0".to_string(), primary_id));
-        monitors.get_mut(primary_id).active_workspace = ws_id;
+        let strategy = build_strategy(&config.layout);
 
         Self {
             access: HubAccess {
@@ -405,7 +373,18 @@ impl Hub {
     }
 
     pub(crate) fn sync_config(&mut self, config: HubConfig) {
+        // A full strategy rebuild is needed only when the active layout kind
+        // changes (partition-tree <-> master-stack). Scalar param changes
+        // (master_ratio, master_count) are pushed into the running strategy
+        // via apply_config, preserving per-workspace window ordering and focus.
+        let rebuild = self.access.config.layout.active != config.layout.active;
         self.access.config = config;
+
+        if !rebuild {
+            self.strategy.apply_config(&mut self.access);
+            return;
+        }
+
         // Collect IDs first to avoid borrowing self.access.workspaces while
         // passing &mut self.access to the strategy.
         let ws_ids: Vec<WorkspaceId> = self
@@ -415,8 +394,61 @@ impl Hub {
             .iter()
             .map(|(id, _)| *id)
             .collect();
-        for ws_id in ws_ids {
-            self.strategy.layout_workspace(&mut self.access, ws_id);
+
+        // Rebuild path. Entered only when `layout.active` changed (e.g.
+        // partition-tree <-> master-stack). Strategies differ in tree topology
+        // (partition-tree uses containers and tabs; master-stack uses a flat
+        // ordered list), so there is no meaningful cross-strategy migration.
+        // Consequences:
+        //   - Container groupings, tabbed containers, and split directions
+        //     from partition-tree are lost.
+        //   - Master-stack window order within master/stack areas is reset.
+        //   - Runtime-tuned master-stack params (GrowMaster / ShrinkMaster /
+        //     MoreMaster / FewerMaster actions) are wiped because the new
+        //     strategy is built fresh from config.
+        // Focus is preserved per workspace: the previously-focused tiling
+        // window is restored via set_focus, and `is_float_focused` is
+        // restored inline after the strategy calls that would otherwise clear
+        // it. Fullscreen, float, and minimized windows are untouched: their
+        // placement is managed by Hub, not the strategy.
+
+        // Snapshot each workspace's tiling windows, previous tiling focus,
+        // and float-focus flag before the old strategy is dropped.
+        let mut snapshots: Vec<(WorkspaceId, Vec<WindowId>, Option<WindowId>, bool)> = Vec::new();
+        for ws_id in &ws_ids {
+            let tiling_windows: Vec<WindowId> = self
+                .access
+                .windows
+                .all_active()
+                .iter()
+                .filter(|(_, w)| w.mode == DisplayMode::Tiling && w.workspace == *ws_id)
+                .map(|(id, _)| *id)
+                .collect();
+            let prev_focus = self.strategy.focused_tiling_window(&self.access, *ws_id);
+            let was_float_focused = self.access.workspaces.get(*ws_id).is_float_focused;
+            snapshots.push((*ws_id, tiling_windows, prev_focus, was_float_focused));
+        }
+
+        // Replace the strategy. The old Box<dyn TilingStrategy> is dropped,
+        // deallocating all per-workspace state (both PartitionTreeStrategy
+        // and MasterStackStrategy are pure owned-data structs).
+        self.strategy = build_strategy(&self.access.config.layout);
+
+        // Re-attach tiling windows in WindowId-ascending order (creation
+        // order, the canonical deterministic ordering).
+        for (ws_id, wids, prev_focus, was_float_focused) in snapshots {
+            for wid in &wids {
+                self.strategy.attach_window(&mut self.access, *wid, ws_id);
+            }
+            if let Some(f) = prev_focus {
+                self.strategy.set_focus(&mut self.access, f);
+            }
+            // Restore is_float_focused after all strategy calls that clear it.
+            // The Workspace invariant (flag=true => float_windows non-empty)
+            // holds because the rebuild never mutates float_windows.
+            if was_float_focused {
+                self.access.workspaces.get_mut(ws_id).is_float_focused = true;
+            }
         }
     }
 
@@ -739,8 +771,7 @@ impl Hub {
 
 #[derive(Debug, Clone)]
 pub(crate) struct HubConfig {
-    pub(super) tab_bar_height: Length<Logical>,
-    pub(super) auto_tile: bool,
+    pub(super) layout: LayoutConfig,
     pub(super) min_width: SizeConstraint,
     pub(super) min_height: SizeConstraint,
     pub(super) max_width: SizeConstraint,
@@ -750,12 +781,21 @@ pub(crate) struct HubConfig {
 impl From<crate::config::Config> for HubConfig {
     fn from(config: crate::config::Config) -> Self {
         Self {
-            tab_bar_height: config.tab_bar_height,
-            auto_tile: config.automatic_tiling,
+            layout: config.layout,
             min_width: config.min_width,
             min_height: config.min_height,
             max_width: config.max_width,
             max_height: config.max_height,
         }
+    }
+}
+
+fn build_strategy(layout: &LayoutConfig) -> Box<dyn TilingStrategy> {
+    match layout.active {
+        LayoutKind::PartitionTree => Box::new(PartitionTreeStrategy::new()),
+        LayoutKind::MasterStack => Box::new(MasterStackStrategy::new(
+            layout.master_stack.master_ratio,
+            layout.master_stack.master_count,
+        )),
     }
 }

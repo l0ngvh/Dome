@@ -1,10 +1,12 @@
 use insta::assert_snapshot;
 
-use crate::config::SizeConstraint;
+use crate::config::{LayoutConfig, PartitionTreeConfig, SizeConstraint};
 
 use crate::core::hub::HubConfig;
-use crate::core::node::{Length, Logical};
-use crate::core::tests::{setup, snapshot};
+use crate::core::node::Length;
+use crate::core::tests::{
+    default_layout_for_tests, default_partition_tree_config_for_tests, setup, snapshot,
+};
 
 #[test]
 fn set_min_size_respects_minimum_width() {
@@ -382,7 +384,6 @@ fn set_min_size_global_exceeds_screen_size() {
     hub.insert_tiling();
 
     hub.sync_config(HubConfig {
-        tab_bar_height: Length::<Logical>::new(2.0),
         min_width: SizeConstraint::Pixels(Length::new(100.0)),
         ..Default::default()
     });
@@ -1289,7 +1290,13 @@ fn global_max_applies_to_all_windows() {
     hub.insert_tiling();
 
     hub.sync_config(HubConfig {
-        auto_tile: true,
+        layout: LayoutConfig {
+            partition_tree: PartitionTreeConfig {
+                auto_tile: true,
+                ..default_partition_tree_config_for_tests()
+            },
+            ..default_layout_for_tests()
+        },
         max_width: SizeConstraint::Pixels(Length::new(60.0)),
         ..Default::default()
     });
@@ -1342,7 +1349,13 @@ fn per_window_max_overrides_global() {
     hub.insert_tiling();
 
     hub.sync_config(HubConfig {
-        auto_tile: true,
+        layout: LayoutConfig {
+            partition_tree: PartitionTreeConfig {
+                auto_tile: true,
+                ..default_partition_tree_config_for_tests()
+            },
+            ..default_layout_for_tests()
+        },
         max_width: SizeConstraint::Pixels(Length::new(60.0)),
         ..Default::default()
     });

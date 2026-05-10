@@ -14,45 +14,6 @@ use crate::core::hub::{ContainerPlacement, HubAccess, SpawnIndicator, TilingWind
 use crate::core::node::{Dimension, Length, WindowId, WorkspaceId};
 use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, clip, translate};
 
-impl SpawnIndicator {
-    fn from_spawn_mode(mode: SpawnMode) -> Self {
-        Self {
-            top: mode.is_tab(),
-            right: mode.is_horizontal(),
-            bottom: mode.is_vertical(),
-            left: false,
-        }
-    }
-}
-
-/// Per-window tiling state. Containers store the same fields in the container
-/// allocator; this is the window equivalent, owned by the strategy rather than
-/// the shared Window struct because these fields are meaningless for float and
-/// fullscreen windows.
-#[derive(Debug)]
-struct TilingWindowData {
-    parent: Parent,
-    dimension: Dimension,
-    spawn_mode: SpawnMode,
-}
-
-/// Per-workspace tiling state owned by the strategy. Moved out of Workspace
-/// so that other strategies can manage their own per-workspace state without
-/// polluting the shared Workspace struct.
-#[derive(Debug, Default)]
-struct WorkspaceTilingState {
-    root: Option<Child>,
-    /// Tiling focus pointer. Usually a `Child::Window` (the focused window). Can be
-    /// `Child::Container` after `focus_parent`, entering container-highlight mode where
-    /// `focused_tiling_window()` returns `None`. Can only be None in an empty workspace.
-    ///
-    /// Invariant: if `focused_tiling == Some(X)`, every ancestor container of X has
-    /// `focused == X`. Walking `container.focused` from root reaches X directly.
-    /// Established by `set_focus_child`, preserved by `replace_split_child_focus`.
-    focused_tiling: Option<Child>,
-    viewport_offset: (Length, Length),
-}
-
 /// i3-style manual tiling strategy. Manages a container tree where windows are
 /// leaves and containers define split direction (horizontal/vertical) or tabbed
 /// layout. This is the default (and currently only) tiling strategy.
@@ -444,6 +405,18 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.workspaces.remove(&ws_id);
     }
 
+    fn apply_config(&mut self, hub: &mut HubAccess) {
+        let ws_ids: Vec<WorkspaceId> = hub
+            .workspaces
+            .all_active()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+        for ws_id in ws_ids {
+            self.layout_workspace(hub, ws_id);
+        }
+    }
+
     #[cfg(test)]
     fn validate_tree(&self, hub: &HubAccess) {
         for (workspace_id, workspace) in hub.workspaces.all_active() {
@@ -472,6 +445,45 @@ impl TilingStrategy for PartitionTreeStrategy {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Per-window tiling state. Containers store the same fields in the container
+/// allocator; this is the window equivalent, owned by the strategy rather than
+/// the shared Window struct because these fields are meaningless for float and
+/// fullscreen windows.
+#[derive(Debug)]
+struct TilingWindowData {
+    parent: Parent,
+    dimension: Dimension,
+    spawn_mode: SpawnMode,
+}
+
+/// Per-workspace tiling state owned by the strategy. Moved out of Workspace
+/// so that other strategies can manage their own per-workspace state without
+/// polluting the shared Workspace struct.
+#[derive(Debug, Default)]
+struct WorkspaceTilingState {
+    root: Option<Child>,
+    /// Tiling focus pointer. Usually a `Child::Window` (the focused window). Can be
+    /// `Child::Container` after `focus_parent`, entering container-highlight mode where
+    /// `focused_tiling_window()` returns `None`. Can only be None in an empty workspace.
+    ///
+    /// Invariant: if `focused_tiling == Some(X)`, every ancestor container of X has
+    /// `focused == X`. Walking `container.focused` from root reaches X directly.
+    /// Established by `set_focus_child`, preserved by `replace_split_child_focus`.
+    focused_tiling: Option<Child>,
+    viewport_offset: (Length, Length),
+}
+
+impl SpawnIndicator {
+    fn from_spawn_mode(mode: SpawnMode) -> Self {
+        Self {
+            top: mode.is_tab(),
+            right: mode.is_horizontal(),
+            bottom: mode.is_vertical(),
+            left: false,
         }
     }
 }
