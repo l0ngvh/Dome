@@ -147,9 +147,7 @@ impl PickerWindow {
         )?;
         let hwnd = window.hwnd();
         configure_picker_dwm(hwnd);
-        let renderer = Renderer::new(
-            instance, device, queue, hwnd, w_phys, h_phys, false, flavor, font,
-        )?;
+        let renderer = Renderer::new(instance, device, queue, hwnd, w_phys, h_phys, flavor, font)?;
         let theme = Theme::from_flavor(flavor);
         // Renderer::new called set_theme with this flavor, which wrote catppuccin
         // values into egui Visuals. The set_visuals call below fully overwrites

@@ -48,7 +48,6 @@ pub enum Action {
     Mode {
         name: String,
     },
-    ToggleMinimizePicker,
     /// Restore a specific minimized window. Sent by the picker UI, not user-configurable.
     #[command(skip)]
     UnminimizeWindow(WindowId),
@@ -96,7 +95,6 @@ impl fmt::Display for Action {
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
             Action::Mode { name } => write!(f, "mode {name}"),
-            Action::ToggleMinimizePicker => write!(f, "toggle minimized"),
             Action::UnminimizeWindow(id) => write!(f, "unminimize_window {id}"),
         }
     }
@@ -237,6 +235,10 @@ pub enum ToggleTarget {
     Layout,
     Float,
     Fullscreen,
+    // Sits in ToggleTarget so the keymap, IPC, and CLI all spell it `toggle minimized`.
+    // Each platform runner intercepts this variant before calling into the hub; the
+    // hub never dispatches it (the picker is a UI concern, not a tree mutation).
+    Minimized,
 }
 
 impl fmt::Display for ToggleTarget {
@@ -247,6 +249,7 @@ impl fmt::Display for ToggleTarget {
             ToggleTarget::Layout => write!(f, "layout"),
             ToggleTarget::Float => write!(f, "float"),
             ToggleTarget::Fullscreen => write!(f, "fullscreen"),
+            ToggleTarget::Minimized => write!(f, "minimized"),
         }
     }
 }
@@ -379,7 +382,9 @@ impl FromStr for Action {
                 target: MasterTarget::Fewer,
             })),
             ["exit"] => Ok(Action::Exit),
-            ["toggle", "minimized"] => Ok(Action::ToggleMinimizePicker),
+            ["toggle", "minimized"] => Ok(Action::Hub(HubAction::Toggle {
+                target: ToggleTarget::Minimized,
+            })),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
     }
@@ -409,7 +414,6 @@ enum FlatAction {
     Exec { command: String },
     Exit,
     Mode { name: String },
-    ToggleMinimizePicker,
     UnminimizeWindow(WindowId),
 }
 
@@ -423,7 +427,6 @@ impl From<Action> for FlatAction {
             Action::Exec { command } => FlatAction::Exec { command },
             Action::Exit => FlatAction::Exit,
             Action::Mode { name } => FlatAction::Mode { name },
-            Action::ToggleMinimizePicker => FlatAction::ToggleMinimizePicker,
             Action::UnminimizeWindow(id) => FlatAction::UnminimizeWindow(id),
         }
     }
@@ -439,7 +442,6 @@ impl From<FlatAction> for Action {
             FlatAction::Exec { command } => Action::Exec { command },
             FlatAction::Exit => Action::Exit,
             FlatAction::Mode { name } => Action::Mode { name },
-            FlatAction::ToggleMinimizePicker => Action::ToggleMinimizePicker,
             FlatAction::UnminimizeWindow(id) => Action::UnminimizeWindow(id),
         }
     }
@@ -501,7 +503,12 @@ mod tests {
                 r#"{"Exec":{"command":"open -a Terminal"}}"#,
             ),
             (Action::Exit, r#""Exit""#),
-            (Action::ToggleMinimizePicker, r#""ToggleMinimizePicker""#),
+            (
+                Action::Hub(HubAction::Toggle {
+                    target: ToggleTarget::Minimized,
+                }),
+                r#"{"Toggle":{"target":"Minimized"}}"#,
+            ),
             (
                 Action::Mode {
                     name: "resize".into(),

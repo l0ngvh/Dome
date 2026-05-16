@@ -29,8 +29,8 @@
         <Icon Id="DomeIcon.ico" SourceFile="Dome.ico"/>
         <Property Id="ARPPRODUCTICON" Value="DomeIcon.ico" />
 
-        <WixVariable Id="WixUIBannerBmp" Value="WixBanner.bmp" />
-        <WixVariable Id="WixUIDialogBmp" Value="WixDialog.bmp" />
+        <WixVariable Id="WixUIBannerBmp" Value="banner.bmp" />
+        <WixVariable Id="WixUIDialogBmp" Value="welcome.bmp" />
 
         <UIRef Id="WixUI_FeatureTree" />
 

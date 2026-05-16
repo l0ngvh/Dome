@@ -455,11 +455,16 @@ pub(super) trait AXWindowApi: Send + Sync + std::fmt::Display {
     fn cg_id(&self) -> CGWindowID;
     fn pid(&self) -> i32;
     fn is_native_fullscreen(&self, marker: &DispatcherMarker) -> bool;
+    /// Reads the window's AX position as `(x, y)` in logical points (top-left origin).
     fn get_position(&self, marker: &DispatcherMarker)
     -> Result<(Length<Logical>, Length<Logical>)>;
+    /// Reads the window's AX size as `(width, height)` in logical points.
     fn get_size(&self, marker: &DispatcherMarker) -> Result<(Length<Logical>, Length<Logical>)>;
+    /// Positions and resizes the window via AX. Owns the `Dimension<Logical>` to
+    /// `CGPoint`/`CGSize` conversion (f64 casts happen inside the impl).
     fn set_frame(&self, dim: Dimension<Logical>) -> Result<()>;
     fn focus(&self) -> Result<()>;
+    /// Moves the window offscreen to hide it (no minimize animation).
     fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()>;
     fn minimize(&self) -> Result<()>;
     fn unminimize(&self) -> Result<()>;

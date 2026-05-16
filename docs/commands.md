@@ -1,166 +1,74 @@
 # Commands
 
-Every Dome command works identically on macOS and Windows — the command set is part of the platform-independent core.
-
-There are three ways to send commands:
-
-1. **CLI** — `dome <command>` sends the command to a running Dome instance via IPC.
-2. **Keybindings** — bind commands to keyboard shortcuts in the `[keymaps]` section of the config file.
-3. **Window rules** — use commands in `on_open` rules to run actions when a window opens.
-
-All three use the same command syntax and produce the same result.
+An action is a single instruction that mutates Dome's window state, like `focus right` or `toggle float`. The action surface is identical on macOS and Windows, and the same syntax appears everywhere actions are used: the `[keymaps]` table in the config file (see [keybindings.md](keybindings.md)), the `on_open` field on a window rule (see [configuration.md](configuration.md#window-rules)), and the `dome` CLI (see [cli.md](cli.md)).
 
 ## Focus
 
-Move keyboard focus to a different window, tab, workspace, or monitor.
+Move keyboard focus to a different window, container, tab, workspace, or monitor.
 
-| Command | Description |
-|---------|-------------|
-| `focus up` | Focus the window above the current one in the tiling tree. |
-| `focus down` | Focus the window below. |
-| `focus left` | Focus the window to the left. |
-| `focus right` | Focus the window to the right. |
-| `focus parent` | Focus the parent container. Useful for selecting a group of windows to move or toggle. |
+| Action | Effect |
+|--------|--------|
+| `focus up`, `focus down`, `focus left`, `focus right` | Focus the neighboring window in the tiling tree. |
+| `focus parent` | Focus the parent container. Subsequent `move` and `toggle` actions then target the whole group. |
 | `focus tab next` | Focus the next tab in a tabbed container. |
-| `focus tab prev` | Focus the previous tab in a tabbed container. |
-| `focus workspace <name>` | Switch to the named workspace (e.g., `focus workspace 2`). Workspaces are created on demand — any string is a valid name. |
-| `focus monitor up\|down\|left\|right` | Focus the nearest monitor in the given direction. |
+| `focus tab prev` | Focus the previous tab. |
+| `focus workspace <name>` | Switch to the named workspace, e.g. `focus workspace 2`. Workspaces are created on demand and any string is a valid name. |
+| `focus monitor up`, `focus monitor down`, `focus monitor left`, `focus monitor right` | Focus the nearest monitor in that direction. |
 | `focus monitor <name>` | Focus the monitor with the given name. |
 
 ## Move
 
 Move the focused window or container within the tiling tree, or to a different workspace or monitor.
 
-| Command | Description |
-|---------|-------------|
-| `move up` | Move the focused window up in the tiling tree. |
-| `move down` | Move the focused window down. |
-| `move left` | Move the focused window left. |
-| `move right` | Move the focused window right. |
+| Action | Effect |
+|--------|--------|
+| `move up`, `move down`, `move left`, `move right` | Move the focused window in the tiling tree. |
 | `move workspace <name>` | Move the focused window to the named workspace. |
-| `move monitor up\|down\|left\|right` | Move the focused window to the nearest monitor in the given direction. |
+| `move monitor up`, `move monitor down`, `move monitor left`, `move monitor right` | Move the focused window to the nearest monitor in that direction. |
 | `move monitor <name>` | Move the focused window to the named monitor. |
 
-## Toggle
+## Container layout
 
-Toggle window or container properties.
+These actions reshape the container holding the focused window. To target a specific ancestor instead of the immediate parent, run `focus parent` first.
 
-| Command | Description |
-|---------|-------------|
-| `toggle spawn` | Cycle the spawn direction of the focused window/container between horizontal, vertical, and tabbed. Controls where the next window opens relative to the focused one. |
+| Action | Effect |
+|--------|--------|
+| `toggle spawn` | Cycle the spawn direction between horizontal, vertical, and tabbed. The spawn direction decides where the next new window lands relative to the focused one. |
 | `toggle direction` | Flip the parent container's split direction between horizontal and vertical. |
 | `toggle layout` | Toggle the parent container between split and tabbed layout. |
-| `toggle float` | Toggle the focused window between tiling and floating. Floating windows are not part of the tiling tree and can be freely positioned. Has no effect on fullscreen windows. |
-| `toggle fullscreen` | Toggle the focused window between normal and fullscreen. A fullscreen window covers the entire monitor. Works from both tiling and floating states. |
-| `toggle minimized` | Open or close the minimized window picker. Shows a list of all minimized windows; select one to restore it to the current workspace. No default keybinding. |
 
-Fullscreen integrates with each platform's native fullscreen behavior — macOS Spaces and Windows borderless/exclusive fullscreen are detected and respected rather than overridden.
+## Window state
 
-## Master
+These actions change the focused window's display mode.
 
-Adjust the master-stack layout's master area. Only applies when the master-stack layout is active.
+| Action | Effect |
+|--------|--------|
+| `toggle float` | Toggle the focused window between tiling and floating. No effect on fullscreen windows. |
+| `toggle fullscreen` | Toggle the focused window between normal and fullscreen. Works for both tiling and float windows. |
+| `toggle minimized` | Open or close the minimized window picker. |
 
-| Command | Description |
-|---------|-------------|
-| `master grow` | Increase the master area's size (by 5 percentage points, clamped to 0.1..=0.9 of the workspace). |
-| `master shrink` | Decrease the master area's size by the same increment. |
-| `master more` | Add one more window slot to the master area. |
-| `master fewer` | Remove one window slot from the master area (minimum 1). |
+A window toggled into floating or fullscreen is placed next to the last-focused tiling window on the current workspace. A floated window toggled back to tiling restores its previous tiling dimension. Toggling fullscreen off reveals the next lower fullscreen window, if any.
 
-## Other
+Fullscreen integrates with each platform's native fullscreen behavior: macOS Spaces and Windows borderless or exclusive fullscreen are detected and respected. While a native fullscreen window is focused, `toggle float`, `toggle fullscreen`, and `move monitor` have no effect. Windows exclusive fullscreen additionally blocks every other action, including tiling navigation, workspace moves, and master-area adjustments.
 
-| Command | Description |
-|---------|-------------|
-| `exec <command>` | Run a shell command. Everything after `exec ` is passed to the system shell. Example: `exec open -a Terminal` (macOS) or `exec cmd /c start notepad` (Windows). |
-| `mode <name>` | Switch to a named keybinding mode. `mode default` returns to the default keybindings. See [configuration: modes](configuration.md#modes). |
+## Master area
+
+The master-stack layout reserves a configurable area on one side for `master_count` windows. These actions adjust that area at runtime, and have effect only when the master-stack layout is active. They are transient: the next config hot-reload resets the master area to the values in `config.toml`, which is the source of truth (see [keybindings.md](keybindings.md#hot-reload-behavior) for reload semantics).
+
+| Action | Effect |
+|--------|--------|
+| `master grow` | Increase the master area by 5 percentage points, clamped to `0.1..=0.9` of the workspace. |
+| `master shrink` | Decrease the master area by the same step. |
+| `master more` | Add one window slot to the master area. |
+| `master fewer` | Remove one window slot from the master area, with a minimum of 1. |
+
+## Other commands
+
+These actions do not target windows.
+
+| Action | Effect |
+|--------|--------|
+| `exec <command>` | Run a shell command. The payload after `exec ` is passed verbatim to the system shell. On the CLI, quote the payload (`dome exec "open -a Terminal"`). |
+| `mode <name>` | Switch to a named keybinding mode. `mode default` returns to the default keybindings. See [keybindings.md](keybindings.md#modes). |
 | `exit` | Stop Dome and restore all windows. |
 
-## Launching Dome
-
-These are not commands sent to a running instance — they control how Dome starts.
-
-| CLI | Description |
-|-----|-------------|
-| `dome` | Start Dome with the default config path. |
-| `dome launch` | Same as bare `dome`. |
-| `dome launch --config <path>` | Start Dome with a custom config file. |
-
-## Queries
-
-Queries read state from the hub without modifying it. Unlike fire-and-forget action commands, queries block until the hub responds with JSON.
-
-| Command | Description |
-|---------|-------------|
-| `dome query workspaces` | Returns a JSON array of workspace metadata. |
-
-### `dome query workspaces`
-
-Returns a JSON array with one entry per active workspace, ordered by creation order:
-
-```json
-[
-  {
-    "name": "0",
-    "is_focused": true,
-    "is_visible": true,
-    "window_count": 3
-  },
-  {
-    "name": "web",
-    "is_focused": false,
-    "is_visible": false,
-    "window_count": 1
-  }
-]
-```
-
-- `is_focused` — true for the workspace on the focused monitor.
-- `is_visible` — true for workspaces active on any monitor (one per monitor).
-- `window_count` — total windows (tiling + float + fullscreen), no double-counting.
-
-Empty workspaces that are not active on any monitor are pruned and never appear.
-
-## CLI Examples
-
-```bash
-# Focus the window to the right
-dome focus right
-
-# Focus the next tab
-dome focus tab next
-
-# Move focused window to workspace 3
-dome move workspace 3
-
-# Toggle spawn direction
-dome toggle spawn
-
-# Toggle floating mode
-dome toggle float
-
-# Open minimized window picker
-dome toggle minimized
-
-# Launch a terminal
-dome exec open -a Terminal
-
-# Stop Dome
-dome exit
-
-# Switch to resize keybinding mode
-dome mode resize
-
-# Return to default keybinding mode
-dome mode default
-```
-
-## Restrictions
-
-Some commands are blocked when the focused window has restrictions (e.g., a window in native fullscreen). The behavior depends on the restriction level:
-
-- **Tiling navigation** (`focus`/`move` directional, `focus parent`, tab navigation, `toggle spawn`, `toggle direction`, `toggle layout`) — blocked when the window has full restrictions.
-- **Display mode changes** (`toggle float`, `toggle fullscreen`) — blocked when the window has any restriction (full or fullscreen-protected).
-- **Workspace moves** (`move workspace`) — blocked only by full restrictions. Fullscreen windows can move across workspaces.
-- **Monitor moves** (`move monitor`) — blocked when the window has any restriction. Fullscreen windows are bound to their monitor.
-
-When a command is blocked, it silently does nothing.

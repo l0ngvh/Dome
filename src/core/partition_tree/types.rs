@@ -14,10 +14,7 @@ pub(crate) struct Container {
     pub(super) workspace: WorkspaceId,
     pub(super) children: Vec<Child>,
     /// The last focused node in this subtree. Can be a `Child::Window` or
-    /// `Child::Container` (e.g. after `focus_parent`). Not the immediate child --
-    /// `set_focus_child` writes the same target to every ancestor container.
-    /// Walking `container.focused` from root reaches the focused node directly
-    /// without needing to recurse through intermediate containers.
+    /// `Child::Container` (e.g. after `focus_parent`). Not the immediate child.
     pub(super) focused: Child,
     pub(super) dimension: Dimension,
     direction: Direction,

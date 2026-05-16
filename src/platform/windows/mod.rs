@@ -123,9 +123,11 @@ pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 2;
 /// LPARAM = HMONITOR handle (isize). Posted by every Dome-owned wnd-proc
 /// on WM_DPICHANGED; decoded by the dome-thread message loop.
 pub(super) const WM_APP_DPI_CHANGE: u32 = WM_APP + 3;
-/// Not exported by the windows crate as of 0.62. Defined in WinUser.h.
+/// Not exported by the `windows` crate as of v0.62. Defined in WinUser.h.
 /// Sent before WM_DPICHANGED; the handler writes the desired scaled window
 /// size into the SIZE* at lparam and returns TRUE.
+/// Remove this constant if the `windows` crate adds `WM_GETDPISCALEDSIZE`.
+/// Revisit after next `windows` crate minor bump; target check: 2026-11.
 pub(super) const WM_GETDPISCALEDSIZE: u32 = 0x02E4;
 
 static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -328,11 +330,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
 /// Returns the current window size unchanged. Called from every Dome-owned
 /// wnd-proc's WM_GETDPISCALEDSIZE handler to suppress Windows 11's automatic
 /// DPI resize. By reporting the current size as the "desired scaled size",
-/// Windows' auto-resize becomes a no-op and apply_layout drives final geometry.
-///
-/// This is correct under the agnostic-core design: core stores physical pixels
-/// on Windows, so the OS's suggested physical size is already what core would
-/// assign. The identity reply avoids duplicating the OS's own arithmetic.
+/// Windows' auto-resize becomes a no-op.
 ///
 /// Dome's HWNDs are borderless WS_POPUP with no non-client area, so
 /// GetClientRect == window size. Future window classes with a title bar or
@@ -381,8 +379,10 @@ unsafe extern "system" fn app_wnd_proc(
             // Return 0 to suppress DefWindowProcW's auto-resize to the suggested RECT.
             LRESULT(0)
         }
-        // Suppresses Windows 11's automatic DPI resize by reporting current
-        // size as the desired scaled size. See wm_getdpiscaledsize_reply.
+        // Suppresses Windows 11's automatic DPI resize by reporting current size as the desired
+        // scaled size. See wm_getdpiscaledsize_reply.
+        // Windows 10 also delivers `WM_GETDPISCALEDSIZE` (introduced in 1703) but does not
+        // auto-resize on `WM_DPICHANGED`, so the reply has no visible effect there.
         WM_GETDPISCALEDSIZE => {
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect).ok() };

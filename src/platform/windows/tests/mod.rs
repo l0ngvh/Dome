@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::action::{Action, Actions};
+use crate::action::{Action, Actions, HubAction, ToggleTarget};
 use crate::config::Config;
 use crate::core::{Dimension, Length, Physical};
 use crate::picker::PickerEntry;
@@ -301,8 +301,10 @@ impl TestEnv {
     fn run_actions(&mut self, s: &str) {
         let action: Action = s.parse().unwrap();
         match action {
+            Action::Hub(HubAction::Toggle {
+                target: ToggleTarget::Minimized,
+            }) => self.dome.toggle_picker(),
             Action::Hub(hub_action) => self.dome.execute_hub_action(&hub_action),
-            Action::ToggleMinimizePicker => self.dome.toggle_picker(),
             _ => {}
         }
         self.dome.apply_layout();

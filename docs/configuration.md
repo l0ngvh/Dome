@@ -1,120 +1,72 @@
 # Configuration
 
-Create a config file at `~/.config/dome/config.toml` (macOS/Linux) or `%APPDATA%\dome\config.toml` (Windows). All settings are optional — Dome uses sensible defaults for anything not specified. Changes are applied automatically via hot reload.
+Dome reads a single TOML file at startup and watches it for changes. Every setting is optional and falls back to a built-in default. The `dome launch -c <path>` flag overrides the location (see [cli.md](cli.md)).
 
-The config format is TOML, and the same file works on both macOS and Windows. Changes are hot-reloaded on save, so you can tweak settings without restarting Dome. The one area where config is platform-specific is window rules: macOS and Windows identify applications differently (bundle IDs vs. process names), so matching fields differ by platform.
+Default paths:
 
-## Reference
+- macOS: `~/.config/dome/config.toml` (or `$XDG_CONFIG_HOME/dome/config.toml`).
+- Windows: `%APPDATA%\dome\config.toml`.
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
+## General
+
+Top-level appearance and operational settings.
+
+```toml
+border_size = 4.0
+theme = "mocha"
+log_level = "info"
+start_at_login = false
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
 | `border_size` | float | `4.0` | Border width around windows, in logical pixels. |
-| `min_width` | float or string | `"5%"` | Minimum window width. A number means logical pixels (e.g., `200`). A string with `%` means percentage of screen width (e.g., `"10%"`). |
-| `min_height` | float or string | `"5%"` | Minimum window height. Same format as `min_width`, relative to screen height. |
-| `max_width` | float or string | `0` | Maximum window width. Same format as `min_width`. `0` means no limit. Windows that hit the max are centered within their allocated space. |
-| `max_height` | float or string | `0` | Maximum window height. Same format as `min_height`. `0` means no limit. |
-| `layout` | table | see [Layout](#layout) | Tiling layout strategy selection and per-strategy params. |
-| `theme` | string | `"mocha"` | Color theme. One of `"latte"`, `"frappe"`, `"macchiato"`, `"mocha"` ([Catppuccin](https://catppuccin.com/) flavors, light to dark). Changes apply live via hot reload. |
-| `font.text_size` | float | `14.0` | Body text size in points. Used for overlay tab titles and picker labels. Must be in `[4.0, 128.0]`. |
-| `font.subtext_size` | float | `12.0` | Secondary text size in points. Used for picker app-name subtext. Must be in `[4.0, 128.0]`. |
-| `log_level` | string | `"info"` | Log verbosity. One of: `trace`, `debug`, `info`, `warn`, `error`. |
+| `theme` | string | `"mocha"` | Color theme. One of `"latte"`, `"frappe"`, `"macchiato"`, `"mocha"` ([Catppuccin](https://catppuccin.com/) flavors). |
+| `log_level` | string | `"info"` | Log verbosity. One of `trace`, `debug`, `info`, `warn`, `error`. |
+| `start_at_login` | boolean | `false` | Launch Dome at user login. |
+
+## Window size constraints
+
+Top-level minimum and maximum window dimensions. A size value is either a number (logical pixels) or a string ending in `%` (percentage of the screen dimension).
+
+```toml
+min_width = "5%"
+min_height = "5%"
+max_width = 0       # 0 means no limit
+max_height = 0
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `min_width` | float or string | `"5%"` | Minimum window width. |
+| `min_height` | float or string | `"5%"` | Minimum window height. |
+| `max_width` | float or string | `0` | Maximum window width. `0` means no limit. |
+| `max_height` | float or string | `0` | Maximum window height. `0` means no limit. |
 
 ## Font
 
-Font sizes are configured under the `[font]` table. Both fields are independent and optional (defaults apply if omitted). Changes are hot-reloaded.
+Font sizes live under the `[font]` table. Dome uses egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks); custom font families are not configurable.
 
 ```toml
 [font]
-text_size = 14.0     # Body text: tab titles, picker labels
-subtext_size = 12.0  # Picker app-name subtext
+text_size = 14.0     # Body text: tab titles, picker labels.
+subtext_size = 12.0  # Secondary text: picker app-name subtext.
 ```
 
-Both values must be between `4.0` and `128.0`. Values outside this range cause a config validation error and Dome falls back to built-in defaults.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `font.text_size` | float | `14.0` | Body text size in points. Must be in `[4.0, 128.0]`. |
+| `font.subtext_size` | float | `12.0` | Secondary text size in points. Must be in `[4.0, 128.0]`. |
 
-Dome uses egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks). Custom font families are not configurable.
-
-Note: the default `text_size` of 14.0 is larger than the previous hardcoded 12pt overlay tab title. Long tab titles may truncate earlier inside a tab. `tab_bar_height` (under `[layout.partition_tree]`) is a separate config knob and does not auto-scale with font size.
-
-## Size Constraints
-
-Size values accept either a number (logical pixels) or a string ending in `%` (percentage of screen dimension). Percentages must be between 0 and 100. Pixel values must be non-negative. If both `min_width` and `max_width` are set as pixel values, `min_width` must not exceed `max_width` (same for height).
-
-```toml
-min_width = 200       # 200 logical pixels
-min_height = "10%"    # 10% of screen height
-max_width = "50%"     # 50% of screen width
-max_height = 800      # 800 logical pixels
-```
-
-These constraints are global and apply regardless of which tiling strategy is active. The partition-tree strategy enforces them today. The master-stack strategy does not yet honor them (known gap, tracked as a TODO).
+`tab_bar_height` (under `[layout.partition_tree]`) does not auto-scale with `text_size`, so long tab titles may truncate earlier as the body size grows.
 
 ## Layout
 
-The `[layout]` table selects the tiling strategy and holds per-strategy configuration. Both sub-tables (`[layout.partition_tree]` and `[layout.master_stack]`) are always parsed and validated, regardless of which strategy is active. This means a typo in the inactive block is caught immediately rather than hiding until you flip `active`.
+The `[layout]` table selects the tiling strategy and holds per-strategy parameters. Both sub-tables (`[layout.partition_tree]` and `[layout.master_stack]`) are always parsed and validated regardless of which strategy is active, so a typo in the inactive block surfaces immediately rather than hiding until `active` is flipped.
 
 ```toml
 [layout]
 active = "partition_tree"   # or "master_stack"
-
-[layout.partition_tree]
-tab_bar_height = 24.0       # logical pixels, must be >= 0
-auto_tile = true            # choose split direction based on focused window dimensions
-
-[layout.master_stack]
-master_ratio = 0.5          # fraction of screen for the master area, must be in [0.1, 0.9]
-master_count = 1            # number of windows in the master area, must be >= 1
-```
-
-When the `[layout]` table is absent, defaults apply: `active = "partition_tree"`, `tab_bar_height = 24.0`, `auto_tile = true`, `master_ratio = 0.5`, `master_count = 1`.
-
-### Partition Tree (`partition_tree`)
-
-The default strategy. i3-style manual tiling with split containers (horizontal, vertical, tabbed), spawn-mode routing, and direction invariance.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, in logical pixels. Does not auto-scale with font size. |
-| `auto_tile` | boolean | `true` | When true, Dome picks horizontal or vertical split based on the focused window's dimensions. When false, new windows split in the current container's direction. |
-
-### Master Stack (`master_stack`)
-
-A two-area layout: one or more master windows on the left, remaining windows stacked on the right.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `master_ratio` | float | `0.5` | Width of the master area as a fraction of screen width. Must be in `[0.1, 0.9]`. |
-| `master_count` | integer | `1` | Number of windows placed in the master area. Must be >= 1. |
-
-Invalid values (`master_ratio` outside `[0.1, 0.9]` or `master_count = 0`) cause a config validation error. Dome falls back to defaults until the file is fixed.
-
-At runtime, master-stack params can be adjusted via keybindings (`master grow`, `master shrink`, `master more`, `master fewer`). These runtime adjustments are transient overrides: every hot-reload resets them to the TOML file values.
-
-### Hot-Reload Behavior
-
-Config changes fall into two categories:
-
-- **Strategy rebuild** (discards tiling state): changing `active` between `"partition_tree"` and `"master_stack"`. The two strategies have incompatible tree topologies, so windows are detached, the old strategy is dropped, a fresh one is built, and windows are reattached in `WindowId` order. Container groupings, tab state, split directions, and runtime-tuned master-stack params are lost. Float, fullscreen, and minimized windows are preserved.
-- **Relayout** (preserves tiling state): any change that does not flip `active`. This includes `master_ratio`, `master_count`, `tab_bar_height`, `auto_tile`, and the top-level size constraints. Per-workspace window ordering and focused window survive. The strategy refreshes its internal state from the updated config and relayouts all workspaces.
-
-Runtime adjustments via `master grow`, `master shrink`, `master more`, `master fewer` are reset to the TOML file values on every hot-reload. The file is always the source of truth for these params.
-
-## Full Example
-
-```toml
-border_size = 2.0
-min_width = "5%"
-min_height = "5%"
-max_width = 0
-max_height = 0
-theme = "mocha"
-log_level = "info"
-
-[font]
-text_size = 14.0
-subtext_size = 12.0
-
-[layout]
-active = "partition_tree"
 
 [layout.partition_tree]
 tab_bar_height = 24.0
@@ -125,220 +77,53 @@ master_ratio = 0.5
 master_count = 1
 ```
 
-## Upgrading from Removed Config Fields
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `layout.active` | string | `"partition_tree"` | Active layout strategy. One of `partition_tree` or `master_stack`. |
+| `layout.partition_tree.auto_tile` | boolean | `true` | When true, Dome picks horizontal or vertical split based on the focused window's dimensions. When false, new windows split in the current container's direction. |
+| `layout.partition_tree.tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, in logical pixels. |
+| `layout.master_stack.master_ratio` | float | `0.5` | Width of the master area as a fraction of the workspace width. Must be in `[0.1, 0.9]`. |
+| `layout.master_stack.master_count` | integer | `1` | Number of windows in the master area. Must be `>= 1`. |
 
-Dome uses `deny_unknown_fields` on its config parser, so removed or moved fields cause a parse error. If your config contains any of these, Dome logs a warning to `dome.log` and falls back to built-in defaults. This means your keybindings, window rules, and other settings silently revert to defaults until you fix the file.
+### Partition tree
 
-**Layout fields (moved):**
+The default strategy. i3-style manual tiling with split containers (horizontal, vertical, tabbed), spawn-mode routing, and direction invariance. See [architecture.md](development/architecture.md#partitiontreestrategy) for the full model.
 
-- `tab_bar_height` (top-level) is now `[layout.partition_tree] tab_bar_height`. Same name, nested under the strategy that uses it.
-- `automatic_tiling` (top-level) is now `[layout.partition_tree] auto_tile`. Moved and renamed.
+### Master stack
 
-The four size-constraint keys (`min_width`, `min_height`, `max_width`, `max_height`) are unchanged and stay at the top level.
+A two-area layout: the first `master_count` windows fill a master area on the left, and the rest stack vertically on the right. Modeled on xmonad's `Tall` layout.
 
-**Color fields (removed):**
+## Window rules
 
-Older versions used five separate color fields (`focused_color`, `spawn_indicator_color`, `border_color`, `tab_bar_background_color`, `active_tab_background_color`). These have been replaced by the single `theme` field. The `border_radius` field has also been removed; Dome now hardcodes window and tab-bar corner radii in the renderer.
+These hooks run once a window matching the criteria is identified. Each hook is one of two kinds:
 
-## Log File
+- `ignore`: do not manage the window at all.
+- `on_open`: run a list of actions when the window first appears.
 
-Dome writes logs to a single `dome.log` file, overwritten on each launch:
+### Matching
 
-- macOS: `~/Library/Logs/dome/dome.log`
-- Windows: `%APPDATA%\dome\logs\dome.log`
-- Linux: `$XDG_STATE_HOME/dome/dome.log` (defaults to `~/.local/state/dome/dome.log`)
+All fields in a rule must match for the rule to apply (AND logic). Rules are evaluated in order, and the first matching rule wins. String values are matched exactly by default. To match a regular expression instead, wrap the pattern in forward slashes (`/pattern/`). The regex is matched against the full string. A rule must specify at least one matching field.
 
-Config-load failures are recorded in this file at `warn` level with the failing path and error details.
+### macOS
 
-## Keybindings
-
-Keybindings are defined in the `[keymaps]` section of the config file. Each entry maps a key combination to one or more commands. Dome ships with a full set of default keybindings (listed below) — if you define a `[keymaps]` section, it completely replaces the defaults rather than merging with them.
-
-### Modes
-
-Dome supports modal keybindings. The `[keymaps]` section defines the **default** mode. Additional modes are defined with `[keymaps.mode.<name>]` sections. Switch between modes at runtime using the `mode <name>` action in a binding or via `dome mode <name>` over CLI/IPC.
-
-```toml
-[keymaps]
-"cmd+h" = ["focus left"]
-"cmd+r" = ["mode resize"]
-
-[keymaps.mode.resize]
-"h" = ["master shrink"]
-"l" = ["master grow"]
-"escape" = ["mode default"]
-```
-
-In this example, `cmd+r` enters resize mode. Inside resize mode, `h` and `l` adjust the master area without modifiers, and `escape` returns to the default keybindings. The special name `"default"` always refers to the top-level `[keymaps]` table.
-
-Mode switching is instant. When a binding contains `mode <name>`, the switch takes effect before the next keypress. A binding can combine a mode switch with other actions: `"cmd+r" = ["focus left", "mode resize"]` focuses left and enters resize mode in one keypress.
-
-If a binding lists multiple `mode` actions, the last one wins.
-
-#### Reserved names
-
-- `"default"` is reserved and refers to the top-level `[keymaps]` section. Using it as a `[keymaps.mode.default]` section name causes a config validation error.
-- `"mode"` is a reserved action keyword. It cannot appear as a key-combo string in `[keymaps]` because it is parsed as the action identifier (and as the sub-table key for `[keymaps.mode.<name>]`).
-- Empty string `""` is rejected as a mode name.
-
-#### Gotchas
-
-**No automatic escape binding.** Dome does not enforce that a mode has a binding back to `default`. If you define a mode with no way out, your keyboard will only have the bindings in that mode. Always include an escape binding (like `"escape" = ["mode default"]`) in every custom mode.
-
-**Config reload preserves active mode.** If you edit your config while in a non-default mode, hot reload keeps you in that mode as long as it still exists in the new config. If the reloaded config removes the active mode, Dome falls back to the default keybindings on the next keypress and logs a warning on each keystroke until you switch back to an existing mode (e.g. `dome mode default`).
-
-**Unknown mode names are rejected.** Running `dome mode typo` or pressing a binding with `mode typo` logs a warning and leaves your current mode unchanged. Your keyboard stays in whatever mode it was in.
-
-**Mode state is global.** Modes are per-process, not per-workspace or per-monitor. Switching workspaces does not change the active mode.
-
-### Syntax
-
-Keys are written as `"modifier+modifier+key"` (all lowercase). Available modifiers: `cmd`, `shift`, `alt`, `ctrl`. Multiple modifiers are joined with `+`. The key is the final segment after all modifiers. Examples: `"cmd+h"`, `"cmd+shift+return"`, `"ctrl+alt+1"`.
-
-Platform note: `cmd` maps to the Command key (⌘) on macOS and the Windows key (⊞) on Windows. `ctrl` maps to Control on both platforms. `alt` maps to Option on macOS and Alt on Windows.
-
-This means the same `[keymaps]` section works on both platforms without changes. Your muscle memory transfers between platforms — the same shortcuts, the same behavior.
-
-Values are arrays of command strings. Each command is executed in order. Example with a single command:
-
-```toml
-"cmd+h" = ["focus left"]
-```
-
-Multi-command example (not a default binding):
-
-```toml
-"cmd+shift+1" = ["move workspace 1", "focus workspace 1"]
-```
-
-This would move the focused window to workspace 1, then switch to it.
-
-### Default Keybindings
-
-#### Workspace Focus
-
-| Key | Command |
-|-----|---------|
-| `cmd+0` through `cmd+9` | `focus workspace 0` through `focus workspace 9` |
-
-#### Workspace Move
-
-| Key | Command |
-|-----|---------|
-| `cmd+shift+0` through `cmd+shift+9` | `move workspace 0` through `move workspace 9` |
-
-#### Focus Navigation
-
-| Key | Command | Description |
-|-----|---------|-------------|
-| `cmd+h` | `focus left` | Focus the window to the left |
-| `cmd+j` | `focus down` | Focus the window below |
-| `cmd+k` | `focus up` | Focus the window above |
-| `cmd+l` | `focus right` | Focus the window to the right |
-| `cmd+p` | `focus parent` | Focus the parent container |
-| `cmd+[` | `focus tab prev` | Focus the previous tab |
-| `cmd+]` | `focus tab next` | Focus the next tab |
-
-#### Move Window
-
-| Key | Command | Description |
-|-----|---------|-------------|
-| `cmd+shift+h` | `move left` | Move focused window left |
-| `cmd+shift+j` | `move down` | Move focused window down |
-| `cmd+shift+k` | `move up` | Move focused window up |
-| `cmd+shift+l` | `move right` | Move focused window right |
-
-#### Monitor Focus
-
-| Key | Command |
-|-----|---------|
-| `cmd+alt+h` | `focus monitor left` |
-| `cmd+alt+j` | `focus monitor down` |
-| `cmd+alt+k` | `focus monitor up` |
-| `cmd+alt+l` | `focus monitor right` |
-
-#### Monitor Move
-
-| Key | Command |
-|-----|---------|
-| `cmd+alt+shift+h` | `move monitor left` |
-| `cmd+alt+shift+j` | `move monitor down` |
-| `cmd+alt+shift+k` | `move monitor up` |
-| `cmd+alt+shift+l` | `move monitor right` |
-
-#### Toggles
-
-| Key | Command | Description |
-|-----|---------|-------------|
-| `cmd+e` | `toggle spawn` | Toggle the spawn direction between horizontal, vertical, and tabbed |
-| `cmd+d` | `toggle direction` | Flip the split direction between horizontal and vertical |
-| `cmd+b` | `toggle layout` | Toggle the parent container between split and tabbed |
-| `cmd+shift+f` | `toggle float` | Toggle focused window between tiling and floating |
-
-#### Other
-
-| Key | Command |
-|-----|---------|
-| `cmd+shift+q` | `exit` |
-
-Note: the default keybindings do not include `exec`, `toggle fullscreen`, or `toggle minimized` bindings. The example config at `examples/config.toml` includes these as examples: `"cmd+return" = ["exec open -a Terminal"]` (macOS), `"cmd+shift+return" = ["toggle fullscreen"]`, and `"cmd+m" = ["toggle minimized"]`. Users who want these bindings must add them to their `[keymaps]` section. Keeping the defaults focused on core navigation means Dome is useful immediately and customizable later.
-
-## Window Rules
-
-Window rules let you customize how Dome handles specific applications. Rules are defined under platform-specific sections (`[macos]` or `[windows]`) because the matching fields differ by platform. There are two types of rules: `ignore` (don't manage the window at all) and `on_open` (run commands when the window first appears).
-
-This is the one area where Dome's config acknowledges platform differences directly. Everywhere else — keybindings, general settings, commands — the config is identical across platforms.
-
-Window rules are the one area where Dome's config is platform-specific. macOS and Windows identify applications differently (bundle IDs vs. process names), and a cross-platform abstraction would be leaky. Dome surfaces this honestly rather than papering over it.
-
-### Matching Logic
-
-- All fields in a rule must match for the rule to apply (AND logic). If a rule specifies both `app` and `title`, the window must match both.
-- Rules are evaluated in order. The first matching rule wins — subsequent rules are not checked.
-- String values are matched exactly by default. To use a regular expression, wrap the pattern in forward slashes: `/pattern/`. The regex is matched against the full string.
-- A rule must specify at least one matching field to be valid.
-
-### macOS Rules
-
-Available matching fields:
-
-- `app` — the application name (e.g., `"System Preferences"`). Supports regex with `/pattern/`.
-- `bundle_id` — the application's bundle identifier (e.g., `"com.apple.finder"`). Exact match only.
-- `title` — the window title. Supports regex with `/pattern/`.
-
-Ignore examples:
+macOS rules match on `app` (the application name, regex-capable), `bundle_id` (exact match only), and `title` (regex-capable).
 
 ```toml
 [macos]
 ignore = [
-  { app = "System Preferences" },
-  { app = "/.*Preferences/" },
-  { bundle_id = "com.apple.finder", title = "Trash" },
+  { app = "System Preferences" },                       # exact app name
+  { app = "/.*Preferences/" },                          # regex on app name
+  { bundle_id = "com.apple.finder", title = "Trash" },  # bundle and title (AND)
 ]
-```
-
-The first rule ignores all System Preferences windows by exact app name. The second ignores any app whose name ends with "Preferences" using regex. The third ignores only the Trash window in Finder (both `bundle_id` and `title` must match).
-
-On-open examples:
-
-```toml
-[macos]
 on_open = [
   { app = "Slack", run = ["move workspace 3"] },
   { app = "Safari", run = ["toggle float"] },
 ]
 ```
 
-`on_open` rules run a list of commands when a matching window first appears. The `run` field takes the same command strings used in keybindings and the CLI. The first rule moves Slack windows to workspace 3 on open. The second makes Safari windows float on open.
+### Windows
 
-### Windows Rules
-
-Available matching fields:
-
-- `process` — the process executable name (e.g., `"SystemSettings.exe"`). Supports regex with `/pattern/`.
-- `title` — the window title. Supports regex with `/pattern/`.
-
-Ignore examples:
+Windows rules match on `process` (the executable name, regex-capable) and `title` (regex-capable).
 
 ```toml
 [windows]
@@ -347,31 +132,8 @@ ignore = [
   { process = "/.*Settings.*/" },
   { title = "Task Manager" },
 ]
-```
-
-Dome has built-in ignore rules for common Windows system windows (`LockApp.exe`, `SearchHost.exe`, `StartMenuExperienceHost.exe`, and certain internal UI windows). These are always active — you only need to add your own custom ignore rules under `[windows] ignore`. User-defined rules are checked in addition to the built-in rules.
-
-On-open examples:
-
-```toml
-[windows]
 on_open = [
   { process = "slack.exe", run = ["move workspace 3"] },
 ]
 ```
 
-### Combining Rules
-
-A complete example showing both `ignore` and `on_open` together:
-
-```toml
-[macos]
-ignore = [
-  { app = "System Preferences" },
-  { bundle_id = "com.apple.finder", title = "Trash" },
-]
-on_open = [
-  { app = "Slack", run = ["move workspace 3"] },
-  { app = "Safari", run = ["toggle float"] },
-]
-```

@@ -564,6 +564,9 @@ impl Dome {
                     .handle_tiling_action(TilingAction::ToggleContainerLayout),
                 ToggleTarget::Float => self.hub.toggle_float(),
                 ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
+                ToggleTarget::Minimized => {
+                    unreachable!("ToggleTarget::Minimized is intercepted by the runner")
+                }
             },
             HubAction::Master { target } => {
                 let action = match target {

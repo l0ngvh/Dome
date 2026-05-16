@@ -1,3 +1,8 @@
+//! Minimize/unminimize operations on Hub.
+//!
+//! Follows the same pattern as `float.rs` and `fullscreen.rs`: read workspace,
+//! match on mode, call the appropriate detach, then handle mode-specific state.
+
 use crate::core::{
     Hub, WindowId,
     node::{DisplayMode, WindowRestrictions},

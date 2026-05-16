@@ -191,17 +191,6 @@ fn toggle_float_with_scrolled_viewport() {
 
     assert!(hub.get_window(w2).is_float());
     // Layout x=200, offset=150, screen.x=0 => screen-absolute x = 200 - 150 + 0 = 50
-    let ws_id = hub.current_workspace();
-    let float_dim = hub
-        .access
-        .workspaces
-        .get(ws_id)
-        .float_windows()
-        .iter()
-        .find(|&&(id, _)| id == w2)
-        .unwrap()
-        .1;
-    assert_eq!(float_dim.x, Length::new(50.0));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

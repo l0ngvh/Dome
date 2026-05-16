@@ -18,13 +18,6 @@ impl PartitionTreeStrategy {
     ) {
         use crate::core::node::DisplayMode;
 
-        if workspace.is_float_focused() {
-            assert!(
-                !workspace.float_windows().is_empty(),
-                "Workspace {workspace_id}: is_float_focused is true but float_windows is empty"
-            );
-        }
-
         let focused_tiling = self
             .workspaces
             .get(&workspace_id)

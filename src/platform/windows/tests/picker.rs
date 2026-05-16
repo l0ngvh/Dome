@@ -8,7 +8,7 @@ fn picker_scale_reflects_focused_monitor() {
     let w = env.spawn_window(1, "App", "app.exe");
     env.add_window(w.clone());
     env.minimize_window(&w);
-    env.run_actions("toggle_minimize_picker");
+    env.run_actions("toggle minimized");
     assert_eq!(env.picker_scale(), Some(1.75));
 }
 
@@ -23,11 +23,11 @@ fn picker_scale_none_when_hidden() {
     env.minimize_window(&w);
 
     // Show picker.
-    env.run_actions("toggle_minimize_picker");
+    env.run_actions("toggle minimized");
     assert!(env.picker_scale().is_some());
 
     // Hide picker.
-    env.run_actions("toggle_minimize_picker");
+    env.run_actions("toggle minimized");
     assert_eq!(env.picker_scale(), None);
 }
 
@@ -39,7 +39,7 @@ fn picker_show_same_scale_preserves_icon_cache() {
     env.minimize_window(&w);
 
     // Open picker at scale 1.0.
-    env.run_actions("toggle_minimize_picker");
+    env.run_actions("toggle minimized");
 
     // Load icons.
     let to_load = env.picker_icons_to_load();
@@ -51,8 +51,8 @@ fn picker_show_same_scale_preserves_icon_cache() {
     assert!(!icons_before.is_empty());
 
     // Close and reopen at the same scale (1.0).
-    env.run_actions("toggle_minimize_picker"); // hide
-    env.run_actions("toggle_minimize_picker"); // show at 1.0 again
+    env.run_actions("toggle minimized"); // hide
+    env.run_actions("toggle minimized"); // show at 1.0 again
 
     // Cache should be preserved: no new icons to load.
     assert!(env.picker_icons_to_load().is_empty());

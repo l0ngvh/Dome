@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     KillTimer, PostQuitMessage, PostThreadMessageW, SetTimer, WM_QUIT,
 };
 
-use crate::action::{Action, Actions};
+use crate::action::{Action, Actions, HubAction, ToggleTarget};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, ObservedPosition};
@@ -189,6 +189,15 @@ impl Runner {
     fn handle_actions(&mut self, actions: &Actions) {
         for action in actions {
             match action {
+                // Picker is a UI concern, not a hub mutation; intercept before execute_hub_action.
+                Action::Hub(HubAction::Toggle {
+                    target: ToggleTarget::Minimized,
+                }) => {
+                    self.dome.toggle_picker();
+                    if self.dome.picker_visible() {
+                        self.dispatch_picker_icons();
+                    }
+                }
                 Action::Hub(hub) => {
                     self.dome.execute_hub_action(hub);
                     self.dome.apply_layout();
@@ -206,12 +215,6 @@ impl Runner {
                         PostThreadMessageW(self.main_thread_id, WM_QUIT, WPARAM(0), LPARAM(0)).ok()
                     };
                     unsafe { PostQuitMessage(0) };
-                }
-                Action::ToggleMinimizePicker => {
-                    self.dome.toggle_picker();
-                    if self.dome.picker_visible() {
-                        self.dispatch_picker_icons();
-                    }
                 }
                 Action::UnminimizeWindow(id) => {
                     self.dome.picker_unminimize_window(*id);

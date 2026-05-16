@@ -523,7 +523,14 @@ fn validate_monitors(hub: &Hub) {
 }
 
 fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
-    for &(fid, _) in workspace.float_windows() {
+    if workspace.is_float_focused {
+        assert!(
+            !workspace.float_windows.is_empty(),
+            "Workspace {workspace_id}: is_float_focused is true but float_windows is empty"
+        );
+    }
+
+    for &(fid, _) in &workspace.float_windows {
         let float = hub.get_window(fid);
         assert_eq!(
             float.workspace, workspace_id,
@@ -537,7 +544,7 @@ fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) 
 }
 
 fn validate_fullscreens(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
-    for &fid in workspace.fullscreen_windows() {
+    for &fid in &workspace.fullscreen_windows {
         let window = hub.get_window(fid);
         assert_eq!(
             window.workspace, workspace_id,
@@ -548,9 +555,9 @@ fn validate_fullscreens(hub: &Hub, workspace_id: WorkspaceId, workspace: &Worksp
             "Window {fid} in fullscreen_windows but mode is not Fullscreen"
         );
     }
-    if let Some(&top) = workspace.fullscreen_windows().last() {
+    if let Some(&top) = workspace.fullscreen_windows.last() {
         assert_eq!(
-            workspace.focused_non_tiling(),
+            hub.focused_window(workspace_id),
             Some(top),
             "Workspace {workspace_id} has fullscreen windows but focus is not on topmost fullscreen window {top}"
         );
@@ -635,11 +642,11 @@ fn validate_minimized(hub: &Hub) {
     for (ws_id, ws) in hub.all_workspaces() {
         for &id in hub.minimized_windows() {
             assert!(
-                !ws.float_windows().iter().any(|&(fid, _)| fid == id),
+                !ws.float_windows.iter().any(|&(fid, _)| fid == id),
                 "Minimized {id} in workspace {ws_id} float list"
             );
             assert!(
-                !ws.fullscreen_windows().contains(&id),
+                !ws.fullscreen_windows.contains(&id),
                 "Minimized {id} in workspace {ws_id} fullscreen list"
             );
         }

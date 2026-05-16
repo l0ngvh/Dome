@@ -127,9 +127,6 @@ master_count = 1            # number of master windows, >= 1
 # Windows rules
 [windows]
 ignore = [
-  { process = "LockApp.exe" },
-  { process = "SearchHost.exe" },
-  { process = "StartMenuExperienceHost.exe" },
   # { process = "SystemSettings.exe" },
   # { process = "/.*Settings.*/" },
   # { title = "Task Manager" },

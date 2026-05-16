@@ -126,7 +126,6 @@ pub(super) struct Renderer {
     _dcomp_visual: IDCompositionVisual,
     _dcomp_target: IDCompositionTarget,
     dcomp_device: IDCompositionDevice,
-    opaque: bool,
 }
 
 impl Renderer {
@@ -138,7 +137,6 @@ impl Renderer {
         hwnd: HWND,
         width: u32,
         height: u32,
-        opaque: bool,
         flavor: Flavor,
         font: &FontConfig,
     ) -> anyhow::Result<Self> {
@@ -157,13 +155,9 @@ impl Renderer {
 
         unsafe { dcomp_target.SetRoot(&dcomp_visual)? };
 
-        let alpha_mode = if opaque {
-            wgpu::CompositeAlphaMode::Opaque
-        } else {
-            // PreMultiplied maps to DXGI_ALPHA_MODE_PREMULTIPLIED, giving native
-            // per-pixel alpha compositing through DComp without DWM blur-behind hacks.
-            wgpu::CompositeAlphaMode::PreMultiplied
-        };
+        // PreMultiplied maps to DXGI_ALPHA_MODE_PREMULTIPLIED, giving native
+        // per-pixel alpha compositing through DComp without DWM blur-behind hacks.
+        let alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: wgpu::TextureFormat::Bgra8UnormSrgb,
@@ -206,7 +200,6 @@ impl Renderer {
             _dcomp_visual: dcomp_visual,
             _dcomp_target: dcomp_target,
             dcomp_device,
-            opaque,
         })
     }
 
@@ -293,7 +286,7 @@ impl Renderer {
                 r: 0.0,
                 g: 0.0,
                 b: 0.0,
-                a: if self.opaque { 1.0 } else { 0.0 },
+                a: 0.0,
             };
             let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -376,9 +369,7 @@ impl TilingOverlay {
             init_h,
         )?;
         let hwnd = window.hwnd();
-        let renderer = Renderer::new(
-            instance, device, queue, hwnd, init_w, init_h, false, flavor, font,
-        )?;
+        let renderer = Renderer::new(instance, device, queue, hwnd, init_w, init_h, flavor, font)?;
         window.show();
         let mut boxed = Box::new(Self {
             renderer,
@@ -683,7 +674,6 @@ impl FloatOverlay {
             window.hwnd(),
             width_phys,
             height_phys,
-            false,
             flavor,
             font,
         )?;

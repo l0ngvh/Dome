@@ -19,7 +19,7 @@ Windows, using only public APIs wherever possible.
 - Tabbed containers, switch on click, can be nested
 - Multi-monitor support with directional keybindings
 
-## Quick Start
+## Quick start
 
 ### Install
 
@@ -38,7 +38,7 @@ first launch.
 
 ### Key bindings
 
-Dome ships with these default keybindings. Meta is ⌘ on macOS and ⊞ Win on Windows.
+Dome ships with these default keybindings. `cmd` maps to ⌘ on macOS and the Windows key ⊞ on Windows; `alt` maps to Option on macOS and Alt on Windows; `ctrl` maps to Control on both.
 
 | Key | Action |
 |-----|--------|
@@ -52,7 +52,7 @@ Dome ships with these default keybindings. Meta is ⌘ on macOS and ⊞ Win on W
 | <kbd>Meta</kbd> + <kbd>B</kbd> | Toggle split/tabbed layout |
 | <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>Q</kbd> | Exit Dome |
 
-See the [keybinding configuration](docs/configuration.md#keybindings) for the complete list, customization options, and [modal keybindings](docs/configuration.md#modes).
+See the [keybinding configuration](docs/keybindings.md#) for the complete list.
 
 ### CLI
 
@@ -61,7 +61,7 @@ Dome can also be controlled through CLI. A few commands to get started:
 ```bash
 dome focus left|down|up|right    # Move focus
 dome move left|down|up|right     # Move window
-dome toggle float/fullscreen     # Toggle floating/fullscreen
+dome toggle float|fullscreen     # Toggle floating or fullscreen
 dome toggle layout               # Toggle split/tabbed
 dome toggle minimized            # Open minimized window picker
 dome focus workspace <name>      # Switch workspace
@@ -73,27 +73,19 @@ See the [command reference](docs/commands.md) for the full list.
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md) — platform-specific setup details
-- [Configuration](docs/configuration.md) — config file reference, keybindings, window rules
-- [Commands](docs/commands.md) — full command reference
+- [Getting started](docs/getting-started.md): platform-specific setup details
+- [Configuration](docs/configuration.md): config file reference and window rules
+- [Keybindings](docs/keybindings.md): defaults, customization, and modes
+- [Commands](docs/commands.md): full command reference
+- [CLI](docs/cli.md): command-line interface usage
 
-## Development
+## Credits
 
-Dome is written in Rust with a platform-independent core and platform-specific shells for macOS and Windows. See the [architecture docs](docs/development/architecture.md) for details.
-
-```bash
-cargo install cargo-make         # Task runner (required)
-cargo make setup                 # Install dev tools
-cargo make coverage              # Run tests with coverage
-```
-
-## Acknowledgement
-
-Dome is heavily inspired by the following projects:
+Dome draws inspiration from these awesome WMs:
 - [AeroSpace](https://github.com/nikitabobko/AeroSpace)
 - [GlazeWM](https://github.com/glzr-io/glazewm)
 - [Sway](https://github.com/swaywm/sway)
 
 ## License
 
-MIT
+Dome is released under the [MIT License](LICENSE).

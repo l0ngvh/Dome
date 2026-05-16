@@ -454,7 +454,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
 }
 
 #[test]
-fn sync_config_swap_preserves_float_focus_flag() {
+fn sync_config_swap_preserves_float_focus() {
     let mut hub = setup_hub();
     hub.insert_tiling();
     let float_dim = Dimension::new(
@@ -468,25 +468,50 @@ fn sync_config_swap_preserves_float_focus_flag() {
     hub.set_focus(float_id);
 
     let ws = hub.current_workspace();
-    assert!(
-        hub.get_workspace(ws).is_float_focused(),
-        "float should be focused before swap"
-    );
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |         ******************************                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *             F1             *                                  W0                                                                         |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         *                            *                                                                                                             |
+    |         ******************************                                                                                                             |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ");
 
     hub.sync_config(HubConfig {
         layout: layout(LayoutKind::MasterStack, 0.5, 1),
         ..Default::default()
     });
 
-    // is_float_focused is restored after the swap.
-    assert!(
-        hub.get_workspace(ws).is_float_focused(),
-        "float focus must survive strategy swap"
-    );
-    // The float window has effective focus.
-    let placements = hub.get_visible_placements();
-    assert_eq!(placements.focused_window, Some(float_id));
-    // validate_hub checks invariants (called inside snapshot).
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

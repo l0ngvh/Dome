@@ -1,6 +1,6 @@
 [book]
 title = "Dome"
-description = "A cross-platform tiling window manager written in Rust"
+description = "Just a tiling window manager"
 src = "."
 
 [build]
@@ -9,4 +9,4 @@ build-dir = "book"
 [output.html]
 default-theme = "navy"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/longvh/dome"
+git-repository-url = "https://github.com/l0ngvh/Dome"

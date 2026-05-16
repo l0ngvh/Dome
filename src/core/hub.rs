@@ -10,12 +10,11 @@ use super::node::{
 use super::partition_tree::PartitionTreeStrategy;
 use super::strategy::{TilingAction, TilingStrategy, clip};
 
-/// Result of `get_visible_placements()`. Bundles per-monitor placements with
-/// the keyboard focus target and focused monitor, so callers don't need
-/// separate queries to Hub for that information.
 pub(crate) struct VisiblePlacements {
+    /// Window that should receive keyboard focus
     pub(crate) focused_window: Option<WindowId>,
     pub(crate) focused_monitor: MonitorId,
+    /// Placement of windows per monitor
     pub(crate) monitors: Vec<MonitorPlacements>,
 }
 
@@ -24,6 +23,8 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) id: WindowId,
     pub(crate) frame: Dimension,
     pub(crate) visible_frame: Dimension,
+    /// Whether to highlight the window, for example when the window is focused. Doesn't require
+    /// that the window has keyboard focus.
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_indicator: Option<SpawnIndicator>,
 }
@@ -41,7 +42,6 @@ pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
     pub(crate) frame: Dimension,
     pub(crate) visible_frame: Dimension,
-    /// Visual highlight: true when this container is the workspace focus.
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_indicator: Option<SpawnIndicator>,
     pub(crate) is_tabbed: bool,
@@ -149,14 +149,23 @@ impl Hub {
             .active_workspace
     }
 
-    /// Computes effective focus: fullscreen > float > tiling.
-    /// Combines Workspace::focused_non_tiling() with strategy's tiling focus.
+    /// Return the window that should get keyboard focus.
+    ///
+    /// The top most fullscreen window will get the focus, if any, as fullscreen windows take over
+    /// the whole workspaces they are in.
+    /// If none is present, focus between float and tiling windows will be decided by is_float_focused
     pub(super) fn focused_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
-        self.access
-            .workspaces
-            .get(ws_id)
-            .focused_non_tiling()
-            .or_else(|| self.strategy.focused_tiling_window(&self.access, ws_id))
+        let workspace = self.access.workspaces.get(ws_id);
+
+        if let Some(&id) = workspace.fullscreen_windows.last() {
+            return Some(id);
+        }
+        if workspace.is_float_focused
+            && let Some(&(id, _)) = workspace.float_windows.last()
+        {
+            return Some(id);
+        }
+        self.strategy.focused_tiling_window(&self.access, ws_id)
     }
 
     pub(super) fn is_restricted(&self, action: RestrictedAction) -> bool {

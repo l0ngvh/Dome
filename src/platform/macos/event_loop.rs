@@ -12,7 +12,7 @@ use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{Action, Actions};
+use crate::action::{Action, Actions, HubAction, ToggleTarget};
 use crate::keymap::KeymapState;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dispatcher::GcdDispatcher;
@@ -153,6 +153,12 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
 fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
     for action in actions {
         match action {
+            // Picker is a UI concern, not a hub mutation; intercept before execute_hub_action.
+            Action::Hub(HubAction::Toggle {
+                target: ToggleTarget::Minimized,
+            }) => {
+                runner.dome.toggle_picker();
+            }
             Action::Hub(hub) => {
                 runner.dome.execute_hub_action(hub);
                 runner.dome.flush_layout();
@@ -170,9 +176,6 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
             Action::Exit => {
                 tracing::debug!("Exit action received");
                 runner.signal.stop();
-            }
-            Action::ToggleMinimizePicker => {
-                runner.dome.toggle_picker();
             }
             Action::UnminimizeWindow(id) => {
                 runner.dome.picker_unminimize_window(*id);

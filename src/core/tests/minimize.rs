@@ -425,7 +425,6 @@ fn minimize_last_tiling_with_floats_present() {
     assert_eq!(hub.minimized_windows().len(), 1);
     let ws_id = hub.current_workspace();
     let ws = hub.get_workspace(ws_id);
-    assert!(ws.is_float_focused());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

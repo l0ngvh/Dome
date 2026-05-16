@@ -51,13 +51,15 @@ impl Node for Monitor {
 pub(crate) struct Workspace {
     pub(super) name: String,
     pub(super) monitor: MonitorId,
-    /// When true, the focused window is float_windows.last() (z-ordered, last = topmost).
-    /// Must be false when float_windows is empty.
+    /// When true, the focused window is float_windows.last().
+    /// Wouldn't have any effect when any fullscreen window is present, but for consistency would be
+    /// set to false in that case
     pub(super) is_float_focused: bool,
-    /// All floats in this workspace, with their screen-absolute dimensions.
-    /// This is the authoritative source for float screen position -- not window.dimension.
+    /// All floats in this workspace, with their screen-absolute dimensions, order by z-index, with
+    /// the last is the top most window. Focusing a float moves it to the end of the vec.
     pub(super) float_windows: Vec<(WindowId, Dimension)>,
-    /// All fullscreen windows in this workspace. Last element is topmost (highest z-order).
+    /// All fullscreen windows in this workspace, order by z-index with the last is the top most
+    /// window. Only the top most fullscreen window is displayed.
     pub(super) fullscreen_windows: Vec<WindowId>,
 }
 
@@ -74,36 +76,6 @@ impl Workspace {
             float_windows: Vec::new(),
             fullscreen_windows: Vec::new(),
         }
-    }
-
-    /// Computes effective non-tiling focus: fullscreen > float.
-    /// Returns None if neither fullscreen nor float is focused, meaning
-    /// tiling focus should be consulted via the strategy.
-    pub(crate) fn focused_non_tiling(&self) -> Option<WindowId> {
-        if let Some(&id) = self.fullscreen_windows.last() {
-            return Some(id);
-        }
-        if self.is_float_focused
-            && let Some(&(id, _)) = self.float_windows.last()
-        {
-            return Some(id);
-        }
-        None
-    }
-
-    #[cfg(test)]
-    pub(crate) fn is_float_focused(&self) -> bool {
-        self.is_float_focused
-    }
-
-    #[cfg(test)]
-    pub(crate) fn float_windows(&self) -> &[(WindowId, Dimension)] {
-        &self.float_windows
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fullscreen_windows(&self) -> &[WindowId] {
-        &self.fullscreen_windows
     }
 }
 
