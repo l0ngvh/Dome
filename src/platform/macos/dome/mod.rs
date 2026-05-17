@@ -7,7 +7,9 @@ mod registry;
 mod window;
 
 pub(super) use events::{HubEvent, HubMessage};
-pub(super) use inspect::{compute_reconcile_all, compute_reconciliation, compute_window_positions};
+pub(super) use inspect::{
+    ExitNativeFullscreen, compute_reconcile_all, compute_reconciliation, compute_window_positions,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -59,7 +61,6 @@ pub(in crate::platform::macos) struct WindowMove {
     pub(in crate::platform::macos) w: i32,
     pub(in crate::platform::macos) h: i32,
     pub(in crate::platform::macos) observed_at: DebounceBurst,
-    pub(in crate::platform::macos) is_native_fullscreen: bool,
 }
 
 pub(in crate::platform::macos) trait FrameSender: Send {
@@ -126,6 +127,8 @@ impl Dome {
         removed: &[CGWindowID],
         minimized: &[CGWindowID],
         added: Vec<NewWindow>,
+        to_enter_native_fullscreen: &[CGWindowID],
+        to_exit_native_fullscreen: &[ExitNativeFullscreen],
     ) -> Vec<Actions> {
         for &cg_id in removed {
             if let Some(entry) = self.registry.get(cg_id) {
@@ -185,6 +188,31 @@ impl Dome {
                 on_open.push(actions);
             }
         }
+        for &cg_id in to_enter_native_fullscreen {
+            if let Some(entry) = self.registry.get(cg_id) {
+                let window_id = entry.window_id;
+                self.window_entered_native_fullscreen(window_id);
+            }
+        }
+        for e in to_exit_native_fullscreen {
+            if let Some(entry) = self.registry.get(e.cg_id)
+                && matches!(entry.state, WindowState::NativeFullscreen)
+            {
+                let window_id = entry.window_id;
+                let now = Instant::now();
+                self.window_moved(
+                    window_id,
+                    e.x,
+                    e.y,
+                    e.w,
+                    e.h,
+                    DebounceBurst {
+                        first: now,
+                        last: now,
+                    },
+                );
+            }
+        }
         self.flush_layout();
         on_open
     }
@@ -195,11 +223,7 @@ impl Dome {
                 continue;
             };
             let window_id = entry.window_id;
-            if m.is_native_fullscreen {
-                self.window_entered_native_fullscreen(window_id);
-            } else {
-                self.window_moved(window_id, m.x, m.y, m.w, m.h, m.observed_at);
-            }
+            self.window_moved(window_id, m.x, m.y, m.w, m.h, m.observed_at);
         }
         self.flush_layout();
     }
@@ -296,8 +320,8 @@ impl Dome {
 
     /// Handles the frontmost window exiting native fullscreen after a space
     /// change. Only acts if `cg_id` is tracked and currently in
-    /// `NativeFullscreen` state — calls `window_moved` with the pre-read
-    /// position and size so the window re-enters tiling.
+    /// `NativeFullscreen` state, routing through `window_moved` so the window
+    /// re-enters tiling via the same path as reconcile-detected exits.
     pub(in crate::platform::macos) fn exit_native_fullscreen(
         &mut self,
         cg_id: CGWindowID,

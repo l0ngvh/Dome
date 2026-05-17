@@ -249,6 +249,8 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
                     &result.to_remove,
                     &result.to_minimize,
                     result.to_add,
+                    &result.to_enter_native_fullscreen,
+                    &result.to_exit_native_fullscreen,
                 );
                 for actions in on_open {
                     process_actions(runner, &actions);
@@ -277,7 +279,6 @@ fn dispatch_check_positions(runner: &mut DomeRunner, pid: i32, observed_at: Debo
                         w: e.w,
                         h: e.h,
                         observed_at,
-                        is_native_fullscreen: e.is_native_fullscreen,
                     })
                     .collect();
                 runner.dome.windows_moved(moves);
@@ -397,6 +398,8 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
                 &result.to_remove,
                 &result.to_minimize,
                 result.to_add,
+                &result.to_enter_native_fullscreen,
+                &result.to_exit_native_fullscreen,
             );
             for actions in on_open {
                 process_actions(runner, &actions);

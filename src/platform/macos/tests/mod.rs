@@ -19,7 +19,7 @@ use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::{
-    DebounceBurst, Dome, FrameSender, HubMessage, NewWindow, WindowMove,
+    DebounceBurst, Dome, ExitNativeFullscreen, FrameSender, HubMessage, NewWindow, WindowMove,
 };
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
@@ -256,12 +256,31 @@ impl MacOS {
         x >= SCREEN_WIDTH.value() as i32 - 1 || y >= SCREEN_HEIGHT.value() as i32 - 1
     }
 
-    fn enter_native_fullscreen(&self, cg_id: CGWindowID) {
+    fn enter_native_fullscreen(&self, dome: &mut Dome, cg_id: CGWindowID) {
         self.window(cg_id).set_native_fullscreen(true);
+        dome.reconcile_windows(&[], &[], vec![], &[cg_id], &[]);
     }
 
-    fn exit_native_fullscreen(&self, cg_id: CGWindowID) {
-        self.window(cg_id).set_native_fullscreen(false);
+    fn exit_native_fullscreen(
+        &self,
+        dome: &mut Dome,
+        cg_id: CGWindowID,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+    ) {
+        let ax = self.window(cg_id);
+        ax.position.set((x, y));
+        ax.size.set((w, h));
+        ax.set_native_fullscreen(false);
+        dome.reconcile_windows(
+            &[],
+            &[],
+            vec![],
+            &[],
+            &[ExitNativeFullscreen { cg_id, x, y, w, h }],
+        );
     }
 
     fn set_min_size(&self, cg_id: CGWindowID, w: i32, h: i32) {
@@ -321,7 +340,6 @@ impl MacOS {
                 first: observed_at,
                 last: observed_at,
             },
-            is_native_fullscreen: ax.native_fullscreen.get(),
         }]);
     }
 
@@ -335,24 +353,16 @@ impl MacOS {
         let observed_at = Instant::now();
         let moves: Vec<_> = pending
             .into_iter()
-            .map(|(cg_id, x, y, w, h)| {
-                let is_native_fullscreen = self
-                    .windows
-                    .get(&cg_id)
-                    .map(|ax| ax.native_fullscreen.get())
-                    .unwrap_or(false);
-                WindowMove {
-                    cg_id,
-                    x,
-                    y,
-                    w,
-                    h,
-                    observed_at: DebounceBurst {
-                        first: observed_at,
-                        last: observed_at,
-                    },
-                    is_native_fullscreen,
-                }
+            .map(|(cg_id, x, y, w, h)| WindowMove {
+                cg_id,
+                x,
+                y,
+                w,
+                h,
+                observed_at: DebounceBurst {
+                    first: observed_at,
+                    last: observed_at,
+                },
             })
             .collect();
         dome.windows_moved(moves);
@@ -369,24 +379,16 @@ impl MacOS {
             let observed_at = Instant::now();
             let moves: Vec<_> = pending
                 .into_iter()
-                .map(|(cg_id, x, y, w, h)| {
-                    let is_native_fullscreen = self
-                        .windows
-                        .get(&cg_id)
-                        .map(|ax| ax.native_fullscreen.get())
-                        .unwrap_or(false);
-                    WindowMove {
-                        cg_id,
-                        x,
-                        y,
-                        w,
-                        h,
-                        observed_at: DebounceBurst {
-                            first: observed_at,
-                            last: observed_at,
-                        },
-                        is_native_fullscreen,
-                    }
+                .map(|(cg_id, x, y, w, h)| WindowMove {
+                    cg_id,
+                    x,
+                    y,
+                    w,
+                    h,
+                    observed_at: DebounceBurst {
+                        first: observed_at,
+                        last: observed_at,
+                    },
                 })
                 .collect();
             dome.windows_moved(moves);
@@ -506,7 +508,6 @@ fn end_drag(
             first: observed_at,
             last: observed_at,
         },
-        is_native_fullscreen: ax.native_fullscreen.get(),
     }]);
 }
 

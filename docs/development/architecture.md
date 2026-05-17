@@ -182,8 +182,8 @@ switches.
 AX notifications are unreliable. Events go missing, arrive duplicated, or
 attach to the wrong window. To compensate, a sync timer fires every five
 seconds and reconciles the tracked windows against live AX state. The pass
-catches windows that were added or removed since the last sync, but it does
-not try to recover focus changes.
+catches windows that were added, removed, or minimized since the last sync,
+but it does not try to recover focus changes.
 
 Each sync also rebuilds every observer from scratch. Observers go dead
 silently and stop emitting, and a fresh registration is the only reliable
@@ -238,8 +238,10 @@ placement from snapping back. The technique comes from AeroSpace's
 virtual-workspace implementation.
 
 Native fullscreen and borderless fullscreen need different detection paths.
-A native fullscreen window lives in its own Space, so the shell flags it by
-combining a Space-change event with the AX fullscreen attribute. A
+A native fullscreen window lives in its own Space. The primary detection
+path is the periodic reconcile cycle, which compares the AX fullscreen
+attribute against tracked state for every window each tick. A secondary,
+faster path fires on SpaceChanged and checks the focused window only. A
 borderless fullscreen window just covers the monitor (zoom button or an
 app-defined shortcut), so the shell catches it by checking position and
 size after every move or resize.

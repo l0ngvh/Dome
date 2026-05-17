@@ -20,13 +20,22 @@ pub(in crate::platform::macos) struct ExistingWindow {
     pub(in crate::platform::macos) y: i32,
     pub(in crate::platform::macos) w: i32,
     pub(in crate::platform::macos) h: i32,
-    pub(in crate::platform::macos) is_native_fullscreen: bool,
+}
+
+pub(in crate::platform::macos) struct ExitNativeFullscreen {
+    pub(in crate::platform::macos) cg_id: CGWindowID,
+    pub(in crate::platform::macos) x: i32,
+    pub(in crate::platform::macos) y: i32,
+    pub(in crate::platform::macos) w: i32,
+    pub(in crate::platform::macos) h: i32,
 }
 
 pub(in crate::platform::macos) struct ReconcileResult {
     pub(in crate::platform::macos) to_remove: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_minimize: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_add: Vec<NewWindow>,
+    pub(in crate::platform::macos) to_enter_native_fullscreen: Vec<CGWindowID>,
+    pub(in crate::platform::macos) to_exit_native_fullscreen: Vec<ExitNativeFullscreen>,
 }
 
 pub(in crate::platform::macos) struct ReconcileAllResult {
@@ -35,6 +44,8 @@ pub(in crate::platform::macos) struct ReconcileAllResult {
     pub(in crate::platform::macos) to_remove: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_minimize: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_add: Vec<NewWindow>,
+    pub(in crate::platform::macos) to_enter_native_fullscreen: Vec<CGWindowID>,
+    pub(in crate::platform::macos) to_exit_native_fullscreen: Vec<ExitNativeFullscreen>,
 }
 
 pub(in crate::platform::macos) fn compute_reconciliation(
@@ -48,15 +59,47 @@ pub(in crate::platform::macos) fn compute_reconciliation(
 
     let mut to_remove = Vec::new();
     let mut to_minimize = Vec::new();
+    let mut to_enter_native_fullscreen = Vec::new();
+    let mut to_exit_native_fullscreen = Vec::new();
     for (&cg_id, entry) in tracked.iter().filter(|(_, e)| e.ax.pid() == pid) {
         if !cg_window_ids.contains(&cg_id) || !entry.ax.is_valid(marker) {
             to_remove.push(cg_id);
-        } else if !matches!(
+            continue;
+        }
+        let already_minimized = matches!(
             entry.state,
-            WindowState::Minimized | WindowState::UserMinimized
-        ) && entry.ax.is_minimized(marker)
-        {
+            WindowState::Minimized | WindowState::UserMinimized,
+        );
+        if !already_minimized && entry.ax.is_minimized(marker) {
             to_minimize.push(cg_id);
+            continue;
+        }
+        if already_minimized {
+            continue;
+        }
+        // macOS does not reliably emit kAXMoved/kAXResized on native fullscreen
+        // enter/exit, and SpaceChanged only covers the frontmost focused window,
+        // so the periodic reconcile cycle is the only reliable signal for
+        // non-focused windows transitioning in/out of native fullscreen.
+        let is_fs = entry.ax.is_native_fullscreen(marker);
+        if !matches!(entry.state, WindowState::NativeFullscreen) && is_fs {
+            to_enter_native_fullscreen.push(cg_id);
+        } else if matches!(entry.state, WindowState::NativeFullscreen) && !is_fs {
+            let Ok((x, y)) = entry.ax.get_position(marker) else {
+                tracing::trace!(%entry, "native fullscreen exit: position read failed, skipping");
+                continue;
+            };
+            let Ok((w, h)) = entry.ax.get_size(marker) else {
+                tracing::trace!(%entry, "native fullscreen exit: size read failed, skipping");
+                continue;
+            };
+            to_exit_native_fullscreen.push(ExitNativeFullscreen {
+                cg_id,
+                x: x.value() as i32,
+                y: y.value() as i32,
+                w: w.value() as i32,
+                h: h.value() as i32,
+            });
         }
     }
 
@@ -70,6 +113,8 @@ pub(in crate::platform::macos) fn compute_reconciliation(
                 to_remove,
                 to_minimize,
                 to_add: Vec::new(),
+                to_enter_native_fullscreen,
+                to_exit_native_fullscreen,
             };
         }
     };
@@ -114,6 +159,8 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         to_remove,
         to_minimize,
         to_add,
+        to_enter_native_fullscreen,
+        to_exit_native_fullscreen,
     }
 }
 
@@ -146,7 +193,6 @@ pub(in crate::platform::macos) fn compute_window_positions(
             y: y.value() as i32,
             w: w.value() as i32,
             h: h.value() as i32,
-            is_native_fullscreen: window.ax.is_native_fullscreen(marker),
         });
     }
     existing
@@ -171,6 +217,8 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
     let mut to_remove = Vec::new();
     let mut to_minimize = Vec::new();
     let mut to_add = Vec::new();
+    let mut to_enter_native_fullscreen = Vec::new();
+    let mut to_exit_native_fullscreen = Vec::new();
     for app in &running {
         if app.is_hidden() {
             hidden_pids.push(app.pid());
@@ -180,6 +228,8 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
             to_remove.extend(result.to_remove);
             to_minimize.extend(result.to_minimize);
             to_add.extend(result.to_add);
+            to_enter_native_fullscreen.extend(result.to_enter_native_fullscreen);
+            to_exit_native_fullscreen.extend(result.to_exit_native_fullscreen);
         }
     }
 
@@ -198,6 +248,8 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
         to_remove,
         to_minimize,
         to_add,
+        to_enter_native_fullscreen,
+        to_exit_native_fullscreen,
     }
 }
 
