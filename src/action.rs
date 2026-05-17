@@ -1,5 +1,4 @@
 use anyhow::{Result, anyhow};
-use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -10,37 +9,32 @@ pub enum IpcMessage {
     Query(Query),
 }
 
-#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Query {
     Workspaces,
 }
 
-#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
-pub enum HubAction {
-    Focus {
-        #[command(subcommand)]
-        target: FocusTarget,
-    },
-    Move {
-        #[command(subcommand)]
-        target: MoveTarget,
-    },
-    Toggle {
-        #[command(subcommand)]
-        target: ToggleTarget,
-    },
-    Master {
-        #[command(subcommand)]
-        target: MasterTarget,
-    },
-}
-
 use crate::core::WindowId;
 
-#[derive(Debug, Clone, Subcommand)]
+/// Every user-visible action Dome can perform. This is the single source of
+/// truth for the action set: CLI (`src/cli.rs`), IPC JSON, and TOML keymap
+/// strings all parse into this enum. Adding a new action requires editing only
+/// this enum and its `Display`/`FromStr` impls.
+///
+/// `TogglePicker` is a first-class variant (not a `ToggleTarget` member)
+/// because the picker is a UI concern, not a tree mutation. Making it top-level
+/// lets the compiler enforce that every platform runner handles it explicitly,
+/// instead of relying on `unreachable!()` arms in hub dispatch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Action {
-    #[command(flatten)]
-    Hub(HubAction),
+    Focus(FocusTarget),
+    Move(MoveTarget),
+    Toggle(ToggleTarget),
+    Master(MasterTarget),
+    TogglePicker,
+    /// Restore a specific minimized window. Sent by the picker UI, not
+    /// user-configurable (no `FromStr` arm, no CLI subcommand).
+    UnminimizeWindow(WindowId),
     Exec {
         command: String,
     },
@@ -48,9 +42,6 @@ pub enum Action {
     Mode {
         name: String,
     },
-    /// Restore a specific minimized window. Sent by the picker UI, not user-configurable.
-    #[command(skip)]
-    UnminimizeWindow(WindowId),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,7 +53,7 @@ pub enum MonitorTarget {
     Name(String),
 }
 
-#[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum TabDirection {
     Next,
     Prev,
@@ -77,25 +68,18 @@ impl fmt::Display for TabDirection {
     }
 }
 
-impl fmt::Display for HubAction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            HubAction::Focus { target } => write!(f, "focus {target}"),
-            HubAction::Move { target } => write!(f, "move {target}"),
-            HubAction::Toggle { target } => write!(f, "toggle {target}"),
-            HubAction::Master { target } => write!(f, "master {target}"),
-        }
-    }
-}
-
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Action::Hub(hub) => hub.fmt(f),
+            Action::Focus(t) => write!(f, "focus {t}"),
+            Action::Move(t) => write!(f, "move {t}"),
+            Action::Toggle(t) => write!(f, "toggle {t}"),
+            Action::Master(t) => write!(f, "master {t}"),
+            Action::TogglePicker => write!(f, "toggle minimized"),
+            Action::UnminimizeWindow(id) => write!(f, "unminimize_window {id}"),
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
             Action::Mode { name } => write!(f, "mode {name}"),
-            Action::UnminimizeWindow(id) => write!(f, "unminimize_window {id}"),
         }
     }
 }
@@ -153,24 +137,16 @@ impl<'de> serde::Deserialize<'de> for Actions {
     }
 }
 
-#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FocusTarget {
     Up,
     Down,
     Left,
     Right,
     Parent,
-    Tab {
-        #[command(subcommand)]
-        direction: TabDirection,
-    },
-    Workspace {
-        name: String,
-    },
-    Monitor {
-        #[arg(value_parser = parse_monitor_target)]
-        target: MonitorTarget,
-    },
+    Tab { direction: TabDirection },
+    Workspace { name: String },
+    Monitor { target: MonitorTarget },
 }
 
 impl fmt::Display for FocusTarget {
@@ -188,19 +164,14 @@ impl fmt::Display for FocusTarget {
     }
 }
 
-#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MoveTarget {
     Up,
     Down,
     Left,
     Right,
-    Workspace {
-        name: String,
-    },
-    Monitor {
-        #[arg(value_parser = parse_monitor_target)]
-        target: MonitorTarget,
-    },
+    Workspace { name: String },
+    Monitor { target: MonitorTarget },
 }
 
 impl fmt::Display for MoveTarget {
@@ -228,17 +199,13 @@ impl fmt::Display for MonitorTarget {
     }
 }
 
-#[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ToggleTarget {
     Spawn,
     Direction,
     Layout,
     Float,
     Fullscreen,
-    // Sits in ToggleTarget so the keymap, IPC, and CLI all spell it `toggle minimized`.
-    // Each platform runner intercepts this variant before calling into the hub; the
-    // hub never dispatches it (the picker is a UI concern, not a tree mutation).
-    Minimized,
 }
 
 impl fmt::Display for ToggleTarget {
@@ -249,12 +216,11 @@ impl fmt::Display for ToggleTarget {
             ToggleTarget::Layout => write!(f, "layout"),
             ToggleTarget::Float => write!(f, "float"),
             ToggleTarget::Fullscreen => write!(f, "fullscreen"),
-            ToggleTarget::Minimized => write!(f, "minimized"),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, Subcommand, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum MasterTarget {
     Grow,
     Shrink,
@@ -297,94 +263,44 @@ impl FromStr for Action {
 
         let parts: Vec<&str> = s.split_whitespace().collect();
         match parts.as_slice() {
-            ["focus", "up"] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::Up,
+            ["focus", "up"] => Ok(Action::Focus(FocusTarget::Up)),
+            ["focus", "down"] => Ok(Action::Focus(FocusTarget::Down)),
+            ["focus", "left"] => Ok(Action::Focus(FocusTarget::Left)),
+            ["focus", "right"] => Ok(Action::Focus(FocusTarget::Right)),
+            ["focus", "parent"] => Ok(Action::Focus(FocusTarget::Parent)),
+            ["focus", "workspace", n] => Ok(Action::Focus(FocusTarget::Workspace {
+                name: n.to_string(),
             })),
-            ["focus", "down"] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::Down,
+            ["focus", "tab", "next"] => Ok(Action::Focus(FocusTarget::Tab {
+                direction: TabDirection::Next,
             })),
-            ["focus", "left"] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::Left,
+            ["focus", "tab", "prev"] => Ok(Action::Focus(FocusTarget::Tab {
+                direction: TabDirection::Prev,
             })),
-            ["focus", "right"] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::Right,
+            ["focus", "monitor", target] => Ok(Action::Focus(FocusTarget::Monitor {
+                target: parse_monitor_target(target)?,
             })),
-            ["focus", "parent"] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::Parent,
+            ["move", "up"] => Ok(Action::Move(MoveTarget::Up)),
+            ["move", "down"] => Ok(Action::Move(MoveTarget::Down)),
+            ["move", "left"] => Ok(Action::Move(MoveTarget::Left)),
+            ["move", "right"] => Ok(Action::Move(MoveTarget::Right)),
+            ["move", "workspace", n] => Ok(Action::Move(MoveTarget::Workspace {
+                name: n.to_string(),
             })),
-            ["focus", "workspace", n] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::Workspace {
-                    name: n.to_string(),
-                },
+            ["move", "monitor", target] => Ok(Action::Move(MoveTarget::Monitor {
+                target: parse_monitor_target(target)?,
             })),
-            ["focus", "tab", "next"] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::Tab {
-                    direction: TabDirection::Next,
-                },
-            })),
-            ["focus", "tab", "prev"] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::Tab {
-                    direction: TabDirection::Prev,
-                },
-            })),
-            ["focus", "monitor", target] => Ok(Action::Hub(HubAction::Focus {
-                target: FocusTarget::Monitor {
-                    target: parse_monitor_target(target)?,
-                },
-            })),
-            ["move", "up"] => Ok(Action::Hub(HubAction::Move {
-                target: MoveTarget::Up,
-            })),
-            ["move", "down"] => Ok(Action::Hub(HubAction::Move {
-                target: MoveTarget::Down,
-            })),
-            ["move", "left"] => Ok(Action::Hub(HubAction::Move {
-                target: MoveTarget::Left,
-            })),
-            ["move", "right"] => Ok(Action::Hub(HubAction::Move {
-                target: MoveTarget::Right,
-            })),
-            ["move", "workspace", n] => Ok(Action::Hub(HubAction::Move {
-                target: MoveTarget::Workspace {
-                    name: n.to_string(),
-                },
-            })),
-            ["move", "monitor", target] => Ok(Action::Hub(HubAction::Move {
-                target: MoveTarget::Monitor {
-                    target: parse_monitor_target(target)?,
-                },
-            })),
-            ["toggle", "spawn"] => Ok(Action::Hub(HubAction::Toggle {
-                target: ToggleTarget::Spawn,
-            })),
-            ["toggle", "direction"] => Ok(Action::Hub(HubAction::Toggle {
-                target: ToggleTarget::Direction,
-            })),
-            ["toggle", "layout"] => Ok(Action::Hub(HubAction::Toggle {
-                target: ToggleTarget::Layout,
-            })),
-            ["toggle", "float"] => Ok(Action::Hub(HubAction::Toggle {
-                target: ToggleTarget::Float,
-            })),
-            ["toggle", "fullscreen"] => Ok(Action::Hub(HubAction::Toggle {
-                target: ToggleTarget::Fullscreen,
-            })),
-            ["master", "grow"] => Ok(Action::Hub(HubAction::Master {
-                target: MasterTarget::Grow,
-            })),
-            ["master", "shrink"] => Ok(Action::Hub(HubAction::Master {
-                target: MasterTarget::Shrink,
-            })),
-            ["master", "more"] => Ok(Action::Hub(HubAction::Master {
-                target: MasterTarget::More,
-            })),
-            ["master", "fewer"] => Ok(Action::Hub(HubAction::Master {
-                target: MasterTarget::Fewer,
-            })),
+            ["toggle", "spawn"] => Ok(Action::Toggle(ToggleTarget::Spawn)),
+            ["toggle", "direction"] => Ok(Action::Toggle(ToggleTarget::Direction)),
+            ["toggle", "layout"] => Ok(Action::Toggle(ToggleTarget::Layout)),
+            ["toggle", "float"] => Ok(Action::Toggle(ToggleTarget::Float)),
+            ["toggle", "fullscreen"] => Ok(Action::Toggle(ToggleTarget::Fullscreen)),
+            ["toggle", "minimized"] => Ok(Action::TogglePicker),
+            ["master", "grow"] => Ok(Action::Master(MasterTarget::Grow)),
+            ["master", "shrink"] => Ok(Action::Master(MasterTarget::Shrink)),
+            ["master", "more"] => Ok(Action::Master(MasterTarget::More)),
+            ["master", "fewer"] => Ok(Action::Master(MasterTarget::Fewer)),
             ["exit"] => Ok(Action::Exit),
-            ["toggle", "minimized"] => Ok(Action::Hub(HubAction::Toggle {
-                target: ToggleTarget::Minimized,
-            })),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
     }
@@ -395,73 +311,13 @@ impl FromStr for Action {
 // becoming `dome focus monitor up` with `up` as its own subcommand), which is overly
 // complex. Since actions are primarily parsed from config files and IPC strings anyway,
 // manual parsing is simpler and more flexible.
-fn parse_monitor_target(s: &str) -> Result<MonitorTarget> {
+pub(crate) fn parse_monitor_target(s: &str) -> Result<MonitorTarget> {
     match s {
         "up" => Ok(MonitorTarget::Up),
         "down" => Ok(MonitorTarget::Down),
         "left" => Ok(MonitorTarget::Left),
         "right" => Ok(MonitorTarget::Right),
         name => Ok(MonitorTarget::Name(name.to_string())),
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-enum FlatAction {
-    Focus { target: FocusTarget },
-    Move { target: MoveTarget },
-    Toggle { target: ToggleTarget },
-    Master { target: MasterTarget },
-    Exec { command: String },
-    Exit,
-    Mode { name: String },
-    UnminimizeWindow(WindowId),
-}
-
-impl From<Action> for FlatAction {
-    fn from(a: Action) -> Self {
-        match a {
-            Action::Hub(HubAction::Focus { target }) => FlatAction::Focus { target },
-            Action::Hub(HubAction::Move { target }) => FlatAction::Move { target },
-            Action::Hub(HubAction::Toggle { target }) => FlatAction::Toggle { target },
-            Action::Hub(HubAction::Master { target }) => FlatAction::Master { target },
-            Action::Exec { command } => FlatAction::Exec { command },
-            Action::Exit => FlatAction::Exit,
-            Action::Mode { name } => FlatAction::Mode { name },
-            Action::UnminimizeWindow(id) => FlatAction::UnminimizeWindow(id),
-        }
-    }
-}
-
-impl From<FlatAction> for Action {
-    fn from(a: FlatAction) -> Self {
-        match a {
-            FlatAction::Focus { target } => Action::Hub(HubAction::Focus { target }),
-            FlatAction::Move { target } => Action::Hub(HubAction::Move { target }),
-            FlatAction::Toggle { target } => Action::Hub(HubAction::Toggle { target }),
-            FlatAction::Master { target } => Action::Hub(HubAction::Master { target }),
-            FlatAction::Exec { command } => Action::Exec { command },
-            FlatAction::Exit => Action::Exit,
-            FlatAction::Mode { name } => Action::Mode { name },
-            FlatAction::UnminimizeWindow(id) => Action::UnminimizeWindow(id),
-        }
-    }
-}
-
-impl Serialize for Action {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        FlatAction::from(self.clone()).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Action {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        FlatAction::deserialize(deserializer).map(Action::from)
     }
 }
 
@@ -472,30 +328,13 @@ mod tests {
     #[test]
     fn serde_wire_format() {
         let cases = vec![
+            (Action::Focus(FocusTarget::Up), r#"{"Focus":"Up"}"#),
             (
-                Action::Hub(HubAction::Focus {
-                    target: FocusTarget::Up,
-                }),
-                r#"{"Focus":{"target":"Up"}}"#,
+                Action::Move(MoveTarget::Workspace { name: "1".into() }),
+                r#"{"Move":{"Workspace":{"name":"1"}}}"#,
             ),
-            (
-                Action::Hub(HubAction::Move {
-                    target: MoveTarget::Workspace { name: "1".into() },
-                }),
-                r#"{"Move":{"target":{"Workspace":{"name":"1"}}}}"#,
-            ),
-            (
-                Action::Hub(HubAction::Toggle {
-                    target: ToggleTarget::Float,
-                }),
-                r#"{"Toggle":{"target":"Float"}}"#,
-            ),
-            (
-                Action::Hub(HubAction::Master {
-                    target: MasterTarget::Grow,
-                }),
-                r#"{"Master":{"target":"Grow"}}"#,
-            ),
+            (Action::Toggle(ToggleTarget::Float), r#"{"Toggle":"Float"}"#),
+            (Action::Master(MasterTarget::Grow), r#"{"Master":"Grow"}"#),
             (
                 Action::Exec {
                     command: "open -a Terminal".into(),
@@ -503,12 +342,7 @@ mod tests {
                 r#"{"Exec":{"command":"open -a Terminal"}}"#,
             ),
             (Action::Exit, r#""Exit""#),
-            (
-                Action::Hub(HubAction::Toggle {
-                    target: ToggleTarget::Minimized,
-                }),
-                r#"{"Toggle":{"target":"Minimized"}}"#,
-            ),
+            (Action::TogglePicker, r#""TogglePicker""#),
             (
                 Action::Mode {
                     name: "resize".into(),
@@ -516,12 +350,10 @@ mod tests {
                 r#"{"Mode":{"name":"resize"}}"#,
             ),
             (
-                Action::Hub(HubAction::Focus {
-                    target: FocusTarget::Tab {
-                        direction: TabDirection::Next,
-                    },
+                Action::Focus(FocusTarget::Tab {
+                    direction: TabDirection::Next,
                 }),
-                r#"{"Focus":{"target":{"Tab":{"direction":"Next"}}}}"#,
+                r#"{"Focus":{"Tab":{"direction":"Next"}}}"#,
             ),
         ];
         for (action, expected) in &cases {
@@ -541,10 +373,8 @@ mod tests {
         let cases = vec![
             (IpcMessage::Action(Action::Exit), r#"{"Action":"Exit"}"#),
             (
-                IpcMessage::Action(Action::Hub(HubAction::Focus {
-                    target: FocusTarget::Up,
-                })),
-                r#"{"Action":{"Focus":{"target":"Up"}}}"#,
+                IpcMessage::Action(Action::Focus(FocusTarget::Up)),
+                r#"{"Action":{"Focus":"Up"}}"#,
             ),
             (
                 IpcMessage::Query(Query::Workspaces),

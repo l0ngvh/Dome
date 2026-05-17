@@ -512,11 +512,24 @@ fn end_drag(
 
 fn send(dome: &mut Dome, s: &str) {
     let action: Action = s.parse().unwrap();
-    match action {
-        Action::Hub(hub) => {
-            dome.execute_hub_action(&hub);
+    match &action {
+        Action::Focus(t) => {
+            dome.apply_focus(t);
             dome.flush_layout();
         }
-        _ => panic!("send() only handles Hub actions"),
+        Action::Move(t) => {
+            dome.apply_move(t);
+            dome.flush_layout();
+        }
+        Action::Toggle(t) => {
+            dome.apply_toggle(t);
+            dome.flush_layout();
+        }
+        Action::Master(t) => {
+            dome.apply_master(t);
+            dome.flush_layout();
+        }
+        Action::TogglePicker => dome.toggle_picker(),
+        _ => panic!("send() only handles tiling actions, got: {action}"),
     }
 }

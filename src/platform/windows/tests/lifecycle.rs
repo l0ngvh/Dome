@@ -416,9 +416,25 @@ fn multi_action_sequence_applies_each_hub_action() {
         "focus workspace 0".parse().unwrap(),
     ]);
     for action in &actions {
-        if let Action::Hub(hub) = action {
-            env.dome.execute_hub_action(hub);
-            env.dome.apply_layout();
+        match action {
+            Action::Focus(t) => {
+                env.dome.apply_focus(t);
+                env.dome.apply_layout();
+            }
+            Action::Move(t) => {
+                env.dome.apply_move(t);
+                env.dome.apply_layout();
+            }
+            Action::Toggle(t) => {
+                env.dome.apply_toggle(t);
+                env.dome.apply_layout();
+            }
+            Action::Master(t) => {
+                env.dome.apply_master(t);
+                env.dome.apply_layout();
+            }
+            Action::TogglePicker => env.dome.toggle_picker(),
+            _ => {}
         }
     }
 

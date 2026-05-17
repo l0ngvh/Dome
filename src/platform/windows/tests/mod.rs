@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::action::{Action, Actions, HubAction, ToggleTarget};
+use crate::action::{Action, Actions};
 use crate::config::Config;
 use crate::core::{Dimension, Length, Physical};
 use crate::picker::PickerEntry;
@@ -203,8 +203,13 @@ impl TestEnv {
         );
         if let Some(actions) = on_open {
             for action in &actions {
-                if let Action::Hub(hub_action) = action {
-                    self.dome.execute_hub_action(hub_action);
+                match action {
+                    Action::Focus(t) => self.dome.apply_focus(t),
+                    Action::Move(t) => self.dome.apply_move(t),
+                    Action::Toggle(t) => self.dome.apply_toggle(t),
+                    Action::Master(t) => self.dome.apply_master(t),
+                    Action::TogglePicker => self.dome.toggle_picker(),
+                    _ => {}
                 }
             }
         }
@@ -300,11 +305,12 @@ impl TestEnv {
 
     fn run_actions(&mut self, s: &str) {
         let action: Action = s.parse().unwrap();
-        match action {
-            Action::Hub(HubAction::Toggle {
-                target: ToggleTarget::Minimized,
-            }) => self.dome.toggle_picker(),
-            Action::Hub(hub_action) => self.dome.execute_hub_action(&hub_action),
+        match &action {
+            Action::Focus(t) => self.dome.apply_focus(t),
+            Action::Move(t) => self.dome.apply_move(t),
+            Action::Toggle(t) => self.dome.apply_toggle(t),
+            Action::Master(t) => self.dome.apply_master(t),
+            Action::TogglePicker => self.dome.toggle_picker(),
             _ => {}
         }
         self.dome.apply_layout();

@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     KillTimer, PostQuitMessage, PostThreadMessageW, SetTimer, WM_QUIT,
 };
 
-use crate::action::{Action, Actions, HubAction, ToggleTarget};
+use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, ObservedPosition};
@@ -189,18 +189,27 @@ impl Runner {
     fn handle_actions(&mut self, actions: &Actions) {
         for action in actions {
             match action {
-                // Picker is a UI concern, not a hub mutation; intercept before execute_hub_action.
-                Action::Hub(HubAction::Toggle {
-                    target: ToggleTarget::Minimized,
-                }) => {
+                Action::Focus(t) => {
+                    self.dome.apply_focus(t);
+                    self.dome.apply_layout();
+                }
+                Action::Move(t) => {
+                    self.dome.apply_move(t);
+                    self.dome.apply_layout();
+                }
+                Action::Toggle(t) => {
+                    self.dome.apply_toggle(t);
+                    self.dome.apply_layout();
+                }
+                Action::Master(t) => {
+                    self.dome.apply_master(t);
+                    self.dome.apply_layout();
+                }
+                Action::TogglePicker => {
                     self.dome.toggle_picker();
                     if self.dome.picker_visible() {
                         self.dispatch_picker_icons();
                     }
-                }
-                Action::Hub(hub) => {
-                    self.dome.execute_hub_action(hub);
-                    self.dome.apply_layout();
                 }
                 Action::Exec { command } => {
                     if let Err(e) = std::process::Command::new("cmd")

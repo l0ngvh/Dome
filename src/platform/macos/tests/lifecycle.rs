@@ -54,9 +54,25 @@ fn on_open_moves_window_to_other_workspace() {
     let on_open = dome.reconcile_windows(&[], &[], vec![new_window(&macos, cg2)]);
     for actions in on_open {
         for action in &actions {
-            if let Action::Hub(hub) = action {
-                dome.execute_hub_action(hub);
-                dome.flush_layout();
+            match action {
+                Action::Focus(t) => {
+                    dome.apply_focus(t);
+                    dome.flush_layout();
+                }
+                Action::Move(t) => {
+                    dome.apply_move(t);
+                    dome.flush_layout();
+                }
+                Action::Toggle(t) => {
+                    dome.apply_toggle(t);
+                    dome.flush_layout();
+                }
+                Action::Master(t) => {
+                    dome.apply_master(t);
+                    dome.flush_layout();
+                }
+                Action::TogglePicker => dome.toggle_picker(),
+                _ => {}
             }
         }
     }
@@ -351,9 +367,25 @@ fn multi_action_sequence_applies_each_hub_action() {
         "focus workspace 0".parse().unwrap(),
     ]);
     for action in &actions {
-        if let Action::Hub(hub) = action {
-            dome.execute_hub_action(hub);
-            dome.flush_layout();
+        match action {
+            Action::Focus(t) => {
+                dome.apply_focus(t);
+                dome.flush_layout();
+            }
+            Action::Move(t) => {
+                dome.apply_move(t);
+                dome.flush_layout();
+            }
+            Action::Toggle(t) => {
+                dome.apply_toggle(t);
+                dome.flush_layout();
+            }
+            Action::Master(t) => {
+                dome.apply_master(t);
+                dome.flush_layout();
+            }
+            Action::TogglePicker => dome.toggle_picker(),
+            _ => {}
         }
     }
 

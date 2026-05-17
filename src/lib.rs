@@ -1,4 +1,5 @@
 mod action;
+pub mod cli;
 mod config;
 mod core;
 mod font;
@@ -10,7 +11,10 @@ pub(crate) mod picker;
 mod platform;
 mod theme;
 
-pub use action::{Action, FocusTarget, HubAction, IpcMessage, MoveTarget, Query, ToggleTarget};
+pub use action::{
+    Action, FocusTarget, IpcMessage, MasterTarget, MonitorTarget, MoveTarget, Query, TabDirection,
+    ToggleTarget,
+};
 pub use ipc::DomeClient;
 
 #[cfg(target_os = "macos")]

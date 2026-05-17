@@ -116,7 +116,7 @@ impl KeymapState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::{Action, Actions, FocusTarget, HubAction};
+    use crate::action::{Action, Actions, FocusTarget};
     use crate::config::{Keymap, Modifiers};
 
     fn km(key: &str, mods: Modifiers) -> Keymap {
@@ -127,9 +127,7 @@ mod tests {
     }
 
     fn focus_left_actions() -> Actions {
-        Actions::new(vec![Action::Hub(HubAction::Focus {
-            target: FocusTarget::Left,
-        })])
+        Actions::new(vec![Action::Focus(FocusTarget::Left)])
     }
 
     fn mode_action(name: &str) -> Action {
@@ -210,9 +208,7 @@ mod tests {
             vec![(
                 cmd_r.clone(),
                 Actions::new(vec![
-                    Action::Hub(HubAction::Focus {
-                        target: FocusTarget::Left,
-                    }),
+                    Action::Focus(FocusTarget::Left),
                     mode_action("resize"),
                 ]),
             )],

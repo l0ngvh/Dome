@@ -15,9 +15,7 @@ use std::time::Instant;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{
-    Actions, FocusTarget, HubAction, MasterTarget, MoveTarget, TabDirection, ToggleTarget,
-};
+use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
 use crate::config::{Config, MacosOnOpenRule, MacosWindow};
 use crate::core::{
     ContainerId, Dimension, Direction, Hub, Length, Logical, TilingAction, WindowId,
@@ -466,78 +464,78 @@ impl Dome {
         }
     }
 
-    pub(in crate::platform::macos) fn execute_hub_action(&mut self, action: &HubAction) {
-        match action {
-            HubAction::Focus { target } => match target {
-                FocusTarget::Up => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                    direction: Direction::Vertical,
-                    forward: false,
-                }),
-                FocusTarget::Down => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                    direction: Direction::Vertical,
-                    forward: true,
-                }),
-                FocusTarget::Left => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                    direction: Direction::Horizontal,
-                    forward: false,
-                }),
-                FocusTarget::Right => self.hub.handle_tiling_action(TilingAction::FocusDirection {
-                    direction: Direction::Horizontal,
-                    forward: true,
-                }),
-                FocusTarget::Parent => self.hub.handle_tiling_action(TilingAction::FocusParent),
-                FocusTarget::Tab { direction } => {
-                    self.hub.handle_tiling_action(TilingAction::FocusTab {
-                        forward: matches!(direction, TabDirection::Next),
-                    })
-                }
-                FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
-                FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
-            },
-            HubAction::Move { target } => match target {
-                MoveTarget::Up => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                    direction: Direction::Vertical,
-                    forward: false,
-                }),
-                MoveTarget::Down => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                    direction: Direction::Vertical,
-                    forward: true,
-                }),
-                MoveTarget::Left => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                    direction: Direction::Horizontal,
-                    forward: false,
-                }),
-                MoveTarget::Right => self.hub.handle_tiling_action(TilingAction::MoveDirection {
-                    direction: Direction::Horizontal,
-                    forward: true,
-                }),
-                MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
-                MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
-            },
-            HubAction::Toggle { target } => match target {
-                ToggleTarget::Spawn => self.hub.handle_tiling_action(TilingAction::ToggleSpawnMode),
-                ToggleTarget::Direction => {
-                    self.hub.handle_tiling_action(TilingAction::ToggleDirection)
-                }
-                ToggleTarget::Layout => self
-                    .hub
-                    .handle_tiling_action(TilingAction::ToggleContainerLayout),
-                ToggleTarget::Float => self.hub.toggle_float(),
-                ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
-                ToggleTarget::Minimized => {
-                    unreachable!("ToggleTarget::Minimized is intercepted by the runner")
-                }
-            },
-            HubAction::Master { target } => {
-                let action = match target {
-                    MasterTarget::Grow => TilingAction::GrowMaster,
-                    MasterTarget::Shrink => TilingAction::ShrinkMaster,
-                    MasterTarget::More => TilingAction::MoreMaster,
-                    MasterTarget::Fewer => TilingAction::FewerMaster,
-                };
-                self.hub.handle_tiling_action(action);
+    pub(in crate::platform::macos) fn apply_focus(&mut self, target: &FocusTarget) {
+        match target {
+            FocusTarget::Up => self.hub.handle_tiling_action(TilingAction::FocusDirection {
+                direction: Direction::Vertical,
+                forward: false,
+            }),
+            FocusTarget::Down => self.hub.handle_tiling_action(TilingAction::FocusDirection {
+                direction: Direction::Vertical,
+                forward: true,
+            }),
+            FocusTarget::Left => self.hub.handle_tiling_action(TilingAction::FocusDirection {
+                direction: Direction::Horizontal,
+                forward: false,
+            }),
+            FocusTarget::Right => self.hub.handle_tiling_action(TilingAction::FocusDirection {
+                direction: Direction::Horizontal,
+                forward: true,
+            }),
+            FocusTarget::Parent => self.hub.handle_tiling_action(TilingAction::FocusParent),
+            FocusTarget::Tab { direction } => {
+                self.hub.handle_tiling_action(TilingAction::FocusTab {
+                    forward: matches!(direction, TabDirection::Next),
+                })
             }
+            FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
+            FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
         }
+    }
+
+    pub(in crate::platform::macos) fn apply_move(&mut self, target: &MoveTarget) {
+        match target {
+            MoveTarget::Up => self.hub.handle_tiling_action(TilingAction::MoveDirection {
+                direction: Direction::Vertical,
+                forward: false,
+            }),
+            MoveTarget::Down => self.hub.handle_tiling_action(TilingAction::MoveDirection {
+                direction: Direction::Vertical,
+                forward: true,
+            }),
+            MoveTarget::Left => self.hub.handle_tiling_action(TilingAction::MoveDirection {
+                direction: Direction::Horizontal,
+                forward: false,
+            }),
+            MoveTarget::Right => self.hub.handle_tiling_action(TilingAction::MoveDirection {
+                direction: Direction::Horizontal,
+                forward: true,
+            }),
+            MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
+            MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
+        }
+    }
+
+    pub(in crate::platform::macos) fn apply_toggle(&mut self, target: &ToggleTarget) {
+        match target {
+            ToggleTarget::Spawn => self.hub.handle_tiling_action(TilingAction::ToggleSpawnMode),
+            ToggleTarget::Direction => self.hub.handle_tiling_action(TilingAction::ToggleDirection),
+            ToggleTarget::Layout => self
+                .hub
+                .handle_tiling_action(TilingAction::ToggleContainerLayout),
+            ToggleTarget::Float => self.hub.toggle_float(),
+            ToggleTarget::Fullscreen => self.hub.toggle_fullscreen(),
+        }
+    }
+
+    pub(in crate::platform::macos) fn apply_master(&mut self, target: &MasterTarget) {
+        let action = match target {
+            MasterTarget::Grow => TilingAction::GrowMaster,
+            MasterTarget::Shrink => TilingAction::ShrinkMaster,
+            MasterTarget::More => TilingAction::MoreMaster,
+            MasterTarget::Fewer => TilingAction::FewerMaster,
+        };
+        self.hub.handle_tiling_action(action);
     }
 }
 

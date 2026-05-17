@@ -12,7 +12,7 @@ use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSWorkspace;
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{Action, Actions, HubAction, ToggleTarget};
+use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::macos::accessibility::AXWindowApi;
 use crate::platform::macos::dispatcher::GcdDispatcher;
@@ -153,15 +153,24 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
 fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
     for action in actions {
         match action {
-            // Picker is a UI concern, not a hub mutation; intercept before execute_hub_action.
-            Action::Hub(HubAction::Toggle {
-                target: ToggleTarget::Minimized,
-            }) => {
-                runner.dome.toggle_picker();
-            }
-            Action::Hub(hub) => {
-                runner.dome.execute_hub_action(hub);
+            Action::Focus(t) => {
+                runner.dome.apply_focus(t);
                 runner.dome.flush_layout();
+            }
+            Action::Move(t) => {
+                runner.dome.apply_move(t);
+                runner.dome.flush_layout();
+            }
+            Action::Toggle(t) => {
+                runner.dome.apply_toggle(t);
+                runner.dome.flush_layout();
+            }
+            Action::Master(t) => {
+                runner.dome.apply_master(t);
+                runner.dome.flush_layout();
+            }
+            Action::TogglePicker => {
+                runner.dome.toggle_picker();
             }
             Action::Exec { command } => {
                 if let Err(e) = std::process::Command::new("sh")
