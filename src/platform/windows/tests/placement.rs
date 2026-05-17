@@ -781,3 +781,124 @@ fn dome_new_assigns_per_monitor_scale() {
         (Length::new(2880.0) - 2.0 * scaled_border_b).round()
     );
 }
+
+#[test]
+fn float_drift_repositions_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.run_actions("toggle float");
+    env.settle(10);
+
+    let baseline = env.overlay_update_count();
+
+    // Simulate user dragging the float to a new position
+    *w1.dimension.lock().unwrap() = Dimension::new(
+        Length::new(500.0),
+        Length::new(300.0),
+        Length::new(400.0),
+        Length::new(250.0),
+    );
+    env.dome.move_size_ended(w1.hwnd_id);
+    env.dome.placement_timeout(w1.hwnd_id);
+    env.dome.window_moved(
+        w1.hwnd_id,
+        ObservedPosition::Visible {
+            rect: dim(500, 300, 400, 250),
+            monitor: 1,
+        },
+    );
+
+    assert!(
+        env.overlay_update_count() > baseline,
+        "overlay.update must fire after window_drifted's Float arm"
+    );
+
+    // The overlay receives the border-expanded outer_dim, not the raw managed-window rect.
+    let border = Length::new(env.config.border_size);
+    let expected_outer = Dimension::new(
+        Length::new(500.0) - border,
+        Length::new(300.0) - border,
+        Length::new(400.0) + 2.0 * border,
+        Length::new(250.0) + 2.0 * border,
+    );
+    assert_eq!(
+        env.last_visible_frame(),
+        Some(expected_outer),
+        "overlay should receive the border-expanded outer_dim as visible_frame"
+    );
+}
+
+#[test]
+fn float_drift_does_not_touch_managed_hwnd() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.run_actions("toggle float");
+    env.settle(10);
+
+    // Clear move log to establish baseline
+    env.moves.lock().unwrap().clear();
+
+    // Simulate user dragging the float to a new position
+    *w1.dimension.lock().unwrap() = Dimension::new(
+        Length::new(500.0),
+        Length::new(300.0),
+        Length::new(400.0),
+        Length::new(250.0),
+    );
+    env.dome.move_size_ended(w1.hwnd_id);
+    env.dome.placement_timeout(w1.hwnd_id);
+    env.dome.window_moved(
+        w1.hwnd_id,
+        ObservedPosition::Visible {
+            rect: dim(500, 300, 400, 250),
+            monitor: 1,
+        },
+    );
+
+    // The fix must not call set_position on the managed HWND
+    assert!(
+        env.moves.lock().unwrap().is_empty(),
+        "overlay update must not trigger set_position on the managed HWND"
+    );
+}
+
+#[test]
+fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    env.run_actions("toggle float");
+    env.settle(10);
+
+    // Simulate user dragging the float to a new position
+    *w1.dimension.lock().unwrap() = Dimension::new(
+        Length::new(500.0),
+        Length::new(300.0),
+        Length::new(400.0),
+        Length::new(250.0),
+    );
+    env.dome.move_size_ended(w1.hwnd_id);
+    env.dome.placement_timeout(w1.hwnd_id);
+    env.dome.window_moved(
+        w1.hwnd_id,
+        ObservedPosition::Visible {
+            rect: dim(500, 300, 400, 250),
+            monitor: 1,
+        },
+    );
+
+    // Snapshot count after the first overlay update (from window_drifted)
+    let post_drift = env.overlay_update_count();
+
+    // show_float's settled branch must remain a no-op
+    env.dome.apply_layout();
+    env.settle(10);
+
+    assert_eq!(
+        env.overlay_update_count(),
+        post_drift,
+        "apply_layout after drift must not re-update the overlay (settled short-circuit)"
+    );
+}

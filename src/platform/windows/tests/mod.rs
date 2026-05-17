@@ -83,6 +83,7 @@ struct TestEnv {
     config: Config,
     sink_focus_count: Rc<Cell<u32>>,
     overlay_update_count: Rc<Cell<u32>>,
+    last_visible_frame: Rc<Cell<Option<Dimension<Physical>>>>,
     tiling_overlay_update_count: Rc<Cell<u32>>,
     tiling_overlay_clear_count: Rc<Cell<u32>>,
     float_overlay_apply_theme_count: Rc<Cell<u32>>,
@@ -111,6 +112,7 @@ impl TestEnv {
         };
         let sink_focus_count = Rc::new(Cell::new(0));
         let overlay_update_count = Rc::new(Cell::new(0));
+        let last_visible_frame = Rc::new(Cell::new(None));
         let tiling_overlay_update_count = Rc::new(Cell::new(0));
         let tiling_overlay_clear_count = Rc::new(Cell::new(0));
         let float_overlay_apply_theme_count = Rc::new(Cell::new(0));
@@ -126,6 +128,7 @@ impl TestEnv {
             Rc::new(NoopTaskbar),
             Box::new(NoopOverlays {
                 overlay_update_count: overlay_update_count.clone(),
+                last_visible_frame: last_visible_frame.clone(),
                 tiling_overlay_update_count: tiling_overlay_update_count.clone(),
                 tiling_overlay_clear_count: tiling_overlay_clear_count.clone(),
                 float_overlay_apply_theme_count: float_overlay_apply_theme_count.clone(),
@@ -149,6 +152,7 @@ impl TestEnv {
             config,
             sink_focus_count,
             overlay_update_count,
+            last_visible_frame,
             tiling_overlay_update_count,
             tiling_overlay_clear_count,
             float_overlay_apply_theme_count,
@@ -333,6 +337,10 @@ impl TestEnv {
 
     fn overlay_update_count(&self) -> u32 {
         self.overlay_update_count.get()
+    }
+
+    fn last_visible_frame(&self) -> Option<Dimension<Physical>> {
+        self.last_visible_frame.get()
     }
 
     fn tiling_overlay_update_count(&self) -> u32 {
@@ -720,19 +728,21 @@ impl KeyboardSinkApi for NoopKeyboardSink {
 
 struct NoopFloatOverlay {
     overlay_update_count: Rc<Cell<u32>>,
+    last_visible_frame: Rc<Cell<Option<Dimension<Physical>>>>,
     apply_theme_count: Rc<Cell<u32>>,
     apply_font_count: Rc<Cell<u32>>,
 }
 impl FloatOverlayApi for NoopFloatOverlay {
     fn update(
         &mut self,
-        _: &crate::core::FloatWindowPlacement,
+        wp: &crate::core::FloatWindowPlacement,
         _: &Config,
         _: ZOrder,
         _scale: f32,
     ) {
         self.overlay_update_count
             .set(self.overlay_update_count.get() + 1);
+        self.last_visible_frame.set(Some(wp.visible_frame));
     }
     fn hide(&mut self) {}
     fn apply_theme(&mut self, _flavor: crate::theme::Flavor) {
@@ -824,6 +834,7 @@ impl PickerApi for NoopPicker {
 
 struct NoopOverlays {
     overlay_update_count: Rc<Cell<u32>>,
+    last_visible_frame: Rc<Cell<Option<Dimension<Physical>>>>,
     tiling_overlay_update_count: Rc<Cell<u32>>,
     tiling_overlay_clear_count: Rc<Cell<u32>>,
     float_overlay_apply_theme_count: Rc<Cell<u32>>,
@@ -862,6 +873,7 @@ impl CreateOverlay for NoopOverlays {
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         Ok(Box::new(NoopFloatOverlay {
             overlay_update_count: self.overlay_update_count.clone(),
+            last_visible_frame: self.last_visible_frame.clone(),
             apply_theme_count: self.float_overlay_apply_theme_count.clone(),
             apply_font_count: self.float_overlay_apply_font_count.clone(),
         }))

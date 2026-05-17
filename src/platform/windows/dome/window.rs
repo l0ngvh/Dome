@@ -373,11 +373,35 @@ impl Dome {
                 // Inlined: can't call self.physical_border() here because the
                 // mutable borrow on self.registry (via entry/fp) conflicts with
                 // the shared &self the method needs. Same expression as physical_border().
-                let border = Length::<Physical>::new(
-                    self.config.border_size * self.monitors[&fp.monitor].scale,
-                );
+                let scale = self.monitors[&resolved].scale;
+                let border = Length::<Physical>::new(self.config.border_size * scale);
                 let outer_dim = reverse_inset(visible_rect, border);
                 self.hub.update_float_dimension(id, outer_dim);
+
+                // Reposition the float overlay to follow the drag. This lives in
+                // window_drifted (not show_float) because show_float's `settled`
+                // gate short-circuits after window_drifted writes both fp.target
+                // and hub dimension in sync. Moving through show_float's !settled
+                // branch would call entry.ext.set_position on the user-dragged
+                // HWND, violating the drag invariant.
+                let hwnd = entry.ext.id();
+                // visible_frame == outer_dim here intentionally skips clip(frame, screen).
+                // Windows constrains drag targets to on-screen and the OS clips HWND
+                // rendering at monitor edges, so the unclipped rect is fine for the
+                // overlay update.
+                let wp = FloatWindowPlacement {
+                    id,
+                    frame: outer_dim,
+                    visible_frame: outer_dim,
+                    is_highlighted: self.last_focused == Some(id),
+                };
+                // ZOrder::After(hwnd) because click-to-drag foregrounds the managed
+                // HWND, which can push it above the overlay. After(hwnd) re-establishes
+                // "overlay immediately above its window". Unchanged would leave the
+                // overlay covered.
+                if let Some(overlay) = self.float_overlays.get_mut(&id) {
+                    overlay.update(&wp, &self.config, ZOrder::After(hwnd), scale);
+                }
             }
             WindowState::Positioned(PositionedState::Offscreen { retries, actual }) => {
                 *actual = visible_rect;
