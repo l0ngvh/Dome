@@ -10,5 +10,4 @@
 
 # Development
 
-- [Architecture](development/architecture.md)
-- [Releasing](development/releasing.md)
+- [Architecture](architecture.md)

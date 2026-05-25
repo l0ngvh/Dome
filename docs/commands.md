@@ -68,7 +68,12 @@ These actions do not target windows.
 
 | Action | Effect |
 |--------|--------|
-| `exec <command>` | Run a shell command. The payload after `exec ` is passed verbatim to the system shell. On the CLI, quote the payload (`dome exec "open -a Terminal"`). |
+| `exec <command>` | Run a shell command. The payload after `exec ` is passed verbatim to the system shell. |
 | `mode <name>` | Switch to a named keybinding mode. `mode default` returns to the default keybindings. See [keybindings.md](keybindings.md#modes). |
 | `exit` | Stop Dome and restore all windows. |
 
+> **Note**
+> 
+> Do not run Dome with elevated privileges. `exec` runs arbitrary shell commands, so
+> anyone with access to the user's shell or Dome's IPC socket would inherit
+> those privileges.
