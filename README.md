@@ -52,7 +52,7 @@ Dome ships with these default keybindings. `cmd` maps to ⌘ on macOS and the Wi
 | <kbd>Meta</kbd> + <kbd>B</kbd> | Toggle split/tabbed layout |
 | <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>Q</kbd> | Exit Dome |
 
-See the [keybinding configuration](docs/keybindings.md#) for the complete list.
+See the [keybinding configuration](docs/configuration.md#keybindings) for the complete list.
 
 ### CLI
 

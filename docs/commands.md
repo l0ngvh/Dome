@@ -1,6 +1,6 @@
 # Commands
 
-An action is a single instruction that mutates Dome's window state, like `focus right` or `toggle float`. The action surface is identical on macOS and Windows, and the same syntax appears everywhere actions are used: the `[keymaps]` table in the config file (see [keybindings.md](keybindings.md)), the `on_open` field on a window rule (see [configuration.md](configuration.md#window-rules)), and the `dome` CLI (see [cli.md](cli.md)).
+An action is a single instruction that mutates Dome's window state, like `focus right` or `toggle float`. The action surface is identical on macOS and Windows, and the same syntax appears everywhere actions are used: the `[keymaps]` table in the config file (see [configuration.md](configuration.md#keybindings)), the `on_open` field on a window rule (see [configuration.md](configuration.md#window-rules)), and the `dome` CLI (see [cli.md](cli.md)).
 
 ## Focus
 
@@ -53,7 +53,7 @@ Fullscreen integrates with each platform's native fullscreen behavior: macOS Spa
 
 ## Master area
 
-The master-stack layout reserves a configurable area on one side for `master_count` windows. These actions adjust that area at runtime, and have effect only when the master-stack layout is active. They are transient: the next config hot-reload resets the master area to the values in `config.toml`, which is the source of truth (see [keybindings.md](keybindings.md#hot-reload-behavior) for reload semantics).
+The master-stack layout reserves a configurable area on one side for `master_count` windows. These actions adjust that area at runtime, and have effect only when the master-stack layout is active. They are transient: the next config hot-reload resets the master area to the values in `config.toml`, which is the source of truth (see [configuration.md](configuration.md) for the config reference).
 
 | Action | Effect |
 |--------|--------|
@@ -69,7 +69,7 @@ These actions do not target windows.
 | Action | Effect |
 |--------|--------|
 | `exec <command>` | Run a shell command. The payload after `exec ` is passed verbatim to the system shell. |
-| `mode <name>` | Switch to a named keybinding mode. `mode default` returns to the default keybindings. See [keybindings.md](keybindings.md#modes). |
+| `mode <name>` | Switch to a named keybinding mode. `mode default` returns to the default keybindings. See [configuration.md](configuration.md#modes). |
 | `exit` | Stop Dome and restore all windows. |
 
 > **Note**
