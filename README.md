@@ -1,27 +1,20 @@
 # Dome
 
-**Dome** is a tiling window manager for macOS and Windows.
+**Dome** is a constraint-aware scrollable tiling window manager that works on
+Windows and macOS.
 
-## Why
+## Background
 
-There are already plenty of window managers on each platform, but they all
-behave slightly differently, just enough to trip up your muscle memory. Dome aims
-to give a consistent experience across macOS and Windows.
+Before Dome, there were already plenty of excellent window managers for macOS
+and Windows. The problem is, I'd like to enjoy gaming with friends on Windows,
+while still having to ship code handed to me by my manager on macOS, and
+maintaining two sets of configuration and getting them to behave consistently
+takes a lot of work. So I just decided to put in even more work and build Dome.
 
-Dome is inspired by how window managers on Wayland work, and strives to bring
-the same level of control that Wayland compositors offer on Linux to macOS and
-Windows, using only public APIs wherever possible.
+## Install
 
-## Features
-
-- Pinned floating windows
-- Respects window size constraints, scrolls when needed
-- Tabbed containers, switch on click, can be nested
-- Multi-monitor support with directional keybindings
-
-## Quick start
-
-### Install
+Currently, to install Dome, you have to build from source, which requires a
+[Rust toolchain](https://rustup.rs/).
 
 ```bash
 git clone https://github.com/l0ngvh/Dome
@@ -30,15 +23,19 @@ cargo install --path .
 dome
 ```
 
-Requires a [Rust toolchain](https://rustup.rs/).
+We'll have proper one-click installers once the project reaches a stable point.
 
 On macOS, Dome needs Accessibility permissions to manage windows, and Screen
-Capture permissions to render float windows. macOS will prompt for both on
-first launch.
+Capture permissions to render float windows. macOS will prompt you for both on
+first launch. No extra permissions are required on Windows.
 
-### Key bindings
+## Usage
 
-Dome ships with these default keybindings. `cmd` maps to ⌘ on macOS and the Windows key ⊞ on Windows; `alt` maps to Option on macOS and Alt on Windows; `ctrl` maps to Control on both.
+By default, Dome uses a modified version of the i3 layout, where each window is
+a leaf of a layout tree rooted at the workspace. Each window has a cap on how
+small (or big) it can be, and thus the whole workspace can be scrolled when the
+windows can't all fit on the screen. Dome ships with the following default
+keybindings:
 
 | Key | Action |
 |-----|--------|
@@ -52,11 +49,7 @@ Dome ships with these default keybindings. `cmd` maps to ⌘ on macOS and the Wi
 | <kbd>Meta</kbd> + <kbd>B</kbd> | Toggle split/tabbed layout |
 | <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>Q</kbd> | Exit Dome |
 
-See the [keybinding configuration](docs/configuration.md#keybindings) for the complete list.
-
-### CLI
-
-Dome can also be controlled through CLI. A few commands to get started:
+Dome can also be controlled via the CLI:
 
 ```bash
 dome focus left|down|up|right    # Move focus
@@ -66,25 +59,39 @@ dome toggle layout               # Toggle split/tabbed
 dome toggle minimized            # Open minimized window picker
 dome focus workspace <name>      # Switch workspace
 dome exit                        # Quit Dome
-dome mode resize                 # Switch to resize keybinding mode
 ```
 
-See the [command reference](docs/commands.md) for the full list.
+See the [keybinding configuration](docs/configuration.md#keybindings) and
+[command reference](docs/commands.md) for the complete list.
+
+To check why Dome did what it did, look at `dome.log`. It's written fresh on each
+launch to `~/Library/Logs/dome/dome.log` on macOS, or
+`%APPDATA%\dome\logs\dome.log` on Windows.
+
+## Configuring Dome
+
+Dome is configured by editing a single TOML file. The default location is:
+
+- macOS: `~/.config/dome/config.toml` (or `$XDG_CONFIG_HOME/dome/config.toml`).
+- Windows: `%APPDATA%\dome\config.toml`.
+
+Changes take effect when you save.
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md): platform-specific setup details
-- [Configuration](docs/configuration.md): config file reference and window rules
-- [Keybindings](docs/keybindings.md): defaults, customization, and modes
+- [Configuration](docs/configuration.md): config file reference, window rules, and keybindings
 - [Commands](docs/commands.md): full command reference
 - [CLI](docs/cli.md): command-line interface usage
 
 ## Credits
 
-Dome draws inspiration from these awesome WMs:
+Dome draws a lot of inspiration from these awesome WMs and likely wouldn't
+exist without them:
 - [AeroSpace](https://github.com/nikitabobko/AeroSpace)
 - [GlazeWM](https://github.com/glzr-io/glazewm)
+- [komorebi](https://github.com/LGUG2Z/komorebi)
 - [Sway](https://github.com/swaywm/sway)
+- [niri](https://github.com/niri-wm/niri)
 
 ## License
 
