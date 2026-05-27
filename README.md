@@ -82,6 +82,7 @@ Changes take effect when you save.
 - [Configuration](docs/configuration.md): config file reference, window rules, and keybindings
 - [Commands](docs/commands.md): full command reference
 - [CLI](docs/cli.md): command-line interface usage
+- [FQG](docs/faq.md): command-line interface usage
 
 ## Credits
 
