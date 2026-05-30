@@ -185,6 +185,12 @@ impl TestEnv {
         if !ext.manageable {
             return;
         }
+        if ext.minimized.load(Ordering::Relaxed) {
+            // Mirrors production: `is_manageable` rejects already-minimized
+            // HWNDs at registration. They re-enter the create path when the
+            // user restores the window.
+            return;
+        }
         let dim = ext.get_dim();
         let observation = if dim.x <= Length::ZERO
             && dim.y <= Length::ZERO
@@ -563,7 +569,7 @@ struct MockExternalHwnd {
     dimension: Mutex<Dimension>,
     override_position: Mutex<Option<(i32, i32, i32, i32)>>,
     should_float: bool,
-    iconic: AtomicBool,
+    minimized: AtomicBool,
     min_size: (f32, f32),
     max_size: (f32, f32),
     z_state: Mutex<ZOrderState>,
@@ -595,7 +601,7 @@ impl MockExternalHwnd {
             )),
             override_position: Mutex::new(None),
             should_float: false,
-            iconic: AtomicBool::new(false),
+            minimized: AtomicBool::new(false),
             min_size: (0.0, 0.0),
             max_size: (0.0, 0.0),
             z_state: Mutex::new(ZOrderState::Normal),
@@ -656,12 +662,8 @@ impl ManageExternalHwnd for MockExternalHwnd {
         self.should_float
     }
 
-    fn is_iconic(&self) -> bool {
-        self.iconic.load(Ordering::Relaxed)
-    }
-
     fn set_position(&self, z: ZOrder, dim: Dimension) {
-        self.iconic.store(false, Ordering::Relaxed);
+        self.minimized.store(false, Ordering::Relaxed);
         let dim = self.override_position.lock().unwrap().map_or(dim, |pos| {
             Dimension::new(
                 Length::new(pos.0 as f32),
@@ -705,8 +707,8 @@ impl ManageExternalHwnd for MockExternalHwnd {
 
     fn show_cmd(&self, cmd: ShowCmd) {
         match cmd {
-            ShowCmd::Minimize => self.iconic.store(true, Ordering::Relaxed),
-            ShowCmd::Restore => self.iconic.store(false, Ordering::Relaxed),
+            ShowCmd::Minimize => self.minimized.store(true, Ordering::Relaxed),
+            ShowCmd::Restore => self.minimized.store(false, Ordering::Relaxed),
         }
     }
 

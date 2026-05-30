@@ -228,7 +228,7 @@ fn fullscreen_borderless_minimizes_on_workspace_switch() {
 
     env.run_actions("focus workspace 1");
 
-    assert!(w1.iconic.load(Ordering::Relaxed));
+    assert!(w1.minimized.load(Ordering::Relaxed));
 }
 
 #[test]
@@ -252,35 +252,6 @@ fn fullscreen_exclusive_not_repositioned() {
 }
 
 #[test]
-fn iconic_window_restored_before_positioning() {
-    let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "App1",
-        "app1.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w1.clone());
-
-    // Simulate the window becoming iconic externally
-    w1.iconic.store(true, Ordering::Relaxed);
-
-    // Trigger relayout — show_tiling should restore before positioning
-    let w2 = Arc::new(MockExternalHwnd::with_title(
-        2,
-        "App2",
-        "app2.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w2.clone());
-
-    assert!(!w1.iconic.load(Ordering::Relaxed));
-    assert!(!w1.is_offscreen());
-}
-
-#[test]
 fn borderless_fullscreen_restored_on_workspace_switch_back() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(
@@ -294,14 +265,14 @@ fn borderless_fullscreen_restored_on_workspace_switch_back() {
         .with_dimension(fullscreen_dim()),
     );
     env.add_window(w1.clone());
-    assert!(!w1.iconic.load(Ordering::Relaxed));
+    assert!(!w1.minimized.load(Ordering::Relaxed));
     assert_eq!(w1.get_dim(), fullscreen_dim());
 
     env.run_actions("focus workspace 1");
-    assert!(w1.iconic.load(Ordering::Relaxed));
+    assert!(w1.minimized.load(Ordering::Relaxed));
 
     env.run_actions("focus workspace 0");
-    assert!(!w1.iconic.load(Ordering::Relaxed));
+    assert!(!w1.minimized.load(Ordering::Relaxed));
     assert_eq!(w1.get_dim(), fullscreen_dim());
 }
 
@@ -321,10 +292,10 @@ fn dome_minimized_window_survives_minimize_event() {
     env.add_window(w1.clone());
 
     env.run_actions("focus workspace 1");
-    assert!(w1.iconic.load(Ordering::Relaxed));
+    assert!(w1.minimized.load(Ordering::Relaxed));
 
     env.minimize_window(&w1);
-    assert!(w1.iconic.load(Ordering::Relaxed));
+    assert!(w1.minimized.load(Ordering::Relaxed));
 }
 
 #[test]
@@ -340,11 +311,11 @@ fn exclusive_fullscreen_survives_minimize_event() {
     env.add_window(w1.clone());
 
     env.enter_exclusive_fullscreen(HwndId::test(1));
-    assert!(!w1.iconic.load(Ordering::Relaxed));
+    assert!(!w1.minimized.load(Ordering::Relaxed));
     assert!(!w1.is_offscreen());
 
     env.minimize_window(&w1);
-    assert!(!w1.iconic.load(Ordering::Relaxed));
+    assert!(!w1.minimized.load(Ordering::Relaxed));
     assert!(!w1.is_offscreen());
 }
 
@@ -571,7 +542,7 @@ fn borderless_fullscreen_blocks_toggle_float_but_allows_workspace_move() {
 
     // ProtectFullscreen allows workspace move — window should be minimized
     env.run_actions("move workspace 1");
-    assert!(w1.iconic.load(Ordering::Relaxed));
+    assert!(w1.minimized.load(Ordering::Relaxed));
 }
 
 #[test]

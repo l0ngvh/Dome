@@ -71,7 +71,6 @@ pub(crate) enum ShowCmd {
 pub(crate) trait ManageExternalHwnd: Send + Sync {
     fn id(&self) -> HwndId;
     fn should_float(&self) -> bool;
-    fn is_iconic(&self) -> bool;
     fn set_position(&self, z: ZOrder, dim: Dimension<Physical>);
     fn move_offscreen(&self);
     fn show_cmd(&self, cmd: ShowCmd);

@@ -235,6 +235,15 @@ pub(crate) fn is_manageable(hwnd: HWND) -> bool {
         tracing::trace!(?hwnd, reason = "not visible", "not manageable");
         return false;
     }
+    if unsafe { IsIconic(hwnd) }.as_bool() {
+        // Already-minimized windows are skipped at registration time. Their
+        // visible rect is the iconic-cache value (-32000,-32000), the monitor
+        // is unreliable, and we have no way to know the user's intended
+        // tiling-vs-float state. Picked back up by the standard create path
+        // when the user restores the window via WM_RESTORE / unminimize.
+        tracing::trace!(?hwnd, reason = "iconic", "not manageable");
+        return false;
+    }
     if is_cloaked(hwnd) {
         tracing::trace!(?hwnd, reason = "cloaked", "not manageable");
         return false;
@@ -571,10 +580,6 @@ impl ManageExternalHwnd for ExternalHwnd {
 
     fn should_float(&self) -> bool {
         should_float(self.0)
-    }
-
-    fn is_iconic(&self) -> bool {
-        unsafe { IsIconic(self.0) }.as_bool()
     }
 
     fn set_position(&self, z: ZOrder, dim: Dimension) {

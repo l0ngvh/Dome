@@ -121,19 +121,14 @@ impl Dome {
                 entry.ext.show_cmd(ShowCmd::Restore);
                 (true, false)
             }
-            WindowState::Positioned(ps) => {
-                if entry.ext.is_iconic() {
-                    entry.ext.show_cmd(ShowCmd::Restore);
+            WindowState::Positioned(ps) => match ps {
+                PositionedState::Float(fp) => {
+                    let needs_topmost = focus_changed && is_focused;
+                    let settled = fp.target == new_target && !needs_topmost;
+                    (needs_topmost, settled)
                 }
-                match ps {
-                    PositionedState::Float(fp) => {
-                        let needs_topmost = focus_changed && is_focused;
-                        let settled = fp.target == new_target && !needs_topmost;
-                        (needs_topmost, settled)
-                    }
-                    PositionedState::Tiling(_) | PositionedState::Offscreen { .. } => (true, false),
-                }
-            }
+                PositionedState::Tiling(_) | PositionedState::Offscreen { .. } => (true, false),
+            },
         };
 
         if let Some(overlay) = self.float_overlays.get_mut(&id) {
@@ -198,10 +193,7 @@ impl Dome {
             WindowState::Positioned(PositionedState::Tiling(d)) => {
                 if d.monitor != monitor {
                     // Cross-monitor: window is re-entering a different overlay's
-                    // monitor. Restore first if it was iconified externally.
-                    if entry.ext.is_iconic() {
-                        entry.ext.show_cmd(ShowCmd::Restore);
-                    }
+                    // monitor.
                     match above {
                         Some(prev) => {
                             entry.ext.set_position(ZOrder::After(prev), new_target);
@@ -237,9 +229,6 @@ impl Dome {
                 }
             }
             WindowState::Positioned(PositionedState::Float(fp)) => {
-                if entry.ext.is_iconic() {
-                    entry.ext.show_cmd(ShowCmd::Restore);
-                }
                 // Two-step exit from the topmost band. Placing self below a
                 // non-topmost reference does not, by itself, clear WS_EX_TOPMOST;
                 // only HWND_NOTOPMOST and HWND_BOTTOM are documented to drop the
@@ -260,23 +249,18 @@ impl Dome {
                     }
                 }
             }
-            WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => {
-                if entry.ext.is_iconic() {
-                    entry.ext.show_cmd(ShowCmd::Restore);
+            WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => match above {
+                Some(prev) => {
+                    entry.ext.set_position(ZOrder::After(prev), new_target);
+                    entry.state = tiling_state(actual);
                 }
-                match above {
-                    Some(prev) => {
-                        entry.ext.set_position(ZOrder::After(prev), new_target);
-                        entry.state = tiling_state(actual);
-                    }
-                    None => {
-                        entry.ext.set_position(ZOrder::Unchanged, new_target);
-                        let id = entry.ext.id();
-                        entry.state = tiling_state(actual);
-                        overlay.demote_below(id);
-                    }
+                None => {
+                    entry.ext.set_position(ZOrder::Unchanged, new_target);
+                    let id = entry.ext.id();
+                    entry.state = tiling_state(actual);
+                    overlay.demote_below(id);
                 }
-            }
+            },
         }
     }
 
