@@ -182,7 +182,7 @@ impl PickerWindow {
 
     fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension, scale: f32) {
         let (x, y, w_phys, h_phys) = picker_physical_rect(scale, monitor_dim);
-        unsafe {
+        if let Err(e) = unsafe {
             SetWindowPos(
                 self.window.hwnd(),
                 None,
@@ -192,7 +192,8 @@ impl PickerWindow {
                 h_phys as i32,
                 SWP_NOACTIVATE | SWP_NOZORDER,
             )
-            .ok();
+        } {
+            tracing::trace!("picker SetWindowPos failed: {e}");
         }
         // Clear cached icon textures when the monitor scale changes so icons
         // are re-captured at the new physical density.

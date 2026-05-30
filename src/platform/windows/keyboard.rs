@@ -130,7 +130,10 @@ fn get_actions(vk: VIRTUAL_KEY) -> Option<Actions> {
 
     let state = STATE.get()?;
     let mut ks = state.keymap_state.write().ok()?;
-    ks.resolve(&keymap)
+    let actions = ks.resolve(&keymap)?;
+    drop(ks);
+    tracing::trace!(?keymap, %actions, "Keymap matched");
+    Some(actions)
 }
 
 fn is_key_pressed(vk: VIRTUAL_KEY) -> bool {

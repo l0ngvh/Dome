@@ -687,7 +687,7 @@ impl Dome {
         }
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "trace", skip_all)]
     pub(super) fn apply_layout(&mut self) {
         let created = std::mem::take(&mut self.pending_created);
 
@@ -838,7 +838,7 @@ impl Dome {
         self.last_focused_monitor = Some(current_monitor);
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "trace", skip_all)]
     fn position_windows(&mut self, per_monitor: &[MonitorPositionData], focused: Option<WindowId>) {
         let focus_changed = focused != self.last_focused;
 
@@ -917,6 +917,7 @@ impl Dome {
             self.registry.set_title(*hwnd_id, title.clone());
             if let (Some(window_id), Some(title)) = (self.registry.get_id(*hwnd_id), title) {
                 self.hub.set_window_title(window_id, title.clone());
+                tracing::trace!(%window_id, ?hwnd_id, title = %title, "Title changed");
             }
         }
         // TODO: full re-layout on every title change is expensive — we should

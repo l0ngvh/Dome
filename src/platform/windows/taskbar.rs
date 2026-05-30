@@ -23,10 +23,14 @@ impl Taskbar {
 
 impl ManageTaskbar for Taskbar {
     fn add_tab(&self, hwnd: HwndId) {
-        unsafe { self.0.AddTab(HWND::from(hwnd)) }.ok();
+        if let Err(e) = unsafe { self.0.AddTab(HWND::from(hwnd)) } {
+            tracing::trace!(?hwnd, "ITaskbarList::AddTab failed: {e}");
+        }
     }
 
     fn delete_tab(&self, hwnd: HwndId) {
-        unsafe { self.0.DeleteTab(HWND::from(hwnd)) }.ok();
+        if let Err(e) = unsafe { self.0.DeleteTab(HWND::from(hwnd)) } {
+            tracing::trace!(?hwnd, "ITaskbarList::DeleteTab failed: {e}");
+        }
     }
 }

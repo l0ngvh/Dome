@@ -128,7 +128,9 @@ unsafe extern "system" fn event_hook_proc(
             EVENT_OBJECT_LOCATIONCHANGE => {
                 sender.send(HubEvent::LocationChanged(hwnd_id));
             }
-            _ => {}
+            _ => {
+                tracing::trace!(event, "unexpected WinEvent");
+            }
         }
     });
 }

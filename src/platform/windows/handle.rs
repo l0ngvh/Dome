@@ -76,7 +76,11 @@ pub(crate) const OFFSCREEN_POS: Length<Physical> = Length::new(-32000.0);
 /// in the same way -- see `target_scale_to_physical`.
 pub(crate) fn get_dimension(hwnd: HWND) -> Dimension {
     let mut rect = RECT::default();
-    unsafe { GetWindowRect(hwnd, &mut rect).ok() };
+    if let Err(e) = unsafe { GetWindowRect(hwnd, &mut rect) } {
+        tracing::trace!(?hwnd, "GetWindowRect failed: {e}");
+        // Callers tolerate a zero Dimension (e.g. is_manageable rejects zero-dim windows).
+        return rect_to_dimension(rect);
+    }
     rect_to_dimension(rect)
 }
 
@@ -129,7 +133,7 @@ pub(crate) fn monitor_info_work_area(hmonitor: HMONITOR) -> Option<Dimension> {
 /// offscreen windows cannot occlude visible windows and the reposition does not
 /// steal foreground activation.
 pub(crate) fn move_window_offscreen(hwnd: HWND) {
-    unsafe {
+    if let Err(e) = unsafe {
         SetWindowPos(
             hwnd,
             Some(HWND_BOTTOM),
@@ -139,8 +143,9 @@ pub(crate) fn move_window_offscreen(hwnd: HWND) {
             0,
             SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
         )
-        .ok()
-    };
+    } {
+        tracing::trace!(?hwnd, "move_window_offscreen SetWindowPos failed: {e}");
+    }
 }
 
 /// Positions `hwnd` with border compensation and child-window offset propagation.
@@ -164,7 +169,9 @@ pub(crate) fn set_window_pos(hwnd: HWND, z: ZOrder, dim: Dimension, flags: SET_W
         flags |= SWP_NOZORDER;
     }
 
-    unsafe { SetWindowPos(hwnd, insert_after, x, y, cx, cy, flags).ok() };
+    if let Err(e) = unsafe { SetWindowPos(hwnd, insert_after, x, y, cx, cy, flags) } {
+        tracing::trace!(?hwnd, rect = ?(x, y, cx, cy), "SetWindowPos failed: {e}");
+    }
 
     // Propagate the position delta to owned child windows so they stay anchored
     // relative to the parent. Short-circuits on windows with no owned children.
@@ -173,8 +180,8 @@ pub(crate) fn set_window_pos(hwnd: HWND, z: ZOrder, dim: Dimension, flags: SET_W
     if dx != 0 || dy != 0 {
         for_each_owned(hwnd, |child| {
             let mut rect = RECT::default();
-            if unsafe { GetWindowRect(child, &mut rect).is_ok() } {
-                unsafe {
+            if unsafe { GetWindowRect(child, &mut rect).is_ok() }
+                && let Err(e) = unsafe {
                     SetWindowPos(
                         child,
                         None,
@@ -184,8 +191,9 @@ pub(crate) fn set_window_pos(hwnd: HWND, z: ZOrder, dim: Dimension, flags: SET_W
                         0,
                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS,
                     )
-                    .ok()
-                };
+                }
+            {
+                tracing::trace!(?child, dx, dy, "SetWindowPos (child propagate) failed: {e}");
             }
         });
     }
@@ -224,27 +232,34 @@ const MSG_TIMEOUT_MS: u32 = 100;
 
 pub(crate) fn is_manageable(hwnd: HWND) -> bool {
     if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+        tracing::trace!(?hwnd, reason = "not visible", "not manageable");
         return false;
     }
     if is_cloaked(hwnd) {
+        tracing::trace!(?hwnd, reason = "cloaked", "not manageable");
         return false;
     }
     if unsafe { GetAncestor(hwnd, GA_ROOT) } != hwnd {
+        tracing::trace!(?hwnd, reason = "GetAncestor != hwnd", "not manageable");
         return false;
     }
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
     let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
     if style & WS_CHILD.0 != 0 {
+        tracing::trace!(?hwnd, reason = "WS_CHILD", "not manageable");
         return false;
     }
     if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+        tracing::trace!(?hwnd, reason = "WS_EX_TOOLWINDOW", "not manageable");
         return false;
     }
     if ex_style & WS_EX_NOACTIVATE.0 != 0 {
+        tracing::trace!(?hwnd, reason = "WS_EX_NOACTIVATE", "not manageable");
         return false;
     }
     let dim = get_dimension(hwnd);
     if dim.width == Length::ZERO || dim.height == Length::ZERO {
+        tracing::trace!(?hwnd, reason = "zero dimension", "not manageable");
         return false;
     }
     true
@@ -614,21 +629,28 @@ impl ManageExternalHwnd for ExternalHwnd {
     }
 
     fn recover(&self, was_maximized: bool) {
+        let hwnd = self.0;
         unsafe {
             if was_maximized {
-                let _ = ShowWindow(self.0, SW_RESTORE);
+                let _ = ShowWindow(hwnd, SW_RESTORE);
             }
-            let _ = SetWindowPos(
-                self.0,
+            if let Err(e) = SetWindowPos(
+                hwnd,
                 None,
                 100,
                 100,
                 0,
                 0,
                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
-            );
+            ) {
+                tracing::trace!(
+                    ?hwnd,
+                    op = "recover_set_position",
+                    "SetWindowPos failed: {e}"
+                );
+            }
             if was_maximized {
-                let _ = ShowWindow(self.0, SW_MAXIMIZE);
+                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
             }
         }
     }
