@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn keymap_state_resolve_default_mode() {
-        let cmd_h = km("h", Modifiers::CMD);
+        let cmd_h = km("h", Modifiers::META);
         let keymaps = make_keymaps(vec![(cmd_h.clone(), focus_left_actions())], vec![]);
         let mut state = KeymapState::new(keymaps);
         let result = state.resolve(&cmd_h);
@@ -161,8 +161,8 @@ mod tests {
 
     #[test]
     fn keymap_state_resolve_no_binding() {
-        let cmd_h = km("h", Modifiers::CMD);
-        let cmd_j = km("j", Modifiers::CMD);
+        let cmd_h = km("h", Modifiers::META);
+        let cmd_j = km("j", Modifiers::META);
         let keymaps = make_keymaps(vec![(cmd_h, focus_left_actions())], vec![]);
         let mut state = KeymapState::new(keymaps);
         assert!(state.resolve(&cmd_j).is_none());
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn keymap_state_resolve_custom_mode() {
-        let cmd_h = km("h", Modifiers::CMD);
+        let cmd_h = km("h", Modifiers::META);
         let h = km("h", Modifiers::empty());
         let keymaps = make_keymaps(
             vec![(cmd_h.clone(), focus_left_actions())],
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn keymap_state_resolve_filters_mode_actions() {
-        let cmd_r = km("r", Modifiers::CMD);
+        let cmd_r = km("r", Modifiers::META);
         let keymaps = make_keymaps(
             vec![(cmd_r.clone(), Actions::new(vec![mode_action("resize")]))],
             vec![("resize", vec![])],
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn keymap_state_resolve_mixed_actions() {
-        let cmd_r = km("r", Modifiers::CMD);
+        let cmd_r = km("r", Modifiers::META);
         let keymaps = make_keymaps(
             vec![(
                 cmd_r.clone(),
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn keymap_state_switch_to_default_while_default_is_noop() {
-        let cmd_h = km("h", Modifiers::CMD);
+        let cmd_h = km("h", Modifiers::META);
         let keymaps = make_keymaps(vec![(cmd_h.clone(), focus_left_actions())], vec![]);
         let mut state = KeymapState::new(keymaps);
         state.switch_mode("default");
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn keymap_state_resolve_falls_back_to_default_when_active_mode_missing() {
-        let cmd_h = km("h", Modifiers::CMD);
+        let cmd_h = km("h", Modifiers::META);
         let keymaps = make_keymaps(
             vec![(cmd_h.clone(), focus_left_actions())],
             vec![("resize", vec![])],
@@ -294,8 +294,8 @@ mod tests {
 
     #[test]
     fn keymap_state_resolve_falls_back_when_key_unbound_in_default() {
-        let cmd_h = km("h", Modifiers::CMD);
-        let cmd_j = km("j", Modifiers::CMD);
+        let cmd_h = km("h", Modifiers::META);
+        let cmd_j = km("j", Modifiers::META);
         let keymaps = make_keymaps(
             vec![(cmd_h, focus_left_actions())],
             vec![("resize", vec![])],

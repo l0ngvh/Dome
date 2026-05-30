@@ -71,7 +71,7 @@ fn on_open_moves_window_to_other_workspace() {
                     dome.apply_master(t);
                     dome.flush_layout();
                 }
-                Action::TogglePicker => dome.toggle_picker(),
+                Action::ToggleMinimized => dome.toggle_picker(),
                 _ => {}
             }
         }
@@ -396,7 +396,7 @@ fn multi_action_sequence_applies_each_hub_action() {
                 dome.apply_master(t);
                 dome.flush_layout();
             }
-            Action::TogglePicker => dome.toggle_picker(),
+            Action::ToggleMinimized => dome.toggle_picker(),
             _ => {}
         }
     }

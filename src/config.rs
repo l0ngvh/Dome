@@ -15,7 +15,7 @@ use crate::theme::{Flavor, Theme};
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub(crate) struct Modifiers: u8 {
-        const CMD = 1 << 0;
+        const META = 1 << 0;
         const SHIFT = 1 << 1;
         const ALT = 1 << 2;
         const CTRL = 1 << 3;
@@ -40,7 +40,10 @@ impl FromStr for Keymap {
         let mut modifiers = Modifiers::empty();
         for m in &parts[..parts.len() - 1] {
             modifiers |= match *m {
-                "cmd" => Modifiers::CMD,
+                // `cmd` and `win` are platform-flavored aliases for `meta` so users
+                // can write keymaps in the vocabulary of their OS without us
+                // shipping a platform-conditional config schema.
+                "meta" | "cmd" | "win" => Modifiers::META,
                 "shift" => Modifiers::SHIFT,
                 "alt" => Modifiers::ALT,
                 "ctrl" => Modifiers::CTRL,
@@ -63,7 +66,7 @@ fn default_keymaps() -> ModalKeymaps {
         keymaps.insert(
             Keymap {
                 key: i.to_string(),
-                modifiers: Modifiers::CMD,
+                modifiers: Modifiers::META,
             },
             Actions::new(vec![Action::Focus(FocusTarget::Workspace {
                 name: i.to_string(),
@@ -72,7 +75,7 @@ fn default_keymaps() -> ModalKeymaps {
         keymaps.insert(
             Keymap {
                 key: i.to_string(),
-                modifiers: Modifiers::CMD | Modifiers::SHIFT,
+                modifiers: Modifiers::META | Modifiers::SHIFT,
             },
             Actions::new(vec![Action::Move(MoveTarget::Workspace {
                 name: i.to_string(),
@@ -82,63 +85,63 @@ fn default_keymaps() -> ModalKeymaps {
     keymaps.insert(
         Keymap {
             key: "e".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Toggle(ToggleTarget::Spawn)]),
     );
     keymaps.insert(
         Keymap {
             key: "d".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Toggle(ToggleTarget::Direction)]),
     );
     keymaps.insert(
         Keymap {
             key: "b".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Toggle(ToggleTarget::Layout)]),
     );
     keymaps.insert(
         Keymap {
             key: "p".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Focus(FocusTarget::Parent)]),
     );
     keymaps.insert(
         Keymap {
             key: "h".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Focus(FocusTarget::Left)]),
     );
     keymaps.insert(
         Keymap {
             key: "j".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Focus(FocusTarget::Down)]),
     );
     keymaps.insert(
         Keymap {
             key: "k".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Focus(FocusTarget::Up)]),
     );
     keymaps.insert(
         Keymap {
             key: "l".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Focus(FocusTarget::Right)]),
     );
     keymaps.insert(
         Keymap {
             key: "[".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Focus(FocusTarget::Tab {
             direction: TabDirection::Prev,
@@ -147,7 +150,7 @@ fn default_keymaps() -> ModalKeymaps {
     keymaps.insert(
         Keymap {
             key: "]".into(),
-            modifiers: Modifiers::CMD,
+            modifiers: Modifiers::META,
         },
         Actions::new(vec![Action::Focus(FocusTarget::Tab {
             direction: TabDirection::Next,
@@ -156,46 +159,46 @@ fn default_keymaps() -> ModalKeymaps {
     keymaps.insert(
         Keymap {
             key: "h".into(),
-            modifiers: Modifiers::CMD | Modifiers::SHIFT,
+            modifiers: Modifiers::META | Modifiers::SHIFT,
         },
         Actions::new(vec![Action::Move(MoveTarget::Left)]),
     );
     keymaps.insert(
         Keymap {
             key: "j".into(),
-            modifiers: Modifiers::CMD | Modifiers::SHIFT,
+            modifiers: Modifiers::META | Modifiers::SHIFT,
         },
         Actions::new(vec![Action::Move(MoveTarget::Down)]),
     );
     keymaps.insert(
         Keymap {
             key: "k".into(),
-            modifiers: Modifiers::CMD | Modifiers::SHIFT,
+            modifiers: Modifiers::META | Modifiers::SHIFT,
         },
         Actions::new(vec![Action::Move(MoveTarget::Up)]),
     );
     keymaps.insert(
         Keymap {
             key: "l".into(),
-            modifiers: Modifiers::CMD | Modifiers::SHIFT,
+            modifiers: Modifiers::META | Modifiers::SHIFT,
         },
         Actions::new(vec![Action::Move(MoveTarget::Right)]),
     );
     keymaps.insert(
         Keymap {
             key: "f".into(),
-            modifiers: Modifiers::CMD | Modifiers::SHIFT,
+            modifiers: Modifiers::META | Modifiers::SHIFT,
         },
         Actions::new(vec![Action::Toggle(ToggleTarget::Float)]),
     );
     keymaps.insert(
         Keymap {
             key: "q".into(),
-            modifiers: Modifiers::CMD | Modifiers::SHIFT,
+            modifiers: Modifiers::META | Modifiers::SHIFT,
         },
         Actions::new(vec![Action::Exit]),
     );
-    // Monitor focus: Cmd+Alt+hjkl
+    // Monitor focus: Meta+Alt+hjkl
     for (key, target) in [
         ("h", MonitorTarget::Left),
         ("j", MonitorTarget::Down),
@@ -205,7 +208,7 @@ fn default_keymaps() -> ModalKeymaps {
         keymaps.insert(
             Keymap {
                 key: key.into(),
-                modifiers: Modifiers::CMD | Modifiers::ALT,
+                modifiers: Modifiers::META | Modifiers::ALT,
             },
             Actions::new(vec![Action::Focus(FocusTarget::Monitor {
                 target: target.clone(),
@@ -214,7 +217,7 @@ fn default_keymaps() -> ModalKeymaps {
         keymaps.insert(
             Keymap {
                 key: key.into(),
-                modifiers: Modifiers::CMD | Modifiers::ALT | Modifiers::SHIFT,
+                modifiers: Modifiers::META | Modifiers::ALT | Modifiers::SHIFT,
             },
             Actions::new(vec![Action::Move(MoveTarget::Monitor { target })]),
         );
@@ -384,9 +387,9 @@ impl<'de> Deserialize<'de> for SizeConstraint {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum LayoutKind {
+pub(crate) enum Strategy {
     PartitionTree,
-    MasterStack,
+    Master,
 }
 
 /// Per-strategy config for the partition-tree strategy.
@@ -401,19 +404,19 @@ pub(crate) enum LayoutKind {
 pub(crate) struct PartitionTreeConfig {
     #[serde(default = "default_tab_bar_height")]
     pub(crate) tab_bar_height: Length<Logical>,
-    #[serde(default = "default_auto_tile")]
-    pub(crate) auto_tile: bool,
+    #[serde(default = "default_automatic_tiling")]
+    pub(crate) automatic_tiling: bool,
 }
 
 /// Per-strategy config for the master-stack strategy.
 ///
-/// All fields flow into the running `MasterStackStrategy` via `apply_config`
+/// All fields flow into the running `MasterStrategy` via `apply_config`
 /// on hot-reload, overwriting any runtime-tuned values (e.g. from
 /// `master grow/shrink/more/fewer` commands). The TOML file is the source of
 /// truth; runtime commands are a transient override until the next reload.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct MasterStackConfig {
+pub(crate) struct MasterConfig {
     #[serde(default = "default_master_ratio")]
     pub(crate) master_ratio: f32,
     #[serde(default = "default_master_count")]
@@ -423,33 +426,33 @@ pub(crate) struct MasterStackConfig {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LayoutConfig {
-    #[serde(default = "default_active_layout")]
-    pub(crate) active: LayoutKind,
+    #[serde(default = "default_strategy")]
+    pub(crate) strategy: Strategy,
     #[serde(default = "default_partition_tree_config")]
     pub(crate) partition_tree: PartitionTreeConfig,
-    #[serde(default = "default_master_stack_config")]
-    pub(crate) master_stack: MasterStackConfig,
+    #[serde(default = "default_master_config")]
+    pub(crate) master: MasterConfig,
 }
 
-impl MasterStackConfig {
+impl MasterConfig {
     pub(crate) fn validate(&self) -> Result<()> {
         if self.master_ratio < 0.1 || self.master_ratio > 0.9 {
             anyhow::bail!(
-                "layout.master_stack.master_ratio ({}) must be between 0.1 and 0.9",
+                "layout.master.master_ratio ({}) must be between 0.1 and 0.9",
                 self.master_ratio
             );
         }
         if self.master_count < 1 {
-            anyhow::bail!("layout.master_stack.master_count must be >= 1");
+            anyhow::bail!("layout.master.master_count must be >= 1");
         }
         Ok(())
     }
 }
 
-fn default_active_layout() -> LayoutKind {
-    LayoutKind::PartitionTree
+fn default_strategy() -> Strategy {
+    Strategy::PartitionTree
 }
-fn default_auto_tile() -> bool {
+fn default_automatic_tiling() -> bool {
     true
 }
 fn default_master_ratio() -> f32 {
@@ -461,20 +464,20 @@ fn default_master_count() -> usize {
 fn default_partition_tree_config() -> PartitionTreeConfig {
     PartitionTreeConfig {
         tab_bar_height: default_tab_bar_height(),
-        auto_tile: default_auto_tile(),
+        automatic_tiling: default_automatic_tiling(),
     }
 }
-fn default_master_stack_config() -> MasterStackConfig {
-    MasterStackConfig {
+fn default_master_config() -> MasterConfig {
+    MasterConfig {
         master_ratio: default_master_ratio(),
         master_count: default_master_count(),
     }
 }
 fn default_layout() -> LayoutConfig {
     LayoutConfig {
-        active: default_active_layout(),
+        strategy: default_strategy(),
         partition_tree: default_partition_tree_config(),
-        master_stack: default_master_stack_config(),
+        master: default_master_config(),
     }
 }
 
@@ -806,9 +809,9 @@ impl Config {
             anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
         }
         self.font.validate()?;
-        // Validate master_stack regardless of layout.active so toggling
+        // Validate master regardless of layout.strategy so toggling
         // never hides errors in the inactive sub-table.
-        self.layout.master_stack.validate()?;
+        self.layout.master.validate()?;
         // "default" is the reserved name for the top-level [keymaps] table.
         if self.keymaps.modes.contains_key("default") {
             anyhow::bail!("mode name 'default' is reserved for the top-level [keymaps] table");
@@ -1083,13 +1086,31 @@ mod tests {
         let config: Config = toml::from_str(
             r#"
             [keymaps]
-            "cmd+h" = ["focus left"]
+            "meta+h" = ["focus left"]
             "#,
         )
         .unwrap();
         assert!(config.keymaps.modes.is_empty());
-        let keymap = "cmd+h".parse::<Keymap>().unwrap();
+        let keymap = "meta+h".parse::<Keymap>().unwrap();
         assert!(config.keymaps.default.contains_key(&keymap));
+    }
+
+    #[test]
+    fn keymap_parses_meta_modifier() {
+        let key: Keymap = "meta+t".parse().unwrap();
+        assert_eq!(key.modifiers, Modifiers::META);
+    }
+
+    #[test]
+    fn keymap_accepts_cmd_and_win_aliases() {
+        // `cmd` (macOS) and `win` (Windows) are aliases for `meta` so users can
+        // write keymaps in the vocabulary of their OS.
+        let cmd: Keymap = "cmd+t".parse().unwrap();
+        assert_eq!(cmd.modifiers, Modifiers::META);
+        let win: Keymap = "win+t".parse().unwrap();
+        assert_eq!(win.modifiers, Modifiers::META);
+        let mixed: Keymap = "cmd+shift+t".parse().unwrap();
+        assert_eq!(mixed.modifiers, Modifiers::META | Modifiers::SHIFT);
     }
 
     #[test]
@@ -1097,7 +1118,7 @@ mod tests {
         let config: Config = toml::from_str(
             r#"
             [keymaps]
-            "cmd+h" = ["focus left"]
+            "meta+h" = ["focus left"]
 
             [keymaps.mode.resize]
             "h" = ["focus left"]
@@ -1105,8 +1126,8 @@ mod tests {
             "#,
         )
         .unwrap();
-        let cmd_h = "cmd+h".parse::<Keymap>().unwrap();
-        assert!(config.keymaps.default.contains_key(&cmd_h));
+        let meta_h = "meta+h".parse::<Keymap>().unwrap();
+        assert!(config.keymaps.default.contains_key(&meta_h));
         let resize = config
             .keymaps
             .modes
@@ -1123,7 +1144,7 @@ mod tests {
         let config: Config = toml::from_str(
             r#"
             [keymaps]
-            "cmd+h" = ["focus left"]
+            "meta+h" = ["focus left"]
 
             [keymaps.mode.default]
             "h" = ["focus left"]
@@ -1142,7 +1163,7 @@ mod tests {
         let result = toml::from_str::<Config>(
             r#"
             [keymaps]
-            "cmd+h" = ["focus left"]
+            "meta+h" = ["focus left"]
 
             [keymaps.mode.""]
             "h" = ["focus left"]
@@ -1198,11 +1219,12 @@ mod tests {
 
     #[test]
     fn partition_tree_config_parses_fields() {
-        let config: Config =
-            toml::from_str("[layout.partition_tree]\ntab_bar_height = 30.0\nauto_tile = false")
-                .unwrap();
+        let config: Config = toml::from_str(
+            "[layout.partition_tree]\ntab_bar_height = 30.0\nautomatic_tiling = false",
+        )
+        .unwrap();
         assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 30.0);
-        assert!(!config.layout.partition_tree.auto_tile);
+        assert!(!config.layout.partition_tree.automatic_tiling);
         assert!(config.validate().is_ok());
     }
 
@@ -1210,69 +1232,69 @@ mod tests {
     fn partition_tree_config_defaults() {
         let config: Config = toml::from_str("").unwrap();
         assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 24.0);
-        assert!(config.layout.partition_tree.auto_tile);
+        assert!(config.layout.partition_tree.automatic_tiling);
     }
 
     #[test]
     fn layout_defaults_to_partition_tree() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.layout.active, LayoutKind::PartitionTree);
-        assert_eq!(config.layout.master_stack.master_ratio, 0.5);
-        assert_eq!(config.layout.master_stack.master_count, 1);
+        assert_eq!(config.layout.strategy, Strategy::PartitionTree);
+        assert_eq!(config.layout.master.master_ratio, 0.5);
+        assert_eq!(config.layout.master.master_count, 1);
     }
 
     #[test]
-    fn layout_parses_master_stack_active() {
-        let config: Config = toml::from_str("[layout]\nactive = \"master_stack\"\n").unwrap();
-        assert_eq!(config.layout.active, LayoutKind::MasterStack);
+    fn layout_parses_master_strategy() {
+        let config: Config = toml::from_str("[layout]\nstrategy = \"master\"\n").unwrap();
+        assert_eq!(config.layout.strategy, Strategy::Master);
         // Sub-tables still get their defaults
         assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 24.0);
-        assert_eq!(config.layout.master_stack.master_ratio, 0.5);
+        assert_eq!(config.layout.master.master_ratio, 0.5);
     }
 
     #[test]
-    fn layout_parses_master_stack_params() {
+    fn layout_parses_master_params() {
         let config: Config =
-            toml::from_str("[layout.master_stack]\nmaster_ratio = 0.3\nmaster_count = 2").unwrap();
-        assert_eq!(config.layout.master_stack.master_ratio, 0.3);
-        assert_eq!(config.layout.master_stack.master_count, 2);
+            toml::from_str("[layout.master]\nmaster_ratio = 0.3\nmaster_count = 2").unwrap();
+        assert_eq!(config.layout.master.master_ratio, 0.3);
+        assert_eq!(config.layout.master.master_count, 2);
     }
 
     #[test]
     fn layout_validates_master_ratio_low() {
-        let config: Config = toml::from_str("[layout.master_stack]\nmaster_ratio = 0.05").unwrap();
+        let config: Config = toml::from_str("[layout.master]\nmaster_ratio = 0.05").unwrap();
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn layout_validates_master_ratio_high() {
-        let config: Config = toml::from_str("[layout.master_stack]\nmaster_ratio = 0.95").unwrap();
+        let config: Config = toml::from_str("[layout.master]\nmaster_ratio = 0.95").unwrap();
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn layout_validates_master_count_zero() {
-        let config: Config = toml::from_str("[layout.master_stack]\nmaster_count = 0").unwrap();
+        let config: Config = toml::from_str("[layout.master]\nmaster_count = 0").unwrap();
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn layout_validates_even_when_inactive() {
         let config: Config = toml::from_str(
-            "[layout]\nactive = \"partition_tree\"\n[layout.master_stack]\nmaster_ratio = 0.05",
+            "[layout]\nstrategy = \"partition_tree\"\n[layout.master]\nmaster_ratio = 0.05",
         )
         .unwrap();
         assert!(config.validate().is_err());
     }
 
     #[test]
-    fn layout_rejects_unknown_active() {
-        assert!(toml::from_str::<Config>("[layout]\nactive = \"floating\"").is_err());
+    fn layout_rejects_unknown_strategy() {
+        assert!(toml::from_str::<Config>("[layout]\nstrategy = \"floating\"").is_err());
     }
 
     #[test]
-    fn layout_rejects_unknown_subfield_master_stack() {
-        assert!(toml::from_str::<Config>("[layout.master_stack]\nfoo = 1").is_err());
+    fn layout_rejects_unknown_subfield_master() {
+        assert!(toml::from_str::<Config>("[layout.master]\nfoo = 1").is_err());
     }
 
     #[test]
@@ -1282,9 +1304,9 @@ mod tests {
 
     #[test]
     fn layout_master_ratio_boundary_accepts_endpoints() {
-        let low: Config = toml::from_str("[layout.master_stack]\nmaster_ratio = 0.1").unwrap();
+        let low: Config = toml::from_str("[layout.master]\nmaster_ratio = 0.1").unwrap();
         assert!(low.validate().is_ok());
-        let high: Config = toml::from_str("[layout.master_stack]\nmaster_ratio = 0.9").unwrap();
+        let high: Config = toml::from_str("[layout.master]\nmaster_ratio = 0.9").unwrap();
         assert!(high.validate().is_ok());
     }
 }

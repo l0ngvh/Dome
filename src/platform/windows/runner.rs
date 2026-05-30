@@ -205,7 +205,7 @@ impl Runner {
                     self.dome.apply_master(t);
                     self.dome.apply_layout();
                 }
-                Action::TogglePicker => {
+                Action::ToggleMinimized => {
                     self.dome.toggle_picker();
                     if self.dome.picker_visible() {
                         self.dispatch_picker_icons();

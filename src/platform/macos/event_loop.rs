@@ -169,7 +169,7 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
                 runner.dome.apply_master(t);
                 runner.dome.flush_layout();
             }
-            Action::TogglePicker => {
+            Action::ToggleMinimized => {
                 runner.dome.toggle_picker();
             }
             Action::Exec { command } => {

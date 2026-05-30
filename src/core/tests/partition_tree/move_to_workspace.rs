@@ -1,4 +1,4 @@
-use crate::core::tests::{setup, setup_with_auto_tile, snapshot};
+use crate::core::tests::{setup, setup_with_automatic_tiling, snapshot};
 use insta::assert_snapshot;
 
 #[test]
@@ -417,7 +417,7 @@ fn move_container_to_tabbed_workspace() {
 
 #[test]
 fn move_to_empty_workspace_resets_spawn_mode() {
-    let mut hub = setup_with_auto_tile();
+    let mut hub = setup_with_automatic_tiling();
 
     hub.insert_tiling();
     hub.toggle_spawn_mode();
@@ -468,7 +468,7 @@ fn move_to_empty_workspace_resets_spawn_mode() {
     ");
 
     // Move a container (not just a window) to verify spawn mode resets for containers too
-    let mut hub = setup_with_auto_tile();
+    let mut hub = setup_with_automatic_tiling();
 
     hub.insert_tiling();
     hub.toggle_spawn_mode();
@@ -524,7 +524,7 @@ fn move_to_empty_workspace_resets_spawn_mode() {
 
 #[test]
 fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
-    let mut hub = setup_with_auto_tile();
+    let mut hub = setup_with_automatic_tiling();
 
     let w0 = hub.insert_tiling();
     hub.focus_workspace("1");

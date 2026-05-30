@@ -218,7 +218,7 @@ impl TestEnv {
                     Action::Move(t) => self.dome.apply_move(t),
                     Action::Toggle(t) => self.dome.apply_toggle(t),
                     Action::Master(t) => self.dome.apply_master(t),
-                    Action::TogglePicker => self.dome.toggle_picker(),
+                    Action::ToggleMinimized => self.dome.toggle_picker(),
                     _ => {}
                 }
             }
@@ -320,7 +320,7 @@ impl TestEnv {
             Action::Move(t) => self.dome.apply_move(t),
             Action::Toggle(t) => self.dome.apply_toggle(t),
             Action::Master(t) => self.dome.apply_master(t),
-            Action::TogglePicker => self.dome.toggle_picker(),
+            Action::ToggleMinimized => self.dome.toggle_picker(),
             _ => {}
         }
         self.dome.apply_layout();

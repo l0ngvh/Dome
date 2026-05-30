@@ -1,5 +1,5 @@
 use super::{snapshot, validate_hub};
-use crate::config::{LayoutConfig, LayoutKind, MasterStackConfig};
+use crate::config::{LayoutConfig, MasterConfig, Strategy};
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig};
 use crate::core::node::{Dimension, Length, WindowId};
@@ -7,9 +7,9 @@ use crate::core::strategy::TilingAction;
 use crate::core::tests::default_partition_tree_config_for_tests;
 use insta::assert_snapshot;
 
-fn setup_master_stack() -> Hub {
+fn setup_master() -> Hub {
     let mut config = HubConfig::default();
-    config.layout.active = LayoutKind::MasterStack;
+    config.layout.strategy = Strategy::Master;
     Hub::new(
         Dimension::new(
             Length::new(0.0),
@@ -24,7 +24,7 @@ fn setup_master_stack() -> Hub {
 
 #[test]
 fn single_window_layout() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -67,7 +67,7 @@ fn single_window_layout() {
 
 #[test]
 fn two_windows_default_ratio() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling();
     hub.insert_tiling();
     assert_snapshot!(snapshot(&hub), @"
@@ -112,7 +112,7 @@ fn two_windows_default_ratio() {
 
 #[test]
 fn three_windows_layout() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -159,7 +159,7 @@ fn three_windows_layout() {
 
 #[test]
 fn focus_direction_left_right() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling(); // W0 = master
     hub.insert_tiling(); // W1 = stack (focused)
 
@@ -184,7 +184,7 @@ fn focus_direction_left_right() {
 
 #[test]
 fn focus_direction_up_down() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling(); // W0 = master
     hub.insert_tiling(); // W1 = stack
     hub.insert_tiling(); // W2 = stack (focused)
@@ -210,7 +210,7 @@ fn focus_direction_up_down() {
 
 #[test]
 fn move_direction_left_right() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling(); // W0 = master
     hub.insert_tiling(); // W1 = stack (focused)
 
@@ -258,7 +258,7 @@ fn move_direction_left_right() {
 
 #[test]
 fn move_direction_up_down() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling(); // W0 = master
     hub.insert_tiling(); // W1 = stack
     hub.insert_tiling(); // W2 = stack (focused)
@@ -308,7 +308,7 @@ fn move_direction_up_down() {
 
 #[test]
 fn single_window_focus_move_noop() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling();
 
     let before = snapshot(&hub);
@@ -327,7 +327,7 @@ fn single_window_focus_move_noop() {
 
 #[test]
 fn increase_decrease_master_ratio() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -503,7 +503,7 @@ fn increase_decrease_master_ratio() {
 
 #[test]
 fn increment_decrement_master_count() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling(); // W0
     hub.insert_tiling(); // W1
     hub.insert_tiling(); // W2
@@ -637,7 +637,7 @@ fn increment_decrement_master_count() {
 
 #[test]
 fn master_count_exceeds_window_count() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling(); // W0
     hub.insert_tiling(); // W1
     hub.insert_tiling(); // W2
@@ -689,7 +689,7 @@ fn master_count_exceeds_window_count() {
 
 #[test]
 fn delete_window() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling(); // W0 = master
     hub.insert_tiling(); // W1 = stack
     hub.insert_tiling(); // W2 = stack (focused)
@@ -780,7 +780,7 @@ fn delete_window() {
 fn move_window_to_workspace() {
     // Move master to another workspace
     {
-        let mut hub = setup_master_stack();
+        let mut hub = setup_master();
         hub.insert_tiling(); // W0 = master
         hub.insert_tiling(); // W1 = stack (focused)
         hub.focus_left();
@@ -865,7 +865,7 @@ fn move_window_to_workspace() {
 
     // Move stack window to another workspace
     {
-        let mut hub = setup_master_stack();
+        let mut hub = setup_master();
         hub.insert_tiling(); // W0 = master
         hub.insert_tiling(); // W1 = stack
         hub.insert_tiling(); // W2 = stack (focused)
@@ -952,7 +952,7 @@ fn move_window_to_workspace() {
 
 #[test]
 fn move_only_window_to_workspace() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling(); // W0
 
     hub.move_focused_to_workspace("1");
@@ -1006,7 +1006,7 @@ fn move_only_window_to_workspace() {
 
 #[test]
 fn prune_workspace() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling(); // W0
     hub.insert_tiling(); // W1
 
@@ -1026,7 +1026,7 @@ fn prune_workspace() {
 
 #[test]
 fn sync_config_increments_master_count() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -1038,9 +1038,9 @@ fn sync_config_increments_master_count() {
 
     hub.sync_config(HubConfig {
         layout: LayoutConfig {
-            active: LayoutKind::MasterStack,
+            strategy: Strategy::Master,
             partition_tree: default_partition_tree_config_for_tests(),
-            master_stack: MasterStackConfig {
+            master: MasterConfig {
                 master_ratio: 0.5,
                 master_count: 2,
             },
@@ -1096,7 +1096,7 @@ fn sync_config_increments_master_count() {
 
 #[test]
 fn sync_config_decrease_master_ratio() {
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -1106,9 +1106,9 @@ fn sync_config_decrease_master_ratio() {
 
     hub.sync_config(HubConfig {
         layout: LayoutConfig {
-            active: LayoutKind::MasterStack,
+            strategy: Strategy::Master,
             partition_tree: default_partition_tree_config_for_tests(),
-            master_stack: MasterStackConfig {
+            master: MasterConfig {
                 master_ratio: 0.3,
                 master_count: 1,
             },
@@ -1161,11 +1161,11 @@ fn sync_config_decrease_master_ratio() {
 }
 
 #[test]
-fn sync_config_applies_master_stack_params_without_rebuilding() {
+fn sync_config_applies_master_params_without_rebuilding() {
     // Two workspaces with specific window orderings. Changing master_ratio
     // via sync_config must NOT rebuild the strategy (no reattach), so each
     // workspace's window ordering and focused window survive.
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
 
     // Workspace "0": insert 3 windows (ids allocated in order).
     hub.insert_tiling();
@@ -1187,9 +1187,9 @@ fn sync_config_applies_master_stack_params_without_rebuilding() {
     // Change master_ratio from 0.5 to 0.4 via hot-reload.
     hub.sync_config(HubConfig {
         layout: LayoutConfig {
-            active: LayoutKind::MasterStack,
+            strategy: Strategy::Master,
             partition_tree: default_partition_tree_config_for_tests(),
-            master_stack: MasterStackConfig {
+            master: MasterConfig {
                 master_ratio: 0.4,
                 master_count: 1,
             },
@@ -1246,7 +1246,7 @@ fn sync_config_applies_master_stack_params_without_rebuilding() {
 fn sync_config_overrides_runtime_tuned_master_ratio() {
     // Runtime GrowMaster tuning is a transient override. A hot-reload with
     // the same file value resets the ratio to the file's authoritative value.
-    let mut hub = setup_master_stack();
+    let mut hub = setup_master();
     hub.insert_tiling();
     hub.insert_tiling();
 
@@ -1258,9 +1258,9 @@ fn sync_config_overrides_runtime_tuned_master_ratio() {
     // Hot-reload resets to file value 0.5.
     hub.sync_config(HubConfig {
         layout: LayoutConfig {
-            active: LayoutKind::MasterStack,
+            strategy: Strategy::Master,
             partition_tree: default_partition_tree_config_for_tests(),
-            master_stack: MasterStackConfig {
+            master: MasterConfig {
                 master_ratio: 0.4,
                 master_count: 1,
             },

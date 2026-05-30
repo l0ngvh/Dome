@@ -1,8 +1,8 @@
 use crate::action::MonitorTarget;
-use crate::config::{LayoutConfig, LayoutKind, SizeConstraint};
+use crate::config::{LayoutConfig, SizeConstraint, Strategy};
 
 use super::allocator::{Allocator, NodeId};
-use super::master_stack::MasterStackStrategy;
+use super::master::MasterStrategy;
 use super::node::{
     ContainerId, Dimension, DisplayMode, Length, Monitor, MonitorId, Window, WindowId,
     WindowRestrictions, Workspace, WorkspaceId,
@@ -386,7 +386,7 @@ impl Hub {
         // changes (partition-tree <-> master-stack). Scalar param changes
         // (master_ratio, master_count) are pushed into the running strategy
         // via apply_config, preserving per-workspace window ordering and focus.
-        let rebuild = self.access.config.layout.active != config.layout.active;
+        let rebuild = self.access.config.layout.strategy != config.layout.strategy;
         self.access.config = config;
 
         if !rebuild {
@@ -404,7 +404,7 @@ impl Hub {
             .map(|(id, _)| *id)
             .collect();
 
-        // Rebuild path. Entered only when `layout.active` changed (e.g.
+        // Rebuild path. Entered only when `layout.strategy` changed (e.g.
         // partition-tree <-> master-stack). Strategies differ in tree topology
         // (partition-tree uses containers and tabs; master-stack uses a flat
         // ordered list), so there is no meaningful cross-strategy migration.
@@ -440,7 +440,7 @@ impl Hub {
 
         // Replace the strategy. The old Box<dyn TilingStrategy> is dropped,
         // deallocating all per-workspace state (both PartitionTreeStrategy
-        // and MasterStackStrategy are pure owned-data structs).
+        // and MasterStrategy are pure owned-data structs).
         self.strategy = build_strategy(&self.access.config.layout);
 
         // Re-attach tiling windows in WindowId-ascending order (creation
@@ -800,11 +800,11 @@ impl From<crate::config::Config> for HubConfig {
 }
 
 fn build_strategy(layout: &LayoutConfig) -> Box<dyn TilingStrategy> {
-    match layout.active {
-        LayoutKind::PartitionTree => Box::new(PartitionTreeStrategy::new()),
-        LayoutKind::MasterStack => Box::new(MasterStackStrategy::new(
-            layout.master_stack.master_ratio,
-            layout.master_stack.master_count,
+    match layout.strategy {
+        Strategy::PartitionTree => Box::new(PartitionTreeStrategy::new()),
+        Strategy::Master => Box::new(MasterStrategy::new(
+            layout.master.master_ratio,
+            layout.master.master_count,
         )),
     }
 }

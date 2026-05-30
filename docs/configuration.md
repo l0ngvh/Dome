@@ -64,34 +64,34 @@ subtext_size = 12.0  # Secondary text: picker app-name subtext.
 
 ## Layout
 
-The `[layout]` table selects the tiling strategy and holds per-strategy parameters. Both sub-tables (`[layout.partition_tree]` and `[layout.master_stack]`) are always parsed and validated regardless of which strategy is active, so a typo in the inactive block surfaces immediately rather than hiding until `active` is flipped.
+The `[layout]` table selects the tiling strategy and holds per-strategy parameters. Both sub-tables (`[layout.partition_tree]` and `[layout.master]`) are always parsed and validated regardless of which strategy is active, so a typo in the inactive block surfaces immediately rather than hiding until `strategy` is flipped.
 
 ```toml
 [layout]
-active = "partition_tree"   # or "master_stack"
+strategy = "partition_tree"   # or "master"
 
 [layout.partition_tree]
 tab_bar_height = 24.0
-auto_tile = true
+automatic_tiling = true
 
-[layout.master_stack]
+[layout.master]
 master_ratio = 0.5
 master_count = 1
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `layout.active` | string | `"partition_tree"` | Active layout strategy. One of `partition_tree` or `master_stack`. |
-| `layout.partition_tree.auto_tile` | boolean | `true` | When true, Dome picks horizontal or vertical split based on the focused window's dimensions. When false, new windows split in the current container's direction. |
+| `layout.strategy` | string | `"partition_tree"` | Active layout strategy. One of `partition_tree` or `master`. |
+| `layout.partition_tree.automatic_tiling` | boolean | `true` | When true, Dome picks horizontal or vertical split based on the focused window's dimensions. When false, new windows split in the current container's direction. |
 | `layout.partition_tree.tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, in logical pixels. |
-| `layout.master_stack.master_ratio` | float | `0.5` | Width of the master area as a fraction of the workspace width. Must be in `[0.1, 0.9]`. |
-| `layout.master_stack.master_count` | integer | `1` | Number of windows in the master area. Must be `>= 1`. |
+| `layout.master.master_ratio` | float | `0.5` | Width of the master area as a fraction of the workspace width. Must be in `[0.1, 0.9]`. |
+| `layout.master.master_count` | integer | `1` | Number of windows in the master area. Must be `>= 1`. |
 
 ### Partition tree
 
 The default strategy. i3-style manual tiling with split containers (horizontal, vertical, tabbed), spawn-mode routing, and direction invariance. See [architecture.md](development/architecture.md#partitiontreestrategy) for the full model.
 
-### Master stack
+### Master
 
 A two-area layout: the first `master_count` windows fill a master area on the left, and the rest stack vertically on the right. Modeled on xmonad's `Tall` layout.
 
@@ -151,24 +151,24 @@ Each entry maps a key combination to one or more action strings:
 "mods+...+key" = ["<action>", ...]
 ```
 
-Tokens are lowercase. Accepted modifier tokens: `cmd`, `shift`, `alt`, `ctrl`. Multiple modifiers are joined with `+`. The key is the final segment after all modifiers.
+Tokens are lowercase. Accepted modifier tokens: `meta`, `shift`, `alt`, `ctrl`. `cmd` and `win` are platform-flavored aliases for `meta`. Multiple modifiers are joined with `+`. The key is the final segment after all modifiers.
 
 Values are arrays of action strings. Single-element arrays are fine. Multi-action arrays fire in order.
 
 Examples:
 
 ```toml
-"cmd+h" = ["focus left"]
-"cmd+shift+1" = ["move workspace 1", "focus workspace 1"]
+"meta+h" = ["focus left"]
+"meta+shift+1" = ["move workspace 1", "focus workspace 1"]
 ```
 
 ### Modifier mapping
 
-The literal config token is always `cmd`. "Meta" is display shorthand used in the README and never appears in config files.
+The literal config token is `meta`. `cmd` and `win` are accepted as aliases and behave identically. It maps to the platform key shown in the table below.
 
 | Token | macOS | Windows |
 |-------|-------|---------|
-| `cmd` | <kbd>Command</kbd> | <kbd>Windows</kbd> |
+| `meta` (alias: `cmd`, `win`) | <kbd>Command</kbd> | <kbd>Windows</kbd> |
 | `shift` | <kbd>Shift</kbd> | <kbd>Shift</kbd> |
 | `alt` | <kbd>Option</kbd> | <kbd>Alt</kbd> |
 | `ctrl` | <kbd>Control</kbd> | <kbd>Control</kbd> |
@@ -179,32 +179,32 @@ Dome ships 44 default bindings.
 
 | Key | Action |
 |-----|--------|
-| <kbd>cmd</kbd>+<kbd>0</kbd> through <kbd>cmd</kbd>+<kbd>9</kbd> | `focus workspace 0` through `focus workspace 9` |
-| <kbd>cmd</kbd>+<kbd>shift</kbd>+<kbd>0</kbd> through <kbd>cmd</kbd>+<kbd>shift</kbd>+<kbd>9</kbd> | `move workspace 0` through `move workspace 9` |
-| <kbd>cmd</kbd>+<kbd>h</kbd> | `focus left` |
-| <kbd>cmd</kbd>+<kbd>j</kbd> | `focus down` |
-| <kbd>cmd</kbd>+<kbd>k</kbd> | `focus up` |
-| <kbd>cmd</kbd>+<kbd>l</kbd> | `focus right` |
-| <kbd>cmd</kbd>+<kbd>p</kbd> | `focus parent` |
-| <kbd>cmd</kbd>+<kbd>[</kbd> | `focus tab prev` |
-| <kbd>cmd</kbd>+<kbd>]</kbd> | `focus tab next` |
-| <kbd>cmd</kbd>+<kbd>e</kbd> | `toggle spawn` |
-| <kbd>cmd</kbd>+<kbd>d</kbd> | `toggle direction` |
-| <kbd>cmd</kbd>+<kbd>b</kbd> | `toggle layout` |
-| <kbd>cmd</kbd>+<kbd>shift</kbd>+<kbd>f</kbd> | `toggle float` |
-| <kbd>cmd</kbd>+<kbd>shift</kbd>+<kbd>h</kbd> | `move left` |
-| <kbd>cmd</kbd>+<kbd>shift</kbd>+<kbd>j</kbd> | `move down` |
-| <kbd>cmd</kbd>+<kbd>shift</kbd>+<kbd>k</kbd> | `move up` |
-| <kbd>cmd</kbd>+<kbd>shift</kbd>+<kbd>l</kbd> | `move right` |
-| <kbd>cmd</kbd>+<kbd>alt</kbd>+<kbd>h</kbd> | `focus monitor left` |
-| <kbd>cmd</kbd>+<kbd>alt</kbd>+<kbd>j</kbd> | `focus monitor down` |
-| <kbd>cmd</kbd>+<kbd>alt</kbd>+<kbd>k</kbd> | `focus monitor up` |
-| <kbd>cmd</kbd>+<kbd>alt</kbd>+<kbd>l</kbd> | `focus monitor right` |
-| <kbd>cmd</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>h</kbd> | `move monitor left` |
-| <kbd>cmd</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>j</kbd> | `move monitor down` |
-| <kbd>cmd</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>k</kbd> | `move monitor up` |
-| <kbd>cmd</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>l</kbd> | `move monitor right` |
-| <kbd>cmd</kbd>+<kbd>shift</kbd>+<kbd>q</kbd> | `exit` |
+| <kbd>meta</kbd>+<kbd>0</kbd> through <kbd>meta</kbd>+<kbd>9</kbd> | `focus workspace 0` through `focus workspace 9` |
+| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>0</kbd> through <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>9</kbd> | `move workspace 0` through `move workspace 9` |
+| <kbd>meta</kbd>+<kbd>h</kbd> | `focus left` |
+| <kbd>meta</kbd>+<kbd>j</kbd> | `focus down` |
+| <kbd>meta</kbd>+<kbd>k</kbd> | `focus up` |
+| <kbd>meta</kbd>+<kbd>l</kbd> | `focus right` |
+| <kbd>meta</kbd>+<kbd>p</kbd> | `focus parent` |
+| <kbd>meta</kbd>+<kbd>[</kbd> | `focus tab prev` |
+| <kbd>meta</kbd>+<kbd>]</kbd> | `focus tab next` |
+| <kbd>meta</kbd>+<kbd>e</kbd> | `toggle spawn` |
+| <kbd>meta</kbd>+<kbd>d</kbd> | `toggle direction` |
+| <kbd>meta</kbd>+<kbd>b</kbd> | `toggle layout` |
+| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>f</kbd> | `toggle float` |
+| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>h</kbd> | `move left` |
+| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>j</kbd> | `move down` |
+| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>k</kbd> | `move up` |
+| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>l</kbd> | `move right` |
+| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>h</kbd> | `focus monitor left` |
+| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>j</kbd> | `focus monitor down` |
+| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>k</kbd> | `focus monitor up` |
+| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>l</kbd> | `focus monitor right` |
+| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>h</kbd> | `move monitor left` |
+| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>j</kbd> | `move monitor down` |
+| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>k</kbd> | `move monitor up` |
+| <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>l</kbd> | `move monitor right` |
+| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>q</kbd> | `exit` |
 
 ### Customising
 
@@ -212,9 +212,9 @@ Define a `[keymaps]` section to replace the defaults with your own bindings. The
 
 ```toml
 [keymaps]
-"cmd+h" = ["focus left"]
-"cmd+l" = ["focus right"]
-"cmd+return" = ["exec open -a Terminal"]
+"meta+h" = ["focus left"]
+"meta+l" = ["focus right"]
+"meta+return" = ["exec open -a Terminal"]
 ```
 
 ### Multi-action bindings
@@ -222,7 +222,7 @@ Define a `[keymaps]` section to replace the defaults with your own bindings. The
 A binding's value is an array of action strings. All actions fire in order on a single keypress:
 
 ```toml
-"cmd+shift+1" = ["move workspace 1", "focus workspace 1"]
+"meta+shift+1" = ["move workspace 1", "focus workspace 1"]
 ```
 
 ### Modes
@@ -231,8 +231,8 @@ Dome supports modal keybindings. The `[keymaps]` section defines the **default**
 
 ```toml
 [keymaps]
-"cmd+h" = ["focus left"]
-"cmd+r" = ["mode resize"]
+"meta+h" = ["focus left"]
+"meta+r" = ["mode resize"]
 
 [keymaps.mode.resize]
 "h" = ["master shrink"]
@@ -240,12 +240,12 @@ Dome supports modal keybindings. The `[keymaps]` section defines the **default**
 "escape" = ["mode default"]
 ```
 
-In this example, `cmd+r` enters resize mode. Inside resize mode, `h` and `l` adjust the master area without modifiers, and `escape` returns to the default keybindings. The special name `"default"` always refers to the top-level `[keymaps]` table.
+In this example, `meta+r` enters resize mode. Inside resize mode, `h` and `l` adjust the master area without modifiers, and `escape` returns to the default keybindings. The special name `"default"` always refers to the top-level `[keymaps]` table.
 
 Mode switching is instant. When a binding contains `mode <name>`, the switch takes effect before the next keypress. A binding can combine a mode switch with other actions:
 
 ```toml
-"cmd+r" = ["focus left", "mode resize"]
+"meta+r" = ["focus left", "mode resize"]
 ```
 
 This focuses left and enters resize mode in one keypress. If a binding lists multiple `mode` actions, the last one wins.

@@ -1,7 +1,7 @@
 mod float_window;
 mod focus_workspace;
 mod fullscreen;
-mod master_stack;
+mod master;
 mod minimize;
 mod monitor;
 mod move_to_workspace;
@@ -13,9 +13,7 @@ mod strategy_switch;
 
 use std::collections::HashSet;
 
-use crate::config::{
-    LayoutConfig, LayoutKind, MasterStackConfig, PartitionTreeConfig, SizeConstraint,
-};
+use crate::config::{LayoutConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, Strategy};
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Dimension, Direction, Length, Logical, WindowId, Workspace, WorkspaceId};
@@ -763,20 +761,20 @@ pub(super) fn setup_logger_with_level(level: &str) {
 pub(super) fn default_partition_tree_config_for_tests() -> PartitionTreeConfig {
     PartitionTreeConfig {
         tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
-        auto_tile: false,
+        automatic_tiling: false,
     }
 }
-pub(super) fn default_master_stack_config_for_tests() -> MasterStackConfig {
-    MasterStackConfig {
+pub(super) fn default_master_config_for_tests() -> MasterConfig {
+    MasterConfig {
         master_ratio: 0.5,
         master_count: 1,
     }
 }
 pub(super) fn default_layout_for_tests() -> LayoutConfig {
     LayoutConfig {
-        active: LayoutKind::PartitionTree,
+        strategy: Strategy::PartitionTree,
         partition_tree: default_partition_tree_config_for_tests(),
-        master_stack: default_master_stack_config_for_tests(),
+        master: default_master_config_for_tests(),
     }
 }
 
@@ -810,7 +808,7 @@ pub(super) fn setup() -> Hub {
     setup_hub()
 }
 
-pub(super) fn setup_with_auto_tile() -> Hub {
+pub(super) fn setup_with_automatic_tiling() -> Hub {
     setup_logger();
     Hub::new(
         Dimension::new(
@@ -823,7 +821,7 @@ pub(super) fn setup_with_auto_tile() -> Hub {
         HubConfig {
             layout: crate::config::LayoutConfig {
                 partition_tree: crate::config::PartitionTreeConfig {
-                    auto_tile: true,
+                    automatic_tiling: true,
                     ..default_partition_tree_config_for_tests()
                 },
                 ..default_layout_for_tests()

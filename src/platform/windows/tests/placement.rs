@@ -50,7 +50,7 @@ fn two_windows_split_screen() {
 #[test]
 fn three_windows_split_screen() {
     let mut config = Config::default();
-    config.layout.partition_tree.auto_tile = false;
+    config.layout.partition_tree.automatic_tiling = false;
     let mut env = TestEnv::new_with_config(config);
     let w1 = Arc::new(MockExternalHwnd::with_title(
         1,
@@ -90,7 +90,7 @@ fn three_windows_split_screen() {
 #[test]
 fn positions_are_rounded_not_truncated() {
     let mut config = Config::default();
-    config.layout.partition_tree.auto_tile = false;
+    config.layout.partition_tree.automatic_tiling = false;
     let mut env = TestEnv::new_with_config(config);
     let wins: Vec<_> = (1..=7)
         .map(|i| {

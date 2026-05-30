@@ -8,8 +8,8 @@ use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, clip
 /// No containers, no tabs, no scroll. The first `master_count` windows in each
 /// workspace's list occupy the master area; the rest go in the stack.
 #[derive(Debug)]
-pub(crate) struct MasterStackStrategy {
-    workspaces: HashMap<WorkspaceId, MasterStackState>,
+pub(crate) struct MasterStrategy {
+    workspaces: HashMap<WorkspaceId, MasterState>,
     window_dimensions: HashMap<WindowId, Dimension>,
     master_ratio: f32,
     master_count: usize,
@@ -18,12 +18,12 @@ pub(crate) struct MasterStackStrategy {
 /// Per-workspace state for master-stack layout. Windows are ordered: the first
 /// `master_count` entries are in the master area, the rest in the stack.
 #[derive(Debug)]
-struct MasterStackState {
+struct MasterState {
     windows: Vec<WindowId>,
     focused_index: Option<usize>,
 }
 
-impl MasterStackStrategy {
+impl MasterStrategy {
     pub(crate) fn new(master_ratio: f32, master_count: usize) -> Self {
         Self {
             workspaces: HashMap::new(),
@@ -92,7 +92,7 @@ impl MasterStackStrategy {
     }
 
     /// Adjust `focused_index` after removing the window at `removed_idx`.
-    fn adjust_focus_after_removal(state: &mut MasterStackState, removed_idx: usize) {
+    fn adjust_focus_after_removal(state: &mut MasterState, removed_idx: usize) {
         let Some(focused) = state.focused_index else {
             return;
         };
@@ -126,16 +126,13 @@ impl MasterStackStrategy {
     }
 }
 
-impl TilingStrategy for MasterStackStrategy {
+impl TilingStrategy for MasterStrategy {
     fn attach_window(&mut self, hub: &mut HubAccess, id: WindowId, ws_id: WorkspaceId) {
         hub.windows.get_mut(id).workspace = ws_id;
-        let state = self
-            .workspaces
-            .entry(ws_id)
-            .or_insert_with(|| MasterStackState {
-                windows: Vec::new(),
-                focused_index: None,
-            });
+        let state = self.workspaces.entry(ws_id).or_insert_with(|| MasterState {
+            windows: Vec::new(),
+            focused_index: None,
+        });
         state.windows.push(id);
         state.focused_index = Some(state.windows.len() - 1);
         // Zero placeholder -- the layout_workspace call below computes the real rect
@@ -153,9 +150,7 @@ impl TilingStrategy for MasterStackStrategy {
             .dimension;
 
         let state = self.workspaces.get_mut(&ws_id).unwrap_or_else(|| {
-            panic!(
-                "master_stack: detach_window called for {id:?} but workspace {ws_id} has no state"
-            )
+            panic!("master: detach_window called for {id:?} but workspace {ws_id} has no state")
         });
 
         let idx = state
@@ -163,7 +158,7 @@ impl TilingStrategy for MasterStackStrategy {
             .iter()
             .position(|&w| w == id)
             .unwrap_or_else(|| {
-                panic!("master_stack: detach_window called for {id:?} but window is not in workspace {ws_id} state.windows")
+                panic!("master: detach_window called for {id:?} but window is not in workspace {ws_id} state.windows")
             });
         state.windows.remove(idx);
         Self::adjust_focus_after_removal(state, idx);
@@ -174,9 +169,7 @@ impl TilingStrategy for MasterStackStrategy {
         }
 
         let dim = self.window_dimensions.remove(&id).unwrap_or_else(|| {
-            panic!(
-                "master_stack: detach_window called for {id:?} but window_dimensions has no entry"
-            )
+            panic!("master: detach_window called for {id:?} but window_dimensions has no entry")
         });
         // Translate layout-space coords to screen-absolute by adding monitor origin
         let result = Dimension::new(dim.x + screen.x, dim.y + screen.y, dim.width, dim.height);
@@ -227,7 +220,7 @@ impl TilingStrategy for MasterStackStrategy {
         let mut windows = Vec::with_capacity(state.windows.len());
         for (i, &wid) in state.windows.iter().enumerate() {
             let dim = *self.window_dimensions.get(&wid).expect(
-                "master_stack: window present in state.windows but missing from window_dimensions",
+                "master: window present in state.windows but missing from window_dimensions",
             );
             let frame = translate(dim, Length::ZERO, Length::ZERO, screen);
             if let Some(visible_frame) = clip(frame, screen) {
@@ -413,8 +406,8 @@ impl TilingStrategy for MasterStackStrategy {
         // Hot-reload overrides any runtime tuning from GrowMaster / MoreMaster
         // etc.: the TOML file is the source of truth, runtime commands are a
         // transient override until the next config reload.
-        self.master_ratio = hub.config.layout.master_stack.master_ratio;
-        self.master_count = hub.config.layout.master_stack.master_count;
+        self.master_ratio = hub.config.layout.master.master_ratio;
+        self.master_count = hub.config.layout.master.master_count;
 
         // Relayout every workspace so the new scalars take effect.
         let ws_ids: Vec<WorkspaceId> = hub

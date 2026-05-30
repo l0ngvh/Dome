@@ -1,6 +1,6 @@
 use super::{hub_debug_text, setup_hub, setup_logger_with_level, validate_hub};
 use crate::action::MonitorTarget;
-use crate::config::LayoutKind;
+use crate::config::Strategy;
 use crate::core::hub::{Hub, HubConfig};
 use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
 use crate::core::strategy::TilingAction;
@@ -456,9 +456,9 @@ fn strategy_smoke_test() {
     assert_eq!(hub.focused_tiling_window(ws), Some(id));
 }
 
-fn setup_master_stack() -> Hub {
+fn setup_master() -> Hub {
     let mut config = HubConfig::default();
-    config.layout.active = LayoutKind::MasterStack;
+    config.layout.strategy = Strategy::Master;
     Hub::new(
         Dimension::new(
             Length::new(0.0),
@@ -472,7 +472,7 @@ fn setup_master_stack() -> Hub {
 }
 
 #[test]
-fn master_stack_smoke_test() {
+fn master_smoke_test() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     setup_logger_with_level("info");
@@ -483,11 +483,7 @@ fn master_stack_smoke_test() {
     let completed = AtomicUsize::new(0);
 
     (0..runs).into_par_iter().for_each(|run| {
-        run_smoke_iteration(
-            seed.wrapping_add(run as u64),
-            ops_per_run,
-            setup_master_stack,
-        );
+        run_smoke_iteration(seed.wrapping_add(run as u64), ops_per_run, setup_master);
         let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
         if done.is_multiple_of(10) {
             tracing::info!("Completed master-stack {done}/{runs}");

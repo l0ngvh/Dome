@@ -1,9 +1,9 @@
-use crate::core::tests::{setup_with_auto_tile, snapshot};
+use crate::core::tests::{setup_with_automatic_tiling, snapshot};
 use insta::assert_snapshot;
 
 #[test]
 fn auto_tile_sets_horizontal_spawn_mode_when_width_greater_than_height() {
-    let mut hub = setup_with_auto_tile();
+    let mut hub = setup_with_automatic_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -51,7 +51,7 @@ fn auto_tile_sets_horizontal_spawn_mode_when_width_greater_than_height() {
 
 #[test]
 fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
-    let mut hub = setup_with_auto_tile();
+    let mut hub = setup_with_automatic_tiling();
     // Going on a round trip to ensure that we can always create a horizontal container with 6
     // direct children, as the auto tile logic can get confused when width is approximately equal
     // to height, due to floating precision lost
@@ -119,7 +119,7 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
 
 #[test]
 fn auto_tile_preserves_tab_spawn_mode() {
-    let mut hub = setup_with_auto_tile();
+    let mut hub = setup_with_automatic_tiling();
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
@@ -169,7 +169,7 @@ fn auto_tile_preserves_tab_spawn_mode() {
 
 #[test]
 fn auto_tile_adjusts_after_toggle_direction() {
-    let mut hub = setup_with_auto_tile();
+    let mut hub = setup_with_automatic_tiling();
     let w0 = hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -222,7 +222,7 @@ fn auto_tile_adjusts_after_toggle_direction() {
 
 #[test]
 fn auto_tile_with_tab_spawn_mode() {
-    let mut hub = setup_with_auto_tile();
+    let mut hub = setup_with_automatic_tiling();
     hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
@@ -270,7 +270,7 @@ fn auto_tile_with_tab_spawn_mode() {
 
 #[test]
 fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
-    let mut hub = setup_with_auto_tile();
+    let mut hub = setup_with_automatic_tiling();
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();
     let w2 = hub.insert_tiling_titled();

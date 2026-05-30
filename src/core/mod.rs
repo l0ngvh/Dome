@@ -3,7 +3,7 @@ mod dto;
 mod float;
 mod fullscreen;
 mod hub;
-mod master_stack;
+mod master;
 mod minimize;
 mod node;
 mod partition_tree;

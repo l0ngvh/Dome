@@ -118,7 +118,7 @@ fn handle_keyboard(ctx: &KeyboardCtx, event: *mut CGEvent) -> bool {
 
     let mut modifiers = Modifiers::empty();
     if flags.contains(CGEventFlags::MaskCommand) {
-        modifiers |= Modifiers::CMD;
+        modifiers |= Modifiers::META;
     }
     if flags.contains(CGEventFlags::MaskShift) {
         modifiers |= Modifiers::SHIFT;

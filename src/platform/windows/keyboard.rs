@@ -113,7 +113,7 @@ fn get_actions(vk: VIRTUAL_KEY) -> Option<Actions> {
 
     let mut modifiers = Modifiers::empty();
     if is_key_pressed(VK_LWIN) || is_key_pressed(VK_RWIN) {
-        modifiers |= Modifiers::CMD;
+        modifiers |= Modifiers::META;
     }
     if is_key_pressed(VK_SHIFT) {
         modifiers |= Modifiers::SHIFT;

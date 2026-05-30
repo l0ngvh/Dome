@@ -433,7 +433,7 @@ fn multi_action_sequence_applies_each_hub_action() {
                 env.dome.apply_master(t);
                 env.dome.apply_layout();
             }
-            Action::TogglePicker => env.dome.toggle_picker(),
+            Action::ToggleMinimized => env.dome.toggle_picker(),
             _ => {}
         }
     }

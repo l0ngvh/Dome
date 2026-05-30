@@ -1,4 +1,4 @@
-mod auto_tile;
+mod automatic_tiling;
 mod delete_window;
 mod float_window;
 mod focus_direction;

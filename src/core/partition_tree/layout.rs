@@ -314,14 +314,14 @@ impl PartitionTreeStrategy {
             Child::Window(wid) => {
                 let td = self.tiling_data_mut(wid);
                 td.dimension = dim;
-                if hub.config.layout.partition_tree.auto_tile && !td.spawn_mode.is_tab() {
+                if hub.config.layout.partition_tree.automatic_tiling && !td.spawn_mode.is_tab() {
                     td.spawn_mode = SpawnMode::clean(spawn_mode);
                 }
             }
             Child::Container(cid) => {
                 let c = self.containers.get_mut(cid);
                 c.dimension = dim;
-                if hub.config.layout.partition_tree.auto_tile && !c.spawn_mode().is_tab() {
+                if hub.config.layout.partition_tree.automatic_tiling && !c.spawn_mode().is_tab() {
                     c.set_spawn_mode(spawn_mode);
                 }
             }

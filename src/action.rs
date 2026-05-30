@@ -19,9 +19,10 @@ use crate::core::WindowId;
 /// Every user-visible action Dome can perform. This is the single source of
 /// truth for the action set: CLI (`src/cli.rs`), IPC JSON, and TOML keymap
 /// strings all parse into this enum. Adding a new action requires editing only
-/// this enum and its `Display`/`FromStr` impls.
+/// this enum and its `Display`/`FromStr` impls. IPC wire format uses the
+/// variant name as its tag; a rename is a wire-format break.
 ///
-/// `TogglePicker` is a first-class variant (not a `ToggleTarget` member)
+/// `ToggleMinimized` is a first-class variant (not a `ToggleTarget` member)
 /// because the picker is a UI concern, not a tree mutation. Making it top-level
 /// lets the compiler enforce that every platform runner handles it explicitly,
 /// instead of relying on `unreachable!()` arms in hub dispatch.
@@ -31,7 +32,7 @@ pub enum Action {
     Move(MoveTarget),
     Toggle(ToggleTarget),
     Master(MasterTarget),
-    TogglePicker,
+    ToggleMinimized,
     /// Restore a specific minimized window. Sent by the picker UI, not
     /// user-configurable (no `FromStr` arm, no CLI subcommand).
     UnminimizeWindow(WindowId),
@@ -75,8 +76,8 @@ impl fmt::Display for Action {
             Action::Move(t) => write!(f, "move {t}"),
             Action::Toggle(t) => write!(f, "toggle {t}"),
             Action::Master(t) => write!(f, "master {t}"),
-            Action::TogglePicker => write!(f, "toggle minimized"),
-            Action::UnminimizeWindow(id) => write!(f, "unminimize_window {id}"),
+            Action::ToggleMinimized => write!(f, "toggle minimized"),
+            Action::UnminimizeWindow(id) => write!(f, "unminimize window {id}"),
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
             Action::Mode { name } => write!(f, "mode {name}"),
@@ -295,7 +296,7 @@ impl FromStr for Action {
             ["toggle", "layout"] => Ok(Action::Toggle(ToggleTarget::Layout)),
             ["toggle", "float"] => Ok(Action::Toggle(ToggleTarget::Float)),
             ["toggle", "fullscreen"] => Ok(Action::Toggle(ToggleTarget::Fullscreen)),
-            ["toggle", "minimized"] => Ok(Action::TogglePicker),
+            ["toggle", "minimized"] => Ok(Action::ToggleMinimized),
             ["master", "grow"] => Ok(Action::Master(MasterTarget::Grow)),
             ["master", "shrink"] => Ok(Action::Master(MasterTarget::Shrink)),
             ["master", "more"] => Ok(Action::Master(MasterTarget::More)),
@@ -342,7 +343,7 @@ mod tests {
                 r#"{"Exec":{"command":"open -a Terminal"}}"#,
             ),
             (Action::Exit, r#""Exit""#),
-            (Action::TogglePicker, r#""TogglePicker""#),
+            (Action::ToggleMinimized, r#""ToggleMinimized""#),
             (
                 Action::Mode {
                     name: "resize".into(),
@@ -458,5 +459,12 @@ mod tests {
             .to_string(),
             "mode resize"
         );
+    }
+
+    #[test]
+    fn unminimize_window_display_uses_space() {
+        let id: WindowId = serde_json::from_value(serde_json::json!(7)).unwrap();
+        let action = Action::UnminimizeWindow(id);
+        assert_eq!(action.to_string(), "unminimize window WindowId(7)");
     }
 }

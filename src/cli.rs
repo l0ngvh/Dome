@@ -178,7 +178,7 @@ impl From<CliQuery> for Query {
 
 fn cli_toggle_to_action(t: CliToggle) -> Action {
     match t {
-        CliToggle::Minimized => Action::TogglePicker,
+        CliToggle::Minimized => Action::ToggleMinimized,
         CliToggle::Spawn => Action::Toggle(ToggleTarget::Spawn),
         CliToggle::Direction => Action::Toggle(ToggleTarget::Direction),
         CliToggle::Layout => Action::Toggle(ToggleTarget::Layout),
@@ -274,11 +274,11 @@ mod tests {
         assert_action(&["dome", "toggle", "float"], "toggle float");
         assert_action(&["dome", "toggle", "fullscreen"], "toggle fullscreen");
         assert_action(&["dome", "toggle", "minimized"], "toggle minimized");
-        // Verify `toggle minimized` maps to the dedicated TogglePicker variant
+        // Verify `toggle minimized` maps to the dedicated ToggleMinimized variant
         let d = dispatch_from_argv(&["dome", "toggle", "minimized"]);
         match d {
-            Dispatch::Action(Action::TogglePicker) => {}
-            other => panic!("expected Action(TogglePicker), got {other:?}"),
+            Dispatch::Action(Action::ToggleMinimized) => {}
+            other => panic!("expected Action(ToggleMinimized), got {other:?}"),
         }
     }
 

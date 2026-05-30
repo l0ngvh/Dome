@@ -1292,7 +1292,7 @@ fn global_max_applies_to_all_windows() {
     hub.sync_config(HubConfig {
         layout: LayoutConfig {
             partition_tree: PartitionTreeConfig {
-                auto_tile: true,
+                automatic_tiling: true,
                 ..default_partition_tree_config_for_tests()
             },
             ..default_layout_for_tests()
@@ -1351,7 +1351,7 @@ fn per_window_max_overrides_global() {
     hub.sync_config(HubConfig {
         layout: LayoutConfig {
             partition_tree: PartitionTreeConfig {
-                auto_tile: true,
+                automatic_tiling: true,
                 ..default_partition_tree_config_for_tests()
             },
             ..default_layout_for_tests()

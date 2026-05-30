@@ -1,4 +1,4 @@
-use crate::config::{LayoutConfig, LayoutKind, MasterStackConfig};
+use crate::config::{LayoutConfig, MasterConfig, Strategy};
 use crate::core::hub::{Hub, HubConfig};
 use crate::core::node::{Dimension, Length, WindowRestrictions};
 use crate::core::strategy::TilingAction;
@@ -8,11 +8,11 @@ use super::{
 };
 use insta::assert_snapshot;
 
-fn layout(active: LayoutKind, ratio: f32, count: usize) -> LayoutConfig {
+fn layout(strategy: Strategy, ratio: f32, count: usize) -> LayoutConfig {
     LayoutConfig {
-        active,
+        strategy,
         partition_tree: default_partition_tree_config_for_tests(),
-        master_stack: MasterStackConfig {
+        master: MasterConfig {
             master_ratio: ratio,
             master_count: count,
         },
@@ -49,7 +49,7 @@ fn sync_config_no_op_when_layout_unchanged() {
 }
 
 #[test]
-fn sync_config_inactive_master_stack_field_change_preserves_tree() {
+fn sync_config_inactive_master_field_change_preserves_tree() {
     let mut hub = setup_hub();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -61,7 +61,7 @@ fn sync_config_inactive_master_stack_field_change_preserves_tree() {
     // Change master-stack params while partition-tree is active.
     hub.sync_config(HubConfig {
         layout: LayoutConfig {
-            master_stack: MasterStackConfig {
+            master: MasterConfig {
                 master_ratio: 0.3,
                 master_count: 2,
             },
@@ -113,7 +113,7 @@ fn sync_config_inactive_master_stack_field_change_preserves_tree() {
 }
 
 #[test]
-fn sync_config_switches_partition_tree_to_master_stack() {
+fn sync_config_switches_partition_tree_to_master() {
     let mut hub = setup_hub();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -121,7 +121,7 @@ fn sync_config_switches_partition_tree_to_master_stack() {
     hub.insert_tiling();
 
     hub.sync_config(HubConfig {
-        layout: layout(LayoutKind::MasterStack, 0.5, 1),
+        layout: layout(Strategy::Master, 0.5, 1),
         ..Default::default()
     });
 
@@ -168,8 +168,8 @@ fn sync_config_switches_partition_tree_to_master_stack() {
 }
 
 #[test]
-fn sync_config_switches_master_stack_to_partition_tree() {
-    let mut hub = setup_hub_with_layout(layout(LayoutKind::MasterStack, 0.5, 1));
+fn sync_config_switches_master_to_partition_tree() {
+    let mut hub = setup_hub_with_layout(layout(Strategy::Master, 0.5, 1));
     hub.insert_tiling();
     hub.insert_tiling();
     hub.insert_tiling();
@@ -273,7 +273,7 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
     ");
 
     hub.sync_config(HubConfig {
-        layout: layout(LayoutKind::MasterStack, 0.5, 1),
+        layout: layout(Strategy::Master, 0.5, 1),
         ..Default::default()
     });
 
@@ -327,7 +327,7 @@ fn sync_config_swap_empty_workspace_no_panic() {
     let mut hub = setup_hub();
     // No windows inserted.
     hub.sync_config(HubConfig {
-        layout: layout(LayoutKind::MasterStack, 0.5, 1),
+        layout: layout(Strategy::Master, 0.5, 1),
         ..Default::default()
     });
 
@@ -363,7 +363,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
     hub.focus_workspace("0");
 
     hub.sync_config(HubConfig {
-        layout: layout(LayoutKind::MasterStack, 0.5, 1),
+        layout: layout(Strategy::Master, 0.5, 1),
         ..Default::default()
     });
 
@@ -508,7 +508,7 @@ fn sync_config_swap_preserves_float_focus() {
     ");
 
     hub.sync_config(HubConfig {
-        layout: layout(LayoutKind::MasterStack, 0.5, 1),
+        layout: layout(Strategy::Master, 0.5, 1),
         ..Default::default()
     });
 

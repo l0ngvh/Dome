@@ -19,7 +19,7 @@ fn sync_config_updates_tab_bar_height() {
             layout: crate::config::LayoutConfig {
                 partition_tree: crate::config::PartitionTreeConfig {
                     tab_bar_height: Length::<Logical>::new(10.0),
-                    auto_tile: true,
+                    automatic_tiling: true,
                 },
                 ..default_layout_for_tests()
             },
@@ -34,7 +34,7 @@ fn sync_config_updates_tab_bar_height() {
         layout: crate::config::LayoutConfig {
             partition_tree: crate::config::PartitionTreeConfig {
                 tab_bar_height: Length::<Logical>::new(10.0),
-                auto_tile: true,
+                automatic_tiling: true,
             },
             ..default_layout_for_tests()
         },
@@ -64,7 +64,7 @@ fn sync_config_recalculates_all_workspaces() {
             layout: crate::config::LayoutConfig {
                 partition_tree: crate::config::PartitionTreeConfig {
                     tab_bar_height: Length::<Logical>::new(10.0),
-                    auto_tile: true,
+                    automatic_tiling: true,
                 },
                 ..default_layout_for_tests()
             },
@@ -84,7 +84,7 @@ fn sync_config_recalculates_all_workspaces() {
         layout: crate::config::LayoutConfig {
             partition_tree: crate::config::PartitionTreeConfig {
                 tab_bar_height: Length::<Logical>::new(5.0),
-                auto_tile: true,
+                automatic_tiling: true,
             },
             ..default_layout_for_tests()
         },

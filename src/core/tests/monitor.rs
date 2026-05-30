@@ -551,7 +551,7 @@ fn monitor_scale_multiplies_config_lengths() {
             layout: crate::config::LayoutConfig {
                 partition_tree: crate::config::PartitionTreeConfig {
                     tab_bar_height: Length::<Logical>::new(20.0),
-                    auto_tile: true,
+                    automatic_tiling: true,
                 },
                 ..default_layout_for_tests()
             },
@@ -619,7 +619,7 @@ fn monitor_scale_multiplies_config_lengths() {
             layout: crate::config::LayoutConfig {
                 partition_tree: crate::config::PartitionTreeConfig {
                     tab_bar_height: Length::<Logical>::new(20.0),
-                    auto_tile: true,
+                    automatic_tiling: true,
                 },
                 ..default_layout_for_tests()
             },
