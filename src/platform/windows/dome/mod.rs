@@ -99,11 +99,9 @@ pub(super) trait CreateOverlay {
     ) -> anyhow::Result<Box<dyn overlay::PickerApi>>;
 }
 
-/// Holds Win32 foreground when Dome has no managed window to focus (empty
-/// workspace, `focus_parent` container-highlight). A dedicated invisible HWND
-/// avoids raising the tiling overlay, which would swallow clicks on managed
-/// windows until the next layout pass pushes it back down.
-pub(super) trait KeyboardSinkApi {
+/// Holds Win32 foreground when Dome has no managed window to focus
+/// (empty workspace, `focus_parent` container-highlight).
+pub(super) trait FocusSinkApi {
     fn focus(&self);
 }
 
@@ -129,7 +127,7 @@ pub(super) struct Dome {
     display: Box<dyn QueryDisplay>,
     tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>>,
     float_overlays: HashMap<WindowId, Box<dyn FloatOverlayApi>>,
-    keyboard_sink: Box<dyn KeyboardSinkApi>,
+    focus_sink: Box<dyn FocusSinkApi>,
     last_focused: Option<WindowId>,
     last_focused_monitor: Option<MonitorId>,
     pending_created: Vec<WindowId>,
@@ -150,7 +148,7 @@ impl Dome {
         taskbar: Rc<dyn ManageTaskbar>,
         overlay_factory: Box<dyn CreateOverlay>,
         display: Box<dyn QueryDisplay>,
-        keyboard_sink: Box<dyn KeyboardSinkApi>,
+        focus_sink: Box<dyn FocusSinkApi>,
     ) -> anyhow::Result<Self> {
         let screens = display.get_all_screens()?;
         anyhow::ensure!(!screens.is_empty(), "No monitors detected");
@@ -220,7 +218,7 @@ impl Dome {
             display,
             tiling_overlays,
             float_overlays: HashMap::new(),
-            keyboard_sink,
+            focus_sink,
             last_focused: None,
             last_focused_monitor: None,
             pending_created: Vec::new(),
@@ -832,7 +830,7 @@ impl Dome {
                     entry.ext.set_foreground_window();
                 }
             } else {
-                self.keyboard_sink.focus();
+                self.focus_sink.focus();
             }
         }
         self.last_focused_monitor = Some(current_monitor);

@@ -18,7 +18,7 @@ use crate::picker::PickerEntry;
 use crate::platform::windows::ScreenInfo;
 use crate::platform::windows::dome::ObservedPosition;
 use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
-use crate::platform::windows::dome::{CreateOverlay, Dome, KeyboardSinkApi, QueryDisplay};
+use crate::platform::windows::dome::{CreateOverlay, Dome, FocusSinkApi, QueryDisplay};
 use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
 
@@ -86,6 +86,7 @@ struct TestEnv {
     last_visible_frame: Rc<Cell<Option<Dimension<Physical>>>>,
     tiling_overlay_update_count: Rc<Cell<u32>>,
     tiling_overlay_clear_count: Rc<Cell<u32>>,
+    tiling_overlay_setwindowpos_count: Rc<Cell<u32>>,
     float_overlay_apply_theme_count: Rc<Cell<u32>>,
     tiling_overlay_apply_theme_count: Rc<Cell<u32>>,
     float_overlay_apply_font_count: Rc<Cell<u32>>,
@@ -115,6 +116,7 @@ impl TestEnv {
         let last_visible_frame = Rc::new(Cell::new(None));
         let tiling_overlay_update_count = Rc::new(Cell::new(0));
         let tiling_overlay_clear_count = Rc::new(Cell::new(0));
+        let tiling_overlay_setwindowpos_count = Rc::new(Cell::new(0));
         let float_overlay_apply_theme_count = Rc::new(Cell::new(0));
         let tiling_overlay_apply_theme_count = Rc::new(Cell::new(0));
         let float_overlay_apply_font_count = Rc::new(Cell::new(0));
@@ -122,15 +124,17 @@ impl TestEnv {
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let picker_loaded_icons = Rc::new(RefCell::new(HashSet::new()));
         let z_model = ZOrderModel::new();
+        let next_float_overlay_id = Rc::new(Cell::new(9000_isize));
 
         let dome = Dome::new(
             config.clone(),
             Rc::new(NoopTaskbar),
-            Box::new(NoopOverlays {
+            Box::new(MockOverlays {
                 overlay_update_count: overlay_update_count.clone(),
                 last_visible_frame: last_visible_frame.clone(),
                 tiling_overlay_update_count: tiling_overlay_update_count.clone(),
                 tiling_overlay_clear_count: tiling_overlay_clear_count.clone(),
+                tiling_overlay_setwindowpos_count: tiling_overlay_setwindowpos_count.clone(),
                 float_overlay_apply_theme_count: float_overlay_apply_theme_count.clone(),
                 tiling_overlay_apply_theme_count: tiling_overlay_apply_theme_count.clone(),
                 float_overlay_apply_font_count: float_overlay_apply_font_count.clone(),
@@ -138,9 +142,10 @@ impl TestEnv {
                 picker_entries: picker_entries.clone(),
                 picker_loaded_icons: picker_loaded_icons.clone(),
                 z_model: z_model.clone(),
+                next_float_overlay_id: next_float_overlay_id.clone(),
             }),
             Box::new(display),
-            Box::new(NoopKeyboardSink {
+            Box::new(NoopFocusSink {
                 focus_count: sink_focus_count.clone(),
             }),
         )
@@ -155,6 +160,7 @@ impl TestEnv {
             last_visible_frame,
             tiling_overlay_update_count,
             tiling_overlay_clear_count,
+            tiling_overlay_setwindowpos_count,
             float_overlay_apply_theme_count,
             tiling_overlay_apply_theme_count,
             float_overlay_apply_font_count,
@@ -351,6 +357,10 @@ impl TestEnv {
         self.tiling_overlay_clear_count.get()
     }
 
+    fn tiling_overlay_setwindowpos_count(&self) -> u32 {
+        self.tiling_overlay_setwindowpos_count.get()
+    }
+
     fn float_overlay_apply_theme_count(&self) -> u32 {
         self.float_overlay_apply_theme_count.get()
     }
@@ -447,14 +457,17 @@ impl ZOrderModel {
         let orig_topmost_pos = stack.topmost.iter().position(|&id| id == hwnd);
         let orig_normal_pos = stack.normal.iter().position(|&id| id == hwnd);
 
+        match z {
+            // Win32 self-reference (SetWindowPos(hwnd, hwnd, ...)) is a no-op.
+            ZOrder::After(other) if other == hwnd => return,
+            _ => {}
+        }
+
         // Remove from both lists
         stack.topmost.retain(|&id| id != hwnd);
         stack.normal.retain(|&id| id != hwnd);
 
         match z {
-            ZOrder::Top => {
-                stack.normal.insert(0, hwnd);
-            }
             ZOrder::After(other) => {
                 if let Some(pos) = stack.normal.iter().position(|&id| id == other) {
                     stack.normal.insert(pos + 1, hwnd);
@@ -464,6 +477,12 @@ impl ZOrderModel {
             }
             ZOrder::Topmost => {
                 stack.topmost.insert(0, hwnd);
+            }
+            ZOrder::NotTopmost => {
+                // HWND_NOTOPMOST: remove from topmost band, prepend to normal
+                // band only if not already there (already removed above).
+                let clamped = orig_normal_pos.unwrap_or(0).min(stack.normal.len());
+                stack.normal.insert(clamped, hwnd);
             }
             ZOrder::Unchanged => {
                 // Re-insert at original position (clamped to list length)
@@ -499,11 +518,39 @@ impl ZOrderModel {
         self.inner.lock().unwrap().normal.clone()
     }
 
+    /// Returns the HWND sitting directly above `hwnd` in the combined z-order
+    /// stack (topmost band first, then normal). Mirrors `GetWindow(GW_HWNDPREV)`.
+    fn window_above(&self, hwnd: HwndId) -> Option<HwndId> {
+        let stack = self.inner.lock().unwrap();
+        let combined: Vec<HwndId> = stack
+            .topmost
+            .iter()
+            .chain(stack.normal.iter())
+            .copied()
+            .collect();
+        let idx = combined.iter().position(|&h| h == hwnd)?;
+        if idx == 0 {
+            None
+        } else {
+            Some(combined[idx - 1])
+        }
+    }
+
     /// Removes a window from both z-order bands. Mirrors Win32 `DestroyWindow`.
     fn remove(&self, hwnd: HwndId) {
         let mut stack = self.inner.lock().unwrap();
         stack.topmost.retain(|&id| id != hwnd);
         stack.normal.retain(|&id| id != hwnd);
+    }
+
+    /// Simulate CreateWindowExW: place a freshly-created HWND at the top of
+    /// the normal z-order band. Models the OS-side birth event; the tiling
+    /// overlay's explicit drop-to-bottom park is applied separately by the
+    /// caller via `move_to_bottom`.
+    fn simulate_create(&self, hwnd: HwndId) {
+        let mut stack = self.inner.lock().unwrap();
+        stack.normal.retain(|&id| id != hwnd);
+        stack.normal.insert(0, hwnd);
     }
 }
 
@@ -532,8 +579,10 @@ impl MockExternalHwnd {
         moves: MoveLog,
         z_model: ZOrderModel,
     ) -> Self {
+        let hwnd_id = HwndId::test(id);
+        z_model.simulate_create(hwnd_id);
         Self {
-            hwnd_id: HwndId::test(id),
+            hwnd_id,
             manageable: true,
             title: Some(title.to_string()),
             process: process.to_string(),
@@ -625,7 +674,7 @@ impl ManageExternalHwnd for MockExternalHwnd {
         let mut z_state = self.z_state.lock().unwrap();
         match z {
             ZOrder::Topmost => *z_state = ZOrderState::Topmost,
-            ZOrder::Top => *z_state = ZOrderState::Normal,
+            ZOrder::NotTopmost => *z_state = ZOrderState::Normal,
             ZOrder::After(_) => *z_state = ZOrderState::Normal,
             ZOrder::Unchanged => {}
         }
@@ -716,23 +765,23 @@ impl ManageTaskbar for NoopTaskbar {
     fn delete_tab(&self, _: HwndId) {}
 }
 
-struct NoopKeyboardSink {
+struct NoopFocusSink {
     focus_count: Rc<Cell<u32>>,
 }
 
-impl KeyboardSinkApi for NoopKeyboardSink {
+impl FocusSinkApi for NoopFocusSink {
     fn focus(&self) {
         self.focus_count.set(self.focus_count.get() + 1);
     }
 }
 
-struct NoopFloatOverlay {
+struct MockFloatOverlay {
     overlay_update_count: Rc<Cell<u32>>,
     last_visible_frame: Rc<Cell<Option<Dimension<Physical>>>>,
     apply_theme_count: Rc<Cell<u32>>,
     apply_font_count: Rc<Cell<u32>>,
 }
-impl FloatOverlayApi for NoopFloatOverlay {
+impl FloatOverlayApi for MockFloatOverlay {
     fn update(
         &mut self,
         wp: &crate::core::FloatWindowPlacement,
@@ -753,27 +802,46 @@ impl FloatOverlayApi for NoopFloatOverlay {
     }
 }
 
-struct NoopTilingOverlay {
+struct MockTilingOverlay {
+    overlay_id: HwndId,
+    z_model: ZOrderModel,
     update_count: Rc<Cell<u32>>,
     clear_count: Rc<Cell<u32>>,
     apply_theme_count: Rc<Cell<u32>>,
     apply_font_count: Rc<Cell<u32>>,
+    setwindowpos_count: Rc<Cell<u32>>,
+    monitor: Dimension,
 }
 
-impl TilingOverlayApi for NoopTilingOverlay {
+impl TilingOverlayApi for MockTilingOverlay {
     fn update(
         &mut self,
-        _: Dimension,
+        monitor: Dimension,
         _: &[crate::core::TilingWindowPlacement],
         _: &[(crate::core::ContainerPlacement, Vec<String>)],
         _scale: f32,
     ) {
+        if self.monitor != monitor {
+            self.monitor = monitor;
+            self.setwindowpos_count
+                .set(self.setwindowpos_count.get() + 1);
+            // Monitor-change branch: mirror production's HWND_BOTTOM park.
+            self.z_model.move_to_bottom(self.overlay_id);
+        }
+        // Same-monitor path: no z-order call. Matches production behavior
+        // where show_tiling's per-window lift maintains the invariant.
         self.update_count.set(self.update_count.get() + 1);
     }
     fn clear(&mut self) {
         self.clear_count.set(self.clear_count.get() + 1);
     }
     fn set_config(&mut self, _: Config) {}
+    fn window_above(&self) -> Option<HwndId> {
+        self.z_model.window_above(self.overlay_id)
+    }
+    fn demote_below(&mut self, managed: HwndId) {
+        self.z_model.apply(self.overlay_id, ZOrder::After(managed));
+    }
     fn apply_theme(&mut self, _flavor: crate::theme::Flavor) {
         self.apply_theme_count.set(self.apply_theme_count.get() + 1);
     }
@@ -832,11 +900,12 @@ impl PickerApi for NoopPicker {
     fn rerender(&mut self) {}
 }
 
-struct NoopOverlays {
+struct MockOverlays {
     overlay_update_count: Rc<Cell<u32>>,
     last_visible_frame: Rc<Cell<Option<Dimension<Physical>>>>,
     tiling_overlay_update_count: Rc<Cell<u32>>,
     tiling_overlay_clear_count: Rc<Cell<u32>>,
+    tiling_overlay_setwindowpos_count: Rc<Cell<u32>>,
     float_overlay_apply_theme_count: Rc<Cell<u32>>,
     tiling_overlay_apply_theme_count: Rc<Cell<u32>>,
     float_overlay_apply_font_count: Rc<Cell<u32>>,
@@ -844,24 +913,29 @@ struct NoopOverlays {
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
     z_model: ZOrderModel,
+    next_float_overlay_id: Rc<Cell<isize>>,
 }
 
-impl CreateOverlay for NoopOverlays {
+impl CreateOverlay for MockOverlays {
     fn create_tiling_overlay(
         &self,
         _: Config,
         _monitor: Dimension,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
-        // Seed the overlay at the top of the normal band, mirroring Win32
-        // CreateWindowExW. Subsequent tiling windows placed with ZOrder::Top
-        // push it down.
-        self.z_model.apply(HwndId::test(9999), ZOrder::Top);
-        Ok(Box::new(NoopTilingOverlay {
+        // Mirror production: CreateWindowExW seeds at top of normal band, then
+        // we explicitly drop the overlay to HWND_BOTTOM.
+        self.z_model.simulate_create(HwndId::test(9999));
+        self.z_model.move_to_bottom(HwndId::test(9999));
+        Ok(Box::new(MockTilingOverlay {
+            overlay_id: HwndId::test(9999),
+            z_model: self.z_model.clone(),
             update_count: self.tiling_overlay_update_count.clone(),
             clear_count: self.tiling_overlay_clear_count.clone(),
             apply_theme_count: self.tiling_overlay_apply_theme_count.clone(),
             apply_font_count: self.tiling_overlay_apply_font_count.clone(),
+            setwindowpos_count: self.tiling_overlay_setwindowpos_count.clone(),
+            monitor: Dimension::default(),
         }))
     }
     fn create_float_overlay(
@@ -871,7 +945,9 @@ impl CreateOverlay for NoopOverlays {
         _scale: f32,
         _visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
-        Ok(Box::new(NoopFloatOverlay {
+        let id = self.next_float_overlay_id.get();
+        self.next_float_overlay_id.set(id + 1);
+        Ok(Box::new(MockFloatOverlay {
             overlay_update_count: self.overlay_update_count.clone(),
             last_visible_frame: self.last_visible_frame.clone(),
             apply_theme_count: self.float_overlay_apply_theme_count.clone(),

@@ -54,7 +54,7 @@ use dome::overlay::{
     FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, WgpuOverlayFactory, tiling_overlay_wnd_proc,
 };
 use dome::picker::{PICKER_OVERLAY_CLASS, picker_wnd_proc};
-use dome::{Dome, HubEvent, KeyboardSinkApi};
+use dome::{Dome, FocusSinkApi, HubEvent};
 use event_listener::install_event_hooks;
 use external::HwndId;
 
@@ -150,7 +150,7 @@ pub(super) struct AppWindowSink {
     hwnd: HWND,
 }
 
-impl KeyboardSinkApi for AppWindowSink {
+impl FocusSinkApi for AppWindowSink {
     fn focus(&self) {
         if unsafe { GetForegroundWindow() } == self.hwnd {
             return;
@@ -180,7 +180,7 @@ impl KeyboardSinkApi for AppWindowSink {
         ];
         unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
         if !unsafe { SetForegroundWindow(self.hwnd) }.as_bool() {
-            tracing::warn!("SetForegroundWindow failed for keyboard sink");
+            tracing::warn!("SetForegroundWindow failed for focus sink");
         }
     }
 }
@@ -490,8 +490,9 @@ fn run_dome(config: Config, main_thread_id: u32, keymap_state: Arc<RwLock<Keymap
     };
     unsafe { RegisterClassW(&wc_picker) };
 
-    // The HWND serves as a keyboard sink (holds foreground when no managed window
-    // is focused) and a WndProc host (handles WM_DISPLAYCHANGE).
+    // The HWND serves as a focus sink (holds foreground when no managed window
+    // is focused) and a WndProc host (handles WM_DISPLAYCHANGE). With the tiling
+    // overlay parked at HWND_BOTTOM, this sink is the only fallback foreground target.
     let app_hwnd = unsafe {
         CreateWindowExW(
             WS_EX_TOOLWINDOW,

@@ -1,5 +1,5 @@
 use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::WindowsAndMessaging::{HWND_TOP, HWND_TOPMOST};
+use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
 use crate::core::{Dimension, Physical};
 
@@ -41,7 +41,10 @@ impl HwndId {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ZOrder {
     Topmost,
-    Top,
+    /// Clears WS_EX_TOPMOST, dropping the window out of the topmost band.
+    /// Placing self below a non-topmost reference does not, by itself, clear
+    /// the flag; only HWND_NOTOPMOST and HWND_BOTTOM are documented to do so.
+    NotTopmost,
     After(HwndId),
     Unchanged,
 }
@@ -50,7 +53,7 @@ impl From<ZOrder> for Option<HWND> {
     fn from(z: ZOrder) -> Self {
         match z {
             ZOrder::Topmost => Some(HWND_TOPMOST),
-            ZOrder::Top => Some(HWND_TOP),
+            ZOrder::NotTopmost => Some(HWND_NOTOPMOST),
             ZOrder::After(id) => Some(HWND(id.0 as *mut _)),
             ZOrder::Unchanged => None,
         }

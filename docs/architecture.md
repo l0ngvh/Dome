@@ -311,8 +311,9 @@ Switching to an empty workspace causes a similar problem from the opposite
 direction. Focus stays on whichever window held it before the switch, which
 after parking sits offscreen in another workspace, so a stray keystroke can
 land somewhere the user can no longer see. The shell handles this with a
-dedicated keyboard sink, a small offscreen window whose only job is to absorb
-foreground.
+dedicated focus sink, a small offscreen window that absorbs Win32 foreground
+when no managed window is eligible (empty workspace, `focus_parent`
+container-highlight).
 
 ### Fullscreen windows {#windows-fullscreen-windows}
 
@@ -364,12 +365,20 @@ shell batches tiling overlays into one overlay window per monitor, while each
 float gets its own.
 
 Click handling has to stay clear of managed windows, and Windows has no
-per-region click-through either. With no equivalent of `NSNormalWindowLevel -
-1`, the shell pins each overlay's z-order just below the windows it decorates
-on spawn. Float overlays sit inside the topmost band so they stay just below
-their float.
+per-region click-through either. The tiling overlay parks at `HWND_BOTTOM`
+once at creation. Tiling windows that re-enter the visible band (from
+Float, Offscreen, Minimized, or UserMinimized) consult `window_above()` on
+the overlay (a wrapper around `GetWindow(GW_HWNDPREV)`) and call
+`set_position(ZOrder::After(reference), dim)` to slot themselves above the
+overlay. The Float arm first issues `set_position(ZOrder::NotTopmost, dim)`
+to clear `WS_EX_TOPMOST`; placing self below a non-topmost reference does
+not, by itself, drop the topmost flag. The fallback
+`overlay.demote_below(managed)` handles the rare case where the overlay has
+been promoted to the top of z-order with nothing above it. Float overlays
+sit inside the topmost band so they stay just below their float.
 
-The pinning is also the reason the shell uses a separate keyboard sink rather
-than activating the tiling overlay the way the macOS shell does (see [Virtual
-workspaces](#windows-virtual-workspaces)). Activating the overlay would raise
-it above the managed windows and break the layering.
+Because the tiling overlay sits at the bottom of z-order, it shouldn't
+receive activation or absorb keyboard focus the way the macOS overlay does
+(see [Virtual workspaces](#windows-virtual-workspaces)). A separate focus
+sink window serves that role, holding Win32 foreground whenever no managed
+window is eligible.

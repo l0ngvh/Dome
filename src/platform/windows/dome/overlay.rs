@@ -21,10 +21,11 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetClientRect,
-    GetWindowLongPtrW, PostThreadMessageW, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE, SWP_NOREDRAW,
-    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_DPICHANGED,
-    WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WS_EX_NOACTIVATE,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GW_HWNDPREV, GWLP_USERDATA, GetClientRect,
+    GetWindow, GetWindowLongPtrW, HWND_BOTTOM, MA_NOACTIVATE, PostThreadMessageW, SW_HIDE,
+    SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE, SWP_NOZORDER,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_PAINT, WS_EX_NOACTIVATE,
     WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Interface, PCWSTR};
@@ -360,9 +361,11 @@ impl TilingOverlay {
         // Monitor dimensions are already physical under the agnostic-core
         // design, so this is a cast-only conversion (same as update()).
         let (x_phys, y_phys, init_w, init_h) = monitor.to_surface_size();
+        // WS_EX_NOACTIVATE prevents DefWindowProcW from returning MA_ACTIVATE on clicks,
+        // stopping the overlay from being raised above managed windows by user input.
         let mut window = OwnedHwnd::new(
             TILING_OVERLAY_CLASS,
-            WS_EX_TOOLWINDOW,
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             x_phys,
             y_phys,
             init_w,
@@ -371,6 +374,22 @@ impl TilingOverlay {
         let hwnd = window.hwnd();
         let renderer = Renderer::new(instance, device, queue, hwnd, init_w, init_h, flavor, font)?;
         window.show();
+        // Park the overlay at HWND_BOTTOM immediately after creation. Managed
+        // windows created after this (via CreateWindowExW) naturally land above
+        // it. Z-order is maintained thereafter by show_tiling's per-window lift
+        // on transitions into the visible band.
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                Some(HWND_BOTTOM),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            .ok();
+        }
         let mut boxed = Box::new(Self {
             renderer,
             events: Vec::new(),
@@ -459,17 +478,20 @@ impl TilingOverlayApi for TilingOverlay {
             unsafe {
                 SetWindowPos(
                     self.window.hwnd(),
-                    None,
+                    Some(HWND_BOTTOM),
                     x_phys,
                     y_phys,
                     w_phys as i32,
                     h_phys as i32,
-                    SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOZORDER,
+                    SWP_NOACTIVATE | SWP_NOREDRAW,
                 )
                 .ok();
             }
             self.window.show();
         }
+        // Same-monitor path: no SetWindowPos. Z-order is restored by the
+        // per-window lift in show_tiling whenever a tiling window enters the
+        // visible band from Float, Offscreen, Minimized, or UserMinimized.
 
         // All state assignments must precede rerender(), which reads cached
         // physical dimensions.
@@ -492,6 +514,27 @@ impl TilingOverlayApi for TilingOverlay {
 
     fn set_config(&mut self, config: Config) {
         self.config = config;
+    }
+
+    fn window_above(&self) -> Option<HwndId> {
+        let prev = unsafe { GetWindow(self.window.hwnd(), GW_HWNDPREV) }.ok();
+        prev.map(HwndId::from)
+    }
+
+    fn demote_below(&mut self, managed: HwndId) {
+        let target: HWND = managed.into();
+        unsafe {
+            SetWindowPos(
+                self.window.hwnd(),
+                Some(target),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            .ok();
+        }
     }
 
     fn apply_theme(&mut self, flavor: Flavor) {
@@ -545,6 +588,13 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
         unsafe { *out = crate::platform::windows::wm_getdpiscaledsize_reply(size) };
         return LRESULT(1);
     }
+    // Explicit MA_NOACTIVATE closes the "active window tracking" (hover-to-activate)
+    // accessibility bypass: that path dispatches WM_MOUSEACTIVATE and honours the wnd-proc
+    // return regardless of WS_EX_NOACTIVATE. Placed before the USERDATA read because
+    // WM_MOUSEACTIVATE can arrive during window creation before USERDATA is written.
+    if msg == WM_MOUSEACTIVATE {
+        return LRESULT(MA_NOACTIVATE as isize);
+    }
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut TilingOverlay;
     if ptr.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
@@ -559,6 +609,10 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
                 .push(egui::Event::PointerMoved(egui::pos2(x, y)));
             LRESULT(0)
         }
+        // Forward the click to egui so workspace-tab interactions register. The
+        // overlay's z-order is maintained by show_tiling's per-window lift on
+        // transitions into the visible band; the wnd-proc no longer self-heals
+        // z-order.
         WM_LBUTTONDOWN => {
             let x = (lparam.0 & 0xFFFF) as i16 as f32;
             let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
@@ -568,6 +622,7 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
                 pressed: true,
                 modifiers: egui::Modifiers::NONE,
             });
+            overlay.rerender();
             LRESULT(0)
         }
         WM_LBUTTONUP => {
@@ -613,6 +668,13 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     );
     fn clear(&mut self);
     fn set_config(&mut self, config: Config);
+    /// Returns the HWND sitting directly above this overlay in z-order.
+    /// Wraps `GetWindow(GW_HWNDPREV)` in production; used by `show_tiling`
+    /// to slot tiling windows above the overlay on band transitions.
+    fn window_above(&self) -> Option<HwndId>;
+    /// Demotes the overlay below `managed` via a z-only `SetWindowPos`.
+    /// Fallback for when `window_above()` returns None (overlay at top).
+    fn demote_below(&mut self, managed: HwndId);
     // &mut self keeps the receiver consistent with the other trait
     // methods; apply_theme only needs &self on the underlying Renderer.
     fn apply_theme(&mut self, flavor: Flavor);
@@ -634,7 +696,7 @@ pub(in crate::platform::windows) trait PickerApi {
 pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =
     windows::core::w!("DomeFloatOverlay");
 
-struct FloatOverlay {
+pub(in crate::platform::windows) struct FloatOverlay {
     renderer: Renderer,
     // Physical-pixel cache for the last `SetWindowPos` / `renderer.resize`.
     // Asserted positive on construction and update (zero would be a logic bug).
@@ -658,7 +720,7 @@ impl FloatOverlay {
         y: i32,
         width_phys: u32,
         height_phys: u32,
-    ) -> anyhow::Result<Self> {
+    ) -> anyhow::Result<Box<Self>> {
         let window = OwnedHwnd::new(
             FLOAT_OVERLAY_CLASS,
             WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -667,22 +729,24 @@ impl FloatOverlay {
             width_phys,
             height_phys,
         )?;
+        let hwnd = window.hwnd();
         let renderer = Renderer::new(
             instance,
             device,
             queue,
-            window.hwnd(),
+            hwnd,
             width_phys,
             height_phys,
             flavor,
             font,
         )?;
-        Ok(Self {
+        let boxed = Box::new(Self {
             renderer,
             width_phys,
             height_phys,
             window,
-        })
+        });
+        Ok(boxed)
     }
 }
 
@@ -795,7 +859,7 @@ impl CreateOverlay for WgpuOverlayFactory {
         visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         let (x_phys, y_phys, w_phys, h_phys) = visible_frame.to_surface_size();
-        Ok(Box::new(FloatOverlay::new(
+        Ok(FloatOverlay::new(
             &self.instance,
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
@@ -805,7 +869,7 @@ impl CreateOverlay for WgpuOverlayFactory {
             y_phys,
             w_phys,
             h_phys,
-        )?))
+        )?)
     }
     fn create_picker(
         &self,

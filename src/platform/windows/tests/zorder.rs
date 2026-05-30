@@ -273,3 +273,84 @@ fn monitor_switch_issues_set_position() {
         "cross-monitor move should trigger set_position"
     );
 }
+
+/// New tiling overlay parks at the bottom of the normal band on creation,
+/// so the next CreateWindowExW for a managed window naturally sits above it.
+#[test]
+fn tiling_overlay_seeded_at_bottom() {
+    let env = TestEnv::new();
+    assert_eq!(env.tiling_z_order(), vec![env.overlay_id()]);
+}
+
+/// Float->Tiling emits ZOrder::NotTopmost to clear WS_EX_TOPMOST, then
+/// positions the window above the overlay reference. The tiling-above-overlay
+/// invariant is restored by the per-window lift in show_tiling.
+#[test]
+fn unfloat_drops_window_from_topmost_band() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    // w2 is focused (last added). Float it so it enters the topmost band.
+    env.run_actions("toggle float");
+    assert!(w2.is_topmost(), "floated window must be in topmost band");
+
+    // Unfloat w2 back to tiling.
+    env.run_actions("toggle float");
+
+    // w2 must have left the topmost band.
+    assert!(
+        !w2.is_topmost(),
+        "unfloated window must leave the topmost band"
+    );
+    // Both tiling windows sit in the normal band above the overlay.
+    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2)]);
+}
+
+/// After the initial layout pass seeds all windows above the overlay,
+/// a second apply_layout with identical targets must not issue any
+/// SetWindowPos on the overlay (no per-pass demote).
+#[test]
+fn steady_state_apply_layout_does_not_touch_overlay_zorder() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1);
+    env.add_window(w2);
+    let before = env.tiling_overlay_setwindowpos_count();
+    env.dome.apply_layout();
+    let after = env.tiling_overlay_setwindowpos_count();
+    assert_eq!(
+        after, before,
+        "second apply_layout must not reorder the overlay"
+    );
+}
+
+/// When window_above() returns None (overlay has been promoted to the top
+/// with nothing above it), show_tiling's fallback path demotes the overlay
+/// below the managed window via demote_below.
+#[test]
+fn lift_falls_back_when_overlay_at_top() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    env.add_window(w1.clone());
+    // Corrupt overlay to topmost band so window_above() returns None.
+    let overlay_id = env.overlay_id();
+    env.z_model.apply(overlay_id, ZOrder::Topmost);
+    // Drive a workspace round-trip: switch away parks w1 offscreen, switch
+    // back triggers show_tiling's lift on the Offscreen->Tiling transition.
+    env.run_actions("focus workspace 1");
+    env.run_actions("focus workspace 0");
+    let stack = env.z_model.normal_stack();
+    assert_eq!(
+        stack.last(),
+        Some(&overlay_id),
+        "overlay must end up at the bottom of the normal band via demote_below fallback"
+    );
+    assert!(
+        stack.contains(&w1.hwnd_id),
+        "w1 must be in the normal band above the overlay"
+    );
+}

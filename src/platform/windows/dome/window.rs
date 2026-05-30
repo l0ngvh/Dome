@@ -167,56 +167,117 @@ impl Dome {
         wp: &TilingWindowPlacement,
         monitor: MonitorId,
     ) {
-        // Hub delivers frames in the OS-native unit (physical pixels on Windows).
+        // Hub delivers frames in physical pixels on Windows.
         let border = self.physical_border(monitor);
+
+        let overlay = self
+            .tiling_overlays
+            .get_mut(&monitor)
+            .expect("tiling overlay exists for monitor");
+        let above = overlay.window_above();
+
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
         let content = apply_inset(wp.frame, border);
         let new_target = content.round();
 
-        let (z, prev_actual) = match entry.state {
+        let tiling_state = |actual: Dimension<Physical>| {
+            WindowState::Positioned(PositionedState::Tiling(DriftState {
+                target: new_target,
+                actual,
+                retries: 0,
+                monitor,
+            }))
+        };
+
+        match entry.state {
             WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {
                 debug_assert!(false, "show_tiling called on fullscreen window {id}");
-                return;
             }
-            // Stable: same monitor, same target. No set_position needed.
-            WindowState::Positioned(PositionedState::Tiling(d))
-                if d.monitor == monitor && d.target == new_target =>
-            {
-                return;
+            WindowState::Positioned(PositionedState::Tiling(d)) => {
+                if d.monitor != monitor {
+                    // Cross-monitor: window is re-entering a different overlay's
+                    // monitor. Restore first if it was iconified externally.
+                    if entry.ext.is_iconic() {
+                        entry.ext.show_cmd(ShowCmd::Restore);
+                    }
+                    match above {
+                        Some(prev) => {
+                            entry.ext.set_position(ZOrder::After(prev), new_target);
+                            entry.state = tiling_state(d.actual);
+                        }
+                        None => {
+                            entry.ext.set_position(ZOrder::Unchanged, new_target);
+                            let id = entry.ext.id();
+                            entry.state = tiling_state(d.actual);
+                            overlay.demote_below(id);
+                        }
+                    }
+                } else if d.target != new_target {
+                    // Same-monitor drift: reposition without touching z-order.
+                    entry.ext.set_position(ZOrder::Unchanged, new_target);
+                    entry.state = tiling_state(d.actual);
+                }
+                // else: stable on the same monitor at the same target, no-op.
             }
-            // Same monitor, target drifted: reposition without raising.
-            WindowState::Positioned(PositionedState::Tiling(d)) if d.monitor == monitor => {
-                (ZOrder::Unchanged, d.actual)
-            }
-            // New window, restored from Minimized/Offscreen, Float->Tiling, or
-            // cross-monitor Tiling: raise to Top above the overlay.
             WindowState::Minimized | WindowState::UserMinimized => {
                 entry.ext.show_cmd(ShowCmd::Restore);
-                (ZOrder::Top, new_target)
+                match above {
+                    Some(prev) => {
+                        entry.ext.set_position(ZOrder::After(prev), new_target);
+                        entry.state = tiling_state(new_target);
+                    }
+                    None => {
+                        entry.ext.set_position(ZOrder::Unchanged, new_target);
+                        let id = entry.ext.id();
+                        entry.state = tiling_state(new_target);
+                        overlay.demote_below(id);
+                    }
+                }
             }
-            WindowState::Positioned(ps) => {
+            WindowState::Positioned(PositionedState::Float(fp)) => {
                 if entry.ext.is_iconic() {
                     entry.ext.show_cmd(ShowCmd::Restore);
                 }
-                let prev = match ps {
-                    PositionedState::Tiling(d) => d.actual,
-                    // Post-sync: fp.target is the last observed rect
-                    PositionedState::Float(fp) => fp.target,
-                    PositionedState::Offscreen { actual, .. } => actual,
-                };
-                (ZOrder::Top, prev)
+                // Two-step exit from the topmost band. Placing self below a
+                // non-topmost reference does not, by itself, clear WS_EX_TOPMOST;
+                // only HWND_NOTOPMOST and HWND_BOTTOM are documented to drop the
+                // flag. NotTopmost first to escape the band, then a second call
+                // to position above the overlay reference.
+                entry.ext.set_position(ZOrder::NotTopmost, new_target);
+                match above {
+                    Some(prev) => {
+                        entry.ext.set_position(ZOrder::After(prev), new_target);
+                        entry.state = tiling_state(fp.target);
+                    }
+                    None => {
+                        // NotTopmost above already wrote geometry; just park
+                        // the overlay below self.
+                        let id = entry.ext.id();
+                        entry.state = tiling_state(fp.target);
+                        overlay.demote_below(id);
+                    }
+                }
             }
-        };
-
-        entry.ext.set_position(z, new_target);
-        entry.state = WindowState::Positioned(PositionedState::Tiling(DriftState {
-            target: new_target,
-            actual: prev_actual,
-            retries: 0,
-            monitor,
-        }));
+            WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => {
+                if entry.ext.is_iconic() {
+                    entry.ext.show_cmd(ShowCmd::Restore);
+                }
+                match above {
+                    Some(prev) => {
+                        entry.ext.set_position(ZOrder::After(prev), new_target);
+                        entry.state = tiling_state(actual);
+                    }
+                    None => {
+                        entry.ext.set_position(ZOrder::Unchanged, new_target);
+                        let id = entry.ext.id();
+                        entry.state = tiling_state(actual);
+                        overlay.demote_below(id);
+                    }
+                }
+            }
+        }
     }
 
     pub(super) fn show_fullscreen_window(
@@ -328,6 +389,7 @@ impl Dome {
             WindowState::FullscreenExclusive | WindowState::UserMinimized => {}
             WindowState::FullscreenBorderless | WindowState::Minimized => {
                 if matches!(entry.state, WindowState::Minimized) {
+                    tracing::trace!(%id, "Previously-minimized borderless-fullscreen window reappeared");
                     entry.ext.show_cmd(ShowCmd::Restore);
                 }
                 entry.state = WindowState::Positioned(PositionedState::Offscreen {
@@ -343,6 +405,7 @@ impl Dome {
                     if drift.retries > MAX_DRIFT_RETRIES {
                         tracing::debug!("Drift retries exhausted, giving up");
                     } else {
+                        tracing::trace!(%id, target = ?drift.target, actual = ?drift.actual, retries = drift.retries, "window drifted, correcting");
                         entry.ext.set_position(ZOrder::Unchanged, drift.target);
                     }
                 }
