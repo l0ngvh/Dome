@@ -16,7 +16,7 @@ fn single_window_fills_screen() {
     env.add_window(w1.clone());
     assert_h_tiled(
         &[w1.get_dim()],
-        default_screen().dimension,
+        default_monitor().dimension,
         env.config.border_size,
     );
 }
@@ -42,7 +42,7 @@ fn two_windows_split_screen() {
     env.add_window(w2.clone());
     assert_h_tiled(
         &[w1.get_dim(), w2.get_dim()],
-        default_screen().dimension,
+        default_monitor().dimension,
         env.config.border_size,
     );
 }
@@ -78,7 +78,7 @@ fn three_windows_split_screen() {
     env.add_window(w3.clone());
     assert_h_tiled(
         &[w1.get_dim(), w2.get_dim(), w3.get_dim()],
-        default_screen().dimension,
+        default_monitor().dimension,
         env.config.border_size,
     );
 }
@@ -107,7 +107,7 @@ fn positions_are_rounded_not_truncated() {
         env.add_window(w.clone());
     }
     let dims: Vec<_> = wins.iter().map(|w| w.get_dim()).collect();
-    assert_h_tiled(&dims, default_screen().dimension, env.config.border_size);
+    assert_h_tiled(&dims, default_monitor().dimension, env.config.border_size);
 }
 
 #[test]
@@ -247,10 +247,10 @@ fn float_move_writes_core_and_does_not_correct() {
 // pass physical-native frames from Hub directly to SetWindowPos. Border inset
 // uses `config.border_size * monitor.scale` (config-to-physical scaling).
 
-fn scaled_screen(scale: f32) -> ScreenInfo {
-    // ScreenInfo.dimension is physical pixels. At non-1.0 scales the physical
+fn scaled_monitor(scale: f32) -> MonitorInfo {
+    // MonitorInfo.dimension is physical pixels. At non-1.0 scales the physical
     // extent is the logical resolution multiplied by scale.
-    ScreenInfo {
+    MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
         dimension: Dimension::new(
@@ -266,7 +266,7 @@ fn scaled_screen(scale: f32) -> ScreenInfo {
 
 #[test]
 fn show_tiling_places_at_100pct() {
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![scaled_screen(1.0)]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![scaled_monitor(1.0)]);
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
     let border = Length::new(env.config.border_size);
@@ -280,7 +280,7 @@ fn show_tiling_places_at_100pct() {
 
 #[test]
 fn show_tiling_places_at_150pct() {
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![scaled_screen(1.5)]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![scaled_monitor(1.5)]);
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
     let border = Length::new(env.config.border_size);
@@ -297,7 +297,7 @@ fn show_tiling_places_at_150pct() {
 
 #[test]
 fn show_tiling_places_at_200pct_offset_monitor() {
-    let primary = ScreenInfo {
+    let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
         dimension: Dimension::new(
@@ -310,7 +310,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
         scale: 1.0,
     };
     // Physical dimensions at 2.0x: 2560*2=5120, 1440*2=2880, origin 1920
-    let secondary = ScreenInfo {
+    let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
         dimension: Dimension::new(
@@ -322,7 +322,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
         is_primary: false,
         scale: 2.0,
     };
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![primary, secondary]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![primary, secondary]);
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
     // Move to the secondary monitor
@@ -343,7 +343,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
 
 #[test]
 fn show_float_places_at_125pct() {
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![scaled_screen(1.25)]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![scaled_monitor(1.25)]);
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
     env.run_actions("toggle float");
@@ -379,7 +379,7 @@ fn show_float_places_at_125pct() {
 
 #[test]
 fn show_fullscreen_window_places_at_175pct() {
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![scaled_screen(1.75)]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![scaled_monitor(1.75)]);
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
 
@@ -407,7 +407,7 @@ fn show_fullscreen_window_places_at_175pct() {
 /// Under agnostic-core, no conversion occurs, so this is a pure identity check.
 #[test]
 fn float_round_trip_converges_at_125pct() {
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![scaled_screen(1.25)]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![scaled_monitor(1.25)]);
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
     env.run_actions("toggle float");
@@ -459,7 +459,7 @@ fn float_round_trip_converges_at_125pct() {
 
 #[test]
 fn window_drifted_float_ignores_unknown_monitor_handle() {
-    let primary = ScreenInfo {
+    let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
         dimension: Dimension::new(
@@ -471,7 +471,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
         is_primary: true,
         scale: 1.0,
     };
-    let secondary = ScreenInfo {
+    let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
         dimension: Dimension::new(
@@ -483,7 +483,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
         is_primary: false,
         scale: 2.0,
     };
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![primary, secondary]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![primary, secondary]);
     let win = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(win.clone());
     env.run_actions("toggle float");
@@ -521,7 +521,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
 
 #[test]
 fn monitor_dpi_changed_reruns_layout_with_new_scale() {
-    let screen = ScreenInfo {
+    let monitor = MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
         dimension: Dimension::new(
@@ -535,7 +535,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     };
     let mut config = Config::default();
     config.layout.partition_tree.tab_bar_height = Length::<Logical>::new(30.0);
-    let mut env = TestEnv::new_with_screens(config, vec![screen]);
+    let mut env = TestEnv::new_with_monitors(config, vec![monitor]);
     let win = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(win.clone());
     // Put into a tabbed container so tab_bar_height participates in layout
@@ -567,7 +567,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
 
 #[test]
 fn window_min_size_constraint_on_high_dpi_monitor() {
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![scaled_screen(2.0)]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![scaled_monitor(2.0)]);
     let w1 = Arc::new(
         MockExternalHwnd::with_title(
             1,
@@ -598,7 +598,7 @@ fn window_min_size_constraint_on_high_dpi_monitor() {
 #[test]
 fn float_move_monitor_same_dpi_preserves_content_rect() {
     let mut env =
-        TestEnv::new_with_screens(Config::default(), vec![default_screen(), second_screen()]);
+        TestEnv::new_with_monitors(Config::default(), vec![default_monitor(), second_monitor()]);
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
     env.run_actions("toggle float");
@@ -652,7 +652,7 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
 
 #[test]
 fn float_move_monitor_different_dpi_rescales_border() {
-    let primary = ScreenInfo {
+    let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
         dimension: Dimension::new(
@@ -664,7 +664,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
         is_primary: true,
         scale: 1.0,
     };
-    let secondary = ScreenInfo {
+    let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
         dimension: Dimension::new(
@@ -676,7 +676,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
         is_primary: false,
         scale: 2.0,
     };
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![primary, secondary]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![primary, secondary]);
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
     env.run_actions("toggle float");
@@ -722,7 +722,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
 
 #[test]
 fn dome_new_assigns_per_monitor_scale() {
-    let primary = ScreenInfo {
+    let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
         dimension: Dimension::new(
@@ -734,7 +734,7 @@ fn dome_new_assigns_per_monitor_scale() {
         is_primary: true,
         scale: 1.5,
     };
-    let secondary = ScreenInfo {
+    let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
         dimension: Dimension::new(
@@ -746,7 +746,7 @@ fn dome_new_assigns_per_monitor_scale() {
         is_primary: false,
         scale: 2.0,
     };
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![primary, secondary]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![primary, secondary]);
     let border = Length::new(env.config.border_size);
 
     // Verify primary monitor uses 1.5x scale via window placement.

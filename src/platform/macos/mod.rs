@@ -123,8 +123,8 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
         }
     })?;
 
-    let screens = get_all_screens(mtm);
-    if screens.is_empty() {
+    let monitors = get_all_monitors(mtm);
+    if monitors.is_empty() {
         return Err(anyhow::anyhow!("No monitors detected"));
     }
 
@@ -137,7 +137,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     let hub_thread = thread::spawn(move || {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let dome = Dome::new(&screens, hub_config, Box::new(sender));
+            let dome = Dome::new(&monitors, hub_config, Box::new(sender));
             event_loop::run_dome(dome, event_rx, keymap_state);
         }))
         .ok();
@@ -191,7 +191,7 @@ fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
         .unwrap_or(0)
 }
 
-fn get_all_screens(mtm: MainThreadMarker) -> Vec<MonitorInfo> {
+fn get_all_monitors(mtm: MainThreadMarker) -> Vec<MonitorInfo> {
     let primary_id = CGMainDisplayID();
 
     NSScreen::screens(mtm)

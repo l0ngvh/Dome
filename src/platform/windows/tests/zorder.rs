@@ -257,7 +257,7 @@ fn stable_windows_skip_set_position() {
 #[test]
 fn monitor_switch_issues_set_position() {
     let mut env = TestEnv::new();
-    env.add_screen(second_screen());
+    env.add_monitor(second_monitor());
     let w1 = env.spawn_window(1, "App1", "app1.exe");
     env.add_window(w1.clone());
 

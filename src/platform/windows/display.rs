@@ -11,13 +11,13 @@ use crate::platform::windows::dome::QueryDisplay;
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
-use super::ScreenInfo;
+use super::MonitorInfo;
 
 pub(super) struct Win32Display;
 
 impl QueryDisplay for Win32Display {
-    fn get_all_screens(&self) -> anyhow::Result<Vec<ScreenInfo>> {
-        get_all_screens()
+    fn get_all_monitors(&self) -> anyhow::Result<Vec<MonitorInfo>> {
+        get_all_monitors()
     }
 
     fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId> {
@@ -29,7 +29,7 @@ impl QueryDisplay for Win32Display {
     }
 }
 
-fn get_all_screens() -> anyhow::Result<Vec<ScreenInfo>> {
+fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
     let mut monitors = Vec::new();
 
     unsafe extern "system" fn enum_proc(
@@ -38,7 +38,7 @@ fn get_all_screens() -> anyhow::Result<Vec<ScreenInfo>> {
         _rect: *mut RECT,
         lparam: LPARAM,
     ) -> BOOL {
-        let monitors = unsafe { &mut *(lparam.0 as *mut Vec<ScreenInfo>) };
+        let monitors = unsafe { &mut *(lparam.0 as *mut Vec<MonitorInfo>) };
         let mut info = MONITORINFOEXW {
             monitorInfo: windows::Win32::Graphics::Gdi::MONITORINFO {
                 cbSize: size_of::<MONITORINFOEXW>() as u32,
@@ -60,7 +60,7 @@ fn get_all_screens() -> anyhow::Result<Vec<ScreenInfo>> {
 
             let scale = scale_for_monitor(hmonitor);
 
-            monitors.push(ScreenInfo {
+            monitors.push(MonitorInfo {
                 handle: hmonitor.0 as isize,
                 name,
                 dimension: handle::rect_to_dimension(rc),

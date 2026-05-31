@@ -112,16 +112,16 @@ impl Dome {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
                 self.place_fullscreen_window(*window_id, mp.monitor_id);
-                let screen = &self.monitor_registry.get_entry(mp.monitor_id).screen;
+                let info = &self.monitor_registry.get_entry(mp.monitor_id).info;
                 (
                     MonitorTilingData {
                         monitor_id: mp.monitor_id,
-                        monitor_dim: screen.dimension,
+                        monitor_dim: info.dimension,
                         cocoa_frame: dimension_to_ns_rect_cocoa(
                             Length::new(self.primary_full_height),
-                            screen.dimension,
+                            info.dimension,
                         ),
-                        scale: screen.scale,
+                        scale: info.scale,
                         windows: Vec::new(),
                         containers: Vec::new(),
                     },
@@ -135,9 +135,9 @@ impl Dome {
             } => {
                 let border_size = Length::<Unit>::new(self.config.border_size);
                 // macOS scale is always 1.0, so no to_unit(scale) needed for border.
-                let screen = &self.monitor_registry.get_entry(mp.monitor_id).screen;
-                let monitor_dim = screen.dimension;
-                let scale = screen.scale;
+                let info = &self.monitor_registry.get_entry(mp.monitor_id).info;
+                let monitor_dim = info.dimension;
+                let scale = info.scale;
 
                 let mut placed_tiling = Vec::new();
                 let mut float_shows = Vec::new();

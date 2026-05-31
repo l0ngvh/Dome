@@ -2,9 +2,9 @@ use super::*;
 
 #[test]
 fn picker_scale_reflects_focused_monitor() {
-    let mut screen = default_screen();
-    screen.scale = 1.75;
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![screen]);
+    let mut monitor = default_monitor();
+    monitor.scale = 1.75;
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![monitor]);
     let w = env.spawn_window(1, "App", "app.exe");
     env.add_window(w.clone());
     env.minimize_window(&w);

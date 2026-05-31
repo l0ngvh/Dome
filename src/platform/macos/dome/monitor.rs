@@ -8,7 +8,7 @@ type DisplayId = u32;
 
 pub(super) struct MonitorEntry {
     pub(super) id: MonitorId,
-    pub(super) screen: MonitorInfo,
+    pub(super) info: MonitorInfo,
     pub(super) displayed_windows: HashSet<WindowId>,
 }
 
@@ -26,7 +26,7 @@ impl MonitorRegistry {
             primary.display_id,
             MonitorEntry {
                 id: primary_monitor_id,
-                screen: primary.clone(),
+                info: primary.clone(),
                 displayed_windows: HashSet::new(),
             },
         );
@@ -68,29 +68,29 @@ impl MonitorRegistry {
         self.primary_display_id = display_id;
     }
 
-    pub(super) fn replace_primary(&mut self, new_screen: &MonitorInfo) {
-        debug_assert!(!self.map.contains_key(&new_screen.display_id));
+    pub(super) fn replace_primary(&mut self, new_info: &MonitorInfo) {
+        debug_assert!(!self.map.contains_key(&new_info.display_id));
         if let Some(mut entry) = self.map.remove(&self.primary_display_id) {
             let old = self.primary_display_id;
             let monitor_id = entry.id;
-            entry.screen = new_screen.clone();
-            self.map.insert(new_screen.display_id, entry);
-            self.reverse.insert(monitor_id, new_screen.display_id);
-            self.primary_display_id = new_screen.display_id;
-            tracing::info!(old, new = new_screen.display_id, "Primary monitor replaced");
+            entry.info = new_info.clone();
+            self.map.insert(new_info.display_id, entry);
+            self.reverse.insert(monitor_id, new_info.display_id);
+            self.primary_display_id = new_info.display_id;
+            tracing::info!(old, new = new_info.display_id, "Primary monitor replaced");
         }
     }
 
-    pub(super) fn insert(&mut self, screen: &MonitorInfo, monitor_id: MonitorId) {
+    pub(super) fn insert(&mut self, monitor: &MonitorInfo, monitor_id: MonitorId) {
         self.map.insert(
-            screen.display_id,
+            monitor.display_id,
             MonitorEntry {
                 id: monitor_id,
-                screen: screen.clone(),
+                info: monitor.clone(),
                 displayed_windows: HashSet::new(),
             },
         );
-        self.reverse.insert(monitor_id, screen.display_id);
+        self.reverse.insert(monitor_id, monitor.display_id);
     }
 
     pub(super) fn remove_displayed_window(&mut self, window_id: WindowId) {
@@ -127,27 +127,30 @@ impl MonitorRegistry {
         stale
     }
 
-    pub(super) fn all_screens(&self) -> Vec<MonitorInfo> {
-        self.map.values().map(|e| e.screen.clone()).collect()
+    pub(super) fn all_monitors(&self) -> Vec<MonitorInfo> {
+        self.map.values().map(|e| e.info.clone()).collect()
     }
 
     pub(super) fn find_monitor_at(&self, x: f32, y: f32) -> Option<&MonitorInfo> {
         self.map
             .values()
             .find(|e| {
-                let d = &e.screen.dimension;
+                let d = &e.info.dimension;
                 x >= d.x.value()
                     && x < (d.x + d.width).value()
                     && y >= d.y.value()
                     && y < (d.y + d.height).value()
             })
-            .map(|e| &e.screen)
+            .map(|e| &e.info)
     }
 
-    pub(super) fn update_screen(&mut self, screen: &MonitorInfo) -> Option<(MonitorId, Dimension)> {
-        let entry = self.map.get_mut(&screen.display_id)?;
-        let old_dim = entry.screen.dimension;
-        entry.screen = screen.clone();
+    pub(super) fn update_monitor(
+        &mut self,
+        monitor: &MonitorInfo,
+    ) -> Option<(MonitorId, Dimension)> {
+        let entry = self.map.get_mut(&monitor.display_id)?;
+        let old_dim = entry.info.dimension;
+        entry.info = monitor.clone();
         Some((entry.id, old_dim))
     }
 }

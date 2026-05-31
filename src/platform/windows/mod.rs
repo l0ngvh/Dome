@@ -63,7 +63,7 @@ use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use taskbar::Taskbar;
 
 #[derive(Clone)]
-pub(super) struct ScreenInfo {
+pub(super) struct MonitorInfo {
     pub handle: isize,
     pub name: String,
     pub dimension: Dimension,

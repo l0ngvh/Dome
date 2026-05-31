@@ -79,7 +79,7 @@ pub(in crate::platform::macos) struct Dome {
     monitor_registry: MonitorRegistry,
     config: Config,
     /// Work area of the primary monitor, used for crash recovery positioning.
-    primary_screen: Dimension,
+    primary_monitor: Dimension,
     /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
@@ -93,18 +93,21 @@ pub(in crate::platform::macos) struct Dome {
 
 impl Dome {
     pub(in crate::platform::macos) fn new(
-        screens: &[MonitorInfo],
+        monitors: &[MonitorInfo],
         config: Config,
         sender: Box<dyn FrameSender>,
     ) -> Self {
-        let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
+        let primary = monitors
+            .iter()
+            .find(|s| s.is_primary)
+            .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(primary.dimension, 1.0, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
-        for screen in screens {
-            if screen.display_id != primary.display_id {
-                let id = hub.add_monitor(screen.name.clone(), screen.dimension, 1.0);
-                monitor_registry.insert(screen, id);
+        for monitor in monitors {
+            if monitor.display_id != primary.display_id {
+                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, 1.0);
+                monitor_registry.insert(monitor, id);
             }
         }
         Self {
@@ -112,7 +115,7 @@ impl Dome {
             registry: WindowRegistry::new(),
             monitor_registry,
             config,
-            primary_screen: primary.dimension,
+            primary_monitor: primary.dimension,
             primary_full_height: primary.full_height,
             observed_pids: HashSet::new(),
             sender,
@@ -178,7 +181,7 @@ impl Dome {
                     title.clone(),
                 )
             };
-            self.recovery.track(ax, w, h, self.primary_screen);
+            self.recovery.track(ax, w, h, self.primary_monitor);
             let actions = {
                 let Some(entry) = self.registry.by_id(window_id) else {
                     continue;
@@ -273,8 +276,8 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn screens_changed(&mut self, screens: Vec<MonitorInfo>) {
-        self.update_screens(screens);
+    pub(in crate::platform::macos) fn monitors_changed(&mut self, monitors: Vec<MonitorInfo>) {
+        self.update_monitors(monitors);
         self.flush_layout();
     }
 
@@ -414,20 +417,20 @@ impl Dome {
         }
     }
 
-    fn update_screens(&mut self, screens: Vec<MonitorInfo>) {
-        if screens.is_empty() {
-            tracing::warn!("Empty screen list, skipping reconciliation");
+    fn update_monitors(&mut self, monitors: Vec<MonitorInfo>) {
+        if monitors.is_empty() {
+            tracing::warn!("Empty monitor list, skipping reconciliation");
             return;
         }
 
-        if let Some(primary) = screens.iter().find(|s| s.is_primary) {
-            self.primary_screen = primary.dimension;
+        if let Some(primary) = monitors.iter().find(|s| s.is_primary) {
+            self.primary_monitor = primary.dimension;
             self.primary_full_height = primary.full_height;
         }
 
-        self.rehide_offscreen_windows(&screens);
+        self.rehide_offscreen_windows(&monitors);
 
-        reconcile_monitors(&mut self.hub, &mut self.monitor_registry, &screens);
+        reconcile_monitors(&mut self.hub, &mut self.monitor_registry, &monitors);
     }
 
     pub(in crate::platform::macos) fn query_workspaces_json(&self) -> String {
@@ -447,9 +450,9 @@ impl Dome {
             )
         });
         let focused_monitor = self.hub.focused_monitor();
-        let screen = &self.monitor_registry.get_entry(focused_monitor).screen;
-        let monitor_dim = screen.dimension;
-        let scale = screen.scale;
+        let info = &self.monitor_registry.get_entry(focused_monitor).info;
+        let monitor_dim = info.dimension;
+        let scale = info.scale;
         let cocoa_frame = crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa(
             Length::new(self.primary_full_height),
             monitor_dim,
@@ -561,12 +564,12 @@ impl Drop for Dome {
     }
 }
 
-fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[MonitorInfo]) {
-    let current_keys: HashSet<_> = screens.iter().map(|s| s.display_id).collect();
+fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, monitors: &[MonitorInfo]) {
+    let current_keys: HashSet<_> = monitors.iter().map(|s| s.display_id).collect();
 
     // Special handling for when the primary monitor got replaced, i.e. due to mirroring to prevent
     // disruption due to removal and addition of workspaces.
-    if let Some(new_primary) = screens.iter().find(|s| s.is_primary) {
+    if let Some(new_primary) = monitors.iter().find(|s| s.is_primary) {
         if !registry.contains(new_primary.display_id) {
             registry.replace_primary(new_primary);
             hub.update_monitor(registry.primary_monitor_id(), new_primary.dimension, 1.0);
@@ -576,11 +579,11 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
     }
 
     // Add new monitors first to prevent exhausting all monitors
-    for screen in screens {
-        if !registry.contains(screen.display_id) {
-            let id = hub.add_monitor(screen.name.clone(), screen.dimension, 1.0);
-            registry.insert(screen, id);
-            tracing::info!(%screen, "Monitor added");
+    for monitor in monitors {
+        if !registry.contains(monitor.display_id) {
+            let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, 1.0);
+            registry.insert(monitor, id);
+            tracing::info!(%monitor, "Monitor added");
         }
     }
 
@@ -590,18 +593,18 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
         tracing::info!(%monitor_id, fallback = %registry.primary_monitor_id(), "Monitor removed");
     }
 
-    // Update screen info (dimension, scale, etc.)
-    for screen in screens {
-        if let Some((monitor_id, old_dim)) = registry.update_screen(screen) {
-            if old_dim != screen.dimension {
+    // Update monitor info (dimension, scale, etc.)
+    for monitor in monitors {
+        if let Some((monitor_id, old_dim)) = registry.update_monitor(monitor) {
+            if old_dim != monitor.dimension {
                 tracing::info!(
-                    name = %screen.name,
+                    name = %monitor.name,
                     ?old_dim,
-                    new_dim = ?screen.dimension,
+                    new_dim = ?monitor.dimension,
                     "Monitor dimension changed"
                 );
             }
-            hub.update_monitor(monitor_id, screen.dimension, 1.0);
+            hub.update_monitor(monitor_id, monitor.dimension, 1.0);
         }
     }
 }

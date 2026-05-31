@@ -25,7 +25,7 @@ use crate::platform::macos::dome::{
 const SCREEN_WIDTH: Length = Length::new(1920.0);
 const SCREEN_HEIGHT: Length = Length::new(1080.0);
 
-fn default_screen() -> MonitorInfo {
+fn default_monitor() -> MonitorInfo {
     MonitorInfo {
         display_id: 1,
         name: "Test".to_string(),
@@ -420,7 +420,7 @@ impl MacOS {
         let sender = TestSender {
             frame_state: self.frame_state.clone(),
         };
-        Dome::new(&[default_screen()], config, Box::new(sender))
+        Dome::new(&[default_monitor()], config, Box::new(sender))
     }
 
     fn last_frame_state(&self) -> FrameState {

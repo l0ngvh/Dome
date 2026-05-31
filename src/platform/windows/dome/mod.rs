@@ -35,7 +35,7 @@ pub(super) enum ObservedPosition {
         monitor: isize,
     },
 }
-use super::ScreenInfo;
+use super::MonitorInfo;
 use super::external::{HwndId, ManageExternalWindow, ShowCmd};
 use super::taskbar::ManageTaskbar;
 
@@ -106,7 +106,7 @@ pub(super) trait FocusSinkApi {
 }
 
 pub(super) trait QueryDisplay {
-    fn get_all_screens(&self) -> anyhow::Result<Vec<ScreenInfo>>;
+    fn get_all_monitors(&self) -> anyhow::Result<Vec<MonitorInfo>>;
     /// Returns the hwnd of the foreground window if D3D exclusive fullscreen is active.
     fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId>;
 }
@@ -150,16 +150,19 @@ impl Dome {
         display: Box<dyn QueryDisplay>,
         focus_sink: Box<dyn FocusSinkApi>,
     ) -> anyhow::Result<Self> {
-        let screens = display.get_all_screens()?;
-        anyhow::ensure!(!screens.is_empty(), "No monitors detected");
-        let primary = screens.iter().find(|s| s.is_primary).unwrap_or(&screens[0]);
+        let monitors = display.get_all_monitors()?;
+        anyhow::ensure!(!monitors.is_empty(), "No monitors detected");
+        let primary = monitors
+            .iter()
+            .find(|s| s.is_primary)
+            .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(primary.dimension, primary.scale, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_handles = HashMap::new();
-        let mut monitors = HashMap::new();
+        let mut monitor_states = HashMap::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
         monitor_handles.insert(primary.handle, primary_monitor_id);
-        monitors.insert(
+        monitor_states.insert(
             primary_monitor_id,
             MonitorState {
                 dimension: primary.dimension,
@@ -179,29 +182,29 @@ impl Dome {
             "Primary monitor"
         );
 
-        for screen in &screens {
-            if screen.handle != primary.handle {
-                let id = hub.add_monitor(screen.name.clone(), screen.dimension, screen.scale);
-                monitor_handles.insert(screen.handle, id);
-                monitors.insert(
+        for monitor in &monitors {
+            if monitor.handle != primary.handle {
+                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
+                monitor_handles.insert(monitor.handle, id);
+                monitor_states.insert(
                     id,
                     MonitorState {
-                        dimension: screen.dimension,
-                        scale: screen.scale,
+                        dimension: monitor.dimension,
+                        scale: monitor.scale,
                         displayed: HashSet::new(),
                     },
                 );
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
-                    screen.dimension,
-                    screen.scale,
+                    monitor.dimension,
+                    monitor.scale,
                 ) {
                     tiling_overlays.insert(id, overlay);
                 }
                 tracing::info!(
-                    name = %screen.name,
-                    handle = ?screen.handle,
-                    dimension = ?screen.dimension,
+                    name = %monitor.name,
+                    handle = ?monitor.handle,
+                    dimension = ?monitor.dimension,
                     "Monitor"
                 );
             }
@@ -211,7 +214,7 @@ impl Dome {
             hub,
             registry: WindowRegistry::new(),
             monitor_handles,
-            monitors,
+            monitors: monitor_states,
             config,
             taskbar: taskbar.clone(),
             overlay_factory,
@@ -304,9 +307,9 @@ impl Dome {
         self.placement_tracker.location_changed(id_key)
     }
 
-    pub(super) fn screens_changed(&mut self, screens: Vec<ScreenInfo>) -> Vec<HwndId> {
-        tracing::info!(count = screens.len(), "Screen parameters changed");
-        self.update_screens(screens)
+    pub(super) fn monitors_changed(&mut self, monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
+        tracing::info!(count = monitors.len(), "Monitor parameters changed");
+        self.update_monitors(monitors)
     }
 
     pub(super) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
@@ -314,10 +317,10 @@ impl Dome {
     }
 
     pub(super) fn handle_display_change(&mut self) -> Vec<HwndId> {
-        let to_refresh = match self.display.get_all_screens() {
-            Ok(screens) => self.screens_changed(screens),
+        let to_refresh = match self.display.get_all_monitors() {
+            Ok(monitors) => self.monitors_changed(monitors),
             Err(e) => {
-                tracing::warn!("Failed to enumerate screens: {e}");
+                tracing::warn!("Failed to enumerate monitors: {e}");
                 Vec::new()
             }
         };
@@ -914,12 +917,12 @@ impl Dome {
         self.apply_layout();
     }
 
-    fn update_screens(&mut self, screens: Vec<ScreenInfo>) -> Vec<HwndId> {
-        if screens.is_empty() {
-            tracing::warn!("Empty screen list, skipping update");
+    fn update_monitors(&mut self, monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
+        if monitors.is_empty() {
+            tracing::warn!("Empty monitor list, skipping update");
             return Vec::new();
         }
-        self.reconcile_monitors(screens);
+        self.reconcile_monitors(monitors);
 
         self.registry
             .iter()
@@ -932,34 +935,34 @@ impl Dome {
             .collect()
     }
 
-    fn reconcile_monitors(&mut self, screens: Vec<ScreenInfo>) {
-        let current_handles: HashSet<isize> = screens.iter().map(|s| s.handle).collect();
+    fn reconcile_monitors(&mut self, monitors: Vec<MonitorInfo>) {
+        let current_handles: HashSet<isize> = monitors.iter().map(|s| s.handle).collect();
 
-        for screen in &screens {
-            if !self.monitor_handles.contains_key(&screen.handle) {
-                let id = self
-                    .hub
-                    .add_monitor(screen.name.clone(), screen.dimension, screen.scale);
-                self.monitor_handles.insert(screen.handle, id);
+        for monitor in &monitors {
+            if !self.monitor_handles.contains_key(&monitor.handle) {
+                let id =
+                    self.hub
+                        .add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
+                self.monitor_handles.insert(monitor.handle, id);
                 self.monitors.insert(
                     id,
                     MonitorState {
-                        dimension: screen.dimension,
-                        scale: screen.scale,
+                        dimension: monitor.dimension,
+                        scale: monitor.scale,
                         displayed: HashSet::new(),
                     },
                 );
                 if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
                     self.config.clone(),
-                    screen.dimension,
-                    screen.scale,
+                    monitor.dimension,
+                    monitor.scale,
                 ) {
                     self.tiling_overlays.insert(id, overlay);
                 }
                 tracing::info!(
-                    name = %screen.name,
-                    handle = ?screen.handle,
-                    dimension = ?screen.dimension,
+                    name = %monitor.name,
+                    handle = ?monitor.handle,
+                    dimension = ?monitor.dimension,
                     "Monitor added"
                 );
             }
@@ -972,7 +975,7 @@ impl Dome {
             .map(|(_, &id)| id)
             .collect();
 
-        let fallback = screens
+        let fallback = monitors
             .iter()
             .find(|s| s.is_primary)
             .and_then(|s| self.monitor_handles.get(&s.handle).copied());
@@ -989,25 +992,26 @@ impl Dome {
             }
         }
 
-        for screen in &screens {
-            if let Some(&id) = self.monitor_handles.get(&screen.handle)
+        for monitor in &monitors {
+            if let Some(&id) = self.monitor_handles.get(&monitor.handle)
                 && let Some(ms) = self.monitors.get(&id)
-                && (ms.dimension != screen.dimension || ms.scale != screen.scale)
+                && (ms.dimension != monitor.dimension || ms.scale != monitor.scale)
             {
                 let old_dim = Some(ms.dimension);
                 let old_scale = Some(ms.scale);
                 tracing::info!(
-                    name = %screen.name,
+                    name = %monitor.name,
                     ?old_dim,
-                    new_dim = ?screen.dimension,
+                    new_dim = ?monitor.dimension,
                     ?old_scale,
-                    new_scale = ?screen.scale,
+                    new_scale = ?monitor.scale,
                     "Monitor dimension changed"
                 );
                 let ms = self.monitors.get_mut(&id).expect("just checked");
-                ms.dimension = screen.dimension;
-                ms.scale = screen.scale;
-                self.hub.update_monitor(id, screen.dimension, screen.scale);
+                ms.dimension = monitor.dimension;
+                ms.scale = monitor.scale;
+                self.hub
+                    .update_monitor(id, monitor.dimension, monitor.scale);
             }
         }
     }

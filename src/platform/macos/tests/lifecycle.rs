@@ -144,7 +144,7 @@ fn monitor_change_rehides_offscreen_windows() {
         is_primary: false,
         scale: 2.0,
     };
-    dome.screens_changed(vec![default_screen(), second_monitor]);
+    dome.monitors_changed(vec![default_monitor(), second_monitor]);
     macos.settle(&mut dome, 10);
 
     // Window should be re-hidden at the new offscreen position (based on second monitor)
@@ -349,7 +349,7 @@ fn render_frame_focused_monitor_changes_on_focus_monitor() {
         is_primary: false,
         scale: 2.0,
     };
-    dome.screens_changed(vec![default_screen(), second_monitor]);
+    dome.monitors_changed(vec![default_monitor(), second_monitor]);
 
     let before = macos.last_frame_state();
     send(&mut dome, "focus monitor right");

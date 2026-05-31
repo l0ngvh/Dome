@@ -201,7 +201,7 @@ fn move_window_to_other_workspace() {
     assert!(w2.is_bottom());
     assert_h_tiled(
         &[w1.get_dim()],
-        default_screen().dimension,
+        default_monitor().dimension,
         env.config.border_size,
     );
 }

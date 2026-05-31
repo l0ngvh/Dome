@@ -533,7 +533,7 @@ impl Dome {
         // inactive. The workspace is visible again, so transition back to
         // BorderlessFullscreen and drive the OS-side restore.
         let monitor = self.monitor_registry.get_entry_mut(monitor_id);
-        let screen_dim = monitor.screen.dimension;
+        let monitor_dim = monitor.info.dimension;
         match &mut window.state {
             WindowState::BorderlessMinimized => {
                 // BorderlessFullscreen windows previously in other workspaces. Restore it
@@ -544,27 +544,27 @@ impl Dome {
             }
             WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
                 let actual = offscreen.actual;
-                let target = round_dim(screen_dim);
+                let target = round_dim(monitor_dim);
                 // Fullscreen is tiling-shaped: always use Tiling placement
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     actual, target,
                 )));
-                if let Err(err) = window.ext.set_frame(screen_dim.round()) {
+                if let Err(err) = window.ext.set_frame(monitor_dim.round()) {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
             }
             WindowState::Positioned(PositionedState::Tiling(p)) => {
-                let target = round_dim(screen_dim);
+                let target = round_dim(monitor_dim);
                 if p.set_target(target)
-                    && let Err(err) = window.ext.set_frame(screen_dim.round())
+                    && let Err(err) = window.ext.set_frame(monitor_dim.round())
                 {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
             }
             WindowState::Positioned(PositionedState::Float(fp)) => {
-                let target = round_dim(screen_dim);
+                let target = round_dim(monitor_dim);
                 if fp.set_target(target)
-                    && let Err(err) = window.ext.set_frame(screen_dim.round())
+                    && let Err(err) = window.ext.set_frame(monitor_dim.round())
                 {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
@@ -603,7 +603,7 @@ impl Dome {
             width: w,
             height: h,
         };
-        let monitors = self.monitor_registry.all_screens();
+        let monitors = self.monitor_registry.all_monitors();
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
@@ -794,7 +794,7 @@ impl Dome {
 
     #[tracing::instrument(skip(self))]
     pub(super) fn hide_window(&mut self, window_id: WindowId) {
-        let monitors = self.monitor_registry.all_screens();
+        let monitors = self.monitor_registry.all_monitors();
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
@@ -842,7 +842,7 @@ impl Dome {
         let WindowState::Positioned(positioned_state) = window.state else {
             unreachable!("Can only move windows which dome control the positions offscreen");
         };
-        let monitors = self.monitor_registry.all_screens();
+        let monitors = self.monitor_registry.all_monitors();
         match positioned_state {
             PositionedState::Tiling(placement) => {
                 let offscreen = OffscreenPlacement::new(placement.actual);
@@ -867,10 +867,10 @@ impl Dome {
         }
     }
 
-    pub(super) fn rehide_offscreen_windows(&self, screens: &[MonitorInfo]) {
+    pub(super) fn rehide_offscreen_windows(&self, monitors: &[MonitorInfo]) {
         for (_, entry) in self.registry.iter() {
             if let WindowState::Positioned(PositionedState::Offscreen(offscreen)) = &entry.state
-                && let Err(e) = move_offscreen(screens, &offscreen.actual, &*entry.ext)
+                && let Err(e) = move_offscreen(monitors, &offscreen.actual, &*entry.ext)
             {
                 tracing::trace!("Failed to re-hide window: {e:#}");
             }

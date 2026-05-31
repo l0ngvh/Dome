@@ -34,7 +34,7 @@ use std::cell::RefCell;
 
 use crate::platform::macos::accessibility::AXApp;
 use crate::platform::macos::dome::HubEvent;
-use crate::platform::macos::get_all_screens;
+use crate::platform::macos::get_all_monitors;
 use crate::platform::macos::objc2_wrapper::{
     add_observer_notification, create_observer, get_cg_window_id, get_pid,
     kAXApplicationHiddenNotification, kAXApplicationShownNotification,
@@ -303,8 +303,8 @@ fn setup_screen_observer(ctx: &ListenerCtx) -> ScreenObserver {
             Some(&NSOperationQueue::mainQueue()),
             &RcBlock::new(move |_: NonNull<NSNotification>| {
                 let mtm = MainThreadMarker::new().unwrap();
-                let screens = get_all_screens(mtm);
-                send_hub_event(&(*ctx_ptr).hub_sender, HubEvent::ScreensChanged(screens));
+                let monitors = get_all_monitors(mtm);
+                send_hub_event(&(*ctx_ptr).hub_sender, HubEvent::MonitorsChanged(monitors));
             }),
         )
     }

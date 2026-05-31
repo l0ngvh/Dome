@@ -24,7 +24,7 @@ impl Recovery {
     }
 
     // Unlike on Windows, we can't reliably tell a window is hidden by us, as we can't move windows
-    // completely offscreen and have to depend on screen size. Screen size can change, and plugging
+    // completely offscreen and have to depend on monitor size. Monitor size can change, and plugging
     // multiple monitors can make the exact placement of where we hide windows fuzzy
     // This has the side effect of moving all windows from different monitor on exit/crash, but that is
     // acceptable
@@ -33,9 +33,9 @@ impl Recovery {
         window: Arc<dyn ExternalWindow>,
         w: i32,
         h: i32,
-        screen: Dimension,
+        monitor: Dimension,
     ) {
-        let original_dim = default_position(screen, w as f32, h as f32);
+        let original_dim = default_position(monitor, w as f32, h as f32);
         self.state.insert(
             window.cg_id(),
             WindowState {
@@ -56,10 +56,10 @@ impl Recovery {
     }
 }
 
-fn default_position(screen: Dimension, width: f32, height: f32) -> Dimension {
+fn default_position(monitor: Dimension, width: f32, height: f32) -> Dimension {
     Dimension::new(
-        screen.x + (screen.width - Length::new(width)) / 2.0,
-        screen.y + (screen.height - Length::new(height)) / 2.0,
+        monitor.x + (monitor.width - Length::new(width)) / 2.0,
+        monitor.y + (monitor.height - Length::new(height)) / 2.0,
         Length::new(width),
         Length::new(height),
     )

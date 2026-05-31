@@ -15,7 +15,7 @@ use crate::action::{Action, Actions};
 use crate::config::Config;
 use crate::core::{Dimension, Length, Physical};
 use crate::picker::PickerEntry;
-use crate::platform::windows::ScreenInfo;
+use crate::platform::windows::MonitorInfo;
 use crate::platform::windows::dome::ObservedPosition;
 use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
 use crate::platform::windows::dome::{CreateOverlay, Dome, FocusSinkApi, QueryDisplay};
@@ -36,8 +36,8 @@ fn dim(x: i32, y: i32, w: i32, h: i32) -> Dimension<Physical> {
     )
 }
 
-fn default_screen() -> ScreenInfo {
-    ScreenInfo {
+fn default_monitor() -> MonitorInfo {
+    MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
         dimension: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
@@ -46,8 +46,8 @@ fn default_screen() -> ScreenInfo {
     }
 }
 
-fn second_screen() -> ScreenInfo {
-    ScreenInfo {
+fn second_monitor() -> MonitorInfo {
+    MonitorInfo {
         handle: 2,
         name: "External".to_string(),
         dimension: Dimension::new(
@@ -62,13 +62,13 @@ fn second_screen() -> ScreenInfo {
 }
 
 struct MockDisplay {
-    screens: Vec<ScreenInfo>,
+    monitors: Vec<MonitorInfo>,
     exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
 }
 
 impl QueryDisplay for MockDisplay {
-    fn get_all_screens(&self) -> anyhow::Result<Vec<ScreenInfo>> {
-        Ok(self.screens.clone())
+    fn get_all_monitors(&self) -> anyhow::Result<Vec<MonitorInfo>> {
+        Ok(self.monitors.clone())
     }
 
     fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId> {
@@ -102,13 +102,13 @@ impl TestEnv {
     }
 
     fn new_with_config(config: Config) -> Self {
-        Self::new_with_screens(config, vec![default_screen()])
+        Self::new_with_monitors(config, vec![default_monitor()])
     }
 
-    fn new_with_screens(config: Config, screens: Vec<ScreenInfo>) -> Self {
+    fn new_with_monitors(config: Config, monitors: Vec<MonitorInfo>) -> Self {
         let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
         let display = MockDisplay {
-            screens,
+            monitors,
             exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
         };
         let sink_focus_count = Rc::new(Cell::new(0));
@@ -401,10 +401,10 @@ impl TestEnv {
         self.dome.picker_scale()
     }
 
-    fn add_screen(&mut self, screen: ScreenInfo) {
-        let mut screens = vec![default_screen()];
-        screens.push(screen);
-        self.dome.screens_changed(screens);
+    fn add_monitor(&mut self, monitor: MonitorInfo) {
+        let mut monitors = vec![default_monitor()];
+        monitors.push(monitor);
+        self.dome.monitors_changed(monitors);
         self.dome.apply_layout();
     }
 

@@ -50,7 +50,7 @@ pub(in crate::platform::macos) enum HubEvent {
     /// syncs window state, not focus, as focus changes should come from user interactions. Beside
     /// we receive plenty of focus events, so missing them isn't a concern.
     Sync,
-    ScreensChanged(Vec<MonitorInfo>),
+    MonitorsChanged(Vec<MonitorInfo>),
     MirrorClicked(CGWindowID),
     TabClicked(ContainerId, usize),
     /// macOS Space changed. Used to detect native fullscreen enter/exit since
@@ -80,8 +80,8 @@ impl fmt::Display for HubEvent {
             Self::Query { query, .. } => write!(f, "Query({query:?})"),
             Self::ConfigChanged(_) => write!(f, "ConfigChanged"),
             Self::Sync => write!(f, "Sync"),
-            Self::ScreensChanged(monitors) => {
-                write!(f, "ScreensChanged(count={})", monitors.len())
+            Self::MonitorsChanged(monitors) => {
+                write!(f, "MonitorsChanged(count={})", monitors.len())
             }
             Self::MirrorClicked(cg_id) => write!(f, "MirrorClicked({cg_id})"),
             Self::TabClicked(container_id, tab_idx) => {

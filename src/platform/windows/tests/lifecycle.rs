@@ -28,7 +28,7 @@ fn window_destroyed_fills_screen() {
     assert!(!w2.is_offscreen());
     assert_h_tiled(
         &[w2.get_dim()],
-        default_screen().dimension,
+        default_monitor().dimension,
         env.config.border_size,
     );
 }
@@ -58,7 +58,7 @@ fn window_minimized_removes_from_tiling() {
     // w1 should now fill the screen
     assert_h_tiled(
         &[w1.get_dim()],
-        default_screen().dimension,
+        default_monitor().dimension,
         env.config.border_size,
     );
     // w2 should be in the minimize picker, not deleted
@@ -97,7 +97,7 @@ fn user_minimize_then_restore() {
     // Both windows should be tiled again
     assert_h_tiled(
         &[w1.get_dim(), w2.get_dim()],
-        default_screen().dimension,
+        default_monitor().dimension,
         env.config.border_size,
     );
 }
@@ -177,7 +177,7 @@ fn move_size_suppresses_placement() {
 }
 
 #[test]
-fn screens_changed_updates_layout() {
+fn monitors_changed_updates_layout() {
     let mut env = TestEnv::new();
     let w1 = Arc::new(MockExternalHwnd::with_title(
         1,
@@ -190,8 +190,8 @@ fn screens_changed_updates_layout() {
 
     let before = w1.get_dim();
 
-    // Screen shrinks
-    let new_screen = ScreenInfo {
+    // Monitor shrinks
+    let new_monitor = MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
         dimension: Dimension::new(
@@ -203,17 +203,17 @@ fn screens_changed_updates_layout() {
         is_primary: true,
         scale: 1.0,
     };
-    env.dome.screens_changed(vec![new_screen]);
+    env.dome.monitors_changed(vec![new_monitor]);
     env.dome.apply_layout();
 
     let after = w1.get_dim();
     assert!(
         after.width < before.width,
-        "window should be narrower after screen shrink"
+        "window should be narrower after monitor shrink"
     );
     assert!(
         after.height < before.height,
-        "window should be shorter after screen shrink"
+        "window should be shorter after monitor shrink"
     );
 }
 
@@ -277,7 +277,7 @@ fn title_changed_manages_unknown_window() {
     assert!(!w1.is_offscreen());
     assert_h_tiled(
         &[w1.get_dim()],
-        default_screen().dimension,
+        default_monitor().dimension,
         env.config.border_size,
     );
 }
@@ -308,7 +308,7 @@ fn delete_currently_displayed_window() {
     assert!(!w2.is_offscreen());
     assert_h_tiled(
         &[w2.get_dim()],
-        default_screen().dimension,
+        default_monitor().dimension,
         env.config.border_size,
     );
 
@@ -395,7 +395,7 @@ fn focus_child_after_parent_does_not_focus_overlay() {
 #[test]
 fn monitor_switch_empty_to_empty_focuses_overlay() {
     let mut env = TestEnv::new();
-    env.add_screen(second_screen());
+    env.add_monitor(second_monitor());
     env.run_actions("focus workspace 1");
     env.reset_sink_focus();
 
@@ -592,9 +592,9 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
 
 #[test]
 fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
-    let mut second = second_screen();
+    let mut second = second_monitor();
     second.scale = 1.0;
-    let mut env = TestEnv::new_with_screens(Config::default(), vec![default_screen(), second]);
+    let mut env = TestEnv::new_with_monitors(Config::default(), vec![default_monitor(), second]);
 
     // Add one window on primary.
     let w_a = env.spawn_window(1, "WinA", "a.exe");

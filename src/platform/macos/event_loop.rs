@@ -128,9 +128,9 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
                 tracing::debug!("Query response dropped -- receiver gone");
             }
         }
-        HubEvent::ScreensChanged(screens) => {
-            tracing::info!(count = screens.len(), "Screens changed");
-            runner.dome.screens_changed(screens);
+        HubEvent::MonitorsChanged(monitors) => {
+            tracing::info!(count = monitors.len(), "Monitors changed");
+            runner.dome.monitors_changed(monitors);
         }
         HubEvent::MirrorClicked(cg_id) => {
             runner.dome.mirror_clicked(cg_id);
