@@ -8,7 +8,7 @@ use crate::config::MacosWindow;
 use crate::platform::macos::accessibility::AXApp;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::NewWindow;
-use crate::platform::macos::dome::registry::WindowEntry;
+use crate::platform::macos::dome::registry::ManagedWindow;
 use crate::platform::macos::dome::window::WindowState;
 use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 use crate::platform::macos::running_application::RunningApp;
@@ -50,7 +50,7 @@ pub(in crate::platform::macos) struct ReconcileAllResult {
 
 pub(in crate::platform::macos) fn compute_reconciliation(
     app: &Arc<AXApp>,
-    tracked: &HashMap<CGWindowID, WindowEntry>,
+    tracked: &HashMap<CGWindowID, ManagedWindow>,
     ignore_rules: &[MacosWindow],
     marker: &DispatcherMarker,
 ) -> ReconcileResult {
@@ -61,14 +61,14 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     let mut to_minimize = Vec::new();
     let mut to_enter_native_fullscreen = Vec::new();
     let mut to_exit_native_fullscreen = Vec::new();
-    for (&cg_id, entry) in tracked.iter().filter(|(_, e)| e.ax.pid() == pid) {
-        if !cg_window_ids.contains(&cg_id) || !entry.ax.is_valid(marker) {
+    for (&cg_id, entry) in tracked.iter().filter(|(_, e)| e.ext.pid() == pid) {
+        if !cg_window_ids.contains(&cg_id) || !entry.ext.is_valid(marker) {
             to_remove.push(cg_id);
             continue;
         }
         let already_minimized =
             entry.is_minimized || matches!(entry.state, WindowState::BorderlessMinimized);
-        if !already_minimized && entry.ax.is_minimized(marker) {
+        if !already_minimized && entry.ext.is_minimized(marker) {
             to_minimize.push(cg_id);
             continue;
         }
@@ -79,15 +79,15 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         // enter/exit, and SpaceChanged only covers the frontmost focused window,
         // so the periodic reconcile cycle is the only reliable signal for
         // non-focused windows transitioning in/out of native fullscreen.
-        let is_fs = entry.ax.is_native_fullscreen(marker);
+        let is_fs = entry.ext.is_native_fullscreen(marker);
         if !matches!(entry.state, WindowState::NativeFullscreen) && is_fs {
             to_enter_native_fullscreen.push(cg_id);
         } else if matches!(entry.state, WindowState::NativeFullscreen) && !is_fs {
-            let Ok((x, y)) = entry.ax.get_position(marker) else {
+            let Ok((x, y)) = entry.ext.get_position(marker) else {
                 tracing::trace!(%entry, "native fullscreen exit: position read failed, skipping");
                 continue;
             };
-            let Ok((w, h)) = entry.ax.get_size(marker) else {
+            let Ok((w, h)) = entry.ext.get_size(marker) else {
                 tracing::trace!(%entry, "native fullscreen exit: size read failed, skipping");
                 continue;
             };
@@ -164,7 +164,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
 
 pub(in crate::platform::macos) fn compute_window_positions(
     app: &Arc<AXApp>,
-    tracked: &HashMap<CGWindowID, WindowEntry>,
+    tracked: &HashMap<CGWindowID, ManagedWindow>,
     marker: &DispatcherMarker,
 ) -> Vec<ExistingWindow> {
     let mut existing = Vec::new();
@@ -179,10 +179,10 @@ pub(in crate::platform::macos) fn compute_window_positions(
         let Some(window) = tracked.get(&ax.cg_id()) else {
             continue;
         };
-        let Ok((x, y)) = window.ax.get_position(marker) else {
+        let Ok((x, y)) = window.ext.get_position(marker) else {
             continue;
         };
-        let Ok((w, h)) = window.ax.get_size(marker) else {
+        let Ok((w, h)) = window.ext.get_size(marker) else {
             continue;
         };
         existing.push(ExistingWindow {
@@ -198,7 +198,7 @@ pub(in crate::platform::macos) fn compute_window_positions(
 
 pub(in crate::platform::macos) fn compute_reconcile_all(
     observed_pids: HashSet<i32>,
-    tracked: HashMap<CGWindowID, WindowEntry>,
+    tracked: HashMap<CGWindowID, ManagedWindow>,
     ignore_rules: Vec<MacosWindow>,
     marker: &DispatcherMarker,
 ) -> ReconcileAllResult {
@@ -235,8 +235,8 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
     // windows, deduped by PID so each app is probed at most once.
     let mut refreshed_pids = HashSet::new();
     for entry in tracked.values() {
-        if refreshed_pids.insert(entry.ax.pid()) {
-            entry.ax.refresh_enhanced_ui(marker);
+        if refreshed_pids.insert(entry.ext.pid()) {
+            entry.ext.refresh_enhanced_ui(marker);
         }
     }
 

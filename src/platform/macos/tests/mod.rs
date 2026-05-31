@@ -16,7 +16,7 @@ use crate::action::Action;
 use crate::config::Config;
 use crate::core::{Dimension, Length, Logical, MonitorId, WindowId};
 use crate::platform::macos::MonitorInfo;
-use crate::platform::macos::accessibility::AXWindowApi;
+use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::{
     DebounceBurst, Dome, ExitNativeFullscreen, FrameSender, HubMessage, NewWindow, WindowMove,
@@ -107,7 +107,7 @@ impl MockAXWindow {
 
 // Marker params on read methods satisfy the trait contract. Tests never call
 // these methods directly — they feed pre-built data to Dome instead.
-impl AXWindowApi for MockAXWindow {
+impl ExternalWindow for MockAXWindow {
     fn cg_id(&self) -> CGWindowID {
         self.cg_id
     }

@@ -24,7 +24,7 @@ use crate::theme::{Flavor, theme_changed};
 use self::overlay::{FloatOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
-use self::registry::{WindowEntry, WindowRegistry};
+use self::registry::{ManagedWindow, WindowRegistry};
 use self::window::{PositionedState, WindowState};
 
 #[derive(Clone, Copy)]
@@ -36,7 +36,7 @@ pub(super) enum ObservedPosition {
     },
 }
 use super::ScreenInfo;
-use super::external::{HwndId, ManageExternalHwnd, ShowCmd};
+use super::external::{HwndId, ManageExternalWindow, ShowCmd};
 use super::taskbar::ManageTaskbar;
 
 pub(super) enum HubEvent {
@@ -340,7 +340,7 @@ impl Dome {
 
     pub(super) fn try_manage_window(
         &mut self,
-        ext: Arc<dyn ManageExternalHwnd>,
+        ext: Arc<dyn ManageExternalWindow>,
         title: Option<String>,
         process: String,
         constraints: (f32, f32, f32, f32),
@@ -357,7 +357,7 @@ impl Dome {
 
     fn insert_window(
         &mut self,
-        ext: Arc<dyn ManageExternalHwnd>,
+        ext: Arc<dyn ManageExternalWindow>,
         title: Option<String>,
         process: String,
         constraints: (f32, f32, f32, f32),
@@ -393,7 +393,7 @@ impl Dome {
         self.registry.insert(
             id_key,
             id,
-            WindowEntry {
+            ManagedWindow {
                 ext,
                 state,
                 is_minimized: false,

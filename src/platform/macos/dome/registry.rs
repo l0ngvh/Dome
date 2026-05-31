@@ -5,12 +5,12 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::core::WindowId;
 
-use super::super::accessibility::AXWindowApi;
+use super::super::accessibility::ExternalWindow;
 use super::window::WindowState;
 
 #[derive(Clone)]
-pub(in crate::platform::macos) struct WindowEntry {
-    pub(in crate::platform::macos) ax: Arc<dyn AXWindowApi>,
+pub(in crate::platform::macos) struct ManagedWindow {
+    pub(in crate::platform::macos) ext: Arc<dyn ExternalWindow>,
     pub(super) cg_id: CGWindowID,
     pub(super) window_id: WindowId,
     pub(super) app_name: Option<String>,
@@ -21,14 +21,14 @@ pub(in crate::platform::macos) struct WindowEntry {
     pub(super) is_moving: bool,
 }
 
-impl std::fmt::Display for WindowEntry {
+impl std::fmt::Display for ManagedWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "[{}|{}:{}] {}",
             self.window_id,
-            self.ax.pid(),
-            self.ax.cg_id(),
+            self.ext.pid(),
+            self.ext.cg_id(),
             self.app_name.as_deref().unwrap_or("Unknown")
         )?;
         if let Some(bundle_id) = &self.bundle_id {
@@ -43,13 +43,13 @@ impl std::fmt::Display for WindowEntry {
 
 /// Allow querying by CGWindowID for interaction between Dome and external events/UI, and by
 /// WindowId for Dome internal handling after confirming the window exist
-pub(super) struct Registry {
-    windows: HashMap<CGWindowID, WindowEntry>,
+pub(super) struct WindowRegistry {
+    windows: HashMap<CGWindowID, ManagedWindow>,
     id_to_cg: HashMap<WindowId, CGWindowID>,
     pid_to_cg: HashMap<i32, Vec<CGWindowID>>,
 }
 
-impl Registry {
+impl WindowRegistry {
     pub(super) fn new() -> Self {
         Self {
             windows: HashMap::new(),
@@ -58,11 +58,11 @@ impl Registry {
         }
     }
 
-    pub(super) fn get(&self, cg_id: CGWindowID) -> Option<&WindowEntry> {
+    pub(super) fn get(&self, cg_id: CGWindowID) -> Option<&ManagedWindow> {
         self.windows.get(&cg_id)
     }
 
-    pub(super) fn get_mut(&mut self, cg_id: CGWindowID) -> Option<&mut WindowEntry> {
+    pub(super) fn get_mut(&mut self, cg_id: CGWindowID) -> Option<&mut ManagedWindow> {
         self.windows.get_mut(&cg_id)
     }
 
@@ -72,7 +72,7 @@ impl Registry {
 
     pub(super) fn remove(&mut self, cg_id: CGWindowID) -> Option<WindowId> {
         let entry = self.windows.remove(&cg_id)?;
-        let pid = entry.ax.pid();
+        let pid = entry.ext.pid();
         self.id_to_cg.remove(&entry.window_id);
         if let Some(ids) = self.pid_to_cg.get_mut(&pid) {
             ids.retain(|&id| id != cg_id);
@@ -84,20 +84,20 @@ impl Registry {
         Some(entry.window_id)
     }
 
-    pub(super) fn by_id(&self, window_id: WindowId) -> Option<&WindowEntry> {
+    pub(super) fn by_id(&self, window_id: WindowId) -> Option<&ManagedWindow> {
         self.id_to_cg
             .get(&window_id)
             .and_then(|&cg_id| self.windows.get(&cg_id))
     }
 
-    pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> Option<&mut WindowEntry> {
+    pub(super) fn by_id_mut(&mut self, window_id: WindowId) -> Option<&mut ManagedWindow> {
         self.id_to_cg
             .get(&window_id)
             .copied()
             .and_then(|cg_id| self.windows.get_mut(&cg_id))
     }
 
-    pub(super) fn for_pid(&self, pid: i32) -> impl Iterator<Item = (CGWindowID, &WindowEntry)> {
+    pub(super) fn for_pid(&self, pid: i32) -> impl Iterator<Item = (CGWindowID, &ManagedWindow)> {
         self.pid_to_cg
             .get(&pid)
             .into_iter()
@@ -105,13 +105,13 @@ impl Registry {
             .filter_map(|&cg_id| Some((cg_id, self.windows.get(&cg_id)?)))
     }
 
-    pub(super) fn iter(&self) -> impl Iterator<Item = (CGWindowID, &WindowEntry)> {
+    pub(super) fn iter(&self) -> impl Iterator<Item = (CGWindowID, &ManagedWindow)> {
         self.windows.iter().map(|(&cg_id, w)| (cg_id, w))
     }
 
     pub(super) fn insert(
         &mut self,
-        ax: Arc<dyn AXWindowApi>,
+        ax: Arc<dyn ExternalWindow>,
         window_id: WindowId,
         state: WindowState,
         app_name: Option<String>,
@@ -127,8 +127,8 @@ impl Registry {
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
         self.windows.insert(
             cg_id,
-            WindowEntry {
-                ax,
+            ManagedWindow {
+                ext: ax,
                 cg_id,
                 window_id,
                 app_name,

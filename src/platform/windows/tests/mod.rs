@@ -19,7 +19,7 @@ use crate::platform::windows::ScreenInfo;
 use crate::platform::windows::dome::ObservedPosition;
 use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
 use crate::platform::windows::dome::{CreateOverlay, Dome, FocusSinkApi, QueryDisplay};
-use crate::platform::windows::external::{HwndId, ManageExternalHwnd, ShowCmd, ZOrder};
+use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
@@ -653,7 +653,7 @@ impl MockExternalHwnd {
     }
 }
 
-impl ManageExternalHwnd for MockExternalHwnd {
+impl ManageExternalWindow for MockExternalHwnd {
     fn id(&self) -> HwndId {
         self.hwnd_id
     }

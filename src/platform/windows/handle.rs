@@ -31,7 +31,7 @@ use windows::core::{BOOL, PCWSTR, w};
 
 use crate::core::{Dimension, Length, Physical};
 use crate::platform::windows::external::{
-    HwndId, InspectExternalHwnd, ManageExternalHwnd, ShowCmd, ZOrder,
+    HwndId, InspectExternalWindow, ManageExternalWindow, ShowCmd, ZOrder,
 };
 
 // Unlike macOS, we are allowed to move windows completely offscreen on Windows
@@ -573,7 +573,7 @@ impl ExternalHwnd {
     }
 }
 
-impl ManageExternalHwnd for ExternalHwnd {
+impl ManageExternalWindow for ExternalHwnd {
     fn id(&self) -> HwndId {
         HwndId::from(self.0)
     }
@@ -661,7 +661,7 @@ impl ManageExternalHwnd for ExternalHwnd {
     }
 }
 
-impl InspectExternalHwnd for ExternalHwnd {
+impl InspectExternalWindow for ExternalHwnd {
     fn is_manageable(&self) -> bool {
         is_manageable(self.0)
     }

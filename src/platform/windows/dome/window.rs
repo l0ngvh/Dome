@@ -44,7 +44,7 @@ pub(super) struct FloatPlacement {
 /// tracks what the platform layer has actually done to the window: is it
 /// visible, hidden offscreen, in a fullscreen mode, or hidden via a Dome-
 /// driven minimize. User-initiated minimize is captured by the orthogonal
-/// `is_minimized` flag on `WindowEntry`, which preserves the prior state
+/// `is_minimized` flag on `ManagedWindow`, which preserves the prior state
 /// across the minimize round trip.
 #[derive(Clone, Copy)]
 pub(super) enum WindowState {
@@ -58,7 +58,7 @@ pub(super) enum WindowState {
     /// its workspace is inactive. Hub-side fullscreen is preserved;
     /// transitioning back to `BorderlessFullscreen` (and a `ShowCmd::Restore`)
     /// brings it back. Mutually exclusive with the user-initiated
-    /// `is_minimized` flag on `WindowEntry`: the user can't minimize a
+    /// `is_minimized` flag on `ManagedWindow`: the user can't minimize a
     /// window that's already hidden by Dome on an inactive workspace.
     BorderlessMinimized,
     /// D3D/Vulkan exclusive fullscreen. Dome must not reposition or minimize

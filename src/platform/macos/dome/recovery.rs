@@ -5,10 +5,10 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::core::{Dimension, Length};
 
-use super::super::accessibility::AXWindowApi;
+use super::super::accessibility::ExternalWindow;
 
 struct WindowState {
-    window: Arc<dyn AXWindowApi>,
+    window: Arc<dyn ExternalWindow>,
     original_dim: Dimension,
 }
 
@@ -30,7 +30,7 @@ impl Recovery {
     // acceptable
     pub(super) fn track(
         &mut self,
-        window: Arc<dyn AXWindowApi>,
+        window: Arc<dyn ExternalWindow>,
         w: i32,
         h: i32,
         screen: Dimension,

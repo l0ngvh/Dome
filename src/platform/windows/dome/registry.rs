@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::core::WindowId;
-use crate::platform::windows::external::{HwndId, ManageExternalHwnd};
+use crate::platform::windows::external::{HwndId, ManageExternalWindow};
 
 use super::window::WindowState;
 
-pub(super) struct WindowEntry {
-    pub(super) ext: Arc<dyn ManageExternalHwnd>,
+pub(super) struct ManagedWindow {
+    pub(super) ext: Arc<dyn ManageExternalWindow>,
     pub(super) state: WindowState,
     pub(super) is_minimized: bool,
     pub(super) title: Option<String>,
@@ -15,7 +15,7 @@ pub(super) struct WindowEntry {
     pub(super) app_name: Option<String>,
 }
 
-impl std::fmt::Display for WindowEntry {
+impl std::fmt::Display for ManagedWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}|{}]", self.ext.id(), self.process)?;
         if let Some(title) = &self.title {
@@ -27,7 +27,7 @@ impl std::fmt::Display for WindowEntry {
 
 pub(super) struct WindowRegistry {
     by_hwnd: HashMap<HwndId, WindowId>,
-    by_id: HashMap<WindowId, WindowEntry>,
+    by_id: HashMap<WindowId, ManagedWindow>,
 }
 
 impl WindowRegistry {
@@ -38,7 +38,7 @@ impl WindowRegistry {
         }
     }
 
-    pub(super) fn insert(&mut self, id: HwndId, window_id: WindowId, entry: WindowEntry) {
+    pub(super) fn insert(&mut self, id: HwndId, window_id: WindowId, entry: ManagedWindow) {
         self.by_hwnd.insert(id, window_id);
         self.by_id.insert(window_id, entry);
     }
@@ -49,11 +49,11 @@ impl WindowRegistry {
         Some(window_id)
     }
 
-    pub(super) fn get(&self, id: WindowId) -> Option<&WindowEntry> {
+    pub(super) fn get(&self, id: WindowId) -> Option<&ManagedWindow> {
         self.by_id.get(&id)
     }
 
-    pub(super) fn get_mut(&mut self, id: WindowId) -> Option<&mut WindowEntry> {
+    pub(super) fn get_mut(&mut self, id: WindowId) -> Option<&mut ManagedWindow> {
         self.by_id.get_mut(&id)
     }
 

@@ -11,7 +11,7 @@ use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, ObservedPosition};
-use crate::platform::windows::external::{HwndId, InspectExternalHwnd, ManageExternalHwnd};
+use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
 use crate::platform::windows::throttle::{Throttle, ThrottleResult};
 
@@ -153,7 +153,7 @@ impl Runner {
             }
             HubEvent::WindowTitleChanged(hwnd_id) => {
                 if self.dome.registry_contains_hwnd(hwnd_id) {
-                    let inspect: Arc<dyn InspectExternalHwnd> =
+                    let inspect: Arc<dyn InspectExternalWindow> =
                         Arc::new(ExternalHwnd::new(hwnd_id.into()));
                     self.dispatcher.dispatch(
                         move || inspect.get_window_title(),
@@ -239,8 +239,8 @@ impl Runner {
 
     pub(super) fn dispatch_window_created(&mut self, hwnd_id: HwndId) {
         let ext = Arc::new(ExternalHwnd::new(hwnd_id.into()));
-        let inspect: Arc<dyn InspectExternalHwnd> = ext.clone();
-        let manage: Arc<dyn ManageExternalHwnd> = ext;
+        let inspect: Arc<dyn InspectExternalWindow> = ext.clone();
+        let manage: Arc<dyn ManageExternalWindow> = ext;
         self.dispatcher.dispatch(
             move || {
                 if !inspect.is_manageable() {
@@ -290,7 +290,7 @@ impl Runner {
         let Some(id) = self.dome.registry_get_id(hwnd_id) else {
             return;
         };
-        let inspect: Arc<dyn InspectExternalHwnd> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         self.dispatcher.dispatch(
             move || {
                 if inspect.is_fullscreen() {
@@ -331,7 +331,7 @@ impl Runner {
         let Some(id) = self.dome.registry_get_id(hwnd_id) else {
             return;
         };
-        let inspect: Arc<dyn InspectExternalHwnd> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
+        let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         self.dispatcher.dispatch(
             move || inspect.get_size_constraints(),
             move |constraints, runner| {

@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use crate::core::{Dimension, Length, MonitorId, Unit, WindowId, WindowRestrictions};
 use crate::platform::macos::MonitorInfo;
-use crate::platform::macos::accessibility::AXWindowApi;
+use crate::platform::macos::accessibility::ExternalWindow;
 
 use super::{DebounceBurst, Dome};
 
@@ -293,7 +293,7 @@ pub(super) fn clip_to_bounds(rect: Dimension, bounds: Dimension) -> Option<Dimen
 pub(super) fn move_offscreen(
     monitors: &[MonitorInfo],
     actual: &RoundedDimension,
-    ax: &dyn AXWindowApi,
+    ax: &dyn ExternalWindow,
 ) -> Result<()> {
     let (hidden_x, hidden_y) = hidden_position(monitors);
     // When spaces change or monitors are connected/disconnected, hidden windows
@@ -333,7 +333,7 @@ impl Dome {
     #[tracing::instrument(skip(self, ax), fields(window = %ax))]
     pub(super) fn add_window(
         &mut self,
-        ax: Arc<dyn AXWindowApi>,
+        ax: Arc<dyn ExternalWindow>,
         dim: RoundedDimension,
         app_name: Option<String>,
         bundle_id: Option<String>,
@@ -390,7 +390,7 @@ impl Dome {
     #[tracing::instrument(skip(self, ax), fields(window = %ax))]
     pub(super) fn add_native_fullscreen_window(
         &mut self,
-        ax: Arc<dyn AXWindowApi>,
+        ax: Arc<dyn ExternalWindow>,
         app_name: Option<String>,
         bundle_id: Option<String>,
         title: Option<String>,
@@ -426,7 +426,7 @@ impl Dome {
         // preserved state match for geometry placement.
         if window.is_minimized {
             window.is_minimized = false;
-            if let Err(e) = window.ax.unminimize() {
+            if let Err(e) = window.ext.unminimize() {
                 tracing::trace!("Failed to unminimize window: {e:#}");
             }
         }
@@ -435,9 +435,9 @@ impl Dome {
         match &mut window.state {
             WindowState::Positioned(PositionedState::Tiling(p)) => {
                 if p.set_target(target)
-                    && let Err(e) = window.ax.set_frame(dim.round())
+                    && let Err(e) = window.ext.set_frame(dim.round())
                 {
-                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
             // Caller (the `tiling_windows` loop in apply_monitor_placements)
@@ -447,8 +447,8 @@ impl Dome {
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     target, target,
                 )));
-                if let Err(e) = window.ax.set_frame(dim.round()) {
-                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                if let Err(e) = window.ext.set_frame(dim.round()) {
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
             WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
@@ -458,8 +458,8 @@ impl Dome {
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     actual, target,
                 )));
-                if let Err(e) = window.ax.set_frame(dim.round()) {
-                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                if let Err(e) = window.ext.set_frame(dim.round()) {
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
             WindowState::NativeFullscreen => {
@@ -489,7 +489,7 @@ impl Dome {
         // preserved state match for geometry placement.
         if window.is_minimized {
             window.is_minimized = false;
-            if let Err(e) = window.ax.unminimize() {
+            if let Err(e) = window.ext.unminimize() {
                 tracing::trace!("Failed to unminimize window: {e:#}");
             }
         }
@@ -498,16 +498,16 @@ impl Dome {
         match &mut window.state {
             WindowState::Positioned(PositionedState::Float(fp)) => {
                 if fp.set_target(target)
-                    && let Err(e) = window.ax.set_frame(dim.round())
+                    && let Err(e) = window.ext.set_frame(dim.round())
                 {
-                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
             WindowState::Positioned(PositionedState::Tiling(_) | PositionedState::Offscreen(_)) => {
                 window.state =
                     WindowState::Positioned(PositionedState::Float(FloatPlacement::new(target)));
-                if let Err(e) = window.ax.set_frame(dim.round()) {
-                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                if let Err(e) = window.ext.set_frame(dim.round()) {
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ext);
                 }
             }
             WindowState::NativeFullscreen => {
@@ -537,7 +537,7 @@ impl Dome {
         match &mut window.state {
             WindowState::BorderlessMinimized => {
                 // BorderlessFullscreen windows previously in other workspaces. Restore it
-                if let Err(err) = window.ax.unminimize() {
+                if let Err(err) = window.ext.unminimize() {
                     tracing::trace!("Failed to unminimize window: {err:#}");
                 }
                 window.state = WindowState::BorderlessFullscreen
@@ -549,14 +549,14 @@ impl Dome {
                 window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
                     actual, target,
                 )));
-                if let Err(err) = window.ax.set_frame(screen_dim.round()) {
+                if let Err(err) = window.ext.set_frame(screen_dim.round()) {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
             }
             WindowState::Positioned(PositionedState::Tiling(p)) => {
                 let target = round_dim(screen_dim);
                 if p.set_target(target)
-                    && let Err(err) = window.ax.set_frame(screen_dim.round())
+                    && let Err(err) = window.ext.set_frame(screen_dim.round())
                 {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
@@ -564,7 +564,7 @@ impl Dome {
             WindowState::Positioned(PositionedState::Float(fp)) => {
                 let target = round_dim(screen_dim);
                 if fp.set_target(target)
-                    && let Err(err) = window.ax.set_frame(screen_dim.round())
+                    && let Err(err) = window.ext.set_frame(screen_dim.round())
                 {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
@@ -634,12 +634,12 @@ impl Dome {
                     self.hub
                         .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
                     window.state = WindowState::BorderlessMinimized;
-                    if let Err(e) = window.ax.minimize() {
+                    if let Err(e) = window.ext.minimize() {
                         tracing::trace!("Failed to minimize window: {e:#}");
                     }
                 } else if offscreen.record_drift(new_placement, &monitors) {
                     if offscreen.should_retry() {
-                        if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
+                        if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ext) {
                             tracing::trace!("re-hide failed: {e}");
                         }
                     } else if offscreen.just_gave_up() {
@@ -676,7 +676,7 @@ impl Dome {
                 if observed_at.first <= p.placed_at + Duration::from_secs(1) {
                     if p.has_drifted(new_placement) {
                         if let Some(target) = p.observe_drift(new_placement)
-                            && let Err(e) = window.ax.set_frame(target.to_dimension())
+                            && let Err(e) = window.ext.set_frame(target.to_dimension())
                         {
                             tracing::trace!("Window {} set_frame failed: {e}", window);
                         }
@@ -703,7 +703,7 @@ impl Dome {
                     // This is likely not caused by Dome calling AX's set_frame but by app
                     // resizing itself or user move actions.
                     if let Some(target) = p.observe_drift(new_placement)
-                        && let Err(e) = window.ax.set_frame(target.to_dimension())
+                        && let Err(e) = window.ext.set_frame(target.to_dimension())
                     {
                         tracing::trace!("Window {} set_frame failed: {e}", window);
                     }
@@ -741,17 +741,17 @@ impl Dome {
                 tracing::trace!("Previously minimized borderless fullscreen window reappeared");
                 if is_borderless_fullscreen {
                     // TODO: might worth putting a retry limit here to prevent infinite loop
-                    if let Err(e) = window.ax.minimize() {
+                    if let Err(e) = window.ext.minimize() {
                         tracing::trace!("Failed to minimize window: {e:#}");
                     }
                 }
                 // No longer fullscreen borderless, so bring them back and put in offscreen
                 else {
-                    if let Err(e) = window.ax.unminimize() {
+                    if let Err(e) = window.ext.unminimize() {
                         tracing::debug!("Failed to unminimize window: {e:#}");
                     }
                     let offscreen = OffscreenPlacement::new(new_placement);
-                    if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
+                    if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ext) {
                         tracing::trace!("hide after unminimize failed: {e}");
                     }
                     window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
@@ -778,7 +778,7 @@ impl Dome {
                         // Window exited native fullscreen on an unfocused workspace.
                         // Hide via BorderlessMinimized so it does not stay visible.
                         window.state = WindowState::BorderlessMinimized;
-                        if let Err(e) = window.ax.minimize() {
+                        if let Err(e) = window.ext.minimize() {
                             tracing::trace!("Failed to minimize window: {e:#}");
                         }
                     }
@@ -807,25 +807,25 @@ impl Dome {
         let result = match &window.state {
             WindowState::BorderlessFullscreen => {
                 window.state = WindowState::BorderlessMinimized;
-                window.ax.minimize()
+                window.ext.minimize()
             }
             WindowState::NativeFullscreen | WindowState::BorderlessMinimized => Ok(()),
             WindowState::Positioned(positioned_state) => match positioned_state {
                 PositionedState::Tiling(placement) => {
                     let offscreen = OffscreenPlacement::new(placement.actual);
-                    let result = move_offscreen(&monitors, &offscreen.actual, &*window.ax);
+                    let result = move_offscreen(&monitors, &offscreen.actual, &*window.ext);
                     window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
                     result
                 }
                 PositionedState::Float(fp) => {
                     // Post-sync: fp.target is the last observed rect
                     let offscreen = OffscreenPlacement::new(fp.target);
-                    let result = move_offscreen(&monitors, &offscreen.actual, &*window.ax);
+                    let result = move_offscreen(&monitors, &offscreen.actual, &*window.ext);
                     window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
                     result
                 }
                 PositionedState::Offscreen(offscreen) => {
-                    move_offscreen(&monitors, &offscreen.actual, &*window.ax)
+                    move_offscreen(&monitors, &offscreen.actual, &*window.ext)
                 }
             },
         };
@@ -846,7 +846,7 @@ impl Dome {
         match positioned_state {
             PositionedState::Tiling(placement) => {
                 let offscreen = OffscreenPlacement::new(placement.actual);
-                if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
+                if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ext) {
                     tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
                 }
                 window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
@@ -854,13 +854,13 @@ impl Dome {
             PositionedState::Float(fp) => {
                 // Post-sync: fp.target is the last observed rect
                 let offscreen = OffscreenPlacement::new(fp.target);
-                if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
+                if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ext) {
                     tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
                 }
                 window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
             }
             PositionedState::Offscreen(offscreen) => {
-                if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
+                if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ext) {
                     tracing::debug!(%window_id, "Failed to move window offscreen: {e}");
                 }
             }
@@ -870,7 +870,7 @@ impl Dome {
     pub(super) fn rehide_offscreen_windows(&self, screens: &[MonitorInfo]) {
         for (_, entry) in self.registry.iter() {
             if let WindowState::Positioned(PositionedState::Offscreen(offscreen)) = &entry.state
-                && let Err(e) = move_offscreen(screens, &offscreen.actual, &*entry.ax)
+                && let Err(e) = move_offscreen(screens, &offscreen.actual, &*entry.ext)
             {
                 tracing::trace!("Failed to re-hide window: {e:#}");
             }

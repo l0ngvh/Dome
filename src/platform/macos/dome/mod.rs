@@ -25,15 +25,15 @@ use crate::core::{
 };
 use crate::picker::build_picker_entries;
 use crate::platform::macos::MonitorInfo;
-use crate::platform::macos::accessibility::AXWindowApi;
+use crate::platform::macos::accessibility::ExternalWindow;
 
 use monitor::MonitorRegistry;
 use recovery::Recovery;
-use registry::{Registry, WindowEntry};
+use registry::{ManagedWindow, WindowRegistry};
 use window::RoundedDimension;
 
 pub(in crate::platform::macos) struct NewWindow {
-    pub(in crate::platform::macos) ax: Arc<dyn AXWindowApi>,
+    pub(in crate::platform::macos) ax: Arc<dyn ExternalWindow>,
     pub(in crate::platform::macos) app_name: Option<String>,
     pub(in crate::platform::macos) bundle_id: Option<String>,
     pub(in crate::platform::macos) title: Option<String>,
@@ -75,7 +75,7 @@ pub(in crate::platform::macos) trait FrameSender: Send {
 /// `WindowId` happens here where the registry can be checked.
 pub(in crate::platform::macos) struct Dome {
     hub: Hub,
-    registry: Registry,
+    registry: WindowRegistry,
     monitor_registry: MonitorRegistry,
     config: Config,
     /// Work area of the primary monitor, used for crash recovery positioning.
@@ -109,7 +109,7 @@ impl Dome {
         }
         Self {
             hub,
-            registry: Registry::new(),
+            registry: WindowRegistry::new(),
             monitor_registry,
             config,
             primary_screen: primary.dimension,
@@ -246,7 +246,7 @@ impl Dome {
     pub(in crate::platform::macos) fn tracked_window(
         &self,
         cg_id: CGWindowID,
-    ) -> Option<WindowEntry> {
+    ) -> Option<ManagedWindow> {
         self.registry.get(cg_id).cloned()
     }
 
@@ -283,7 +283,7 @@ impl Dome {
             return;
         };
         let window_id = entry.window_id;
-        if let Err(e) = entry.ax.focus() {
+        if let Err(e) = entry.ext.focus() {
             tracing::debug!("Failed to focus window: {e:#}");
         }
         self.hub.set_focus(window_id);
@@ -305,7 +305,7 @@ impl Dome {
     pub(in crate::platform::macos) fn enter_native_fullscreen(
         &mut self,
         cg_id: CGWindowID,
-        ax: Arc<dyn AXWindowApi>,
+        ax: Arc<dyn ExternalWindow>,
         app_name: Option<String>,
         bundle_id: Option<String>,
         title: Option<String>,
@@ -352,14 +352,14 @@ impl Dome {
     pub(in crate::platform::macos) fn tracked_for_pid(
         &self,
         pid: i32,
-    ) -> HashMap<CGWindowID, WindowEntry> {
+    ) -> HashMap<CGWindowID, ManagedWindow> {
         self.registry
             .for_pid(pid)
             .map(|(id, e)| (id, e.clone()))
             .collect()
     }
 
-    pub(in crate::platform::macos) fn all_tracked(&self) -> HashMap<CGWindowID, WindowEntry> {
+    pub(in crate::platform::macos) fn all_tracked(&self) -> HashMap<CGWindowID, ManagedWindow> {
         self.registry
             .iter()
             .map(|(id, e)| (id, e.clone()))
@@ -473,7 +473,7 @@ impl Dome {
         };
         if window.is_minimized {
             window.is_minimized = false;
-            if let Err(e) = window.ax.unminimize() {
+            if let Err(e) = window.ext.unminimize() {
                 tracing::debug!(%window_id, "Failed to unminimize window from picker: {e:#}");
             }
         }
@@ -606,7 +606,7 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, screens: &[
     }
 }
 
-fn on_open_actions(entry: &WindowEntry, rules: &[MacosOnOpenRule]) -> Option<Actions> {
+fn on_open_actions(entry: &ManagedWindow, rules: &[MacosOnOpenRule]) -> Option<Actions> {
     let rule = rules.iter().find(|r| {
         r.window.matches(
             entry.app_name.as_deref(),

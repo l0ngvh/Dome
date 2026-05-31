@@ -72,7 +72,7 @@ impl Dome {
             self.last_focused = focused_window;
             if let Some(id) = focused_window
                 && let Some(window) = self.registry.by_id(id)
-                && let Err(err) = window.ax.focus()
+                && let Err(err) = window.ext.focus()
             {
                 tracing::trace!("Failed to focus window: {err:#}");
             }

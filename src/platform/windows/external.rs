@@ -66,9 +66,11 @@ pub(crate) enum ShowCmd {
     Minimize,
 }
 
-/// Positioning + lifecycle operations on an external window.
-/// Dome stores `Arc<dyn ManageExternalHwnd>` — no blocking reads.
-pub(crate) trait ManageExternalHwnd: Send + Sync {
+/// Non-blocking writes on an external window (HWND messages that complete
+/// synchronously without round-tripping through another process). Stored as
+/// `Arc<dyn ManageExternalWindow>` inside `ManagedWindow`; called from the dome
+/// thread.
+pub(crate) trait ManageExternalWindow: Send + Sync {
     fn id(&self) -> HwndId;
     fn should_float(&self) -> bool;
     fn set_position(&self, z: ZOrder, dim: Dimension<Physical>);
@@ -79,9 +81,13 @@ pub(crate) trait ManageExternalHwnd: Send + Sync {
     fn recover(&self, was_maximized: bool);
 }
 
-/// Blocking reads on an external window (SendMessageTimeoutW).
-/// Used only by the read dispatcher — never called on the dome thread.
-pub(crate) trait InspectExternalHwnd: Send + Sync {
+/// Blocking reads on an external window (`SendMessageTimeout`-style calls
+/// that may stall on hung apps). Constructed fresh inside dispatcher closures
+/// from a bare `HwndId` because `ExternalHwnd` is a thin HWND wrapper with no
+/// per-window state. The macOS `ExternalWindow` trait collapses reads and
+/// writes because `AXWindow` caches an `AXUIElement` and cannot be cheaply
+/// re-fabricated.
+pub(crate) trait InspectExternalWindow: Send + Sync {
     fn is_manageable(&self) -> bool;
     fn get_window_title(&self) -> Option<String>;
     fn get_process_name(&self) -> anyhow::Result<String>;

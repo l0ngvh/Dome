@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::platform::windows::external::{HwndId, ManageExternalHwnd};
+use crate::platform::windows::external::{HwndId, ManageExternalWindow};
 use crate::platform::windows::taskbar::ManageTaskbar;
 
 struct RecoveryEntry {
-    ext: Arc<dyn ManageExternalHwnd>,
+    ext: Arc<dyn ManageExternalWindow>,
     is_maximized: bool,
 }
 
@@ -23,7 +23,7 @@ impl Recovery {
         }
     }
 
-    pub(super) fn track(&mut self, ext: &Arc<dyn ManageExternalHwnd>) {
+    pub(super) fn track(&mut self, ext: &Arc<dyn ManageExternalWindow>) {
         let is_maximized = ext.is_maximized();
         self.state.insert(
             ext.id(),

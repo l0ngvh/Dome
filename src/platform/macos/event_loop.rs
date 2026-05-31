@@ -14,7 +14,7 @@ use objc2_core_graphics::CGWindowID;
 
 use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
-use crate::platform::macos::accessibility::AXWindowApi;
+use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::GcdDispatcher;
 use crate::platform::macos::dome::{
     DebounceBurst, Dome, HubEvent, WindowMove, compute_reconcile_all, compute_reconciliation,
@@ -316,7 +316,7 @@ fn dispatch_title_read(runner: &mut DomeRunner, cg_id: CGWindowID) {
         return;
     };
     runner.dispatcher.dispatch(
-        move |marker| entry.ax.read_title(marker),
+        move |marker| entry.ext.read_title(marker),
         move |title, runner| {
             runner.dome.update_title(cg_id, title);
         },
@@ -348,7 +348,7 @@ fn dispatch_space_changed(runner: &mut DomeRunner) {
                 is_native_fs,
                 pos,
                 size,
-                Arc::new(focused_window) as Arc<dyn AXWindowApi>,
+                Arc::new(focused_window) as Arc<dyn ExternalWindow>,
                 app_name,
                 bundle_id,
                 title,

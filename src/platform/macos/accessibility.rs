@@ -445,13 +445,21 @@ fn is_screen_locked() -> bool {
     false
 }
 
-/// Abstraction over macOS accessibility (AX) window operations.
+/// External-window operations on macOS.
 ///
-/// Read methods take a `&DispatcherMarker` parameter to enforce at compile time
-/// that blocking AX IPC calls only happen on GCD dispatch queues, never on the
-/// dome thread. Write methods (which are intentionally dome-thread operations)
-/// and pure getters omit the marker.
-pub(super) trait AXWindowApi: Send + Sync + std::fmt::Display {
+/// Stored as `Arc<dyn ExternalWindow>` inside `ManagedWindow`. Read methods
+/// take a `&DispatcherMarker` so they can only be called from inside the
+/// GCD-dispatch helper, where blocking AX IPC calls are safe; write methods
+/// (which are intentionally dome-thread operations) and pure getters omit the
+/// marker.
+///
+/// The Windows shell splits the same idea into `ManageExternalWindow` /
+/// `InspectExternalWindow` because re-fabricating an `ExternalHwnd` from a
+/// bare `HwndId` is free (it is a thin HWND wrapper with no per-window
+/// state). macOS keeps one trait because re-fabricating an `AXWindow` would
+/// re-resolve the cached `AXUIElement`; the marker gives the same
+/// "reads only off-thread" guarantee with one Arc per `ManagedWindow`.
+pub(crate) trait ExternalWindow: Send + Sync + std::fmt::Display {
     fn cg_id(&self) -> CGWindowID;
     fn pid(&self) -> i32;
     fn is_native_fullscreen(&self, marker: &DispatcherMarker) -> bool;
@@ -479,7 +487,7 @@ pub(super) trait AXWindowApi: Send + Sync + std::fmt::Display {
 // The marker proves the caller is on a GCD queue. It isn't forwarded to the
 // concrete `AXWindow` methods because those are the underlying implementation
 // that the trait delegates to.
-impl AXWindowApi for AXWindow {
+impl ExternalWindow for AXWindow {
     fn cg_id(&self) -> CGWindowID {
         self.cg_id()
     }
