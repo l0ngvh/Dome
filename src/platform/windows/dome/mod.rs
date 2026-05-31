@@ -368,7 +368,7 @@ impl Dome {
 
         let (state, id) = match observation {
             ObservedPosition::Fullscreen => (
-                WindowState::FullscreenBorderless,
+                WindowState::BorderlessFullscreen,
                 self.hub
                     .insert_fullscreen(WindowRestrictions::ProtectFullscreen),
             ),
@@ -431,7 +431,7 @@ impl Dome {
         match entry.state {
             WindowState::Positioned(PositionedState::Tiling(d)) => d.monitor,
             WindowState::Positioned(PositionedState::Float(fp)) => fp.monitor,
-            // Offscreen, FullscreenBorderless, FullscreenExclusive, or unregistered:
+            // Offscreen, BorderlessFullscreen, ExclusiveFullscreen, or unregistered:
             // best-effort fallback to focused monitor.
             // The next apply_layout retriggers set_constraints via the Tiling/Float branch.
             _ => self.hub.focused_monitor(),
@@ -670,7 +670,7 @@ impl Dome {
             entry.ext.show_cmd(ShowCmd::Restore);
             entry.is_minimized = false;
             // entry.state holds the prior Positioned(Tiling/Float/Offscreen) or
-            // FullscreenBorderless variant. The next apply_layout dispatches
+            // BorderlessFullscreen variant. The next apply_layout dispatches
             // through show_fullscreen_window / show_tiling / show_float against
             // that preserved state.
         }
@@ -816,7 +816,7 @@ impl Dome {
             self.last_focused = focused;
             if let Some(id) = focused {
                 if let Some(entry) = self.registry.get(id)
-                    && !matches!(entry.state, WindowState::FullscreenExclusive)
+                    && !matches!(entry.state, WindowState::ExclusiveFullscreen)
                 {
                     entry.ext.set_foreground_window();
                 }
@@ -926,7 +926,7 @@ impl Dome {
             .filter(|(_, id)| {
                 self.registry
                     .get(*id)
-                    .is_none_or(|e| !matches!(e.state, WindowState::FullscreenExclusive))
+                    .is_none_or(|e| !matches!(e.state, WindowState::ExclusiveFullscreen))
             })
             .map(|(hwnd_id, _)| hwnd_id)
             .collect()

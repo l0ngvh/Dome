@@ -53,10 +53,10 @@ pub(super) enum WindowState {
     /// Window covers the entire monitor, initiated by the user (e.g. a game
     /// or media player). Detected by comparing window dimensions to monitor
     /// dimensions in `check_fullscreen_state`.
-    FullscreenBorderless,
+    BorderlessFullscreen,
     /// Borderless-fullscreen window currently OS-minimized by Dome because
     /// its workspace is inactive. Hub-side fullscreen is preserved;
-    /// transitioning back to `FullscreenBorderless` (and a `ShowCmd::Restore`)
+    /// transitioning back to `BorderlessFullscreen` (and a `ShowCmd::Restore`)
     /// brings it back. Mutually exclusive with the user-initiated
     /// `is_minimized` flag on `WindowEntry`: the user can't minimize a
     /// window that's already hidden by Dome on an inactive workspace.
@@ -65,7 +65,7 @@ pub(super) enum WindowState {
     /// these windows — doing so can crash the application or corrupt the
     /// display. Detected via `is_d3d_exclusive_fullscreen_active` in
     /// `handle_display_change`.
-    FullscreenExclusive,
+    ExclusiveFullscreen,
 }
 
 #[derive(Clone, Copy)]
@@ -88,9 +88,9 @@ impl std::fmt::Display for WindowState {
             Self::Positioned(PositionedState::Tiling(_)) => write!(f, "tiling"),
             Self::Positioned(PositionedState::Float(_)) => write!(f, "float"),
             Self::Positioned(PositionedState::Offscreen { .. }) => write!(f, "offscreen"),
-            Self::FullscreenBorderless => write!(f, "fullscreen-borderless"),
+            Self::BorderlessFullscreen => write!(f, "borderless-fullscreen"),
             Self::BorderlessMinimized => write!(f, "borderless-minimized"),
-            Self::FullscreenExclusive => write!(f, "fullscreen-exclusive"),
+            Self::ExclusiveFullscreen => write!(f, "exclusive-fullscreen"),
         }
     }
 }
@@ -116,9 +116,9 @@ impl Dome {
         let new_target = content.round();
 
         let (needs_topmost, settled) = match entry.state {
-            WindowState::FullscreenBorderless
+            WindowState::BorderlessFullscreen
             | WindowState::BorderlessMinimized
-            | WindowState::FullscreenExclusive => {
+            | WindowState::ExclusiveFullscreen => {
                 debug_assert!(
                     false,
                     "show_float called on fullscreen/borderless-minimized window {id}"
@@ -201,7 +201,7 @@ impl Dome {
         // fullscreen windows through show_fullscreen_window instead.
         if matches!(
             entry.state,
-            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive
+            WindowState::BorderlessFullscreen | WindowState::ExclusiveFullscreen
         ) {
             debug_assert!(false, "show_tiling called on fullscreen window {id}");
             return;
@@ -272,9 +272,9 @@ impl Dome {
             },
             // Fullscreen and borderless-minimized variants are early-returned
             // above; reaching here means the guard was bypassed or removed.
-            WindowState::FullscreenBorderless
+            WindowState::BorderlessFullscreen
             | WindowState::BorderlessMinimized
-            | WindowState::FullscreenExclusive => {
+            | WindowState::ExclusiveFullscreen => {
                 unreachable!(
                     "fullscreen / borderless-minimized variants are handled by the \
                      early-return guard above"
@@ -297,13 +297,13 @@ impl Dome {
         // back and drive the OS-side restore.
         if matches!(entry.state, WindowState::BorderlessMinimized) {
             entry.ext.show_cmd(ShowCmd::Restore);
-            entry.state = WindowState::FullscreenBorderless;
+            entry.state = WindowState::BorderlessFullscreen;
             return;
         }
         match entry.state {
-            WindowState::FullscreenBorderless
+            WindowState::BorderlessFullscreen
             | WindowState::BorderlessMinimized
-            | WindowState::FullscreenExclusive => {}
+            | WindowState::ExclusiveFullscreen => {}
             WindowState::Positioned(ps) => {
                 let new_target = dimension.round();
                 if matches!(ps, PositionedState::Tiling(d) if d.target == new_target) {
@@ -357,7 +357,7 @@ impl Dome {
                     actual: fp.target,
                 });
             }
-            WindowState::FullscreenBorderless => {
+            WindowState::BorderlessFullscreen => {
                 entry.ext.show_cmd(ShowCmd::Minimize);
                 entry.state = WindowState::BorderlessMinimized;
             }
@@ -367,7 +367,7 @@ impl Dome {
                 }
             }
             WindowState::BorderlessMinimized => unreachable!("handled by early return above"),
-            WindowState::FullscreenExclusive => {}
+            WindowState::ExclusiveFullscreen => {}
         }
     }
 
@@ -381,11 +381,11 @@ impl Dome {
         }
         match window.state {
             WindowState::Positioned(_) | WindowState::BorderlessMinimized => {
-                window.state = WindowState::FullscreenBorderless;
+                window.state = WindowState::BorderlessFullscreen;
                 self.hub
                     .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
             }
-            WindowState::FullscreenExclusive | WindowState::FullscreenBorderless => {}
+            WindowState::ExclusiveFullscreen | WindowState::BorderlessFullscreen => {}
         }
     }
 
@@ -418,8 +418,8 @@ impl Dome {
             return;
         }
         match &mut entry.state {
-            WindowState::FullscreenExclusive => {}
-            WindowState::FullscreenBorderless => {
+            WindowState::ExclusiveFullscreen => {}
+            WindowState::BorderlessFullscreen => {
                 entry.state = WindowState::Positioned(PositionedState::Offscreen {
                     retries: 0,
                     actual: visible_rect,
@@ -511,7 +511,7 @@ impl Dome {
 
     pub(super) fn enter_fullscreen_exclusive(&mut self, id: WindowId) {
         if let Some(entry) = self.registry.get_mut(id) {
-            entry.state = WindowState::FullscreenExclusive;
+            entry.state = WindowState::ExclusiveFullscreen;
         }
         self.hub.set_fullscreen(id, WindowRestrictions::BlockAll);
     }

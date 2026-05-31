@@ -893,10 +893,10 @@ fn fullscreen_exclusive_state_preserved_through_user_minimize() {
     assert!(!w1.is_offscreen());
     assert_eq!(w1.get_dim(), dim_after_exclusive);
 
-    // Behavioral witness that we are back in FullscreenExclusive (not just
+    // Behavioral witness that we are back in ExclusiveFullscreen (not just
     // at fullscreen-sized geometry by coincidence): the BlockAll restriction
     // is intact, so DisplayModeChange actions are refused. Only
-    // FullscreenExclusive carries BlockAll; FullscreenBorderless and
+    // ExclusiveFullscreen carries BlockAll; BorderlessFullscreen and
     // Positioned variants would let one of these toggles change the dim.
     env.run_actions("toggle float");
     assert_eq!(w1.get_dim(), dim_after_exclusive);
