@@ -268,15 +268,13 @@ impl Dome {
         let Some(entry) = self.registry.get(id) else {
             return;
         };
-        match entry.state {
-            // Dome-initiated minimize or exclusive fullscreen -- ignore.
-            WindowState::Minimized | WindowState::FullscreenExclusive => {}
-            _ => {
-                self.hub.minimize_window(id);
-                if let Some(entry) = self.registry.get_mut(id) {
-                    entry.state = WindowState::UserMinimized;
-                }
-            }
+        // Dome-initiated minimize
+        if matches!(entry.state, WindowState::BorderlessMinimized) {
+            return;
+        }
+        self.hub.minimize_window(id);
+        if let Some(entry) = self.registry.get_mut(id) {
+            entry.is_minimized = true;
         }
     }
 
@@ -285,21 +283,12 @@ impl Dome {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
-        if !self
-            .registry
-            .get(id)
-            .is_some_and(|e| matches!(e.state, WindowState::UserMinimized))
-        {
+        if !self.registry.get(id).is_some_and(|e| e.is_minimized) {
             return;
         }
         self.hub.unminimize_window(id);
         if let Some(entry) = self.registry.get_mut(id) {
-            // FIXME: exclusive fullscreen windows would like to say a word
-            entry.state = WindowState::Positioned(PositionedState::Offscreen {
-                retries: 0,
-                // Zero placeholder: next apply_layout will position this window.
-                actual: Dimension::default(),
-            });
+            entry.is_minimized = false;
         }
     }
 
@@ -407,6 +396,7 @@ impl Dome {
             WindowEntry {
                 ext,
                 state,
+                is_minimized: false,
                 title,
                 process,
                 app_name,
@@ -432,17 +422,25 @@ impl Dome {
     }
 
     fn resolve_window_monitor(&self, id: WindowId) -> MonitorId {
-        match self.registry.get(id).map(|e| e.state) {
-            Some(WindowState::Positioned(PositionedState::Tiling(d))) => d.monitor,
-            Some(WindowState::Positioned(PositionedState::Float(fp))) => fp.monitor,
-            // Offscreen, FullscreenBorderless, FullscreenExclusive, Minimized,
-            // UserMinimized, or unregistered: best-effort fallback to focused monitor.
+        let Some(entry) = self.registry.get(id) else {
+            return self.hub.focused_monitor();
+        };
+        if entry.is_minimized {
+            return self.hub.focused_monitor();
+        }
+        match entry.state {
+            WindowState::Positioned(PositionedState::Tiling(d)) => d.monitor,
+            WindowState::Positioned(PositionedState::Float(fp)) => fp.monitor,
+            // Offscreen, FullscreenBorderless, FullscreenExclusive, or unregistered:
+            // best-effort fallback to focused monitor.
             // The next apply_layout retriggers set_constraints via the Tiling/Float branch.
             _ => self.hub.focused_monitor(),
         }
     }
 
     pub(super) fn set_constraints(&mut self, id: WindowId, constraints: (f32, f32, f32, f32)) {
+        // FIXME: resolve_window_monitor is best effort, so it can return the wrong monitor. If the
+        // window is immediately minimized after spawn, then we'd get the wrong border
         let monitor = self.resolve_window_monitor(id);
         let border = self.physical_border(monitor).value();
         let (min_w, min_h, max_w, max_h) = constraints;
@@ -668,20 +666,20 @@ impl Dome {
     /// Unminimize a window selected via the picker. Unlike `window_restored`
     /// (driven by a Win32 event after the user clicks the taskbar), the picker
     /// path must drive both the core state and the OS state: tell the hub the
-    /// window is back, ask Windows to restore it, and transition the registry
-    /// state to Positioned(Offscreen) so apply_layout can place it.
+    /// window is back, ask Windows to restore it, and clear the minimize flag
+    /// so apply_layout dispatches against the preserved WindowState.
     pub(super) fn picker_unminimize_window(&mut self, id: WindowId) {
         self.hub.unminimize_window(id);
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        if let WindowState::UserMinimized = entry.state {
+        if entry.is_minimized {
             entry.ext.show_cmd(ShowCmd::Restore);
-            entry.state = WindowState::Positioned(PositionedState::Offscreen {
-                retries: 0,
-                // Zero placeholder: next apply_layout will position this window.
-                actual: Dimension::default(),
-            });
+            entry.is_minimized = false;
+            // entry.state holds the prior Positioned(Tiling/Float/Offscreen) or
+            // FullscreenBorderless variant. The next apply_layout dispatches
+            // through show_fullscreen_window / show_tiling / show_float against
+            // that preserved state.
         }
     }
 
@@ -784,7 +782,7 @@ impl Dome {
             // Keep taskbar tab for user-minimized windows so the user can
             // click it to restore. Dome-hidden windows get their tab removed.
             if let Some(entry) = self.registry.get(id)
-                && !matches!(entry.state, WindowState::UserMinimized)
+                && !entry.is_minimized
             {
                 self.taskbar.delete_tab(entry.ext.id());
             }

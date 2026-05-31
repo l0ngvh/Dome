@@ -41,8 +41,11 @@ pub(super) struct FloatPlacement {
 /// Tracks the platform-level visibility and fullscreen status of a managed window.
 ///
 /// The hub tracks logical state (tiling vs float, which workspace). This enum
-/// tracks what the platform layer has actually done to the window: is it visible,
-/// hidden offscreen, minimized, or in a fullscreen mode?
+/// tracks what the platform layer has actually done to the window: is it
+/// visible, hidden offscreen, in a fullscreen mode, or hidden via a Dome-
+/// driven minimize. User-initiated minimize is captured by the orthogonal
+/// `is_minimized` flag on `WindowEntry`, which preserves the prior state
+/// across the minimize round trip.
 #[derive(Clone, Copy)]
 pub(super) enum WindowState {
     /// Window is under Dome's positional control.
@@ -51,17 +54,18 @@ pub(super) enum WindowState {
     /// or media player). Detected by comparing window dimensions to monitor
     /// dimensions in `check_fullscreen_state`.
     FullscreenBorderless,
+    /// Borderless-fullscreen window currently OS-minimized by Dome because
+    /// its workspace is inactive. Hub-side fullscreen is preserved;
+    /// transitioning back to `FullscreenBorderless` (and a `ShowCmd::Restore`)
+    /// brings it back. Mutually exclusive with the user-initiated
+    /// `is_minimized` flag on `WindowEntry`: the user can't minimize a
+    /// window that's already hidden by Dome on an inactive workspace.
+    BorderlessMinimized,
     /// D3D/Vulkan exclusive fullscreen. Dome must not reposition or minimize
     /// these windows — doing so can crash the application or corrupt the
     /// display. Detected via `is_d3d_exclusive_fullscreen_active` in
     /// `handle_display_change`.
     FullscreenExclusive,
-    /// Minimized by Dome to hide a borderless fullscreen window (e.g. on
-    /// workspace switch). Not user-initiated.
-    Minimized,
-    /// Window was minimized by the user (minimize button, taskbar, etc.).
-    /// Tracked in hub.minimized_windows for the picker.
-    UserMinimized,
 }
 
 #[derive(Clone, Copy)]
@@ -85,9 +89,8 @@ impl std::fmt::Display for WindowState {
             Self::Positioned(PositionedState::Float(_)) => write!(f, "float"),
             Self::Positioned(PositionedState::Offscreen { .. }) => write!(f, "offscreen"),
             Self::FullscreenBorderless => write!(f, "fullscreen-borderless"),
+            Self::BorderlessMinimized => write!(f, "borderless-minimized"),
             Self::FullscreenExclusive => write!(f, "fullscreen-exclusive"),
-            Self::Minimized => write!(f, "minimized"),
-            Self::UserMinimized => write!(f, "user_minimized"),
         }
     }
 }
@@ -113,22 +116,30 @@ impl Dome {
         let new_target = content.round();
 
         let (needs_topmost, settled) = match entry.state {
-            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {
-                debug_assert!(false, "show_float called on fullscreen window {id}");
+            WindowState::FullscreenBorderless
+            | WindowState::BorderlessMinimized
+            | WindowState::FullscreenExclusive => {
+                debug_assert!(
+                    false,
+                    "show_float called on fullscreen/borderless-minimized window {id}"
+                );
                 return;
             }
-            WindowState::Minimized | WindowState::UserMinimized => {
-                entry.ext.show_cmd(ShowCmd::Restore);
-                (true, false)
-            }
-            WindowState::Positioned(ps) => match ps {
-                PositionedState::Float(fp) => {
-                    let needs_topmost = focus_changed && is_focused;
-                    let settled = fp.target == new_target && !needs_topmost;
-                    (needs_topmost, settled)
+            WindowState::Positioned(ps) => {
+                debug_assert!(
+                    !entry.is_minimized,
+                    "show_float reached with user-minimized window {id}: minimized \
+                     windows are detached from their workspace by the hub"
+                );
+                match ps {
+                    PositionedState::Float(fp) => {
+                        let needs_topmost = focus_changed && is_focused;
+                        let settled = fp.target == new_target && !needs_topmost;
+                        (needs_topmost, settled)
+                    }
+                    PositionedState::Tiling(_) | PositionedState::Offscreen { .. } => (true, false),
                 }
-                PositionedState::Tiling(_) | PositionedState::Offscreen { .. } => (true, false),
-            },
+            }
         };
 
         if let Some(overlay) = self.float_overlays.get_mut(&id) {
@@ -186,10 +197,23 @@ impl Dome {
             }))
         };
 
+        // Fullscreen windows should never reach show_tiling. The hub routes
+        // fullscreen windows through show_fullscreen_window instead.
+        if matches!(
+            entry.state,
+            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive
+        ) {
+            debug_assert!(false, "show_tiling called on fullscreen window {id}");
+            return;
+        }
+
+        debug_assert!(
+            !entry.is_minimized,
+            "show_tiling reached with user-minimized window {id}: minimized windows \
+             are detached from their workspace by the hub"
+        );
+
         match entry.state {
-            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {
-                debug_assert!(false, "show_tiling called on fullscreen window {id}");
-            }
             WindowState::Positioned(PositionedState::Tiling(d)) => {
                 if d.monitor != monitor {
                     // Cross-monitor: window is re-entering a different overlay's
@@ -212,21 +236,6 @@ impl Dome {
                     entry.state = tiling_state(d.actual);
                 }
                 // else: stable on the same monitor at the same target, no-op.
-            }
-            WindowState::Minimized | WindowState::UserMinimized => {
-                entry.ext.show_cmd(ShowCmd::Restore);
-                match above {
-                    Some(prev) => {
-                        entry.ext.set_position(ZOrder::After(prev), new_target);
-                        entry.state = tiling_state(new_target);
-                    }
-                    None => {
-                        entry.ext.set_position(ZOrder::Unchanged, new_target);
-                        let id = entry.ext.id();
-                        entry.state = tiling_state(new_target);
-                        overlay.demote_below(id);
-                    }
-                }
             }
             WindowState::Positioned(PositionedState::Float(fp)) => {
                 // Two-step exit from the topmost band. Placing self below a
@@ -261,6 +270,16 @@ impl Dome {
                     overlay.demote_below(id);
                 }
             },
+            // Fullscreen and borderless-minimized variants are early-returned
+            // above; reaching here means the guard was bypassed or removed.
+            WindowState::FullscreenBorderless
+            | WindowState::BorderlessMinimized
+            | WindowState::FullscreenExclusive => {
+                unreachable!(
+                    "fullscreen / borderless-minimized variants are handled by the \
+                     early-return guard above"
+                )
+            }
         }
     }
 
@@ -273,12 +292,18 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
+        // Borderless-fullscreen window hidden by Dome because its workspace
+        // was inactive. The workspace is now visible again, so transition
+        // back and drive the OS-side restore.
+        if matches!(entry.state, WindowState::BorderlessMinimized) {
+            entry.ext.show_cmd(ShowCmd::Restore);
+            entry.state = WindowState::FullscreenBorderless;
+            return;
+        }
         match entry.state {
-            WindowState::FullscreenBorderless | WindowState::FullscreenExclusive => {}
-            WindowState::Minimized | WindowState::UserMinimized => {
-                entry.ext.show_cmd(ShowCmd::Restore);
-                entry.state = WindowState::FullscreenBorderless;
-            }
+            WindowState::FullscreenBorderless
+            | WindowState::BorderlessMinimized
+            | WindowState::FullscreenExclusive => {}
             WindowState::Positioned(ps) => {
                 let new_target = dimension.round();
                 if matches!(ps, PositionedState::Tiling(d) if d.target == new_target) {
@@ -306,6 +331,10 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
+        if entry.is_minimized || matches!(entry.state, WindowState::BorderlessMinimized) {
+            // Already hidden via minimize (by user or by Dome); nothing to do.
+            return;
+        }
         match entry.state {
             WindowState::Positioned(PositionedState::Tiling(d)) => {
                 entry.ext.move_offscreen();
@@ -330,16 +359,15 @@ impl Dome {
             }
             WindowState::FullscreenBorderless => {
                 entry.ext.show_cmd(ShowCmd::Minimize);
-                entry.state = WindowState::Minimized;
+                entry.state = WindowState::BorderlessMinimized;
             }
             WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => {
                 if actual.x > OFFSCREEN_POS && actual.y > OFFSCREEN_POS {
                     entry.ext.move_offscreen();
                 }
             }
-            WindowState::FullscreenExclusive
-            | WindowState::Minimized
-            | WindowState::UserMinimized => {}
+            WindowState::BorderlessMinimized => unreachable!("handled by early return above"),
+            WindowState::FullscreenExclusive => {}
         }
     }
 
@@ -347,16 +375,17 @@ impl Dome {
         let Some(window) = self.registry.get_mut(id) else {
             return;
         };
+        if window.is_minimized {
+            window.ext.show_cmd(ShowCmd::Restore);
+            window.is_minimized = false;
+        }
         match window.state {
-            WindowState::Positioned(_) => {
+            WindowState::Positioned(_) | WindowState::BorderlessMinimized => {
                 window.state = WindowState::FullscreenBorderless;
                 self.hub
                     .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
             }
             WindowState::FullscreenExclusive | WindowState::FullscreenBorderless => {}
-            WindowState::Minimized | WindowState::UserMinimized => {
-                window.ext.show_cmd(ShowCmd::Restore)
-            }
         }
     }
 
@@ -369,19 +398,35 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
+        if entry.is_minimized {
+            // The user is interacting with the picker; the next apply_layout
+            // will reposition.
+            return;
+        }
+        if matches!(entry.state, WindowState::BorderlessMinimized) {
+            // The OS handed us a real geometry observation for a window Dome
+            // had hidden via minimize. The fullscreen has been forcibly
+            // resurfaced (Dock click, etc.); demote to Offscreen and unset
+            // hub-side fullscreen.
+            tracing::trace!(%id, "Previously-minimized borderless-fullscreen window reappeared");
+            entry.ext.show_cmd(ShowCmd::Restore);
+            entry.state = WindowState::Positioned(PositionedState::Offscreen {
+                retries: 0,
+                actual: visible_rect,
+            });
+            self.hub.unset_fullscreen(id);
+            return;
+        }
         match &mut entry.state {
-            WindowState::FullscreenExclusive | WindowState::UserMinimized => {}
-            WindowState::FullscreenBorderless | WindowState::Minimized => {
-                if matches!(entry.state, WindowState::Minimized) {
-                    tracing::trace!(%id, "Previously-minimized borderless-fullscreen window reappeared");
-                    entry.ext.show_cmd(ShowCmd::Restore);
-                }
+            WindowState::FullscreenExclusive => {}
+            WindowState::FullscreenBorderless => {
                 entry.state = WindowState::Positioned(PositionedState::Offscreen {
                     retries: 0,
                     actual: visible_rect,
                 });
                 self.hub.unset_fullscreen(id);
             }
+            WindowState::BorderlessMinimized => unreachable!("handled by early return above"),
             WindowState::Positioned(PositionedState::Tiling(drift)) => {
                 drift.actual = visible_rect;
                 if drift.actual != drift.target {

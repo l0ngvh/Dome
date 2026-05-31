@@ -66,10 +66,8 @@ pub(in crate::platform::macos) fn compute_reconciliation(
             to_remove.push(cg_id);
             continue;
         }
-        let already_minimized = matches!(
-            entry.state,
-            WindowState::Minimized | WindowState::UserMinimized,
-        );
+        let already_minimized =
+            entry.is_minimized || matches!(entry.state, WindowState::BorderlessMinimized);
         if !already_minimized && entry.ax.is_minimized(marker) {
             to_minimize.push(cg_id);
             continue;

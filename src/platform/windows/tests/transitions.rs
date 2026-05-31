@@ -764,3 +764,142 @@ fn config_reload_skips_apply_font_when_font_unchanged() {
     assert_eq!(env.tiling_overlay_apply_font_count(), tiling_baseline);
     assert_eq!(env.float_overlay_apply_font_count(), float_baseline);
 }
+
+#[test]
+fn tiling_state_preserved_through_user_minimize() {
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    let dim_before = w1.get_dim();
+    assert!(!w1.minimized.load(Ordering::Relaxed));
+    assert!(!w1.is_offscreen());
+
+    // Simulate OS minimize (user clicks taskbar). The OS minimizes before
+    // Dome receives the event.
+    w1.minimized.store(true, Ordering::Relaxed);
+    env.minimize_window(&w1);
+    assert!(w1.minimized.load(Ordering::Relaxed));
+
+    // Simulate OS restore (user clicks taskbar again). The OS restores
+    // before Dome receives the event.
+    w1.minimized.store(false, Ordering::Relaxed);
+    env.restore_window(&w1);
+
+    // Geometry and mode are preserved: same tiling slot dimensions.
+    assert!(!w1.minimized.load(Ordering::Relaxed));
+    assert!(!w1.is_offscreen());
+    assert_eq!(w1.get_dim(), dim_before);
+}
+
+#[test]
+fn float_state_preserved_through_user_minimize() {
+    // A float window user-minimized via the OS should return to its
+    // original float position and retain topmost z-order when restored.
+    let mut env = TestEnv::new();
+    let w1 = env.spawn_window(1, "App1", "app1.exe");
+    let w2 = env.spawn_window(2, "App2", "app2.exe");
+    env.add_window(w1.clone());
+    env.add_window(w2.clone());
+
+    // w2 is focused (last added). Toggle to float.
+    env.run_actions("toggle float");
+    let dim_before = w2.get_dim();
+    assert!(w2.is_topmost());
+    assert!(!w2.minimized.load(Ordering::Relaxed));
+
+    // Simulate OS minimize.
+    w2.minimized.store(true, Ordering::Relaxed);
+    env.minimize_window(&w2);
+    assert!(w2.minimized.load(Ordering::Relaxed));
+
+    // Simulate OS restore.
+    w2.minimized.store(false, Ordering::Relaxed);
+    env.restore_window(&w2);
+
+    // Float position and topmost are preserved.
+    assert!(!w2.minimized.load(Ordering::Relaxed));
+    assert!(!w2.is_offscreen());
+    assert_eq!(w2.get_dim(), dim_before);
+    assert!(w2.is_topmost());
+}
+
+#[test]
+fn fullscreen_borderless_state_preserved_through_user_minimize() {
+    // A borderless fullscreen window user-minimized via the OS should
+    // return to its fullscreen geometry when restored. This is distinct
+    // from the dome-minimize path tested by
+    // borderless_fullscreen_restored_on_workspace_switch_back.
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(
+        MockExternalHwnd::with_title(
+            1,
+            "Game",
+            "game.exe",
+            env.moves.clone(),
+            env.z_model.clone(),
+        )
+        .with_dimension(fullscreen_dim()),
+    );
+    env.add_window(w1.clone());
+
+    let dim_before = w1.get_dim();
+    assert_eq!(dim_before, fullscreen_dim());
+    assert!(!w1.minimized.load(Ordering::Relaxed));
+
+    // Simulate OS minimize (user clicks taskbar).
+    w1.minimized.store(true, Ordering::Relaxed);
+    env.minimize_window(&w1);
+    assert!(w1.minimized.load(Ordering::Relaxed));
+
+    // Simulate OS restore.
+    w1.minimized.store(false, Ordering::Relaxed);
+    env.restore_window(&w1);
+
+    // Fullscreen geometry is preserved.
+    assert!(!w1.minimized.load(Ordering::Relaxed));
+    assert_eq!(w1.get_dim(), fullscreen_dim());
+}
+
+#[test]
+fn fullscreen_exclusive_state_preserved_through_user_minimize() {
+    let mut env = TestEnv::new();
+    let w1 = Arc::new(MockExternalHwnd::with_title(
+        1,
+        "Game",
+        "game.exe",
+        env.moves.clone(),
+        env.z_model.clone(),
+    ));
+    env.add_window(w1.clone());
+
+    env.enter_exclusive_fullscreen(HwndId::test(1));
+    let dim_after_exclusive = w1.get_dim();
+    assert!(!w1.minimized.load(Ordering::Relaxed));
+    assert!(!w1.is_offscreen());
+
+    // Simulate OS minimize (user clicks taskbar).
+    w1.minimized.store(true, Ordering::Relaxed);
+    env.minimize_window(&w1);
+    assert!(w1.minimized.load(Ordering::Relaxed));
+
+    // Simulate OS restore.
+    w1.minimized.store(false, Ordering::Relaxed);
+    env.restore_window(&w1);
+
+    assert!(!w1.minimized.load(Ordering::Relaxed));
+    assert!(!w1.is_offscreen());
+    assert_eq!(w1.get_dim(), dim_after_exclusive);
+
+    // Behavioral witness that we are back in FullscreenExclusive (not just
+    // at fullscreen-sized geometry by coincidence): the BlockAll restriction
+    // is intact, so DisplayModeChange actions are refused. Only
+    // FullscreenExclusive carries BlockAll; FullscreenBorderless and
+    // Positioned variants would let one of these toggles change the dim.
+    env.run_actions("toggle float");
+    assert_eq!(w1.get_dim(), dim_after_exclusive);
+    env.run_actions("toggle fullscreen");
+    assert_eq!(w1.get_dim(), dim_after_exclusive);
+}

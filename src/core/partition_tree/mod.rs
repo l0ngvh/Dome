@@ -132,7 +132,11 @@ impl PartitionTreeStrategy {
     /// calls this directly to handle container moves.
     fn detach_child_internal(&mut self, hub: &mut HubAccess, child: Child) {
         let workspace_id = match child {
-            Child::Window(id) => hub.windows.get(id).workspace,
+            Child::Window(id) => hub
+                .windows
+                .get(id)
+                .workspace()
+                .expect("detaching tiling window has a workspace"),
             Child::Container(id) => self.containers.get(id).workspace,
         };
 
@@ -198,7 +202,11 @@ impl TilingStrategy for PartitionTreeStrategy {
 
     fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> Dimension {
         let child_dim = self.tiling_data(window_id).dimension;
-        let workspace_id = hub.windows.get(window_id).workspace;
+        let workspace_id = hub
+            .windows
+            .get(window_id)
+            .workspace()
+            .expect("detaching tiling window has a workspace");
         let (offset_x, offset_y) = self.ws_state(workspace_id).viewport_offset;
         let screen = hub
             .monitors

@@ -19,13 +19,8 @@ pub(super) enum WindowState {
     /// Window was zoomed to fill the screen via the zoom button or similar.
     /// Distinct from native fullscreen — no separate Space is created.
     BorderlessFullscreen,
-    /// Window is minimized by Dome because it can't be moved offscreen
-    /// (e.g. borderless fullscreen windows). Windows minimized by users are
-    /// tracked via `UserMinimized` instead.
-    Minimized,
-    /// Window was minimized by the user (Cmd+M or minimize button).
-    /// Tracked in hub.minimized_windows for the picker.
-    UserMinimized,
+    /// Borderless-fullscreen window currently minimized by Dome because its workspace is inactive.
+    BorderlessMinimized,
 }
 
 #[derive(Clone, Copy)]
@@ -426,6 +421,15 @@ impl Dome {
         if window.is_moving {
             return;
         }
+        // User-minimized window being restored (picker or focus_window_by_cg path).
+        // Clear the flag and drive the OS-side restore; fall through to the
+        // preserved state match for geometry placement.
+        if window.is_minimized {
+            window.is_minimized = false;
+            if let Err(e) = window.ax.unminimize() {
+                tracing::trace!("Failed to unminimize window: {e:#}");
+            }
+        }
         let target = round_dim(dim);
         let is_float = self.hub.get_window(window_id).is_float();
         match &mut window.state {
@@ -474,14 +478,6 @@ impl Dome {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
-            WindowState::UserMinimized => {
-                window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
-                    target, target,
-                )));
-                if let Err(e) = window.ax.set_frame(dim.round()) {
-                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
-                }
-            }
             WindowState::NativeFullscreen => {
                 unreachable!("Native fullscreen windows must be set by `place_fullscreen_window`")
             }
@@ -490,10 +486,8 @@ impl Dome {
                     "Borderless fullscreen windows must be set by `place_fullscreen_window`"
                 )
             }
-            WindowState::Minimized => {
-                unreachable!(
-                    "Minimized borderless fullscreen windows must be set by `place_fullscreen_window`"
-                );
+            WindowState::BorderlessMinimized => {
+                unreachable!("BorderlessMinimized windows must be set by `place_fullscreen_window`")
             }
         }
     }
@@ -503,10 +497,13 @@ impl Dome {
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
+        // Borderless-fullscreen window hidden by Dome because its workspace was
+        // inactive. The workspace is visible again, so transition back to
+        // BorderlessFullscreen and drive the OS-side restore.
         let monitor = self.monitor_registry.get_entry_mut(monitor_id);
         let screen_dim = monitor.screen.dimension;
         match &mut window.state {
-            WindowState::Minimized => {
+            WindowState::BorderlessMinimized => {
                 // BorderlessFullscreen windows previously in other workspaces. Restore it
                 if let Err(err) = window.ax.unminimize() {
                     tracing::trace!("Failed to unminimize window: {err:#}");
@@ -539,12 +536,6 @@ impl Dome {
                 {
                     tracing::trace!("Failed to set fullscreen frame: {err:#}");
                 }
-            }
-            WindowState::UserMinimized => {
-                // To reach this, a window must be toggled to fullscreen while being minimized, and
-                // no moved/resized events are emitted yet, otherwise window_moved must have
-                // changed the window state.
-                unreachable!("Window toggled to fullscreen while being minimized")
             }
             // We can't/don't need to touch native fullscreen windows
             WindowState::NativeFullscreen => {}
@@ -598,13 +589,19 @@ impl Dome {
 
         tracing::Span::current().record("window", window.to_string());
 
+        // User manually brought a minimized window back to screen
+        if window.is_minimized {
+            self.hub.unminimize_window(window_id);
+            window.is_minimized = false;
+        }
+
         match &mut window.state {
             WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
                 if is_borderless_fullscreen {
-                    // Window turned fullscreen, but not visible, so we hide them again
+                    // Window turned fullscreen, but not visible, so we hide it again.
                     self.hub
                         .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
-                    window.state = WindowState::Minimized;
+                    window.state = WindowState::BorderlessMinimized;
                     if let Err(e) = window.ax.minimize() {
                         tracing::trace!("Failed to minimize window: {e:#}");
                     }
@@ -706,7 +703,7 @@ impl Dome {
                     reverse_inset(new_placement, Length::<Unit>::new(self.config.border_size));
                 self.hub.update_float_dimension(window_id, outer_dim);
             }
-            WindowState::Minimized => {
+            WindowState::BorderlessMinimized => {
                 // Window somehow got brought back to screen, maybe through window focused but the
                 // notification was not fired
                 tracing::trace!("Previously minimized borderless fullscreen window reappeared");
@@ -730,9 +727,10 @@ impl Dome {
                 }
             }
             WindowState::BorderlessFullscreen => {
-                // No longer border borderless fullscreen. Move to offscreen position as these
-                // windows might now be inserted offscreen, which will be put back into view later
-                // if it's in view
+                // No longer borderless fullscreen. Move to offscreen since
+                // the window may belong to a hidden workspace and will be
+                // placed back into view by flush_layout if it belongs to the
+                // active one.
                 if !is_borderless_fullscreen {
                     window.state = WindowState::Positioned(PositionedState::Offscreen(
                         OffscreenPlacement::new(new_placement),
@@ -746,8 +744,8 @@ impl Dome {
                         window.state = WindowState::BorderlessFullscreen;
                     } else {
                         // Window exited native fullscreen on an unfocused workspace.
-                        // Minimize it so it doesn't stay visible over the active workspace.
-                        window.state = WindowState::Minimized;
+                        // Hide via BorderlessMinimized so it does not stay visible.
+                        window.state = WindowState::BorderlessMinimized;
                         if let Err(e) = window.ax.minimize() {
                             tracing::trace!("Failed to minimize window: {e:#}");
                         }
@@ -759,21 +757,6 @@ impl Dome {
                     self.hub.unset_fullscreen(window_id);
                 }
             }
-            WindowState::UserMinimized => {
-                // User manually brought windows back to screen.
-                self.hub.unminimize_window(window_id);
-                if is_borderless_fullscreen {
-                    self.hub
-                        .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
-                    window.state = WindowState::BorderlessFullscreen;
-                } else {
-                    let offscreen = OffscreenPlacement::new(new_placement);
-                    if let Err(e) = move_offscreen(&monitors, &offscreen.actual, &*window.ax) {
-                        tracing::trace!("hide after unminimize failed: {e}");
-                    }
-                    window.state = WindowState::Positioned(PositionedState::Offscreen(offscreen));
-                }
-            }
         }
     }
 
@@ -783,18 +766,18 @@ impl Dome {
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
+        if window.is_minimized {
+            return;
+        }
         // Minimize borderless fullscreen windows instead of moving offscreen:
         // 1. User-zoomed windows maintain their fullscreen state, so moving them is futile
         // 2. Moving offscreen triggers handle_window_moved which detects fullscreen exit
-        // Native fullscreen windows are on a separate Space and don't need hiding.
         let result = match &window.state {
             WindowState::BorderlessFullscreen => {
-                window.state = WindowState::Minimized;
+                window.state = WindowState::BorderlessMinimized;
                 window.ax.minimize()
             }
-            WindowState::NativeFullscreen | WindowState::Minimized | WindowState::UserMinimized => {
-                Ok(())
-            }
+            WindowState::NativeFullscreen | WindowState::BorderlessMinimized => Ok(()),
             WindowState::Positioned(positioned_state) => match positioned_state {
                 PositionedState::Tiling(placement) => {
                     let offscreen = OffscreenPlacement::new(placement.actual);
@@ -865,6 +848,6 @@ impl Dome {
     pub(super) fn minimize_window(&mut self, window_id: WindowId) {
         let window = self.registry.by_id_mut(window_id).unwrap();
         self.hub.minimize_window(window_id);
-        window.state = WindowState::UserMinimized;
+        window.is_minimized = true;
     }
 }

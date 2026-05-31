@@ -56,10 +56,11 @@ struct MockAXWindow {
     /// When set, `set_frame` and `hide_at` snap to this position/size instead
     /// of the requested one, simulating a window that resists placement.
     override_frame: OverrideFrame,
-    /// Number of times `minimize()` was called on this window.
-    minimize_count: Rc<Cell<u32>>,
-    /// Number of times `unminimize()` was called on this window.
-    unminimize_count: Rc<Cell<u32>>,
+    /// Whether this window is currently in the OS-level minimized state
+    /// (in the dock). Flipped by `minimize()` / `unminimize()` to model the
+    /// AX side effect, and cleared by `simulate_external_move` because a
+    /// window producing a move event is by definition not in the dock.
+    is_minimized: Rc<Cell<bool>>,
     moves: MoveLog,
 }
 
@@ -86,8 +87,7 @@ impl MockAXWindow {
             min_size: Rc::new(Cell::new(None)),
             max_size: Rc::new(Cell::new(None)),
             override_frame: Rc::new(Cell::new(None)),
-            minimize_count: Rc::new(Cell::new(0)),
-            unminimize_count: Rc::new(Cell::new(0)),
+            is_minimized: Rc::new(Cell::new(false)),
             moves,
         }
     }
@@ -171,18 +171,18 @@ impl AXWindowApi for MockAXWindow {
         Ok(())
     }
     fn minimize(&self) -> Result<()> {
-        self.minimize_count.set(self.minimize_count.get() + 1);
+        self.is_minimized.set(true);
         Ok(())
     }
     fn unminimize(&self) -> Result<()> {
-        self.unminimize_count.set(self.unminimize_count.get() + 1);
+        self.is_minimized.set(false);
         Ok(())
     }
     fn is_valid(&self, _marker: &DispatcherMarker) -> bool {
         true
     }
     fn is_minimized(&self, _marker: &DispatcherMarker) -> bool {
-        false
+        self.is_minimized.get()
     }
     fn read_title(&self, _marker: &DispatcherMarker) -> Option<String> {
         Some(self.title.clone())
@@ -297,14 +297,18 @@ impl MacOS {
         self.window(cg_id).override_frame.set(frame);
     }
 
-    /// How many times `minimize()` was called on this window.
-    fn minimize_count(&self, cg_id: CGWindowID) -> u32 {
-        self.window(cg_id).minimize_count.get()
+    /// Simulate the user minimizing the window at OS level (yellow button,
+    /// dock click, app's own minimize). Flips the mock's OS-level flag first,
+    /// then delivers the resulting AX notification to Dome via reconcile.
+    fn user_minimize(&self, dome: &mut Dome, cg_id: CGWindowID) {
+        self.window(cg_id).is_minimized.set(true);
+        dome.reconcile_windows(&[], &[cg_id], vec![], &[], &[]);
     }
 
-    /// How many times `unminimize()` was called on this window.
-    fn unminimize_count(&self, cg_id: CGWindowID) -> u32 {
-        self.window(cg_id).unminimize_count.get()
+    /// Whether the window is currently in the OS-level minimized (dock) state.
+    /// Mirrors what `ax.is_minimized()` would report on real macOS.
+    fn is_minimized(&self, cg_id: CGWindowID) -> bool {
+        self.window(cg_id).is_minimized.get()
     }
 
     // Why Instant::now() works for these helpers:
@@ -317,6 +321,11 @@ impl MacOS {
 
     /// Simulate an external move (app/macOS moved the window) and feed it to Dome.
     /// Sets mock state and notifies Dome in one step.
+    ///
+    /// Clears `is_minimized`: a window emitting a move event is, by definition,
+    /// out of the dock. This mirrors what tests would observe on real macOS
+    /// and lets later settle iterations check that Dome reacts (e.g. by
+    /// re-issuing `ax.minimize()` if the window comes back still fullscreen).
     fn simulate_external_move(
         &self,
         dome: &mut Dome,
@@ -330,6 +339,7 @@ impl MacOS {
         let ax = self.window(cg_id);
         ax.position.set((x, y));
         ax.size.set((w, h));
+        ax.is_minimized.set(false);
         dome.windows_moved(vec![WindowMove {
             cg_id,
             x,

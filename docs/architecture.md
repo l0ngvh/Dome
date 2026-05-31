@@ -27,8 +27,9 @@ different type, among other restrictions.
 
 A window can also be minimized, in which case it leaves its workspace and sits
 in a Hub-wide scratchpad list until the user restores it through the picker.
-Restoration reattaches it to the current workspace as tiling, regardless of its
-type before minimization.
+Minimize preserves the window's prior mode (tiling, float, or fullscreen),
+restrictions, and float geometry, so restoration returns the window to the
+current workspace in the same mode it had before.
 
 `Hub` is unit-agnostic about coordinates. Every position and size it stores is
 in whichever unit the OS shell hands back, physical pixels or logical points,
@@ -173,7 +174,7 @@ frame after every move or resize. macOS always blocks moves on zoom-triggered
 fullscreen, and apps that control their own fullscreen state vary, some
 blocking and others letting the move through, in which case the
 size-and-position check reads it as a fullscreen exit. Inactive borderless
-windows are therefore kept as `Minimized` rather than parked offscreen.
+windows are therefore minimized rather than parked offscreen.
 
 ### Tracking motion and constraints
 
@@ -365,17 +366,15 @@ shell batches tiling overlays into one overlay window per monitor, while each
 float gets its own.
 
 Click handling has to stay clear of managed windows, and Windows has no
-per-region click-through either. The tiling overlay parks at `HWND_BOTTOM`
-once at creation. Tiling windows that re-enter the visible band (from
-Float, Offscreen, Minimized, or UserMinimized) consult `window_above()` on
-the overlay (a wrapper around `GetWindow(GW_HWNDPREV)`) and call
-`set_position(ZOrder::After(reference), dim)` to slot themselves above the
-overlay. The Float arm first issues `set_position(ZOrder::NotTopmost, dim)`
-to clear `WS_EX_TOPMOST`; placing self below a non-topmost reference does
-not, by itself, drop the topmost flag. The fallback
-`overlay.demote_below(managed)` handles the rare case where the overlay has
-been promoted to the top of z-order with nothing above it. Float overlays
-sit inside the topmost band so they stay just below their float.
+per-region click-through, so the tiling overlay parks at `HWND_BOTTOM`.
+Managed windows receive every click that lands on them, and the overlay
+only catches what falls into the gaps. The shell maintains an invariant
+that every tiling window sits above the overlay: whenever a window rejoins
+the layout from Float, Offscreen, or minimized, the shell restacks it
+above the overlay before showing it.
+
+Float overlays sit inside the topmost band themselves, just below their
+float, tracking the window they decorate.
 
 Because the tiling overlay sits at the bottom of z-order, it shouldn't
 receive activation or absorb keyboard focus the way the macOS overlay does

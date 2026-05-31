@@ -9,6 +9,7 @@ use super::window::WindowState;
 pub(super) struct WindowEntry {
     pub(super) ext: Arc<dyn ManageExternalHwnd>,
     pub(super) state: WindowState,
+    pub(super) is_minimized: bool,
     pub(super) title: Option<String>,
     pub(super) process: String,
     pub(super) app_name: Option<String>,

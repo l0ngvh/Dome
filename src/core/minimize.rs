@@ -1,44 +1,45 @@
-//! Minimize/unminimize operations on Hub.
-//!
-//! Follows the same pattern as `float.rs` and `fullscreen.rs`: read workspace,
-//! match on mode, call the appropriate detach, then handle mode-specific state.
-
-use crate::core::{
-    Hub, WindowId,
-    node::{DisplayMode, WindowRestrictions},
-};
+use crate::core::{Hub, WindowId, node::DisplayMode};
 
 impl Hub {
     /// Detach a window from its current layout and mark it minimized.
-    /// Follows the `delete_window` pattern: read workspace, match on mode,
-    /// call the appropriate detach, then prune. Instead of deleting the window,
-    /// sets mode to Minimized and tracks it in `minimized_windows`.
+    /// The window's `mode` field (including the float dim payload) is
+    /// preserved through the round trip. The window is removed from its
+    /// workspace and tracked in `minimized_windows` until restored.
     #[tracing::instrument(skip(self))]
     pub(crate) fn minimize_window(&mut self, window_id: WindowId) {
         let window = self.access.windows.get(window_id);
-        let ws = window.workspace;
-        match window.mode {
+        if window.is_minimized() {
+            return;
+        }
+        let prior_workspace = window
+            .workspace()
+            .expect("non-minimized window has a workspace");
+        let prior_mode = window.mode;
+
+        match prior_mode {
             DisplayMode::Tiling => {
                 self.strategy.detach_window(&mut self.access, window_id);
             }
-            DisplayMode::Float => {
+            // Float dim rides along on the variant; nothing to stash.
+            DisplayMode::Float { .. } => {
                 let _dim = self.detach_float_from_workspace(window_id);
             }
             DisplayMode::Fullscreen => {
                 self.detach_fullscreen_from_workspace(window_id);
             }
-            DisplayMode::Minimized => return,
         }
+
         let w = self.access.windows.get_mut(window_id);
-        w.mode = DisplayMode::Minimized;
-        w.restrictions = WindowRestrictions::None;
+        w.set_minimized(true);
+        w.set_workspace(None);
         self.minimized_windows.push(window_id);
-        self.prune_workspace(ws);
-        tracing::info!(%window_id, "Window minimized");
+
+        self.prune_workspace(prior_workspace);
+        tracing::info!(%window_id, ?prior_mode, "Window minimized");
     }
 
-    /// Restore a minimized window to the current workspace as tiling.
-    /// No-op if the window is not in `minimized_windows` (guards against
+    /// Restore a minimized window to the current workspace using its preserved
+    /// mode. No-op if the window is not in `minimized_windows` (guards against
     /// stale picker entries where a window was deleted while minimized).
     #[tracing::instrument(skip(self))]
     pub(crate) fn unminimize_window(&mut self, window_id: WindowId) {
@@ -46,11 +47,25 @@ impl Hub {
             return;
         }
         self.minimized_windows.retain(|&w| w != window_id);
-        let current_ws = self.current_workspace();
-        self.access.windows.get_mut(window_id).mode = DisplayMode::Tiling;
-        self.strategy
-            .attach_window(&mut self.access, window_id, current_ws);
-        tracing::info!(%window_id, "Window unminimized");
+
+        let target_workspace = self.current_workspace();
+        let prior_mode = self.access.windows.get(window_id).mode;
+
+        self.access.windows.get_mut(window_id).set_minimized(false);
+
+        match prior_mode {
+            DisplayMode::Tiling => {
+                self.strategy
+                    .attach_window(&mut self.access, window_id, target_workspace);
+            }
+            DisplayMode::Float { dim } => {
+                self.attach_float_to_workspace(target_workspace, window_id, dim);
+            }
+            DisplayMode::Fullscreen => {
+                self.attach_fullscreen_to_workspace(target_workspace, window_id);
+            }
+        }
+        tracing::info!(%window_id, ?prior_mode, "Window unminimized");
     }
 
     /// Returns (id, title) pairs for all minimized windows, in insertion order.

@@ -528,10 +528,11 @@ fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) 
         );
     }
 
-    for &(fid, _) in &workspace.float_windows {
+    for &fid in &workspace.float_windows {
         let float = hub.get_window(fid);
         assert_eq!(
-            float.workspace, workspace_id,
+            float.workspace(),
+            Some(workspace_id),
             "Float {fid} has wrong workspace"
         );
         assert!(
@@ -545,7 +546,8 @@ fn validate_fullscreens(hub: &Hub, workspace_id: WorkspaceId, workspace: &Worksp
     for &fid in &workspace.fullscreen_windows {
         let window = hub.get_window(fid);
         assert_eq!(
-            window.workspace, workspace_id,
+            window.workspace(),
+            Some(workspace_id),
             "Fullscreen {fid} has wrong workspace"
         );
         assert!(
@@ -633,14 +635,30 @@ fn validate_minimized(hub: &Hub) {
         let w = hub.get_window(id);
         assert!(
             w.is_minimized(),
-            "Window {id} in minimized_windows but mode is {:?}",
-            w.mode
+            "Window {id} in minimized_windows but is_minimized is false"
         );
+        assert!(
+            w.workspace().is_none(),
+            "{id} is minimized but has a workspace",
+        );
+    }
+    // Converse: any window with workspace = None must be in minimized_windows.
+    for (wid, window) in hub.access.windows.all_active() {
+        if window.workspace().is_none() {
+            assert!(
+                window.is_minimized(),
+                "{wid} has no workspace but is_minimized is false"
+            );
+            assert!(
+                hub.minimized_windows().contains(&wid),
+                "{wid} has no workspace but is not in minimized_windows"
+            );
+        }
     }
     for (ws_id, ws) in hub.all_workspaces() {
         for &id in hub.minimized_windows() {
             assert!(
-                !ws.float_windows.iter().any(|&(fid, _)| fid == id),
+                !ws.float_windows.contains(&id),
                 "Minimized {id} in workspace {ws_id} float list"
             );
             assert!(

@@ -17,6 +17,7 @@ pub(in crate::platform::macos) struct WindowEntry {
     pub(super) bundle_id: Option<String>,
     pub(super) title: Option<String>,
     pub(super) state: WindowState,
+    pub(super) is_minimized: bool,
     pub(super) is_moving: bool,
 }
 
@@ -134,6 +135,7 @@ impl Registry {
                 bundle_id,
                 title,
                 state,
+                is_minimized: false,
                 is_moving: false,
             },
         );

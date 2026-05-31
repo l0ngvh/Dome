@@ -10,6 +10,7 @@ pub(super) use events::{HubEvent, HubMessage};
 pub(super) use inspect::{
     ExitNativeFullscreen, compute_reconcile_all, compute_reconciliation, compute_window_positions,
 };
+use window::WindowState;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -29,7 +30,7 @@ use crate::platform::macos::accessibility::AXWindowApi;
 use monitor::MonitorRegistry;
 use recovery::Recovery;
 use registry::{Registry, WindowEntry};
-use window::{OffscreenPlacement, PositionedState, RoundedDimension, WindowState};
+use window::RoundedDimension;
 
 pub(in crate::platform::macos) struct NewWindow {
     pub(in crate::platform::macos) ax: Arc<dyn AXWindowApi>,
@@ -461,30 +462,20 @@ impl Dome {
         });
     }
 
-    /// Unminimize a window selected via the picker. Unlike the reconcile path
-    /// (where the user clicks the Dock icon and macOS unminimizes first), the
-    /// picker path must drive both the core state and the OS/platform state:
-    /// 1. Tell the hub the window is back in tiling.
-    /// 2. Ask macOS to actually show the window (it is still OS-minimized).
-    /// 3. Transition the registry state to Positioned(Offscreen) so that
-    ///    flush_layout's place_window can move it into view.
+    /// Unminimize a window selected via the picker. Clears the minimize flag
+    /// and drives the OS-side restore. Geometry reconciliation defers to the
+    /// next flush_layout cycle through place_window / place_fullscreen_window
+    /// against the preserved entry.state.
     pub(in crate::platform::macos) fn picker_unminimize_window(&mut self, window_id: WindowId) {
         self.hub.unminimize_window(window_id);
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
-        if let WindowState::UserMinimized = window.state {
+        if window.is_minimized {
+            window.is_minimized = false;
             if let Err(e) = window.ax.unminimize() {
                 tracing::debug!(%window_id, "Failed to unminimize window from picker: {e:#}");
             }
-            window.state = WindowState::Positioned(PositionedState::Offscreen(
-                OffscreenPlacement::new(RoundedDimension {
-                    x: 0,
-                    y: 0,
-                    width: 0,
-                    height: 0,
-                }),
-            ));
         }
     }
 

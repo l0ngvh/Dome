@@ -128,7 +128,7 @@ impl MasterStrategy {
 
 impl TilingStrategy for MasterStrategy {
     fn attach_window(&mut self, hub: &mut HubAccess, id: WindowId, ws_id: WorkspaceId) {
-        hub.windows.get_mut(id).workspace = ws_id;
+        hub.windows.get_mut(id).set_workspace(Some(ws_id));
         let state = self.workspaces.entry(ws_id).or_insert_with(|| MasterState {
             windows: Vec::new(),
             focused_index: None,
@@ -143,7 +143,11 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn detach_window(&mut self, hub: &mut HubAccess, id: WindowId) -> Dimension {
-        let ws_id = hub.windows.get(id).workspace;
+        let ws_id = hub
+            .windows
+            .get(id)
+            .workspace()
+            .expect("detaching tiling window has a workspace");
         let screen = hub
             .monitors
             .get(hub.workspaces.get(ws_id).monitor)
@@ -179,7 +183,11 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn set_focus(&mut self, hub: &mut HubAccess, window_id: WindowId) {
-        let ws_id = hub.windows.get(window_id).workspace;
+        let ws_id = hub
+            .windows
+            .get(window_id)
+            .workspace()
+            .expect("setting focus on tiling window requires a workspace");
         let Some(state) = self.workspaces.get_mut(&ws_id) else {
             return;
         };

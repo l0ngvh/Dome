@@ -30,7 +30,7 @@ impl PartitionTreeStrategy {
             let Some(current) = stack.pop() else { break };
             match current {
                 Child::Window(wid) => {
-                    hub.windows.get_mut(wid).workspace = workspace_id;
+                    hub.windows.get_mut(wid).set_workspace(Some(workspace_id));
                 }
                 Child::Container(cid) => {
                     self.containers.get_mut(cid).workspace = workspace_id;
@@ -100,7 +100,12 @@ impl PartitionTreeStrategy {
         let (parent, workspace_id, dimension) = match anchor {
             Child::Window(wid) => {
                 let td = self.tiling_data(wid);
-                (td.parent, hub.windows.get(wid).workspace, td.dimension)
+                let ws = hub
+                    .windows
+                    .get(wid)
+                    .workspace()
+                    .expect("tiling window has a workspace");
+                (td.parent, ws, td.dimension)
             }
             Child::Container(cid) => {
                 let c = self.containers.get(cid);

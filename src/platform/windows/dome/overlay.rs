@@ -491,7 +491,7 @@ impl TilingOverlayApi for TilingOverlay {
         }
         // Same-monitor path: no SetWindowPos. Z-order is restored by the
         // per-window lift in show_tiling whenever a tiling window enters the
-        // visible band from Float, Offscreen, Minimized, or UserMinimized.
+        // visible band from Float or Offscreen (or unminimizes via the flag).
 
         // All state assignments must precede rerender(), which reads cached
         // physical dimensions.

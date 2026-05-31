@@ -161,7 +161,7 @@ impl Hub {
             return Some(id);
         }
         if workspace.is_float_focused
-            && let Some(&(id, _)) = workspace.float_windows.last()
+            && let Some(&id) = workspace.float_windows.last()
         {
             return Some(id);
         }
@@ -241,13 +241,15 @@ impl Hub {
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
-        if self.access.windows.get(window_id).mode == DisplayMode::Minimized {
+        if self.access.windows.get(window_id).is_minimized() {
             self.unminimize_window(window_id);
             return;
         }
         tracing::debug!(%window_id, "Setting focus to window");
         let window = self.access.windows.get(window_id);
-        let ws = window.workspace;
+        let ws = window
+            .workspace()
+            .expect("non-minimized window has a workspace");
         match window.mode {
             DisplayMode::Fullscreen => {
                 let fs = &mut self.access.workspaces.get_mut(ws).fullscreen_windows;
@@ -257,13 +259,12 @@ impl Hub {
                 }
                 self.access.workspaces.get_mut(ws).is_float_focused = false;
             }
-            DisplayMode::Float => {
+            DisplayMode::Float { .. } => {
                 self.focus_float(ws, window_id);
             }
             DisplayMode::Tiling => {
                 self.strategy.set_focus(&mut self.access, window_id);
             }
-            DisplayMode::Minimized => unreachable!("guarded above"),
         }
         self.focus_workspace_with_id(ws);
     }
@@ -430,7 +431,7 @@ impl Hub {
                 .windows
                 .all_active()
                 .iter()
-                .filter(|(_, w)| w.mode == DisplayMode::Tiling && w.workspace == *ws_id)
+                .filter(|(_, w)| w.mode == DisplayMode::Tiling && w.workspace() == Some(*ws_id))
                 .map(|(id, _)| *id)
                 .collect();
             let prev_focus = self.strategy.focused_tiling_window(&self.access, *ws_id);
@@ -527,10 +528,11 @@ impl Hub {
                 };
 
                 let mut float_windows = Vec::new();
-                for &(id, dim) in &ws.float_windows {
-                    // Float dimensions are already screen-absolute (stored in the workspace
-                    // tuple), so no translate() call needed. clip() works because both dim
-                    // and screen are in absolute screen coordinates.
+                for &id in &ws.float_windows {
+                    let window = self.access.windows.get(id);
+                    let DisplayMode::Float { dim } = window.mode else {
+                        panic!("window {id} in float_windows but mode is not Float");
+                    };
                     let frame = dim;
                     if let Some(visible_frame) = clip(frame, screen) {
                         let is_highlighted = focused == Some(id);
@@ -583,7 +585,10 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn insert_float(&mut self, dimension: Dimension) -> WindowId {
         let current_ws = self.current_workspace();
-        let window_id = self.access.windows.allocate(Window::float(current_ws));
+        let window_id = self
+            .access
+            .windows
+            .allocate(Window::float(current_ws, dimension));
         tracing::debug!("Inserting float window {window_id} with dimension {dimension:?}");
         self.attach_float_to_workspace(current_ws, window_id, dimension);
         window_id
@@ -604,25 +609,27 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn delete_window(&mut self, id: WindowId) {
         let window = self.access.windows.get(id);
-        let ws = window.workspace;
+        let is_minimized = window.is_minimized();
         let mode = window.mode;
-        match mode {
-            DisplayMode::Float => {
-                let _dim = self.detach_float_from_workspace(id);
+
+        if is_minimized {
+            self.minimized_windows.retain(|&w| w != id);
+        } else {
+            let ws = window
+                .workspace()
+                .expect("non-minimized window has a workspace");
+            match mode {
+                DisplayMode::Float { .. } => {
+                    let _dim = self.detach_float_from_workspace(id);
+                }
+                DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
+                DisplayMode::Tiling => {
+                    self.strategy.detach_window(&mut self.access, id);
+                }
             }
-            DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
-            DisplayMode::Tiling => {
-                self.strategy.detach_window(&mut self.access, id);
-            }
-            DisplayMode::Minimized => {
-                self.minimized_windows.retain(|&w| w != id);
-            }
-        }
-        // Minimized windows have a stale workspace field (the workspace may
-        // have been pruned already), so skip prune_workspace for them.
-        if mode != DisplayMode::Minimized {
             self.prune_workspace(ws);
         }
+
         self.access.windows.delete(id);
     }
 
@@ -682,12 +689,8 @@ impl Hub {
 
         tracing::debug!(%window_id, ?min_width, ?min_height, ?max_width, ?max_height, "Window constraint set");
 
-        let mode = window.mode;
-        let workspace_id = window.workspace;
-        // Minimized windows have a stale workspace field, so skip relayout.
-        if mode != DisplayMode::Minimized {
-            self.strategy
-                .layout_workspace(&mut self.access, workspace_id);
+        if let Some(ws) = window.workspace() {
+            self.strategy.layout_workspace(&mut self.access, ws);
         }
     }
 
@@ -705,13 +708,16 @@ impl Hub {
         }
 
         let window = self.access.windows.get(window_id);
+        if window.is_minimized() {
+            panic!("Minimized window can't be moved");
+        }
         match window.mode {
             DisplayMode::Fullscreen => {
                 self.detach_fullscreen_from_workspace(window_id);
                 self.attach_fullscreen_to_workspace(target_ws, window_id);
                 self.access.workspaces.get_mut(target_ws).is_float_focused = false;
             }
-            DisplayMode::Float => {
+            DisplayMode::Float { .. } => {
                 let dim = self.detach_float_from_workspace(window_id);
                 self.attach_float_to_workspace(target_ws, window_id, dim);
             }
@@ -719,7 +725,6 @@ impl Hub {
                 self.strategy
                     .move_focused_to_workspace(&mut self.access, current_ws, target_ws);
             }
-            DisplayMode::Minimized => return,
         }
 
         tracing::debug!(?window_id, ?target_ws, "Moved to workspace");

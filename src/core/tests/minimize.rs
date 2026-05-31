@@ -424,7 +424,7 @@ fn minimize_last_tiling_with_floats_present() {
     hub.minimize_window(w0);
     assert_eq!(hub.minimized_windows().len(), 1);
     let ws_id = hub.current_workspace();
-    let ws = hub.get_workspace(ws_id);
+    let _ws = hub.get_workspace(ws_id);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -548,4 +548,116 @@ fn unminimize_deleted_window_is_noop() {
     hub.delete_window(w1);
     hub.unminimize_window(w1);
     assert!(hub.minimized_windows().is_empty());
+}
+
+#[test]
+fn unminimize_float_window_restores_mode_and_dimension() {
+    let mut hub = setup();
+    let _w0 = hub.insert_tiling();
+    let float_dim = Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(40.0),
+        Length::new(10.0),
+    );
+    let w_float = hub.insert_float(float_dim);
+
+    hub.minimize_window(w_float);
+    assert_eq!(hub.minimized_windows().len(), 1);
+    assert!(hub.get_window(w_float).is_minimized());
+
+    hub.unminimize_window(w_float);
+    assert!(hub.minimized_windows().is_empty());
+    assert!(!hub.get_window(w_float).is_minimized());
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
+        Window(id=WindowId(1), x=10.00, y=5.00, w=40.00, h=10.00, float, highlighted)
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |         ****************************************                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                  F1                  *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         *                                      *                                                                                                   |
+    |         ****************************************                                                                                                   |
+    |                                                                         W0                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ");
+}
+
+#[test]
+fn unminimize_fullscreen_window_restores_mode_and_restrictions() {
+    let mut hub = setup();
+    let _w0 = hub.insert_tiling();
+    let w1 = hub.insert_tiling();
+    hub.set_fullscreen(w1, WindowRestrictions::BlockAll);
+
+    hub.minimize_window(w1);
+    assert_eq!(hub.minimized_windows().len(), 1);
+    assert!(hub.get_window(w1).is_minimized());
+
+    hub.unminimize_window(w1);
+    assert!(hub.minimized_windows().is_empty());
+    assert!(!hub.get_window(w1).is_minimized());
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Fullscreen(id=WindowId(1))
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                         W1                                                                         |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    |                                                                                                                                                    |
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    ");
 }

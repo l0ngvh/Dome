@@ -335,7 +335,11 @@ impl PartitionTreeStrategy {
         child: Child,
     ) -> (Length, Length, Length, Length) {
         let ws_id = match child {
-            Child::Window(id) => hub.windows.get(id).workspace,
+            Child::Window(id) => hub
+                .windows
+                .get(id)
+                .workspace()
+                .expect("tiling window has a workspace"),
             Child::Container(id) => self.containers.get(id).workspace,
         };
         let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);

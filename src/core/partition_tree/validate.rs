@@ -14,7 +14,7 @@ impl PartitionTreeStrategy {
         &self,
         hub: &HubAccess,
         workspace_id: WorkspaceId,
-        workspace: &crate::core::node::Workspace,
+        _workspace: &crate::core::node::Workspace,
     ) {
         use crate::core::node::DisplayMode;
 
@@ -309,7 +309,8 @@ impl PartitionTreeStrategy {
         let td = self.tiling_data(wid);
         assert_eq!(td.parent, expected_parent, "Window {wid} has wrong parent");
         assert_eq!(
-            window.workspace, workspace_id,
+            window.workspace(),
+            Some(workspace_id),
             "Window {wid} has wrong workspace"
         );
 

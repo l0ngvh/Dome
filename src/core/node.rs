@@ -55,9 +55,10 @@ pub(crate) struct Workspace {
     /// Wouldn't have any effect when any fullscreen window is present, but for consistency would be
     /// set to false in that case
     pub(super) is_float_focused: bool,
-    /// All floats in this workspace, with their screen-absolute dimensions, order by z-index, with
-    /// the last is the top most window. Focusing a float moves it to the end of the vec.
-    pub(super) float_windows: Vec<(WindowId, Dimension)>,
+    /// Float ids in this workspace, ordered by z-index (last is topmost).
+    /// Each id's screen-absolute dim lives on the window itself, in
+    /// `DisplayMode::Float { dim }`. Focusing a float moves it to the end.
+    pub(super) float_windows: Vec<WindowId>,
     /// All fullscreen windows in this workspace, order by z-index with the last is the top most
     /// window. Only the top most fullscreen window is displayed.
     pub(super) fullscreen_windows: Vec<WindowId>,
@@ -95,22 +96,22 @@ impl std::fmt::Display for Direction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) enum DisplayMode {
     #[default]
     Tiling,
-    Float,
+    Float {
+        dim: Dimension,
+    },
     Fullscreen,
-    Minimized,
 }
 
 impl std::fmt::Display for DisplayMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Tiling => write!(f, "tiling"),
-            Self::Float => write!(f, "float"),
+            Self::Float { .. } => write!(f, "float"),
             Self::Fullscreen => write!(f, "fullscreen"),
-            Self::Minimized => write!(f, "minimized"),
         }
     }
 }
@@ -130,9 +131,10 @@ pub(crate) enum WindowRestrictions {
 /// Represents a single application window
 #[derive(Debug, Clone)]
 pub(crate) struct Window {
-    pub(super) workspace: WorkspaceId,
+    pub(super) workspace: Option<WorkspaceId>,
     pub(super) mode: DisplayMode,
     pub(super) restrictions: WindowRestrictions,
+    is_minimized: bool,
     pub(super) title: String,
     pub(super) min_width: f32,
     pub(super) min_height: f32,
@@ -145,11 +147,30 @@ impl Node for Window {
 }
 
 impl Window {
+    /// Returns the workspace this window is attached to. None iff the
+    /// window is minimized (is_minimized <=> workspace().is_none()).
+    pub(crate) fn workspace(&self) -> Option<WorkspaceId> {
+        self.workspace
+    }
+
+    pub(crate) fn is_minimized(&self) -> bool {
+        self.is_minimized
+    }
+
+    pub(super) fn set_minimized(&mut self, v: bool) {
+        self.is_minimized = v;
+    }
+
+    pub(super) fn set_workspace(&mut self, ws: Option<WorkspaceId>) {
+        self.workspace = ws;
+    }
+
     pub(super) fn tiling(workspace: WorkspaceId) -> Self {
         Self {
-            workspace,
+            workspace: Some(workspace),
             mode: DisplayMode::Tiling,
             restrictions: WindowRestrictions::None,
+            is_minimized: false,
             title: String::new(),
             min_width: 0.0,
             min_height: 0.0,
@@ -158,11 +179,12 @@ impl Window {
         }
     }
 
-    pub(super) fn float(workspace: WorkspaceId) -> Self {
+    pub(super) fn float(workspace: WorkspaceId, dim: Dimension) -> Self {
         Self {
-            workspace,
-            mode: DisplayMode::Float,
+            workspace: Some(workspace),
+            mode: DisplayMode::Float { dim },
             restrictions: WindowRestrictions::None,
+            is_minimized: false,
             title: String::new(),
             min_width: 0.0,
             min_height: 0.0,
@@ -173,9 +195,10 @@ impl Window {
 
     pub(super) fn fullscreen(workspace: WorkspaceId, restrictions: WindowRestrictions) -> Self {
         Self {
-            workspace,
+            workspace: Some(workspace),
             mode: DisplayMode::Fullscreen,
             restrictions,
+            is_minimized: false,
             title: String::new(),
             min_width: 0.0,
             min_height: 0.0,
@@ -197,15 +220,11 @@ impl Window {
     }
 
     pub(crate) fn is_float(&self) -> bool {
-        self.mode == DisplayMode::Float
+        matches!(self.mode, DisplayMode::Float { .. })
     }
 
     pub(crate) fn is_fullscreen(&self) -> bool {
-        self.mode == DisplayMode::Fullscreen
-    }
-
-    pub(crate) fn is_minimized(&self) -> bool {
-        self.mode == DisplayMode::Minimized
+        matches!(self.mode, DisplayMode::Fullscreen)
     }
 }
 
