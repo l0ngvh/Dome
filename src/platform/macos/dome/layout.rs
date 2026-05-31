@@ -152,7 +152,7 @@ impl Dome {
                         self.move_window_offscreen(wp.id);
                         continue;
                     };
-                    self.place_window(wp.id, target);
+                    self.show_tiling(wp.id, target);
                     placed_tiling.push(*wp);
                 }
 
@@ -163,7 +163,7 @@ impl Dome {
                     if focused_window != Some(wp.id) {
                         self.move_window_offscreen(wp.id);
                     } else {
-                        self.place_window(wp.id, content_dim);
+                        self.show_float(wp.id, content_dim);
                     }
                     let Some(entry) = self.registry.by_id(wp.id) else {
                         continue;

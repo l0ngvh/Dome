@@ -564,11 +564,9 @@ fn unminimize_float_window_restores_mode_and_dimension() {
 
     hub.minimize_window(w_float);
     assert_eq!(hub.minimized_windows().len(), 1);
-    assert!(hub.get_window(w_float).is_minimized());
 
     hub.unminimize_window(w_float);
     assert!(hub.minimized_windows().is_empty());
-    assert!(!hub.get_window(w_float).is_minimized());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -618,11 +616,9 @@ fn unminimize_fullscreen_window_restores_mode_and_restrictions() {
 
     hub.minimize_window(w1);
     assert_eq!(hub.minimized_windows().len(), 1);
-    assert!(hub.get_window(w1).is_minimized());
 
     hub.unminimize_window(w1);
     assert!(hub.minimized_windows().is_empty());
-    assert!(!hub.get_window(w1).is_minimized());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

@@ -487,10 +487,6 @@ impl Hub {
         self.access.workspaces.get(id)
     }
 
-    pub(crate) fn get_window(&self, id: WindowId) -> &Window {
-        self.access.windows.get(id)
-    }
-
     pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) {
         self.access.windows.get_mut(window_id).title = title;
     }

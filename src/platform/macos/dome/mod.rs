@@ -464,7 +464,7 @@ impl Dome {
 
     /// Unminimize a window selected via the picker. Clears the minimize flag
     /// and drives the OS-side restore. Geometry reconciliation defers to the
-    /// next flush_layout cycle through place_window / place_fullscreen_window
+    /// next flush_layout cycle through show_tiling / show_float / place_fullscreen_window
     /// against the preserved entry.state.
     pub(in crate::platform::macos) fn picker_unminimize_window(&mut self, window_id: WindowId) {
         self.hub.unminimize_window(window_id);

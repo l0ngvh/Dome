@@ -189,7 +189,6 @@ fn toggle_float_with_scrolled_viewport() {
     hub.set_focus(w2);
     hub.toggle_float();
 
-    assert!(hub.get_window(w2).is_float());
     // Layout x=200, offset=150, screen.x=0 => screen-absolute x = 200 - 150 + 0 = 50
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -252,7 +251,6 @@ fn toggle_float_to_tiling_with_scrolled_viewport() {
     hub.set_focus(w1);
     hub.toggle_float();
 
-    assert!(!hub.get_window(w1).is_float());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

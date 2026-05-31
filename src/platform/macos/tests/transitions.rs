@@ -694,7 +694,7 @@ fn user_minimized_unminimize_via_focus() {
     // When set_focus is called on a minimized window (e.g. from the picker),
     // hub.set_focus checks the is_minimized flag, calls unminimize_window to
     // clear it and reattach to the current workspace. flush_layout then
-    // positions the window via place_window.
+    // positions the window via show_tiling / show_float.
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 

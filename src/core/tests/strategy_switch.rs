@@ -230,7 +230,7 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
         Length::new(20.0),
     );
     hub.insert_tiling();
-    let float_id = hub.insert_float(float_dim);
+    let _float_id = hub.insert_float(float_dim);
     let _fs_id = hub.insert_fullscreen(WindowRestrictions::None);
 
     // With fullscreen on top, only it is visible.
@@ -318,8 +318,6 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
-    // Verify the float window still exists.
-    let _float = hub.get_window(float_id);
 }
 
 #[test]

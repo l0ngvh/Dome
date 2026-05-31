@@ -529,7 +529,7 @@ fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) 
     }
 
     for &fid in &workspace.float_windows {
-        let float = hub.get_window(fid);
+        let float = hub.access.windows.get(fid);
         assert_eq!(
             float.workspace(),
             Some(workspace_id),
@@ -544,7 +544,7 @@ fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) 
 
 fn validate_fullscreens(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
     for &fid in &workspace.fullscreen_windows {
-        let window = hub.get_window(fid);
+        let window = hub.access.windows.get(fid);
         assert_eq!(
             window.workspace(),
             Some(workspace_id),
@@ -632,7 +632,7 @@ fn validate_visible_placements(hub: &Hub) {
 
 fn validate_minimized(hub: &Hub) {
     for &id in hub.minimized_windows() {
-        let w = hub.get_window(id);
+        let w = hub.access.windows.get(id);
         assert!(
             w.is_minimized(),
             "Window {id} in minimized_windows but is_minimized is false"

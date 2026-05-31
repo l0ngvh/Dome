@@ -452,23 +452,16 @@ impl Dome {
                     None
                 }
             };
-            let (new_min_w, new_min_h, new_max_w, new_max_h) = (
+            // No pre-check against stored values: calling set_window_constraint with
+            // unchanged values is cheap (the runner's apply_layout diffs against cached
+            // placements and skips windows whose target is unchanged).
+            self.hub.set_window_constraint(
+                id,
                 to_frame(min_w),
                 to_frame(min_h),
                 to_frame(max_w),
                 to_frame(max_h),
             );
-            let (cur_min_w, cur_min_h) = self.hub.get_window(id).min_size();
-            let (cur_max_w, cur_max_h) = self.hub.get_window(id).max_size();
-            if new_min_w.unwrap_or(cur_min_w) == cur_min_w
-                && new_min_h.unwrap_or(cur_min_h) == cur_min_h
-                && new_max_w.unwrap_or(cur_max_w) == cur_max_w
-                && new_max_h.unwrap_or(cur_max_h) == cur_max_h
-            {
-                return;
-            }
-            self.hub
-                .set_window_constraint(id, new_min_w, new_min_h, new_max_w, new_max_h);
         }
     }
 

@@ -86,8 +86,8 @@ pub(super) struct Placement {
 pub(super) struct FloatPlacement {
     /// Last rect reconciled with the OS -- the rect we most recently passed to
     /// `set_frame` or adopted from a drag observation. Used for outbound
-    /// idempotence in `place_window` and to skip no-op observations in
-    /// `window_moved`.
+    /// idempotence in `show_tiling` / `show_float` and to skip no-op
+    /// observations in `window_moved`.
     pub(super) target: RoundedDimension,
     /// When `target` was last bumped by an outbound `set_frame`. The
     /// initial-placement stale filter in `window_moved` ignores AX bursts
@@ -414,7 +414,7 @@ impl Dome {
         window_id
     }
     #[tracing::instrument(skip(self))]
-    pub(super) fn place_window(&mut self, window_id: WindowId, dim: Dimension) {
+    pub(super) fn show_tiling(&mut self, window_id: WindowId, dim: Dimension) {
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
@@ -431,49 +431,81 @@ impl Dome {
             }
         }
         let target = round_dim(dim);
-        let is_float = self.hub.get_window(window_id).is_float();
+
         match &mut window.state {
-            WindowState::Positioned(PositionedState::Tiling(p)) if !is_float => {
+            WindowState::Positioned(PositionedState::Tiling(p)) => {
                 if p.set_target(target)
                     && let Err(e) = window.ax.set_frame(dim.round())
                 {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
-            WindowState::Positioned(PositionedState::Float(fp)) if is_float => {
+            // Caller (the `tiling_windows` loop in apply_monitor_placements)
+            // asserts the kind. If the preserved platform state is Float, the
+            // window just toggled tiling-ward in core; rebuild as Tiling.
+            WindowState::Positioned(PositionedState::Float(_)) => {
+                window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
+                    target, target,
+                )));
+                if let Err(e) = window.ax.set_frame(dim.round()) {
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                }
+            }
+            WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
+                // Preserve the captured actual position from the offscreen state
+                // so drift correction starts from a real coordinate.
+                let actual = offscreen.actual;
+                window.state = WindowState::Positioned(PositionedState::Tiling(Placement::new(
+                    actual, target,
+                )));
+                if let Err(e) = window.ax.set_frame(dim.round()) {
+                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
+                }
+            }
+            WindowState::NativeFullscreen => {
+                unreachable!("Native fullscreen windows must be set by `place_fullscreen_window`")
+            }
+            WindowState::BorderlessFullscreen => {
+                unreachable!(
+                    "Borderless fullscreen windows must be set by `place_fullscreen_window`"
+                )
+            }
+            WindowState::BorderlessMinimized => {
+                unreachable!("BorderlessMinimized windows must be set by `place_fullscreen_window`")
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub(super) fn show_float(&mut self, window_id: WindowId, dim: Dimension) {
+        let Some(window) = self.registry.by_id_mut(window_id) else {
+            return;
+        };
+        if window.is_moving {
+            return;
+        }
+        // User-minimized window being restored (picker or focus_window_by_cg path).
+        // Clear the flag and drive the OS-side restore; fall through to the
+        // preserved state match for geometry placement.
+        if window.is_minimized {
+            window.is_minimized = false;
+            if let Err(e) = window.ax.unminimize() {
+                tracing::trace!("Failed to unminimize window: {e:#}");
+            }
+        }
+        let target = round_dim(dim);
+
+        match &mut window.state {
+            WindowState::Positioned(PositionedState::Float(fp)) => {
                 if fp.set_target(target)
                     && let Err(e) = window.ax.set_frame(dim.round())
                 {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
             }
-            // Cross-transitions: hub says float but platform is tiling, or vice versa.
-            // Rebuild the placement state to match the hub's view.
-            WindowState::Positioned(PositionedState::Tiling(_) | PositionedState::Float(_)) => {
-                if is_float {
-                    window.state = WindowState::Positioned(PositionedState::Float(
-                        FloatPlacement::new(target),
-                    ));
-                } else {
-                    window.state = WindowState::Positioned(PositionedState::Tiling(
-                        Placement::new(target, target),
-                    ));
-                }
-                if let Err(e) = window.ax.set_frame(dim.round()) {
-                    tracing::trace!("Window {} set_frame failed: {e}", window.ax);
-                }
-            }
-            WindowState::Positioned(PositionedState::Offscreen(offscreen)) => {
-                let actual = offscreen.actual;
-                if is_float {
-                    window.state = WindowState::Positioned(PositionedState::Float(
-                        FloatPlacement::new(target),
-                    ));
-                } else {
-                    window.state = WindowState::Positioned(PositionedState::Tiling(
-                        Placement::new(actual, target),
-                    ));
-                }
+            WindowState::Positioned(PositionedState::Tiling(_) | PositionedState::Offscreen(_)) => {
+                window.state =
+                    WindowState::Positioned(PositionedState::Float(FloatPlacement::new(target)));
                 if let Err(e) = window.ax.set_frame(dim.round()) {
                     tracing::trace!("Window {} set_frame failed: {e}", window.ax);
                 }
