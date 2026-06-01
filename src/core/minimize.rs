@@ -35,7 +35,7 @@ impl Hub {
         self.minimized_windows.push(window_id);
 
         self.prune_workspace(prior_workspace);
-        tracing::info!(%window_id, ?prior_mode, "Window minimized");
+        tracing::info!(?prior_mode, "Window minimized");
     }
 
     /// Restore a minimized window to the current workspace using its preserved
@@ -65,7 +65,7 @@ impl Hub {
                 self.attach_fullscreen_to_workspace(target_workspace, window_id);
             }
         }
-        tracing::info!(%window_id, ?prior_mode, "Window unminimized");
+        tracing::info!(?prior_mode, "Window unminimized");
     }
 
     /// Returns (id, title) pairs for all minimized windows, in insertion order.

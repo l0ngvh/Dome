@@ -188,7 +188,6 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
             }
             Action::UnminimizeWindow(id) => {
                 runner.dome.picker_unminimize_window(*id);
-                runner.dome.flush_layout();
             }
             Action::Mode { name } => {
                 runner.keymap_state.write().unwrap().switch_mode(name);

@@ -64,6 +64,7 @@ impl Hub {
     /// Write back the observed screen-absolute dimension for a floating window.
     /// Called by platform shells after a user drag/resize settles.
     /// Panics if the window is not Float (invariant violation in the caller).
+    #[tracing::instrument(skip(self))]
     pub(crate) fn update_float_dimension(&mut self, window_id: WindowId, dim: Dimension) {
         let window = self.access.windows.get_mut(window_id);
         assert!(

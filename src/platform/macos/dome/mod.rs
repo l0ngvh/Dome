@@ -126,6 +126,7 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     pub(in crate::platform::macos) fn reconcile_windows(
         &mut self,
         removed: &[CGWindowID],
@@ -221,6 +222,7 @@ impl Dome {
         on_open
     }
 
+    #[tracing::instrument(skip_all)]
     pub(in crate::platform::macos) fn windows_moved(&mut self, moves: Vec<WindowMove>) {
         for m in moves {
             let Some(entry) = self.registry.get(m.cg_id) else {
@@ -253,13 +255,16 @@ impl Dome {
         self.registry.get(cg_id).cloned()
     }
 
+    #[tracing::instrument(skip(self), fields(cg_id = %cg_id, window = tracing::field::Empty))]
     pub(in crate::platform::macos) fn focus_window_by_cg(&mut self, cg_id: CGWindowID) {
         if let Some(entry) = self.registry.get(cg_id) {
+            tracing::Span::current().record("window", entry.to_string());
             self.hub.set_focus(entry.window_id);
+            self.flush_layout();
         }
-        self.flush_layout();
     }
 
+    #[tracing::instrument(skip(self, title), fields(cg_id = %cg_id, window = tracing::field::Empty))]
     pub(in crate::platform::macos) fn update_title(
         &mut self,
         cg_id: CGWindowID,
@@ -269,11 +274,12 @@ impl Dome {
             && let Some(title) = title
         {
             entry.title = Some(title.clone());
+            tracing::Span::current().record("window", entry.to_string());
 
             self.hub.set_window_title(entry.window_id, title);
-            tracing::trace!(%entry, "Title changed");
+            tracing::trace!("Title changed");
+            self.flush_layout();
         }
-        self.flush_layout();
     }
 
     pub(in crate::platform::macos) fn monitors_changed(&mut self, monitors: Vec<MonitorInfo>) {
@@ -281,10 +287,12 @@ impl Dome {
         self.flush_layout();
     }
 
+    #[tracing::instrument(skip(self), fields(cg_id = %cg_id, window = tracing::field::Empty))]
     pub(in crate::platform::macos) fn mirror_clicked(&mut self, cg_id: CGWindowID) {
         let Some(entry) = self.registry.get(cg_id) else {
             return;
         };
+        tracing::Span::current().record("window", entry.to_string());
         let window_id = entry.window_id;
         if let Err(e) = entry.ext.focus() {
             tracing::debug!("Failed to focus window: {e:#}");
@@ -293,6 +301,7 @@ impl Dome {
         self.flush_layout();
     }
 
+    #[tracing::instrument(skip(self), fields(container_id = %container_id, tab_idx))]
     pub(in crate::platform::macos) fn tab_clicked(
         &mut self,
         container_id: ContainerId,
@@ -305,6 +314,7 @@ impl Dome {
     /// Handles the frontmost window entering native fullscreen after a space
     /// change. If `cg_id` is tracked, transitions it to `NativeFullscreen`
     /// state. If untracked, inserts it as a new fullscreen window.
+    #[tracing::instrument(skip(self, ax, app_name, bundle_id, title), fields(cg_id = %cg_id, window = tracing::field::Empty))]
     pub(in crate::platform::macos) fn enter_native_fullscreen(
         &mut self,
         cg_id: CGWindowID,
@@ -314,6 +324,7 @@ impl Dome {
         title: Option<String>,
     ) {
         if let Some(entry) = self.registry.get(cg_id) {
+            tracing::Span::current().record("window", entry.to_string());
             let window_id = entry.window_id;
             self.window_entered_native_fullscreen(window_id);
         } else {
@@ -326,6 +337,7 @@ impl Dome {
     /// change. Only acts if `cg_id` is tracked and currently in
     /// `NativeFullscreen` state, routing through `window_moved` so the window
     /// re-enters tiling via the same path as reconcile-detected exits.
+    #[tracing::instrument(skip(self, pos, size), fields(cg_id = %cg_id, window = tracing::field::Empty))]
     pub(in crate::platform::macos) fn exit_native_fullscreen(
         &mut self,
         cg_id: CGWindowID,
@@ -335,6 +347,7 @@ impl Dome {
         if let Some(entry) = self.registry.get(cg_id)
             && matches!(entry.state, WindowState::NativeFullscreen)
         {
+            tracing::Span::current().record("window", entry.to_string());
             let window_id = entry.window_id;
             let now = Instant::now();
             self.window_moved(
@@ -348,8 +361,8 @@ impl Dome {
                     last: now,
                 },
             );
+            self.flush_layout();
         }
-        self.flush_layout();
     }
 
     pub(in crate::platform::macos) fn tracked_for_pid(
@@ -466,22 +479,24 @@ impl Dome {
     }
 
     /// Unminimize a window selected via the picker. Clears the minimize flag
-    /// and drives the OS-side restore. Geometry reconciliation defers to the
-    /// next flush_layout cycle through show_tiling / show_float / place_fullscreen_window
-    /// against the preserved entry.state.
+    /// and drives the OS-side restore.
+    #[tracing::instrument(skip(self), fields(window_id = %window_id, window = tracing::field::Empty))]
     pub(in crate::platform::macos) fn picker_unminimize_window(&mut self, window_id: WindowId) {
         self.hub.unminimize_window(window_id);
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
+        tracing::Span::current().record("window", window.to_string());
         if window.is_minimized {
             window.is_minimized = false;
             if let Err(e) = window.ext.unminimize() {
-                tracing::debug!(%window_id, "Failed to unminimize window from picker: {e:#}");
+                tracing::debug!("Failed to unminimize window from picker: {e:#}");
             }
         }
+        self.flush_layout();
     }
 
+    #[tracing::instrument(skip(self), fields(target = ?target))]
     pub(in crate::platform::macos) fn apply_focus(&mut self, target: &FocusTarget) {
         match target {
             FocusTarget::Up => self.hub.handle_tiling_action(TilingAction::FocusDirection {
@@ -511,6 +526,7 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(target = ?target))]
     pub(in crate::platform::macos) fn apply_move(&mut self, target: &MoveTarget) {
         match target {
             MoveTarget::Up => self.hub.handle_tiling_action(TilingAction::MoveDirection {
@@ -534,6 +550,7 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(target = ?target))]
     pub(in crate::platform::macos) fn apply_toggle(&mut self, target: &ToggleTarget) {
         match target {
             ToggleTarget::Spawn => self.hub.handle_tiling_action(TilingAction::ToggleSpawnMode),
@@ -546,6 +563,7 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(target = ?target))]
     pub(in crate::platform::macos) fn apply_master(&mut self, target: &MasterTarget) {
         let action = match target {
             MasterTarget::Grow => TilingAction::GrowMaster,

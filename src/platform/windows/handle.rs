@@ -578,6 +578,18 @@ impl ManageExternalWindow for ExternalHwnd {
         HwndId::from(self.0)
     }
 
+    fn pid(&self) -> u32 {
+        let mut pid = 0u32;
+        // Non-blocking thread/process-map lookup; safe on external HWNDs.
+        // Returns 0 on a zombie HWND (window already destroyed); 0 is never a
+        // valid Windows pid, so callers can use it as an unambiguous sentinel.
+        unsafe { GetWindowThreadProcessId(self.0, Some(&mut pid)) };
+        if pid == 0 {
+            tracing::warn!(id = %HwndId::from(self.0), "GetWindowThreadProcessId returned 0");
+        }
+        pid
+    }
+
     fn should_float(&self) -> bool {
         should_float(self.0)
     }

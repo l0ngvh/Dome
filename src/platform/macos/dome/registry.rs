@@ -25,11 +25,11 @@ impl std::fmt::Display for ManagedWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "[{}|{}:{}] {}",
+            "[id={}|pid={}|cg={}] {}",
             self.window_id,
             self.ext.pid(),
-            self.ext.cg_id(),
-            self.app_name.as_deref().unwrap_or("Unknown")
+            self.cg_id,
+            self.app_name.as_deref().unwrap_or("Unknown"),
         )?;
         if let Some(bundle_id) = &self.bundle_id {
             write!(f, " ({bundle_id})")?;
@@ -117,11 +117,11 @@ impl WindowRegistry {
         app_name: Option<String>,
         bundle_id: Option<String>,
         title: Option<String>,
-    ) {
+    ) -> Option<&ManagedWindow> {
         let cg_id = ax.cg_id();
         let pid = ax.pid();
         if pid as u32 == std::process::id() {
-            return;
+            return None;
         }
         self.id_to_cg.insert(window_id, cg_id);
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
@@ -139,6 +139,7 @@ impl WindowRegistry {
                 is_moving: false,
             },
         );
+        self.windows.get(&cg_id)
     }
 
     pub(super) fn set_pid_moving(&mut self, pid: i32, moving: bool) {

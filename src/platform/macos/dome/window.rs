@@ -330,7 +330,7 @@ fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
 }
 
 impl Dome {
-    #[tracing::instrument(skip(self, ax), fields(window = %ax))]
+    #[tracing::instrument(skip(self, ax), fields(window = tracing::field::Empty))]
     pub(super) fn add_window(
         &mut self,
         ax: Arc<dyn ExternalWindow>,
@@ -357,14 +357,16 @@ impl Dome {
             if let Some(title) = title.clone() {
                 self.hub.set_window_title(window_id, title);
             }
-            self.registry.insert(
+            if let Some(entry) = self.registry.insert(
                 ax.clone(),
                 window_id,
                 WindowState::BorderlessFullscreen,
                 app_name.clone(),
                 bundle_id.clone(),
                 title.clone(),
-            );
+            ) {
+                tracing::Span::current().record("window", entry.to_string());
+            }
             tracing::info!(%window_id, "New borderless fullscreen window");
             self.pending_created.push(window_id);
             window_id
@@ -373,21 +375,23 @@ impl Dome {
             if let Some(title) = title.clone() {
                 self.hub.set_window_title(window_id, title);
             }
-            self.registry.insert(
+            if let Some(entry) = self.registry.insert(
                 ax.clone(),
                 window_id,
                 WindowState::Positioned(PositionedState::Offscreen(OffscreenPlacement::new(dim))),
                 app_name,
                 bundle_id,
                 title,
-            );
+            ) {
+                tracing::Span::current().record("window", entry.to_string());
+            }
             tracing::info!(%window_id, "New tiling window");
             self.pending_created.push(window_id);
             window_id
         }
     }
 
-    #[tracing::instrument(skip(self, ax), fields(window = %ax))]
+    #[tracing::instrument(skip(self, ax), fields(window = tracing::field::Empty))]
     pub(super) fn add_native_fullscreen_window(
         &mut self,
         ax: Arc<dyn ExternalWindow>,
@@ -401,23 +405,26 @@ impl Dome {
         if let Some(ref title) = title {
             self.hub.set_window_title(window_id, title.clone());
         }
-        self.registry.insert(
+        if let Some(entry) = self.registry.insert(
             ax,
             window_id,
             WindowState::NativeFullscreen,
             app_name,
             bundle_id,
             title,
-        );
+        ) {
+            tracing::Span::current().record("window", entry.to_string());
+        }
         tracing::info!(%window_id, "New native fullscreen window");
         self.pending_created.push(window_id);
         window_id
     }
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn show_tiling(&mut self, window_id: WindowId, dim: Dimension) {
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
+        tracing::Span::current().record("window", window.to_string());
         if window.is_moving {
             return;
         }
@@ -476,11 +483,12 @@ impl Dome {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn show_float(&mut self, window_id: WindowId, dim: Dimension) {
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
+        tracing::Span::current().record("window", window.to_string());
         if window.is_moving {
             return;
         }
@@ -524,11 +532,12 @@ impl Dome {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn place_fullscreen_window(&mut self, window_id: WindowId, monitor_id: MonitorId) {
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
+        tracing::Span::current().record("window", window.to_string());
         // Borderless-fullscreen window hidden by Dome because its workspace was
         // inactive. The workspace is visible again, so transition back to
         // BorderlessFullscreen and drive the OS-side restore.
@@ -577,11 +586,12 @@ impl Dome {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn window_entered_native_fullscreen(&mut self, window_id: WindowId) {
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
+        tracing::Span::current().record("window", window.to_string());
         window.state = WindowState::NativeFullscreen;
         self.hub
             .set_fullscreen(window.window_id, WindowRestrictions::ProtectFullscreen);
@@ -792,12 +802,13 @@ impl Dome {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn hide_window(&mut self, window_id: WindowId) {
         let monitors = self.monitor_registry.all_monitors();
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
+        tracing::Span::current().record("window", window.to_string());
         if window.is_minimized {
             return;
         }
@@ -834,11 +845,12 @@ impl Dome {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn move_window_offscreen(&mut self, window_id: WindowId) {
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
+        tracing::Span::current().record("window", window.to_string());
         let WindowState::Positioned(positioned_state) = window.state else {
             unreachable!("Can only move windows which dome control the positions offscreen");
         };

@@ -658,6 +658,12 @@ impl ManageExternalWindow for MockExternalHwnd {
         self.hwnd_id
     }
 
+    fn pid(&self) -> u32 {
+        // Tests do not exercise pid plumbing yet; return a deterministic
+        // sentinel derived from the hwnd so log output stays stable.
+        1
+    }
+
     fn should_float(&self) -> bool {
         self.should_float
     }

@@ -201,6 +201,7 @@ impl Hub {
         });
     }
 
+    #[tracing::instrument(skip(self))]
     pub(crate) fn focus_monitor(&mut self, target: &MonitorTarget) {
         if self.is_restricted(RestrictedAction::TilingNavigation) {
             return;
@@ -211,10 +212,11 @@ impl Hub {
         if target_id == self.access.focused_monitor {
             return;
         }
-        tracing::debug!(?target, "Focusing monitor");
+        tracing::debug!("Focusing monitor");
         self.access.focused_monitor = target_id;
     }
 
+    #[tracing::instrument(skip(self))]
     pub(crate) fn move_focused_to_monitor(&mut self, target: &MonitorTarget) {
         if self.is_restricted(RestrictedAction::MonitorMove) {
             return;
@@ -227,7 +229,7 @@ impl Hub {
         }
 
         let target_ws = self.access.monitors.get(target_id).active_workspace;
-        tracing::debug!(?target, "Moving to monitor");
+        tracing::debug!("Moving to monitor");
         let current_ws = self.current_workspace();
         if let Some(window_id) = self.focused_window(current_ws) {
             self.move_child_to_workspace_with_id(window_id, target_ws);
@@ -245,7 +247,7 @@ impl Hub {
             self.unminimize_window(window_id);
             return;
         }
-        tracing::debug!(%window_id, "Setting focus to window");
+        tracing::debug!("Setting focus to window");
         let window = self.access.windows.get(window_id);
         let ws = window
             .workspace()
@@ -655,14 +657,22 @@ impl Hub {
             if let Some(new_min) = new_min {
                 *min = new_min;
                 if *max > 0.0 && *max < new_min {
-                    tracing::debug!(window_id = %window_id, "{name}: existing max {:.2} < new min {:.2}, raising max", *max, new_min);
+                    tracing::debug!(
+                        "{name}: existing max {:.2} < new min {:.2}, raising max",
+                        *max,
+                        new_min
+                    );
                     *max = new_min;
                 }
             }
             if let Some(new_max) = new_max {
                 *max = if new_max > 0.0 { new_max } else { 0.0 };
                 if *max > 0.0 && *min > *max {
-                    tracing::debug!(window_id = %window_id, "{name}: existing min {:.2} > new max {:.2}, lowering min", *min, *max);
+                    tracing::debug!(
+                        "{name}: existing min {:.2} > new max {:.2}, lowering min",
+                        *min,
+                        *max
+                    );
                     *min = *max;
                 }
             }
@@ -683,7 +693,7 @@ impl Hub {
             max_height,
         );
 
-        tracing::debug!(%window_id, ?min_width, ?min_height, ?max_width, ?max_height, "Window constraint set");
+        tracing::debug!("Window constraint set");
 
         if let Some(ws) = window.workspace() {
             self.strategy.layout_workspace(&mut self.access, ws);
@@ -693,6 +703,7 @@ impl Hub {
     /// Move a window to a target workspace. For tiling windows, delegates to
     /// strategy.move_focused_to_workspace which handles both window and container
     /// moves. For fullscreen/float, moves the specific window.
+    #[tracing::instrument(skip(self))]
     pub(super) fn move_child_to_workspace_with_id(
         &mut self,
         window_id: WindowId,
@@ -723,7 +734,7 @@ impl Hub {
             }
         }
 
-        tracing::debug!(?window_id, ?target_ws, "Moved to workspace");
+        tracing::debug!("Moved to workspace");
     }
 
     pub(super) fn get_or_create_workspace(&mut self, name: &str) -> WorkspaceId {

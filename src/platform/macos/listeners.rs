@@ -455,7 +455,6 @@ fn try_register_app(ctx: &ListenerCtx, app: &RunningApp, ax_app: &Arc<AXApp>) ->
     true
 }
 
-#[tracing::instrument(skip_all)]
 unsafe extern "C-unwind" fn observer_callback(
     _observer: NonNull<AXObserver>,
     element: NonNull<AXUIElement>,

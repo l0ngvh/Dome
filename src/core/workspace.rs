@@ -1,8 +1,9 @@
 use crate::core::{Hub, hub::RestrictedAction, node::WorkspaceId};
 
 impl Hub {
+    #[tracing::instrument(skip(self))]
     pub(super) fn focus_workspace_with_id(&mut self, workspace_id: WorkspaceId) {
-        tracing::debug!("Focusing workspace {workspace_id}");
+        tracing::debug!("Focusing workspace");
         let current_ws = self.current_workspace();
         if workspace_id == current_ws {
             return;
@@ -14,6 +15,7 @@ impl Hub {
     }
 
     /// Deletes workspace if empty and not active on its monitor
+    #[tracing::instrument(skip(self))]
     pub(super) fn prune_workspace(&mut self, ws_id: WorkspaceId) {
         let ws = self.access.workspaces.get(ws_id);
         if self.strategy.has_tiling_windows(&self.access, ws_id)
@@ -28,6 +30,7 @@ impl Hub {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub(crate) fn focus_workspace(&mut self, name: &str) {
         if self.is_restricted(RestrictedAction::TilingNavigation) {
             return;
@@ -36,6 +39,7 @@ impl Hub {
         self.focus_workspace_with_id(ws_id);
     }
 
+    #[tracing::instrument(skip(self))]
     pub(crate) fn move_focused_to_workspace(&mut self, target_workspace: &str) {
         if self.is_restricted(RestrictedAction::WorkspaceMove) {
             return;

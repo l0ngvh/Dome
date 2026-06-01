@@ -13,13 +13,24 @@ pub(super) struct ManagedWindow {
     pub(super) title: Option<String>,
     pub(super) process: String,
     pub(super) app_name: Option<String>,
+    pub(super) window_id: WindowId,
 }
 
 impl std::fmt::Display for ManagedWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}|{}]", self.ext.id(), self.process)?;
+        write!(
+            f,
+            "[id={}|pid={}|hwnd={}] ",
+            self.window_id,
+            self.ext.pid(),
+            self.ext.id(),
+        )?;
+        match self.app_name.as_deref() {
+            Some(name) => write!(f, "{name} ({})", self.process)?,
+            None => write!(f, "{}", self.process)?,
+        }
         if let Some(title) = &self.title {
-            write!(f, " {title}")?;
+            write!(f, " - {title}")?;
         }
         Ok(())
     }
@@ -38,9 +49,14 @@ impl WindowRegistry {
         }
     }
 
-    pub(super) fn insert(&mut self, id: HwndId, window_id: WindowId, entry: ManagedWindow) {
+    pub(super) fn insert(
+        &mut self,
+        id: HwndId,
+        window_id: WindowId,
+        entry: ManagedWindow,
+    ) -> &ManagedWindow {
         self.by_hwnd.insert(id, window_id);
-        self.by_id.insert(window_id, entry);
+        self.by_id.entry(window_id).insert_entry(entry).into_mut()
     }
 
     pub(super) fn remove_by_hwnd(&mut self, id: HwndId) -> Option<WindowId> {

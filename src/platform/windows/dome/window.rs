@@ -96,6 +96,11 @@ impl std::fmt::Display for WindowState {
 }
 
 impl Dome {
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, wp),
+        fields(window_id = %id, window = tracing::field::Empty),
+    )]
     pub(super) fn show_float(
         &mut self,
         id: WindowId,
@@ -112,6 +117,7 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
+        tracing::Span::current().record("window", entry.to_string());
         let content = apply_inset(wp.frame, border);
         let new_target = content.round();
 
@@ -167,6 +173,11 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self, wp),
+        fields(window_id = %id, window = tracing::field::Empty),
+    )]
     pub(super) fn show_tiling(
         &mut self,
         id: WindowId,
@@ -185,6 +196,7 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
+        tracing::Span::current().record("window", entry.to_string());
         let content = apply_inset(wp.frame, border);
         let new_target = content.round();
 
@@ -283,6 +295,11 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(window_id = %id, window = tracing::field::Empty),
+    )]
     pub(super) fn show_fullscreen_window(
         &mut self,
         id: WindowId,
@@ -292,6 +309,7 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
+        tracing::Span::current().record("window", entry.to_string());
         // Borderless-fullscreen window hidden by Dome because its workspace
         // was inactive. The workspace is now visible again, so transition
         // back and drive the OS-side restore.

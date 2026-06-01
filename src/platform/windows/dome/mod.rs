@@ -258,12 +258,34 @@ impl Dome {
         tracing::info!("Config reloaded");
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(
+        skip(self, id_key),
+        fields(hwnd = %id_key, window = tracing::field::Empty),
+    )]
     pub(super) fn window_destroyed(&mut self, id_key: HwndId) {
-        self.remove_window(id_key);
+        if let Some(id) = self.registry.get_id(id_key)
+            && let Some(entry) = self.registry.get(id)
+        {
+            tracing::Span::current().record("window", entry.to_string());
+        }
+
+        self.placement_tracker.clear(id_key);
+        self.taskbar.delete_tab(id_key);
+        self.recovery.untrack(id_key);
+        if let Some(id) = self.registry.remove_by_hwnd(id_key) {
+            tracing::info!(%id, "Window removed");
+            self.float_overlays.remove(&id);
+            for ms in self.monitors.values_mut() {
+                ms.displayed.remove(&id);
+            }
+            self.hub.delete_window(id);
+        }
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(
+        skip(self, id_key),
+        fields(hwnd = %id_key, window = tracing::field::Empty),
+    )]
     pub(super) fn window_minimized(&mut self, id_key: HwndId) {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
@@ -271,6 +293,7 @@ impl Dome {
         let Some(entry) = self.registry.get(id) else {
             return;
         };
+        tracing::Span::current().record("window", entry.to_string());
         // Dome-initiated minimize
         if matches!(entry.state, WindowState::BorderlessMinimized) {
             return;
@@ -281,11 +304,17 @@ impl Dome {
         }
     }
 
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(
+        skip(self, id_key),
+        fields(hwnd = %id_key, window = tracing::field::Empty),
+    )]
     pub(super) fn window_restored(&mut self, id_key: HwndId) {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
+        if let Some(entry) = self.registry.get(id) {
+            tracing::Span::current().record("window", entry.to_string());
+        }
         if !self.registry.get(id).is_some_and(|e| e.is_minimized) {
             return;
         }
@@ -393,7 +422,7 @@ impl Dome {
         }
         self.recovery.track(&ext);
 
-        self.registry.insert(
+        let entry = self.registry.insert(
             id_key,
             id,
             ManagedWindow {
@@ -403,25 +432,11 @@ impl Dome {
                 title,
                 process,
                 app_name,
+                window_id: id,
             },
         );
-        tracing::info!(%id, %id_key, %state, "Window managed");
+        tracing::info!(%state, %entry, "Window managed");
         self.pending_created.push(id);
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn remove_window(&mut self, id_key: HwndId) {
-        self.placement_tracker.clear(id_key);
-        self.taskbar.delete_tab(id_key);
-        self.recovery.untrack(id_key);
-        if let Some(id) = self.registry.remove_by_hwnd(id_key) {
-            tracing::info!(%id, "Window removed");
-            self.float_overlays.remove(&id);
-            for ms in self.monitors.values_mut() {
-                ms.displayed.remove(&id);
-            }
-            self.hub.delete_window(id);
-        }
     }
 
     fn resolve_window_monitor(&self, id: WindowId) -> MonitorId {
@@ -468,10 +483,17 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(
+        skip(self, id_key),
+        fields(hwnd = %id_key, window = tracing::field::Empty),
+    )]
     pub(super) fn handle_focus(&mut self, id_key: HwndId) {
         if let Some(id) = self.registry.get_id(id_key) {
+            if let Some(entry) = self.registry.get(id) {
+                tracing::Span::current().record("window", entry.to_string());
+            }
             self.hub.set_focus(id);
-            tracing::info!(?id_key, "Window focused");
+            tracing::info!("Window focused");
         }
     }
 

@@ -23,11 +23,7 @@ impl Hub {
                 let _dim = self.detach_float_from_workspace(window_id);
             }
             DisplayMode::Fullscreen => {
-                tracing::debug!(
-                    ?window_id,
-                    ?restrictions,
-                    "Updating restrictions on already-fullscreen window"
-                );
+                tracing::debug!("Updating restrictions on already-fullscreen window");
                 self.access.windows.get_mut(window_id).restrictions = restrictions;
                 return;
             }
@@ -38,7 +34,7 @@ impl Hub {
         window.restrictions = restrictions;
         self.attach_fullscreen_to_workspace(ws, window_id);
         self.access.workspaces.get_mut(ws).is_float_focused = false;
-        tracing::info!(%window_id, "Fullscreen set");
+        tracing::info!("Fullscreen set");
     }
 
     #[tracing::instrument(skip(self))]
@@ -57,7 +53,7 @@ impl Hub {
         self.access.windows.get_mut(window_id).mode = DisplayMode::Tiling;
         self.strategy.attach_window(&mut self.access, window_id, ws);
 
-        tracing::info!(%window_id, "Fullscreen unset");
+        tracing::info!("Fullscreen unset");
     }
 
     pub(super) fn attach_fullscreen_to_workspace(&mut self, ws: WorkspaceId, id: WindowId) {
