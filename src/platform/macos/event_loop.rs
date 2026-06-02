@@ -245,6 +245,7 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
         |result, runner| {
             if let Some(result) = result {
                 let on_open = runner.dome.reconcile_windows(
+                    &result.refresh,
                     &result.to_remove,
                     &result.to_minimize,
                     result.to_add,
@@ -394,6 +395,7 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
             // movement notification so constraint detection can work.
             let added_pids: HashSet<i32> = result.to_add.iter().map(|w| w.ax.pid()).collect();
             let on_open = runner.dome.reconcile_windows(
+                &result.refresh,
                 &result.to_remove,
                 &result.to_minimize,
                 result.to_add,

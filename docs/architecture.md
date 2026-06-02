@@ -73,27 +73,28 @@ Through the AX API, the shell subscribes to window lifecycle events (opened,
 closed, moved, resized) and forwards them to `Hub`. AX speaks logical points
 with a top-left origin, so no coordinate translation is needed.
 
-AX notifications can be dropped, and the ones that arrive can be attached to
-the wrong window. On each notification, the shell ignores the attached window
-and reconciles its tracked windows for the source PID against the process's
-live windows. Live windows not in the tracked set are recorded as created,
-tracked windows that no longer respond to AX calls are recorded as closed, and
-changes to the minimized attribute are recorded as state updates.
+AX notifications are quite unreliable, however. They can arrive attached to the
+wrong window, and might even be dropped. To solve the first problem, on every
+notification the shell extracts all windows from the app's pid and reconciles
+them to figure out which windows were created or deleted. To make up for
+dropped notifications, the shell does a sweep every five seconds to detect any
+created or deleted windows that might have been missed. The sweep also rebuilds
+every observer from scratch, since observers can go dead silently and a fresh
+registration is the only reliable way to bring them back.
 
-As a backup for dropped notifications, a sync timer fires every five seconds
-and runs the same reconciliation across every tracked process. The sweep also
-rebuilds every observer from scratch, since observers can go dead silently and
-a fresh registration is the only reliable way to bring them back. The sweep
-does not try to recover missed focus changes. Only the latest focus matters,
-and the next focus event resolves any drift.
+Reconciling windows to detect deletions is also not simple. Getting the list of
+windows through the AX API only returns the windows visible in the current
+space, which causes a problem if we rely on it alone: focus can jump between
+spaces when a window becomes fullscreen (see [Fullscreen
+windows](#macos-fullscreen-windows)). For that reason, to detect deleted
+windows, we check whether the AXUIElement backing the window has already been
+invalidated, by calling any method on it. This itself creates another problem,
+since AX windows can also be invalidated right before the screen is locked, so
+we need a check for that case as well. We previously used a simpler method,
+trying to correlate against the CGWindowID list, but it didn't work out, since
+the list isn't updated by the time the notification fires.
 
-AX itself can also go dark. While the machine sleeps or the screen is locked,
-AX is unavailable, so the shell suspends all AX traffic for the duration of the
-lock and resumes once the screen unlocks. Without the suspend, every AX call
-would fail during the lock and the sync timer would falsely flag every tracked
-window as closed.
-
-Care must be taken while handling focus, as focus events can feed back on
+Handling focus changes also requires care, since focus events can feed back on
 themselves. When `Hub` focuses window A, the OS may already have a focus event
 for B sitting in its queue from earlier input, and the focus action itself
 causes the OS to queue another focus event for A in response. Without
@@ -103,26 +104,25 @@ immediately after a shell-driven focus call.
 
 ### Placing windows
 
-The shell places tiling windows through AX calls. macOS or the owning app can
-override a placement, so each placement gets a five-retry budget. The shell
-reissues the call until the window lands at the requested frame or the budget
-is exhausted. Dome-initiated fullscreen uses the same path with the monitor's
-bounds as the target. Fullscreen initiated by the OS or the owning app comes
-with its own rules and is covered in [Fullscreen
-windows](#macos-fullscreen-windows).
+The shell places tiling windows through AX calls. Because macOS or the owning
+app can override a placement, the shell reissues the call up to five times,
+until the window lands at the requested frame or the retry budget is exhausted.
+Dome-initiated fullscreen uses the same path with the monitor's bounds as the
+target. Fullscreen initiated by the OS or the owning app comes with its own
+rules and is covered in [Fullscreen windows](#macos-fullscreen-windows).
 
-Floats need a different mechanism. The shell can place them anywhere through
-AX, but no public API lets an application set the window level of windows it
-does not own, so a float drops behind any window in another app that takes
-focus. To emulate always-on-top, the shell captures the real window through
-`ScreenCaptureKit` and draws the resulting frames into a Dome-owned window held
-at `NSFloatingWindowLevel`. When the float does need input, the shell swaps the
-real window back into place and stops the mirror, rather than forwarding events
-from the mirror to the real window. The approach has two visible costs.
-Captured frames carry the source monitor's pixel density, so the mirror looks
-blurry when the real window is parked on a lower-DPI monitor than the one
-showing it, and the swap itself shows a brief flicker each time. Floats are
-mostly read rather than interacted with, so this is tolerable.
+Placing float windows needs a little twist. Even though the shell can place
+them anywhere through AX, there is no public API that lets an application set
+the window level (`NSFloatingWindowLevel`) of windows it does not own. Without
+it, a float window would drop behind whichever window currently takes focus. To
+emulate this, given that float windows are mostly used for reading and rarely
+interacted with, the shell captures the real window through `ScreenCaptureKit`
+and draws the resulting frames into a Dome-owned window. When the float does
+need input, the shell swaps the real window back into place and stops the
+mirror, rather than forwarding events from the mirror to the real window. This
+has two consequences. Captured frames carry the source monitor's pixel density,
+so the mirror can look blurry when the real window is parked on a lower-DPI
+monitor than the one showing it. Each swap also produces a brief flicker.
 
 ### Virtual workspaces {#macos-virtual-workspaces}
 
@@ -258,7 +258,7 @@ them to `Hub`, and applies `Hub`'s layout back through Win32. The shell also
 owns a few borderless windows, used for visual indicators and a handful of
 related shell-side responsibilities.
 
-### Managing windows
+### Managing windows {#windows-managing-windows}
 
 Through `SetWinEventHook`, the shell subscribes to window lifecycle events
 (opened, closed, moved, resized) from every process and forwards them to `Hub`.
@@ -349,35 +349,31 @@ apps over time.
 The shell registers a low-level keyboard hook and matches each keystroke
 against the configured keymaps in the hook procedure. Windows holds each
 keystroke until the procedure returns, so heavy work on this path shows up as
-visible input lag. The hook procedure does only the cheap match-and-dispatch
-step, dispatching every action to the orchestration thread that owns `Hub`. The
-hook itself runs on its own thread to keep it isolated from anything that could
-delay the callback.
-
-UI rendering stays on the orchestration thread because Win32 imposes no
-main-thread rule of the kind AppKit does, as long as every render call
-originates from the same thread.
+visible input lag. The hook procedure therefore does only the cheap
+match-and-dispatch step, dispatching every action to the orchestration thread
+that owns `Hub`. The hook itself runs on its own thread to keep it isolated
+from anything that could delay the callback.
 
 ### Displaying visual indicators {#windows-displaying-visual-indicators}
 
 To render visual indicators, the Windows shell owns borderless transparent
 windows backed by `wgpu` surfaces, called overlay windows. As on macOS, the
 shell batches tiling overlays into one overlay window per monitor, while each
-float gets its own.
+float gets its own. These float overlays sit inside the topmost band
+themselves, just below their float. Overlay rendering stays on the
+orchestration thread because Win32 has no AppKit-style main-thread rule, only a
+same-thread one.
 
-Click handling has to stay clear of managed windows, and Windows has no
-per-region click-through, so the tiling overlay parks at `HWND_BOTTOM`.
-Managed windows receive every click that lands on them, and the overlay
-only catches what falls into the gaps. The shell maintains an invariant
-that every tiling window sits above the overlay: whenever a window rejoins
-the layout from Float, Offscreen, or minimized, the shell restacks it
-above the overlay before showing it.
-
-Float overlays sit inside the topmost band themselves, just below their
-float, tracking the window they decorate.
-
-Because the tiling overlay sits at the bottom of z-order, it shouldn't
-receive activation or absorb keyboard focus the way the macOS overlay does
-(see [Virtual workspaces](#windows-virtual-workspaces)). A separate focus
-sink window serves that role, holding Win32 foreground whenever no managed
-window is eligible.
+[Similar to macOS](#macos-displaying-visual-indicators), Windows doesn't have
+per-region click-through, so the tiling overlay window has to stay at the
+bottom of all managed windows. Unlike on macOS, however, even though we can
+place a window at the bottom of the z-order stack through `HWND_BOTTOM`,
+Windows doesn't guarantee that the window stays there, and it can gradually be
+raised up the z-order as other windows get pushed to the bottom (see [Virtual
+workspaces](#windows-virtual-workspaces)). To ensure that at least managed
+windows in the current workspace don't get occluded by the tiling overlay,
+whenever a managed window is displayed as part of the current workspace, the
+shell restacks it above the overlay before showing it. The overlay also
+shouldn't receive activation or absorb keyboard focus the way the macOS overlay
+does (see [Virtual workspaces](#windows-virtual-workspaces)). Instead, a
+separate focus sink window holds focus whenever no managed window is eligible.

@@ -1,19 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFString, CFType};
-use objc2_core_graphics::{CGWindowID, CGWindowListCopyWindowInfo, CGWindowListOption};
+use objc2_core_graphics::CGWindowID;
 
 use crate::config::MacosWindow;
-use crate::platform::macos::accessibility::AXApp;
+use crate::platform::macos::accessibility::{AXApp, ExternalWindow};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::NewWindow;
 use crate::platform::macos::dome::registry::ManagedWindow;
 use crate::platform::macos::dome::window::WindowState;
-use crate::platform::macos::objc2_wrapper::kCGWindowNumber;
 use crate::platform::macos::running_application::RunningApp;
 
-/// A still in display window (unminimized, in current space, returned by AXWindowsAttribute)
+/// A window currently returned by the app's `kAXWindowsAttribute` query
+/// (includes minimized, excludes windows on other Spaces).
 pub(in crate::platform::macos) struct ExistingWindow {
     pub(in crate::platform::macos) cg_id: CGWindowID,
     pub(in crate::platform::macos) x: i32,
@@ -36,6 +35,7 @@ pub(in crate::platform::macos) struct ReconcileResult {
     pub(in crate::platform::macos) to_add: Vec<NewWindow>,
     pub(in crate::platform::macos) to_enter_native_fullscreen: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_exit_native_fullscreen: Vec<ExitNativeFullscreen>,
+    pub(in crate::platform::macos) refresh: Vec<ExtRefresh>,
 }
 
 pub(in crate::platform::macos) struct ReconcileAllResult {
@@ -46,6 +46,12 @@ pub(in crate::platform::macos) struct ReconcileAllResult {
     pub(in crate::platform::macos) to_add: Vec<NewWindow>,
     pub(in crate::platform::macos) to_enter_native_fullscreen: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_exit_native_fullscreen: Vec<ExitNativeFullscreen>,
+    pub(in crate::platform::macos) refresh: Vec<ExtRefresh>,
+}
+
+pub(in crate::platform::macos) struct ExtRefresh {
+    pub(in crate::platform::macos) cg_id: CGWindowID,
+    pub(in crate::platform::macos) ext: Arc<dyn ExternalWindow>,
 }
 
 pub(in crate::platform::macos) fn compute_reconciliation(
@@ -55,17 +61,49 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     marker: &DispatcherMarker,
 ) -> ReconcileResult {
     let pid = app.pid();
-    let cg_window_ids = list_cg_window_ids();
+
+    let ax_windows = match app.clone().windows(marker) {
+        Ok(list) => list,
+        Err(e) => {
+            // AX is unavailable (lock screen, suspended, or transient error).
+            // Keep all tracked entries unchanged this pass.
+            tracing::trace!(%pid, "Failed to retrieve list of windows for {app}: {e}");
+            return ReconcileResult {
+                to_remove: Vec::new(),
+                to_minimize: Vec::new(),
+                to_add: Vec::new(),
+                to_enter_native_fullscreen: Vec::new(),
+                to_exit_native_fullscreen: Vec::new(),
+                refresh: Vec::new(),
+            };
+        }
+    };
+
+    let cg_ids_in_app: HashSet<CGWindowID> = ax_windows.iter().map(|w| w.cg_id()).collect();
 
     let mut to_remove = Vec::new();
     let mut to_minimize = Vec::new();
     let mut to_enter_native_fullscreen = Vec::new();
     let mut to_exit_native_fullscreen = Vec::new();
+    let mut needs_refresh: HashSet<CGWindowID> = HashSet::new();
+
     for (&cg_id, entry) in tracked.iter().filter(|(_, e)| e.ext.pid() == pid) {
-        if !cg_window_ids.contains(&cg_id) || !entry.ext.is_valid(marker) {
-            to_remove.push(cg_id);
-            continue;
+        // Since AXApp::windows was successful earlier, we can assume that the system hasn't been
+        // suspended.
+        if !entry.ext.is_valid(marker) {
+            // In cases the window got invalidated due to Cocoa recycle windows views.
+            //
+            // Also, in rare cases where the system got suspend and AX is unavailable after
+            // AXApp::windows but before is_valid check, the window handle just gets reset rather
+            // than being deleted, no harm is done.
+            if cg_ids_in_app.contains(&cg_id) {
+                needs_refresh.insert(cg_id);
+            } else {
+                to_remove.push(cg_id);
+                continue;
+            }
         }
+
         let already_minimized =
             entry.is_minimized || matches!(entry.state, WindowState::BorderlessMinimized);
         if !already_minimized && entry.ext.is_minimized(marker) {
@@ -102,22 +140,17 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     }
 
     let mut to_add = Vec::new();
-
-    let ax_windows = match app.clone().windows(marker) {
-        Ok(ax_windows) => ax_windows,
-        Err(e) => {
-            tracing::trace!("Failed to retrieve list of windows for {app}: {e}");
-            return ReconcileResult {
-                to_remove,
-                to_minimize,
-                to_add: Vec::new(),
-                to_enter_native_fullscreen,
-                to_exit_native_fullscreen,
-            };
-        }
-    };
+    let mut refresh = Vec::new();
     for ax in ax_windows {
-        if tracked.contains_key(&ax.cg_id()) {
+        let cg_id = ax.cg_id();
+        if needs_refresh.contains(&cg_id) {
+            refresh.push(ExtRefresh {
+                cg_id,
+                ext: Arc::new(ax),
+            });
+            continue;
+        }
+        if tracked.contains_key(&cg_id) {
             continue;
         }
         if !ax.is_manageable() {
@@ -159,6 +192,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         to_add,
         to_enter_native_fullscreen,
         to_exit_native_fullscreen,
+        refresh,
     }
 }
 
@@ -217,6 +251,7 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
     let mut to_add = Vec::new();
     let mut to_enter_native_fullscreen = Vec::new();
     let mut to_exit_native_fullscreen = Vec::new();
+    let mut refresh = Vec::new();
     for app in &running {
         if app.is_hidden() {
             hidden_pids.push(app.pid());
@@ -228,6 +263,7 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
             to_add.extend(result.to_add);
             to_enter_native_fullscreen.extend(result.to_enter_native_fullscreen);
             to_exit_native_fullscreen.extend(result.to_exit_native_fullscreen);
+            refresh.extend(result.refresh);
         }
     }
 
@@ -248,6 +284,7 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
         to_add,
         to_enter_native_fullscreen,
         to_exit_native_fullscreen,
+        refresh,
     }
 }
 
@@ -263,29 +300,4 @@ fn should_ignore(
         return true;
     }
     false
-}
-
-fn list_cg_window_ids() -> HashSet<CGWindowID> {
-    let Some(window_list) = CGWindowListCopyWindowInfo(CGWindowListOption::OptionAll, 0) else {
-        tracing::warn!("CGWindowListCopyWindowInfo returned None");
-        return HashSet::new();
-    };
-    let window_list: &CFArray<CFDictionary<CFString, CFType>> =
-        unsafe { window_list.cast_unchecked() };
-
-    let mut ids = HashSet::new();
-    let key = kCGWindowNumber();
-    for dict in window_list {
-        // window id is a required attribute
-        // https://developer.apple.com/documentation/coregraphics/kcgwindownumber?language=objc
-        let id = dict
-            .get(&key)
-            .unwrap()
-            .downcast::<CFNumber>()
-            .unwrap()
-            .as_i64()
-            .unwrap();
-        ids.insert(id as CGWindowID);
-    }
-    ids
 }

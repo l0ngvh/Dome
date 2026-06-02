@@ -61,6 +61,9 @@ struct MockAXWindow {
     /// AX side effect, and cleared by `simulate_external_move` because a
     /// window producing a move event is by definition not in the dock.
     is_minimized: Rc<Cell<bool>>,
+    /// Whether the cached AX handle reports as valid. Defaults to true.
+    /// Flip via `set_valid(false)` to simulate stale-handle invalidation.
+    is_valid: Rc<Cell<bool>>,
     moves: MoveLog,
 }
 
@@ -88,6 +91,7 @@ impl MockAXWindow {
             max_size: Rc::new(Cell::new(None)),
             override_frame: Rc::new(Cell::new(None)),
             is_minimized: Rc::new(Cell::new(false)),
+            is_valid: Rc::new(Cell::new(true)),
             moves,
         }
     }
@@ -102,6 +106,10 @@ impl MockAXWindow {
 
     fn set_max_size(&self, w: i32, h: i32) {
         self.max_size.set(Some((w, h)));
+    }
+
+    fn set_valid(&self, valid: bool) {
+        self.is_valid.set(valid);
     }
 }
 
@@ -179,7 +187,7 @@ impl ExternalWindow for MockAXWindow {
         Ok(())
     }
     fn is_valid(&self, _marker: &DispatcherMarker) -> bool {
-        true
+        self.is_valid.get()
     }
     fn is_minimized(&self, _marker: &DispatcherMarker) -> bool {
         self.is_minimized.get()
@@ -258,7 +266,7 @@ impl MacOS {
 
     fn enter_native_fullscreen(&self, dome: &mut Dome, cg_id: CGWindowID) {
         self.window(cg_id).set_native_fullscreen(true);
-        dome.reconcile_windows(&[], &[], vec![], &[cg_id], &[]);
+        dome.reconcile_windows(&[], &[], &[], vec![], &[cg_id], &[]);
     }
 
     fn exit_native_fullscreen(
@@ -275,6 +283,7 @@ impl MacOS {
         ax.size.set((w, h));
         ax.set_native_fullscreen(false);
         dome.reconcile_windows(
+            &[],
             &[],
             &[],
             vec![],
@@ -302,7 +311,7 @@ impl MacOS {
     /// then delivers the resulting AX notification to Dome via reconcile.
     fn user_minimize(&self, dome: &mut Dome, cg_id: CGWindowID) {
         self.window(cg_id).is_minimized.set(true);
-        dome.reconcile_windows(&[], &[cg_id], vec![], &[], &[]);
+        dome.reconcile_windows(&[], &[], &[cg_id], vec![], &[], &[]);
     }
 
     /// Whether the window is currently in the OS-level minimized (dock) state.

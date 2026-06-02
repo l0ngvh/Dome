@@ -8,7 +8,8 @@ mod window;
 
 pub(super) use events::{HubEvent, HubMessage};
 pub(super) use inspect::{
-    ExitNativeFullscreen, compute_reconcile_all, compute_reconciliation, compute_window_positions,
+    ExitNativeFullscreen, ExtRefresh, compute_reconcile_all, compute_reconciliation,
+    compute_window_positions,
 };
 use window::WindowState;
 
@@ -126,15 +127,25 @@ impl Dome {
         }
     }
 
+    pub(in crate::platform::macos) fn refresh_ext_cache(&mut self, refresh: &[ExtRefresh]) {
+        for r in refresh {
+            if self.registry.replace_ext(r.cg_id, r.ext.clone()) {
+                tracing::trace!(cg_id = %r.cg_id, pid = r.ext.pid(), "Replaced stale ext handle");
+            }
+        }
+    }
+
     #[tracing::instrument(skip_all)]
     pub(in crate::platform::macos) fn reconcile_windows(
         &mut self,
+        refresh: &[ExtRefresh],
         removed: &[CGWindowID],
         minimized: &[CGWindowID],
         added: Vec<NewWindow>,
         to_enter_native_fullscreen: &[CGWindowID],
         to_exit_native_fullscreen: &[ExitNativeFullscreen],
     ) -> Vec<Actions> {
+        self.refresh_ext_cache(refresh);
         for &cg_id in removed {
             if let Some(entry) = self.registry.get(cg_id) {
                 self.remove_window(entry.window_id);

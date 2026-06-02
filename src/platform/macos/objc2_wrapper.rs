@@ -255,11 +255,6 @@ pub(crate) fn kAXFocusedWindowAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXFocusedWindow")
 }
 
-#[allow(non_snake_case)]
-pub(crate) fn kCGWindowNumber() -> CFRetained<CFString> {
-    CFString::from_static_str("kCGWindowNumber")
-}
-
 pub(crate) fn is_attribute_settable(element: &AXUIElement, attribute: &CFString) -> bool {
     let mut settable: u8 = 0;
     let settable_ptr = NonNull::new(&mut settable as *mut u8).unwrap();

@@ -12,7 +12,7 @@ use super::window::WindowState;
 pub(in crate::platform::macos) struct ManagedWindow {
     pub(in crate::platform::macos) ext: Arc<dyn ExternalWindow>,
     pub(super) cg_id: CGWindowID,
-    pub(super) window_id: WindowId,
+    pub(in crate::platform::macos) window_id: WindowId,
     pub(super) app_name: Option<String>,
     pub(super) bundle_id: Option<String>,
     pub(super) title: Option<String>,
@@ -150,5 +150,22 @@ impl WindowRegistry {
                 }
             }
         }
+    }
+
+    /// Replaces the `ext` handle of an existing tracked entry. Returns true if
+    /// the entry existed.
+    pub(super) fn replace_ext(&mut self, cg_id: CGWindowID, ext: Arc<dyn ExternalWindow>) -> bool {
+        let Some(entry) = self.windows.get_mut(&cg_id) else {
+            return false;
+        };
+        let old_pid = entry.ext.pid();
+        let new_pid = ext.pid();
+        if old_pid != new_pid {
+            // This shouldn't happen, like at all. But if it happens, the worst is that we have 1
+            // window leak, which is not that significant
+            tracing::warn!(%cg_id, old_pid, new_pid, "Window has a different pid than tracked");
+        }
+        entry.ext = ext;
+        true
     }
 }
