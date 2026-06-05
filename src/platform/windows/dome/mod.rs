@@ -27,14 +27,6 @@ use self::recovery::Recovery;
 use self::registry::{ManagedWindow, WindowRegistry};
 use self::window::{PositionedState, WindowState};
 
-#[derive(Clone, Copy)]
-pub(super) enum ObservedPosition {
-    Fullscreen,
-    Visible {
-        rect: Dimension<Physical>,
-        monitor: isize,
-    },
-}
 use super::MonitorInfo;
 use super::external::{HwndId, ManageExternalWindow, ShowCmd};
 use super::taskbar::ManageTaskbar;
@@ -62,8 +54,11 @@ pub(super) enum HubEvent {
 /// Per-monitor state: physical dimension, DPI scale, and the set of windows
 /// currently laid out on this monitor (rebuilt each `apply_layout` pass).
 pub(super) struct MonitorState {
+    /// Work area of the monitor
     dimension: Dimension,
+    /// Monitor scale factor
     scale: f32,
+    /// List of windows currently being displayed
     displayed: HashSet<WindowId>,
 }
 
@@ -256,6 +251,7 @@ impl Dome {
             }
         }
         tracing::info!("Config reloaded");
+        self.apply_layout();
     }
 
     #[tracing::instrument(
@@ -279,6 +275,7 @@ impl Dome {
                 ms.displayed.remove(&id);
             }
             self.hub.delete_window(id);
+            self.apply_layout();
         }
     }
 
@@ -302,26 +299,7 @@ impl Dome {
         if let Some(entry) = self.registry.get_mut(id) {
             entry.is_minimized = true;
         }
-    }
-
-    #[tracing::instrument(
-        skip(self, id_key),
-        fields(hwnd = %id_key, window = tracing::field::Empty),
-    )]
-    pub(super) fn window_restored(&mut self, id_key: HwndId) {
-        let Some(id) = self.registry.get_id(id_key) else {
-            return;
-        };
-        if let Some(entry) = self.registry.get(id) {
-            tracing::Span::current().record("window", entry.to_string());
-        }
-        if !self.registry.get(id).is_some_and(|e| e.is_minimized) {
-            return;
-        }
-        self.hub.unminimize_window(id);
-        if let Some(entry) = self.registry.get_mut(id) {
-            entry.is_minimized = false;
-        }
+        self.apply_layout();
     }
 
     pub(super) fn move_size_started(&mut self, id_key: HwndId) {
@@ -343,6 +321,7 @@ impl Dome {
 
     pub(super) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
         self.hub.focus_tab_index(container_id, tab_idx);
+        self.apply_layout();
     }
 
     pub(super) fn handle_display_change(&mut self) -> Vec<HwndId> {
@@ -376,14 +355,15 @@ impl Dome {
         title: Option<String>,
         process: String,
         constraints: (f32, f32, f32, f32),
-        observation: ObservedPosition,
+        rect: Dimension<Physical>,
+        monitor: isize,
         app_name: Option<String>,
     ) -> Option<Actions> {
         if should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
             return None;
         }
         let actions = on_open_actions(&process, title.as_deref(), &self.config.windows.on_open);
-        self.insert_window(ext, title, process, constraints, observation, app_name);
+        self.insert_window(ext, title, process, constraints, rect, monitor, app_name);
         actions
     }
 
@@ -393,27 +373,38 @@ impl Dome {
         title: Option<String>,
         process: String,
         constraints: (f32, f32, f32, f32),
-        observation: ObservedPosition,
+        rect: Dimension<Physical>,
+        monitor: isize,
         app_name: Option<String>,
     ) {
         let id_key = ext.id();
 
-        let (state, id) = match observation {
-            ObservedPosition::Fullscreen => (
+        let is_fullscreen = self
+            .monitor_handles
+            .get(&monitor)
+            .and_then(|mid| self.monitors.get(mid))
+            .map(|m| {
+                rect.x <= m.dimension.x
+                    && rect.y <= m.dimension.y
+                    && rect.x + rect.width >= m.dimension.x + m.dimension.width
+                    && rect.y + rect.height >= m.dimension.y + m.dimension.height
+            })
+            .unwrap_or(false);
+        let (state, id) = if is_fullscreen {
+            (
                 WindowState::BorderlessFullscreen,
                 self.hub
                     .insert_fullscreen(WindowRestrictions::ProtectFullscreen),
-            ),
-            ObservedPosition::Visible { rect, .. } => {
-                let offscreen = WindowState::Positioned(PositionedState::Offscreen {
-                    retries: 0,
-                    actual: rect,
-                });
-                if ext.should_float() {
-                    (offscreen, self.hub.insert_float(rect))
-                } else {
-                    (offscreen, self.hub.insert_tiling())
-                }
+            )
+        } else {
+            let offscreen = WindowState::Positioned(PositionedState::Offscreen {
+                retries: 0,
+                actual: rect,
+            });
+            if ext.should_float() {
+                (offscreen, self.hub.insert_float(rect))
+            } else {
+                (offscreen, self.hub.insert_tiling())
             }
         };
         self.set_constraints(id, constraints);
@@ -494,6 +485,7 @@ impl Dome {
             }
             self.hub.set_focus(id);
             tracing::info!("Window focused");
+            self.apply_layout();
         }
     }
 
@@ -501,16 +493,6 @@ impl Dome {
     /// timer fires. Removes the window from the placement tracker.
     pub(super) fn placement_timeout(&mut self, id: HwndId) {
         self.placement_tracker.clear(id);
-    }
-
-    pub(super) fn window_moved(&mut self, id_key: HwndId, observation: ObservedPosition) {
-        let Some(id) = self.registry.get_id(id_key) else {
-            return;
-        };
-        match observation {
-            ObservedPosition::Fullscreen => self.window_entered_borderless_fullscreen(id),
-            ObservedPosition::Visible { rect, monitor } => self.window_drifted(id, rect, monitor),
-        }
     }
 
     pub(super) fn query_workspaces_json(&self) -> String {
@@ -681,11 +663,13 @@ impl Dome {
         }
     }
 
-    /// Unminimize a window selected via the picker. Unlike `window_restored`
-    /// (driven by a Win32 event after the user clicks the taskbar), the picker
-    /// path must drive both the core state and the OS state: tell the hub the
-    /// window is back, ask Windows to restore it, and clear the minimize flag
-    /// so apply_layout dispatches against the preserved WindowState.
+    /// Unminimize a window selected via the picker. Unlike the Win32-driven
+    /// taskbar path (where `EVENT_SYSTEM_MINIMIZEEND` triggers a placement
+    /// read whose result drives the unminimize fold inside `window_moved`),
+    /// the picker path must drive both the core
+    /// state and the OS state: tell the hub the window is back, ask Windows
+    /// to restore it, and clear the minimize flag so apply_layout dispatches
+    /// against the preserved WindowState.
     pub(super) fn picker_unminimize_window(&mut self, id: WindowId) {
         self.hub.unminimize_window(id);
         let Some(entry) = self.registry.get_mut(id) else {

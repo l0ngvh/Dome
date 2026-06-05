@@ -1,25 +1,21 @@
+use super::Dome;
 use crate::core::{
     Dimension, FloatWindowPlacement, Length, MonitorId, Physical, TilingWindowPlacement, WindowId,
     WindowRestrictions,
 };
-use crate::platform::windows::external::{ShowCmd, ZOrder};
+use crate::platform::windows::external::{HwndId, ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
-
-use super::Dome;
 
 pub(super) const MAX_DRIFT_RETRIES: u8 = 5;
 
 #[derive(Clone, Copy)]
 pub(super) struct DriftState {
+    /// Target state of the window, controlled by the tiling strategy.
     pub(super) target: Dimension<Physical>,
-    /// The window's last known position -- written by `window_moved`
-    /// via a dispatched `get_visible_rect` read. When a window goes offscreen,
-    /// this preserves its position from before the hide: "actual" means where
-    /// the window currently is (or last was), not where we want it.
+    /// The window's last known position reported by the OS.
     pub(super) actual: Dimension<Physical>,
     pub(super) retries: u8,
-    /// Monitor this window was last placed on. `show_tiling` compares against
-    /// the incoming monitor to detect cross-monitor moves.
+    /// Monitor this window was last placed on.
     pub(super) monitor: MonitorId,
 }
 
@@ -28,13 +24,11 @@ pub(super) struct DriftState {
 /// (target IS actual after each observation) and no retry/drift fields.
 #[derive(Clone, Copy)]
 pub(super) struct FloatPlacement {
-    /// Last rect reconciled with the OS. `show_float` compares
-    /// `target == new_target` to skip redundant `set_position` calls;
-    /// `window_drifted` writes the observed rect back here on user drag.
+    /// Last rect reconciled with the OS.
     pub(super) target: Dimension<Physical>,
-    /// Tracks OS ownership via `MonitorFromWindow`, reported atomically with
-    /// the rect observation in `ObservedPosition::Visible`. Updated by
-    /// `window_drifted` whenever a drift observation arrives.
+    /// Tracks OS ownership via `MonitorFromWindow`, reported atomically
+    /// with the rect observation in `window_moved`. Updated whenever a
+    /// drift observation arrives.
     pub(super) monitor: MonitorId,
 }
 
@@ -135,7 +129,7 @@ impl Dome {
                 debug_assert!(
                     !entry.is_minimized,
                     "show_float reached with user-minimized window {id}: minimized \
-                     windows are detached from their workspace by the hub"
+                     windows are detached from their workspace"
                 );
                 match ps {
                     PositionedState::Float(fp) => {
@@ -153,14 +147,11 @@ impl Dome {
                 entry.ext.set_position(ZOrder::Topmost, new_target);
                 overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()), scale);
             } else if !settled {
-                // Unchanged is safe: this branch only fires for Float-to-Float
-                // position changes where the window is already visible from a
-                // prior Topmost placement.
+                // Window is already Topmost, so we shouldn't set topmost again to avoid bringing it
+                // up the z-order stack
                 entry.ext.set_position(ZOrder::Unchanged, new_target);
                 overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()), scale);
             } else if focus_changed {
-                // Full overlay update is acceptable here: typically 1-3 floats, each a single GL draw.
-                // Matches macOS which unconditionally re-renders every float overlay every frame.
                 overlay.update(wp, &self.config, ZOrder::Unchanged, scale);
             }
         }
@@ -389,64 +380,82 @@ impl Dome {
         }
     }
 
-    pub(super) fn window_entered_borderless_fullscreen(&mut self, id: WindowId) {
-        let Some(window) = self.registry.get_mut(id) else {
-            return;
-        };
-        if window.is_minimized {
-            window.ext.show_cmd(ShowCmd::Restore);
-            window.is_minimized = false;
-        }
-        match window.state {
-            WindowState::Positioned(_) | WindowState::BorderlessMinimized => {
-                window.state = WindowState::BorderlessFullscreen;
-                self.hub
-                    .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
-            }
-            WindowState::ExclusiveFullscreen | WindowState::BorderlessFullscreen => {}
-        }
-    }
-
-    pub(super) fn window_drifted(
+    /// Apply a fresh visible-rect observation from the OS.
+    pub(in crate::platform::windows) fn window_moved(
         &mut self,
-        id: WindowId,
-        visible_rect: Dimension<Physical>,
+        id_key: HwndId,
+        new_placement: Dimension<Physical>,
         monitor_handle: isize,
     ) {
+        let Some(id) = self.registry.get_id(id_key) else {
+            return;
+        };
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
+
         if entry.is_minimized {
-            // The user is interacting with the picker; the next apply_layout
-            // will reposition.
-            return;
+            self.hub.unminimize_window(id);
+            entry.is_minimized = false;
         }
-        if matches!(entry.state, WindowState::BorderlessMinimized) {
-            // The OS handed us a real geometry observation for a window Dome
-            // had hidden via minimize. The fullscreen has been forcibly
-            // resurfaced (Dock click, etc.); demote to Offscreen and unset
-            // hub-side fullscreen.
-            tracing::trace!(%id, "Previously-minimized borderless-fullscreen window reappeared");
-            entry.ext.show_cmd(ShowCmd::Restore);
-            entry.state = WindowState::Positioned(PositionedState::Offscreen {
-                retries: 0,
-                actual: visible_rect,
-            });
-            self.hub.unset_fullscreen(id);
-            return;
-        }
-        match &mut entry.state {
-            WindowState::ExclusiveFullscreen => {}
-            WindowState::BorderlessFullscreen => {
+
+        let is_fullscreen = self
+            .monitor_handles
+            .get(&monitor_handle)
+            .and_then(|monitor_id| self.monitors.get(monitor_id))
+            .map(|m| {
+                new_placement.x <= m.dimension.x
+                    && new_placement.y <= m.dimension.y
+                    && new_placement.x + new_placement.width >= m.dimension.x + m.dimension.width
+                    && new_placement.y + new_placement.height >= m.dimension.y + m.dimension.height
+            })
+            .unwrap_or(false);
+
+        match (&mut entry.state, is_fullscreen) {
+            (WindowState::ExclusiveFullscreen, _) => {}
+
+            (WindowState::BorderlessFullscreen, true) => {
+                // Already in BorderlessFullscreen and still fullscreen-shaped:
+                // either a Dome-issued placement echo or a benign re-observation.
+            }
+            (WindowState::BorderlessFullscreen, false) => {
+                // Rect no longer covers the work area: user resized or moved
+                // the window off the monitor, or unknown-monitor fall-through.
                 entry.state = WindowState::Positioned(PositionedState::Offscreen {
                     retries: 0,
-                    actual: visible_rect,
+                    actual: new_placement,
                 });
                 self.hub.unset_fullscreen(id);
             }
-            WindowState::BorderlessMinimized => unreachable!("handled by early return above"),
-            WindowState::Positioned(PositionedState::Tiling(drift)) => {
-                drift.actual = visible_rect;
+
+            (WindowState::BorderlessMinimized, true) => {
+                // TODO: might worth putting a retry limit here to prevent infinite loop.
+                // BorderlessFullscreen window in another workspace resurfaced, hide them.
+                entry.ext.show_cmd(ShowCmd::Minimize);
+            }
+            (WindowState::BorderlessMinimized, false) => {
+                // Resurfaced but not fullscreen-shaped: user dragged or shrunk
+                // it. Demote to Offscreen.
+                tracing::trace!(%id, "Previously-minimized borderless-fullscreen window reappeared");
+                entry.ext.show_cmd(ShowCmd::Restore);
+                entry.state = WindowState::Positioned(PositionedState::Offscreen {
+                    retries: 0,
+                    actual: new_placement,
+                });
+                self.hub.unset_fullscreen(id);
+            }
+
+            (WindowState::Positioned(PositionedState::Tiling(drift)), true) => {
+                if drift.target == new_placement {
+                    tracing::trace!(%id, "ignoring fullscreen observation: new_placement matches Dome-issued target");
+                    return;
+                }
+                entry.state = WindowState::BorderlessFullscreen;
+                self.hub
+                    .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
+            }
+            (WindowState::Positioned(PositionedState::Tiling(drift)), false) => {
+                drift.actual = new_placement;
                 if drift.actual != drift.target {
                     drift.retries = drift.retries.saturating_add(1);
                     if drift.retries > MAX_DRIFT_RETRIES {
@@ -457,14 +466,14 @@ impl Dome {
                     }
                 }
             }
-            // Float windows accept the OS-reported position: the user dragged/resized
-            // them, so we sync core and mark the position as settled.
-            // The observation is physical pixels (DWM extended frame bounds); stored
-            // directly since core is physical-native on Windows.
-            WindowState::Positioned(PositionedState::Float(fp)) => {
-                // Look up OS-reported monitor. On miss (display-topology race with
-                // reconcile_monitors), skip the entire observation -- the next drift
-                // event after reconcile will converge.
+
+            (WindowState::Positioned(PositionedState::Float(_)), true) => {
+                // Float turned borderless fullscreen
+                entry.state = WindowState::BorderlessFullscreen;
+                self.hub
+                    .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
+            }
+            (WindowState::Positioned(PositionedState::Float(fp)), false) => {
                 let resolved = match self.monitor_handles.get(&monitor_handle) {
                     Some(&id) => id,
                     None => {
@@ -472,49 +481,44 @@ impl Dome {
                             handle = monitor_handle,
                             %id,
                             "MonitorFromWindow returned an HMONITOR not in monitor_handles; \
-                             skipping float-drift observation (display-topology race with \
-                             reconcile_monitors)"
+                             skipping float-drift observation"
                         );
                         return;
                     }
                 };
                 fp.monitor = resolved;
-                fp.target = visible_rect;
+                fp.target = new_placement;
                 // Inlined: can't call self.physical_border() here because the
                 // mutable borrow on self.registry (via entry/fp) conflicts with
-                // the shared &self the method needs. Same expression as physical_border().
+                // the shared &self the method needs.
                 let scale = self.monitors[&resolved].scale;
                 let border = Length::<Physical>::new(self.config.border_size * scale);
-                let outer_dim = reverse_inset(visible_rect, border);
+                let outer_dim = reverse_inset(new_placement, border);
                 self.hub.update_float_dimension(id, outer_dim);
 
-                // Reposition the float overlay to follow the drag. This lives in
-                // window_drifted (not show_float) because show_float's `settled`
-                // gate short-circuits after window_drifted writes both fp.target
-                // and hub dimension in sync. Moving through show_float's !settled
-                // branch would call entry.ext.set_position on the user-dragged
-                // HWND, violating the drag invariant.
+                // Reposition the float overlay to follow the drag.
                 let hwnd = entry.ext.id();
-                // visible_frame == outer_dim here intentionally skips clip(frame, screen).
-                // Windows constrains drag targets to on-screen and the OS clips HWND
-                // rendering at monitor edges, so the unclipped rect is fine for the
-                // overlay update.
                 let wp = FloatWindowPlacement {
                     id,
                     frame: outer_dim,
                     visible_frame: outer_dim,
                     is_highlighted: self.last_focused == Some(id),
                 };
-                // ZOrder::After(hwnd) because click-to-drag foregrounds the managed
-                // HWND, which can push it above the overlay. After(hwnd) re-establishes
-                // "overlay immediately above its window". Unchanged would leave the
-                // overlay covered.
                 if let Some(overlay) = self.float_overlays.get_mut(&id) {
                     overlay.update(&wp, &self.config, ZOrder::After(hwnd), scale);
                 }
             }
-            WindowState::Positioned(PositionedState::Offscreen { retries, actual }) => {
-                *actual = visible_rect;
+
+            (WindowState::Positioned(PositionedState::Offscreen { retries, actual }), true) => {
+                // Window turned fullscreen, but not visible, so we hide it again.
+                self.hub
+                    .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
+                entry.state = WindowState::BorderlessMinimized;
+                entry.ext.show_cmd(ShowCmd::Minimize);
+            }
+
+            (WindowState::Positioned(PositionedState::Offscreen { retries, actual }), false) => {
+                *actual = new_placement;
                 if actual.x > OFFSCREEN_POS && actual.y > OFFSCREEN_POS {
                     *retries = retries.saturating_add(1);
                     if *retries >= MAX_DRIFT_RETRIES {

@@ -13,18 +13,67 @@ use std::sync::{Arc, Mutex};
 
 use crate::action::{Action, Actions};
 use crate::config::Config;
-use crate::core::{Dimension, Length, Physical};
+use crate::core::{
+    ContainerPlacement, Dimension, Length, Physical, TilingWindowPlacement, WindowId,
+};
+use crate::font::FontConfig;
 use crate::picker::PickerEntry;
 use crate::platform::windows::MonitorInfo;
-use crate::platform::windows::dome::ObservedPosition;
 use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
 use crate::platform::windows::dome::{CreateOverlay, Dome, FocusSinkApi, QueryDisplay};
 use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
+use crate::theme::Flavor;
+
+/// Mirrors what the real tiling overlay shows on screen. The mock writes
+/// this from `update`/`clear` so tests assert on state, not call counts.
+#[derive(Clone, Debug)]
+enum TilingOverlayState {
+    Hidden,
+    Visible {
+        monitor: Dimension,
+        windows: Vec<TilingWindowPlacement>,
+        containers: Vec<ContainerPlacement>,
+    },
+}
+
+/// Mirrors what the real float overlay shows on screen. `update` writes
+/// `Visible{..}` with the placement it received; `hide` writes `Hidden`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FloatOverlayState {
+    Hidden,
+    Visible {
+        window_id: WindowId,
+        visible_frame: Dimension,
+        z_order: ZOrder,
+    },
+}
+
+/// Last focus directive Dome issued. The Hub either parks focus on the
+/// sink (no window) or pushes it to a specific window's HWND. The mock
+/// records whichever fires.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FocusTarget {
+    /// Before any focus directive has fired.
+    Initial,
+    Sink,
+    Window(HwndId),
+}
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
 const SCREEN_HEIGHT: Length = Length::new(1080.0);
 const OFFSCREEN_POS: Length = Length::new(-32000.0);
+
+/// Initial rect a freshly-spawned mock reports until layout overwrites it.
+/// Tests that don't care about the pre-layout dimension pass `SPAWN_DIM`;
+/// tests that exercise the registration-time dim (fullscreen detection,
+/// min-size constraints) pass an explicit value.
+const SPAWN_DIM: Dimension<Physical> = Dimension::new(
+    Length::ZERO,
+    Length::ZERO,
+    Length::new(800.0),
+    Length::new(600.0),
+);
 
 /// Test helper: construct a `Dimension<Physical>` from integer coords.
 fn dim(x: i32, y: i32, w: i32, h: i32) -> Dimension<Physical> {
@@ -79,21 +128,19 @@ impl QueryDisplay for MockDisplay {
 struct TestEnv {
     dome: Dome,
     moves: MoveLog,
+    /// Per-HwndId handle to every mock window registered with the dome.
+    mocks: HashMap<HwndId, Arc<MockExternalHwnd>>,
     exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
     config: Config,
-    sink_focus_count: Rc<Cell<u32>>,
-    overlay_update_count: Rc<Cell<u32>>,
-    last_visible_frame: Rc<Cell<Option<Dimension<Physical>>>>,
-    tiling_overlay_update_count: Rc<Cell<u32>>,
-    tiling_overlay_clear_count: Rc<Cell<u32>>,
-    tiling_overlay_setwindowpos_count: Rc<Cell<u32>>,
-    float_overlay_apply_theme_count: Rc<Cell<u32>>,
-    tiling_overlay_apply_theme_count: Rc<Cell<u32>>,
-    float_overlay_apply_font_count: Rc<Cell<u32>>,
-    tiling_overlay_apply_font_count: Rc<Cell<u32>>,
+    tiling_overlay: MockTilingOverlay,
+    /// Production creates one float overlay per floating window; the mock
+    /// collapses them onto a single shared instance, so flavor/font cells
+    /// reflect the most recently applied value across all live overlays.
+    float_overlay: MockFloatOverlay,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
-    z_model: ZOrderModel,
+    z_stack: ZOrderStack,
+    focus_target: Arc<Mutex<FocusTarget>>,
 }
 
 impl TestEnv {
@@ -111,99 +158,92 @@ impl TestEnv {
             monitors,
             exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
         };
-        let sink_focus_count = Rc::new(Cell::new(0));
-        let overlay_update_count = Rc::new(Cell::new(0));
-        let last_visible_frame = Rc::new(Cell::new(None));
-        let tiling_overlay_update_count = Rc::new(Cell::new(0));
-        let tiling_overlay_clear_count = Rc::new(Cell::new(0));
-        let tiling_overlay_setwindowpos_count = Rc::new(Cell::new(0));
-        let float_overlay_apply_theme_count = Rc::new(Cell::new(0));
-        let tiling_overlay_apply_theme_count = Rc::new(Cell::new(0));
-        let float_overlay_apply_font_count = Rc::new(Cell::new(0));
-        let tiling_overlay_apply_font_count = Rc::new(Cell::new(0));
+        let focus_target = Arc::new(Mutex::new(FocusTarget::Initial));
+        let focus_sink = MockFocusSink::new(focus_target.clone());
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let picker_loaded_icons = Rc::new(RefCell::new(HashSet::new()));
-        let z_model = ZOrderModel::new();
+        let z_stack = ZOrderStack::new();
+        // Mirror production startup: the focus-sink HWND is created and
+        // parked at HWND_BOTTOM so Win32's close-time focus walk lands on a
+        // Dome-owned window. Any subsequent move_offscreen call by a managed
+        // window must drop that window strictly below the sink (encoded in
+        // `is_bottom`).
+        z_stack.simulate_create(FOCUS_SINK_ID);
+        z_stack.move_to_bottom(FOCUS_SINK_ID);
         let next_float_overlay_id = Rc::new(Cell::new(9000_isize));
+        // Seed flavor/font from the config to mirror production's overlay
+        // constructors.
+        let tiling_overlay = MockTilingOverlay::new(
+            TILING_OVERLAY_ID,
+            z_stack.clone(),
+            config.theme,
+            config.font.clone(),
+        );
+        let float_overlay = MockFloatOverlay::new(
+            FLOAT_OVERLAY_ID,
+            z_stack.clone(),
+            config.theme,
+            config.font.clone(),
+        );
 
         let dome = Dome::new(
             config.clone(),
             Rc::new(NoopTaskbar),
             Box::new(MockOverlays {
-                overlay_update_count: overlay_update_count.clone(),
-                last_visible_frame: last_visible_frame.clone(),
-                tiling_overlay_update_count: tiling_overlay_update_count.clone(),
-                tiling_overlay_clear_count: tiling_overlay_clear_count.clone(),
-                tiling_overlay_setwindowpos_count: tiling_overlay_setwindowpos_count.clone(),
-                float_overlay_apply_theme_count: float_overlay_apply_theme_count.clone(),
-                tiling_overlay_apply_theme_count: tiling_overlay_apply_theme_count.clone(),
-                float_overlay_apply_font_count: float_overlay_apply_font_count.clone(),
-                tiling_overlay_apply_font_count: tiling_overlay_apply_font_count.clone(),
+                tiling_overlay: tiling_overlay.clone(),
+                float_overlay: float_overlay.clone(),
                 picker_entries: picker_entries.clone(),
                 picker_loaded_icons: picker_loaded_icons.clone(),
-                z_model: z_model.clone(),
+                z_stack: z_stack.clone(),
                 next_float_overlay_id: next_float_overlay_id.clone(),
             }),
             Box::new(display),
-            Box::new(NoopFocusSink {
-                focus_count: sink_focus_count.clone(),
-            }),
+            Box::new(focus_sink),
         )
         .unwrap();
         Self {
             dome,
             moves: Arc::new(Mutex::new(Vec::new())),
+            mocks: HashMap::new(),
             exclusive_fullscreen_hwnd,
             config,
-            sink_focus_count,
-            overlay_update_count,
-            last_visible_frame,
-            tiling_overlay_update_count,
-            tiling_overlay_clear_count,
-            tiling_overlay_setwindowpos_count,
-            float_overlay_apply_theme_count,
-            tiling_overlay_apply_theme_count,
-            float_overlay_apply_font_count,
-            tiling_overlay_apply_font_count,
+            tiling_overlay,
+            float_overlay,
             picker_entries,
             picker_loaded_icons,
-            z_model,
+            z_stack,
+            focus_target,
         }
     }
 
-    fn spawn_window(&self, id: isize, title: &str, process: &str) -> Arc<MockExternalHwnd> {
-        Arc::new(MockExternalHwnd::with_title(
-            id,
-            title,
-            process,
-            self.moves.clone(),
-            self.z_model.clone(),
-        ))
+    fn open(&mut self, id: isize, title: &str, process: &str, dim: Dimension<Physical>) -> HwndId {
+        let ext = Arc::new(
+            MockExternalHwnd::with_title(
+                id,
+                title,
+                process,
+                self.moves.clone(),
+                self.z_stack.clone(),
+                self.focus_target.clone(),
+            )
+            .with_dimension(dim),
+        );
+        self.add_window(ext)
     }
 
-    fn add_window(&mut self, ext: Arc<MockExternalHwnd>) {
+    fn add_window(&mut self, ext: Arc<MockExternalHwnd>) -> HwndId {
+        let hwnd_id = ext.hwnd_id;
+        self.mocks.insert(hwnd_id, ext.clone());
         if !ext.manageable {
-            return;
+            return hwnd_id;
         }
         if ext.minimized.load(Ordering::Relaxed) {
             // Mirrors production: `is_manageable` rejects already-minimized
             // HWNDs at registration. They re-enter the create path when the
             // user restores the window.
-            return;
+            return hwnd_id;
         }
         let dim = ext.get_dim();
-        let observation = if dim.x <= Length::ZERO
-            && dim.y <= Length::ZERO
-            && dim.width >= SCREEN_WIDTH
-            && dim.height >= SCREEN_HEIGHT
-        {
-            ObservedPosition::Fullscreen
-        } else {
-            ObservedPosition::Visible {
-                rect: dim,
-                monitor: 1,
-            }
-        };
         let on_open = self.dome.try_manage_window(
             ext.clone(),
             ext.title.clone(),
@@ -214,7 +254,8 @@ impl TestEnv {
                 ext.max_size.0,
                 ext.max_size.1,
             ),
-            observation,
+            dim,
+            1,
             ext.app_name.clone(),
         );
         if let Some(actions) = on_open {
@@ -230,44 +271,25 @@ impl TestEnv {
             }
         }
         self.dome.apply_layout();
+        hwnd_id
     }
 
     fn settle(&mut self, limit: usize) {
-        for i in 0..limit {
-            let pending = std::mem::take(&mut *self.moves.lock().unwrap());
-            if pending.is_empty() {
+        for _ in 0..limit {
+            if !self.flush_moves() {
                 return;
             }
-            let mut last_pos: HashMap<HwndId, Dimension> = HashMap::new();
-            for (id, dim) in pending {
-                last_pos.insert(id, dim);
-            }
-            for (hwnd_id, dim) in last_pos {
-                self.dome.placement_timeout(hwnd_id);
-                self.dome.window_moved(
-                    hwnd_id,
-                    ObservedPosition::Visible {
-                        rect: dim,
-                        monitor: 1,
-                    },
-                );
-            }
-            self.dome.apply_layout();
-            if i == limit - 1 {
-                let remaining = self.moves.lock().unwrap().len();
-                if remaining > 0 {
-                    panic!(
-                        "settle did not converge after {limit} iterations ({remaining} moves pending)"
-                    );
-                }
-            }
+        }
+        let remaining = self.moves.lock().unwrap().len();
+        if remaining > 0 {
+            panic!("settle did not converge after {limit} iterations ({remaining} moves pending)");
         }
     }
 
-    fn flush_moves(&mut self) {
+    fn flush_moves(&mut self) -> bool {
         let pending = std::mem::take(&mut *self.moves.lock().unwrap());
         if pending.is_empty() {
-            return;
+            return false;
         }
         let mut last_pos: HashMap<HwndId, Dimension> = HashMap::new();
         for (id, dim) in pending {
@@ -275,48 +297,136 @@ impl TestEnv {
         }
         for (hwnd_id, dim) in last_pos {
             self.dome.placement_timeout(hwnd_id);
-            self.dome.window_moved(
-                hwnd_id,
-                ObservedPosition::Visible {
-                    rect: dim,
-                    monitor: 1,
-                },
-            );
+            let minimized = self
+                .mocks
+                .get(&hwnd_id)
+                .is_some_and(|m| m.minimized.load(Ordering::Relaxed));
+            if minimized {
+                // Mirrors production: the placement-read closure early-
+                // returns when `IsIconic` reports true, so `window_moved`
+                // never sees an iconic observation.
+                continue;
+            }
+            self.dome.window_moved(hwnd_id, dim, 1);
         }
         self.dome.apply_layout();
+        true
     }
 
     /// Configure a window to resist repositioning and report it at `pos`.
-    fn simulate_resist(&self, ext: &Arc<MockExternalHwnd>, pos: (i32, i32, i32, i32)) {
-        ext.set_override_position(Some(pos));
-        *ext.dimension.lock().unwrap() = Dimension::new(
+    fn simulate_resist(&self, hwnd: HwndId, pos: (i32, i32, i32, i32)) {
+        let dim = Dimension::new(
             Length::new(pos.0 as f32),
             Length::new(pos.1 as f32),
             Length::new(pos.2 as f32),
             Length::new(pos.3 as f32),
         );
-        ext.simulate_external_move();
+        let ext = self.mock(hwnd);
+        ext.set_override_position(Some(pos));
+        *ext.dimension.lock().unwrap() = dim;
+        self.moves.lock().unwrap().push((hwnd, dim));
     }
 
-    fn destroy_window(&mut self, ext: &Arc<MockExternalHwnd>) {
-        self.dome.window_destroyed(ext.hwnd_id);
-        self.z_model.remove(ext.hwnd_id);
+    fn destroy_window(&mut self, hwnd: HwndId) {
+        self.mocks.remove(&hwnd);
+        self.dome.window_destroyed(hwnd);
+        self.z_stack.remove(hwnd);
         self.dome.apply_layout();
     }
 
-    fn minimize_window(&mut self, ext: &Arc<MockExternalHwnd>) {
-        self.dome.window_minimized(ext.hwnd_id);
+    fn minimize_window(&mut self, hwnd: HwndId) {
+        self.dome.window_minimized(hwnd);
         self.dome.apply_layout();
     }
 
-    fn restore_window(&mut self, ext: &Arc<MockExternalHwnd>) {
-        self.dome.window_restored(ext.hwnd_id);
+    fn restore_window(&mut self, hwnd: HwndId) {
+        // Mirror production: EVENT_SYSTEM_MINIMIZEEND triggers
+        // `dispatch_placement_read` in the runner, whose result drives
+        // `window_moved`. The unminimize fold inside `window_moved` clears
+        // `entry.is_minimized` and calls `hub.unminimize_window`. Replay the
+        // same pipeline by pushing the current (post-restore, non-iconic)
+        // rect to the move log and letting `flush_moves` drive
+        // `placement_timeout` + `window_moved` +
+        // `apply_layout`. Callers set `ext.minimized` to false themselves
+        // (matching `minimize_window`, which leaves the OS-side flag to the
+        // caller too).
+        self.simulate_external_move(hwnd);
+        self.flush_moves();
+    }
+
+    fn focus_window(&mut self, hwnd: HwndId) {
+        self.dome.handle_focus(hwnd);
         self.dome.apply_layout();
     }
 
-    fn focus_window(&mut self, ext: &Arc<MockExternalHwnd>) {
-        self.dome.handle_focus(ext.hwnd_id);
-        self.dome.apply_layout();
+    fn mock(&self, hwnd: HwndId) -> &MockExternalHwnd {
+        self.mocks.get(&hwnd).unwrap_or_else(|| {
+            panic!("window {hwnd:?} is not registered (destroyed or never opened?)")
+        })
+    }
+
+    fn dim(&self, hwnd: HwndId) -> Dimension {
+        self.mock(hwnd).get_dim()
+    }
+
+    fn set_dim(&self, hwnd: HwndId, dim: Dimension) {
+        *self.mock(hwnd).dimension.lock().unwrap() = dim;
+    }
+
+    fn is_minimized(&self, hwnd: HwndId) -> bool {
+        self.mock(hwnd).minimized.load(Ordering::Relaxed)
+    }
+
+    fn set_minimized(&self, hwnd: HwndId, minimized: bool) {
+        self.mock(hwnd)
+            .minimized
+            .store(minimized, Ordering::Relaxed);
+    }
+
+    fn is_offscreen(&self, hwnd: HwndId) -> bool {
+        self.mock(hwnd).is_offscreen()
+    }
+
+    fn is_topmost(&self, hwnd: HwndId) -> bool {
+        self.z_stack.is_topmost(hwnd)
+    }
+
+    /// A window is "at the bottom" iff it sits in the combined z-order below
+    /// every other displayed (non-offscreen) managed mock AND below the focus
+    /// sink. The sink-above invariant matters because Win32's close-time focus
+    /// walk descends the z-order; if a parked window from another workspace
+    /// sat above the sink, that workspace would activate on close (see
+    /// docs/architecture.md, "Virtual workspaces"). Vacuously true on the
+    /// displayed-peers leg when no displayed peer exists.
+    fn is_bottom(&self, hwnd: HwndId) -> bool {
+        let stack = self.z_stack.stack();
+        let Some(idx) = stack.iter().position(|&h| h == hwnd) else {
+            return false;
+        };
+        let displayed_above = self
+            .mocks
+            .values()
+            .filter(|m| m.hwnd_id != hwnd && !m.is_offscreen())
+            .all(|m| match stack.iter().position(|&h| h == m.hwnd_id) {
+                Some(peer_idx) => peer_idx < idx,
+                None => true,
+            });
+        if !displayed_above {
+            return false;
+        }
+        match stack.iter().position(|&h| h == FOCUS_SINK_ID) {
+            Some(sink_idx) => sink_idx < idx,
+            None => false,
+        }
+    }
+
+    fn clear_override_position(&self, hwnd: HwndId) {
+        self.mock(hwnd).set_override_position(None);
+    }
+
+    fn simulate_external_move(&self, hwnd: HwndId) {
+        let dim = self.mock(hwnd).get_dim();
+        self.moves.lock().unwrap().push((hwnd, dim));
     }
 
     fn run_actions(&mut self, s: &str) {
@@ -339,48 +449,32 @@ impl TestEnv {
         self.dome.apply_layout();
     }
 
-    fn sink_focus_count(&self) -> u32 {
-        self.sink_focus_count.get()
+    fn focus_target(&self) -> FocusTarget {
+        *self.focus_target.lock().unwrap()
     }
 
-    fn reset_sink_focus(&self) {
-        self.sink_focus_count.set(0);
+    fn float_overlay_state(&self) -> FloatOverlayState {
+        self.float_overlay.state()
     }
 
-    fn overlay_update_count(&self) -> u32 {
-        self.overlay_update_count.get()
+    fn tiling_overlay_state(&self) -> TilingOverlayState {
+        self.tiling_overlay.state()
     }
 
-    fn last_visible_frame(&self) -> Option<Dimension<Physical>> {
-        self.last_visible_frame.get()
+    fn tiling_overlay_flavor(&self) -> Flavor {
+        self.tiling_overlay.flavor()
     }
 
-    fn tiling_overlay_update_count(&self) -> u32 {
-        self.tiling_overlay_update_count.get()
+    fn tiling_overlay_font(&self) -> FontConfig {
+        self.tiling_overlay.font()
     }
 
-    fn tiling_overlay_clear_count(&self) -> u32 {
-        self.tiling_overlay_clear_count.get()
+    fn float_overlay_flavor(&self) -> Flavor {
+        self.float_overlay.flavor()
     }
 
-    fn tiling_overlay_setwindowpos_count(&self) -> u32 {
-        self.tiling_overlay_setwindowpos_count.get()
-    }
-
-    fn float_overlay_apply_theme_count(&self) -> u32 {
-        self.float_overlay_apply_theme_count.get()
-    }
-
-    fn tiling_overlay_apply_theme_count(&self) -> u32 {
-        self.tiling_overlay_apply_theme_count.get()
-    }
-
-    fn float_overlay_apply_font_count(&self) -> u32 {
-        self.float_overlay_apply_font_count.get()
-    }
-
-    fn tiling_overlay_apply_font_count(&self) -> u32 {
-        self.tiling_overlay_apply_font_count.get()
+    fn float_overlay_font(&self) -> FontConfig {
+        self.float_overlay.font()
     }
 
     fn picker_loaded_icons(&self) -> HashSet<String> {
@@ -409,32 +503,29 @@ impl TestEnv {
     }
 
     fn z_order(&self) -> Vec<HwndId> {
-        self.z_model.stack()
+        self.z_stack.stack()
     }
 
     fn tiling_z_order(&self) -> Vec<HwndId> {
-        self.z_model.normal_stack()
+        self.z_stack.normal_stack()
     }
 
     fn overlay_id(&self) -> HwndId {
-        HwndId::test(9999)
+        TILING_OVERLAY_ID
     }
 }
+
+const TILING_OVERLAY_ID: HwndId = HwndId::test(9999);
+const FOCUS_SINK_ID: HwndId = HwndId::test(9998);
+const FLOAT_OVERLAY_ID: HwndId = HwndId::test(9000);
 
 fn fullscreen_dim() -> Dimension {
     Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ZOrderState {
-    Bottom,
-    Normal,
-    Topmost,
-}
-
 type MoveLog = Arc<Mutex<Vec<(HwndId, Dimension)>>>;
 
-struct ZOrderStack {
+struct ZOrderBands {
     topmost: Vec<HwndId>,
     normal: Vec<HwndId>,
 }
@@ -442,14 +533,14 @@ struct ZOrderStack {
 /// Emulates Win32's z-order stack for test assertions. Tracks the relative
 /// ordering of windows as `set_position` and `move_offscreen` calls arrive.
 #[derive(Clone)]
-struct ZOrderModel {
-    inner: Arc<Mutex<ZOrderStack>>,
+struct ZOrderStack {
+    bands: Arc<Mutex<ZOrderBands>>,
 }
 
-impl ZOrderModel {
+impl ZOrderStack {
     fn new() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(ZOrderStack {
+            bands: Arc::new(Mutex::new(ZOrderBands {
                 topmost: Vec::new(),
                 normal: Vec::new(),
             })),
@@ -457,11 +548,11 @@ impl ZOrderModel {
     }
 
     fn apply(&self, hwnd: HwndId, z: ZOrder) {
-        let mut stack = self.inner.lock().unwrap();
+        let mut bands = self.bands.lock().unwrap();
 
         // Record original position for Unchanged
-        let orig_topmost_pos = stack.topmost.iter().position(|&id| id == hwnd);
-        let orig_normal_pos = stack.normal.iter().position(|&id| id == hwnd);
+        let orig_topmost_pos = bands.topmost.iter().position(|&id| id == hwnd);
+        let orig_normal_pos = bands.normal.iter().position(|&id| id == hwnd);
 
         match z {
             // Win32 self-reference (SetWindowPos(hwnd, hwnd, ...)) is a no-op.
@@ -470,68 +561,74 @@ impl ZOrderModel {
         }
 
         // Remove from both lists
-        stack.topmost.retain(|&id| id != hwnd);
-        stack.normal.retain(|&id| id != hwnd);
+        bands.topmost.retain(|&id| id != hwnd);
+        bands.normal.retain(|&id| id != hwnd);
 
         match z {
             ZOrder::After(other) => {
-                if let Some(pos) = stack.normal.iter().position(|&id| id == other) {
-                    stack.normal.insert(pos + 1, hwnd);
+                if let Some(pos) = bands.topmost.iter().position(|&id| id == other) {
+                    bands.topmost.insert(pos + 1, hwnd);
+                } else if let Some(pos) = bands.normal.iter().position(|&id| id == other) {
+                    bands.normal.insert(pos + 1, hwnd);
                 } else {
-                    stack.normal.push(hwnd);
+                    bands.normal.push(hwnd);
                 }
             }
             ZOrder::Topmost => {
-                stack.topmost.insert(0, hwnd);
+                bands.topmost.insert(0, hwnd);
             }
             ZOrder::NotTopmost => {
                 // HWND_NOTOPMOST: remove from topmost band, prepend to normal
                 // band only if not already there (already removed above).
-                let clamped = orig_normal_pos.unwrap_or(0).min(stack.normal.len());
-                stack.normal.insert(clamped, hwnd);
+                let clamped = orig_normal_pos.unwrap_or(0).min(bands.normal.len());
+                bands.normal.insert(clamped, hwnd);
             }
             ZOrder::Unchanged => {
                 // Re-insert at original position (clamped to list length)
                 if let Some(pos) = orig_topmost_pos {
-                    let clamped = pos.min(stack.topmost.len());
-                    stack.topmost.insert(clamped, hwnd);
+                    let clamped = pos.min(bands.topmost.len());
+                    bands.topmost.insert(clamped, hwnd);
                 } else if let Some(pos) = orig_normal_pos {
-                    let clamped = pos.min(stack.normal.len());
-                    stack.normal.insert(clamped, hwnd);
+                    let clamped = pos.min(bands.normal.len());
+                    bands.normal.insert(clamped, hwnd);
                 } else {
-                    stack.normal.push(hwnd);
+                    bands.normal.push(hwnd);
                 }
             }
         }
     }
 
     fn move_to_bottom(&self, hwnd: HwndId) {
-        let mut stack = self.inner.lock().unwrap();
-        stack.topmost.retain(|&id| id != hwnd);
-        stack.normal.retain(|&id| id != hwnd);
-        stack.normal.push(hwnd);
+        let mut bands = self.bands.lock().unwrap();
+        bands.topmost.retain(|&id| id != hwnd);
+        bands.normal.retain(|&id| id != hwnd);
+        bands.normal.push(hwnd);
     }
 
     /// Returns the full z-order stack from top to bottom: topmost band first, then normal.
     fn stack(&self) -> Vec<HwndId> {
-        let stack = self.inner.lock().unwrap();
-        let mut result = stack.topmost.clone();
-        result.extend_from_slice(&stack.normal);
+        let bands = self.bands.lock().unwrap();
+        let mut result = bands.topmost.clone();
+        result.extend_from_slice(&bands.normal);
         result
     }
 
     fn normal_stack(&self) -> Vec<HwndId> {
-        self.inner.lock().unwrap().normal.clone()
+        self.bands.lock().unwrap().normal.clone()
+    }
+
+    fn is_topmost(&self, hwnd: HwndId) -> bool {
+        self.bands.lock().unwrap().topmost.contains(&hwnd)
     }
 
     /// Returns the HWND sitting directly above `hwnd` in the combined z-order
     /// stack (topmost band first, then normal). Mirrors `GetWindow(GW_HWNDPREV)`.
     fn window_above(&self, hwnd: HwndId) -> Option<HwndId> {
-        let stack = self.inner.lock().unwrap();
-        let combined: Vec<HwndId> = stack
+        let bands = self.bands.lock().unwrap();
+        let combined: Vec<HwndId> = bands
             .topmost
             .iter()
-            .chain(stack.normal.iter())
+            .chain(bands.normal.iter())
             .copied()
             .collect();
         let idx = combined.iter().position(|&h| h == hwnd)?;
@@ -544,9 +641,9 @@ impl ZOrderModel {
 
     /// Removes a window from both z-order bands. Mirrors Win32 `DestroyWindow`.
     fn remove(&self, hwnd: HwndId) {
-        let mut stack = self.inner.lock().unwrap();
-        stack.topmost.retain(|&id| id != hwnd);
-        stack.normal.retain(|&id| id != hwnd);
+        let mut bands = self.bands.lock().unwrap();
+        bands.topmost.retain(|&id| id != hwnd);
+        bands.normal.retain(|&id| id != hwnd);
     }
 
     /// Simulate CreateWindowExW: place a freshly-created HWND at the top of
@@ -554,9 +651,9 @@ impl ZOrderModel {
     /// overlay's explicit drop-to-bottom park is applied separately by the
     /// caller via `move_to_bottom`.
     fn simulate_create(&self, hwnd: HwndId) {
-        let mut stack = self.inner.lock().unwrap();
-        stack.normal.retain(|&id| id != hwnd);
-        stack.normal.insert(0, hwnd);
+        let mut bands = self.bands.lock().unwrap();
+        bands.normal.retain(|&id| id != hwnd);
+        bands.normal.insert(0, hwnd);
     }
 }
 
@@ -572,9 +669,9 @@ struct MockExternalHwnd {
     minimized: AtomicBool,
     min_size: (f32, f32),
     max_size: (f32, f32),
-    z_state: Mutex<ZOrderState>,
-    z_model: ZOrderModel,
+    z_stack: ZOrderStack,
     moves: MoveLog,
+    focus_target: Arc<Mutex<FocusTarget>>,
 }
 
 impl MockExternalHwnd {
@@ -583,10 +680,11 @@ impl MockExternalHwnd {
         title: &str,
         process: &str,
         moves: MoveLog,
-        z_model: ZOrderModel,
+        z_stack: ZOrderStack,
+        focus_target: Arc<Mutex<FocusTarget>>,
     ) -> Self {
         let hwnd_id = HwndId::test(id);
-        z_model.simulate_create(hwnd_id);
+        z_stack.simulate_create(hwnd_id);
         Self {
             hwnd_id,
             manageable: true,
@@ -604,9 +702,9 @@ impl MockExternalHwnd {
             minimized: AtomicBool::new(false),
             min_size: (0.0, 0.0),
             max_size: (0.0, 0.0),
-            z_state: Mutex::new(ZOrderState::Normal),
-            z_model,
+            z_stack,
             moves,
+            focus_target,
         }
     }
 
@@ -629,12 +727,6 @@ impl MockExternalHwnd {
         *self.override_position.lock().unwrap() = pos;
     }
 
-    /// Simulate the app moving itself -- push current dimension to the move log.
-    fn simulate_external_move(&self) {
-        let dim = self.get_dim();
-        self.moves.lock().unwrap().push((self.hwnd_id, dim));
-    }
-
     fn get_dim(&self) -> Dimension {
         *self.dimension.lock().unwrap()
     }
@@ -642,14 +734,6 @@ impl MockExternalHwnd {
     fn is_offscreen(&self) -> bool {
         let dim = self.get_dim();
         dim.x <= OFFSCREEN_POS || dim.y <= OFFSCREEN_POS
-    }
-
-    fn is_topmost(&self) -> bool {
-        *self.z_state.lock().unwrap() == ZOrderState::Topmost
-    }
-
-    fn is_bottom(&self) -> bool {
-        *self.z_state.lock().unwrap() == ZOrderState::Bottom
     }
 }
 
@@ -679,14 +763,7 @@ impl ManageExternalWindow for MockExternalHwnd {
             )
         });
         *self.dimension.lock().unwrap() = dim;
-        let mut z_state = self.z_state.lock().unwrap();
-        match z {
-            ZOrder::Topmost => *z_state = ZOrderState::Topmost,
-            ZOrder::NotTopmost => *z_state = ZOrderState::Normal,
-            ZOrder::After(_) => *z_state = ZOrderState::Normal,
-            ZOrder::Unchanged => {}
-        }
-        self.z_model.apply(self.hwnd_id, z);
+        self.z_stack.apply(self.hwnd_id, z);
         self.moves.lock().unwrap().push((self.hwnd_id, dim));
     }
 
@@ -706,19 +783,33 @@ impl ManageExternalWindow for MockExternalHwnd {
             d.y = OFFSCREEN_POS;
             *d
         };
-        *self.z_state.lock().unwrap() = ZOrderState::Bottom;
-        self.z_model.move_to_bottom(self.hwnd_id);
+        self.z_stack.move_to_bottom(self.hwnd_id);
         self.moves.lock().unwrap().push((self.hwnd_id, dim));
     }
 
     fn show_cmd(&self, cmd: ShowCmd) {
         match cmd {
-            ShowCmd::Minimize => self.minimized.store(true, Ordering::Relaxed),
-            ShowCmd::Restore => self.minimized.store(false, Ordering::Relaxed),
+            ShowCmd::Minimize => {
+                // Production: SW_MINIMIZE flips IsIconic and parks the window
+                // at the iconic-cache rect. Tests never observe the iconic
+                // rect (the placement-read closure early-returns on IsIconic
+                // before reading), so the mock skips the rect overwrite
+                // entirely. The move-log push exists to drive the
+                // LOCATIONCHANGE replay in flush_moves; the value is dropped
+                // by the iconic guard before reaching window_moved.
+                self.minimized.store(true, Ordering::Relaxed);
+                let dim = *self.dimension.lock().unwrap();
+                self.moves.lock().unwrap().push((self.hwnd_id, dim));
+            }
+            ShowCmd::Restore => {
+                self.minimized.store(false, Ordering::Relaxed);
+            }
         }
     }
 
-    fn set_foreground_window(&self) {}
+    fn set_foreground_window(&self) {
+        *self.focus_target.lock().unwrap() = FocusTarget::Window(self.hwnd_id);
+    }
 
     fn is_maximized(&self) -> bool {
         false
@@ -733,7 +824,7 @@ impl ManageExternalWindow for MockExternalHwnd {
 
 impl Drop for MockExternalHwnd {
     fn drop(&mut self) {
-        self.z_model.remove(self.hwnd_id);
+        self.z_stack.remove(self.hwnd_id);
     }
 }
 
@@ -773,98 +864,166 @@ impl ManageTaskbar for NoopTaskbar {
     fn delete_tab(&self, _: HwndId) {}
 }
 
-struct NoopFocusSink {
-    focus_count: Rc<Cell<u32>>,
+struct MockFocusSink {
+    focus_target: Arc<Mutex<FocusTarget>>,
 }
 
-impl FocusSinkApi for NoopFocusSink {
-    fn focus(&self) {
-        self.focus_count.set(self.focus_count.get() + 1);
+impl MockFocusSink {
+    fn new(focus_target: Arc<Mutex<FocusTarget>>) -> Self {
+        Self { focus_target }
     }
 }
 
-struct MockFloatOverlay {
-    overlay_update_count: Rc<Cell<u32>>,
-    last_visible_frame: Rc<Cell<Option<Dimension<Physical>>>>,
-    apply_theme_count: Rc<Cell<u32>>,
-    apply_font_count: Rc<Cell<u32>>,
+impl FocusSinkApi for MockFocusSink {
+    fn focus(&self) {
+        *self.focus_target.lock().unwrap() = FocusTarget::Sink;
+    }
 }
+
+#[derive(Clone)]
+struct MockFloatOverlay {
+    hwnd_id: HwndId,
+    z_stack: ZOrderStack,
+    flavor: Rc<Cell<Flavor>>,
+    font: Rc<RefCell<FontConfig>>,
+    state: Rc<Cell<FloatOverlayState>>,
+}
+
+impl MockFloatOverlay {
+    fn new(hwnd_id: HwndId, z_stack: ZOrderStack, flavor: Flavor, font: FontConfig) -> Self {
+        Self {
+            hwnd_id,
+            z_stack,
+            flavor: Rc::new(Cell::new(flavor)),
+            font: Rc::new(RefCell::new(font)),
+            state: Rc::new(Cell::new(FloatOverlayState::Hidden)),
+        }
+    }
+
+    fn flavor(&self) -> Flavor {
+        self.flavor.get()
+    }
+
+    fn font(&self) -> FontConfig {
+        self.font.borrow().clone()
+    }
+
+    fn state(&self) -> FloatOverlayState {
+        self.state.get()
+    }
+}
+
 impl FloatOverlayApi for MockFloatOverlay {
     fn update(
         &mut self,
         wp: &crate::core::FloatWindowPlacement,
         _: &Config,
-        _: ZOrder,
+        z_order: ZOrder,
         _scale: f32,
     ) {
-        self.overlay_update_count
-            .set(self.overlay_update_count.get() + 1);
-        self.last_visible_frame.set(Some(wp.visible_frame));
+        self.state.set(FloatOverlayState::Visible {
+            window_id: wp.id,
+            visible_frame: wp.visible_frame,
+            z_order,
+        });
+        self.z_stack.apply(self.hwnd_id, z_order);
     }
-    fn hide(&mut self) {}
-    fn apply_theme(&mut self, _flavor: crate::theme::Flavor) {
-        self.apply_theme_count.set(self.apply_theme_count.get() + 1);
+    fn hide(&mut self) {
+        self.state.set(FloatOverlayState::Hidden);
+        self.z_stack.remove(self.hwnd_id);
     }
-    fn apply_font(&mut self, _font: &crate::font::FontConfig) {
-        self.apply_font_count.set(self.apply_font_count.get() + 1);
+    fn apply_theme(&mut self, flavor: Flavor) {
+        self.flavor.set(flavor);
+    }
+    fn apply_font(&mut self, font: &FontConfig) {
+        *self.font.borrow_mut() = font.clone();
     }
 }
 
+/// `monitor` is shared (not just `Cell<Dimension>`) so the struct stays
+/// cheaply `Clone`: the factory hands clones to the Hub while `TestEnv`
+/// retains one for inspection.
+#[derive(Clone)]
 struct MockTilingOverlay {
     overlay_id: HwndId,
-    z_model: ZOrderModel,
-    update_count: Rc<Cell<u32>>,
-    clear_count: Rc<Cell<u32>>,
-    apply_theme_count: Rc<Cell<u32>>,
-    apply_font_count: Rc<Cell<u32>>,
-    setwindowpos_count: Rc<Cell<u32>>,
-    monitor: Dimension,
+    z_stack: ZOrderStack,
+    state: Rc<RefCell<TilingOverlayState>>,
+    flavor: Rc<Cell<Flavor>>,
+    font: Rc<RefCell<FontConfig>>,
+    monitor: Rc<Cell<Dimension>>,
+}
+
+impl MockTilingOverlay {
+    fn new(overlay_id: HwndId, z_stack: ZOrderStack, flavor: Flavor, font: FontConfig) -> Self {
+        Self {
+            overlay_id,
+            z_stack,
+            state: Rc::new(RefCell::new(TilingOverlayState::Hidden)),
+            flavor: Rc::new(Cell::new(flavor)),
+            font: Rc::new(RefCell::new(font)),
+            monitor: Rc::new(Cell::new(Dimension::default())),
+        }
+    }
+
+    fn state(&self) -> TilingOverlayState {
+        self.state.borrow().clone()
+    }
+
+    fn flavor(&self) -> Flavor {
+        self.flavor.get()
+    }
+
+    fn font(&self) -> FontConfig {
+        self.font.borrow().clone()
+    }
 }
 
 impl TilingOverlayApi for MockTilingOverlay {
     fn update(
         &mut self,
         monitor: Dimension,
-        _: &[crate::core::TilingWindowPlacement],
-        _: &[(crate::core::ContainerPlacement, Vec<String>)],
+        windows: &[TilingWindowPlacement],
+        containers: &[(ContainerPlacement, Vec<String>)],
         _scale: f32,
     ) {
-        if self.monitor != monitor {
-            self.monitor = monitor;
-            self.setwindowpos_count
-                .set(self.setwindowpos_count.get() + 1);
+        if self.monitor.get() != monitor {
+            self.monitor.set(monitor);
             // Monitor-change branch: mirror production's HWND_BOTTOM park.
-            self.z_model.move_to_bottom(self.overlay_id);
+            self.z_stack.move_to_bottom(self.overlay_id);
         }
         // Same-monitor path: no z-order call. Matches production behavior
         // where show_tiling's per-window lift maintains the invariant.
-        self.update_count.set(self.update_count.get() + 1);
+        *self.state.borrow_mut() = TilingOverlayState::Visible {
+            monitor,
+            windows: windows.to_vec(),
+            containers: containers.iter().map(|(c, _)| c.clone()).collect(),
+        };
     }
     fn clear(&mut self) {
-        self.clear_count.set(self.clear_count.get() + 1);
+        *self.state.borrow_mut() = TilingOverlayState::Hidden;
     }
     fn set_config(&mut self, _: Config) {}
     fn window_above(&self) -> Option<HwndId> {
-        self.z_model.window_above(self.overlay_id)
+        self.z_stack.window_above(self.overlay_id)
     }
     fn demote_below(&mut self, managed: HwndId) {
-        self.z_model.apply(self.overlay_id, ZOrder::After(managed));
+        self.z_stack.apply(self.overlay_id, ZOrder::After(managed));
     }
-    fn apply_theme(&mut self, _flavor: crate::theme::Flavor) {
-        self.apply_theme_count.set(self.apply_theme_count.get() + 1);
+    fn apply_theme(&mut self, flavor: Flavor) {
+        self.flavor.set(flavor);
     }
-    fn apply_font(&mut self, _font: &crate::font::FontConfig) {
-        self.apply_font_count.set(self.apply_font_count.get() + 1);
+    fn apply_font(&mut self, font: &FontConfig) {
+        *self.font.borrow_mut() = font.clone();
     }
 }
 
-struct NoopPicker {
+struct MockPicker {
     visible: bool,
     entries: Rc<RefCell<Vec<PickerEntry>>>,
     loaded_icons: Rc<RefCell<HashSet<String>>>,
 }
 
-impl PickerApi for NoopPicker {
+impl PickerApi for MockPicker {
     fn show(&mut self, entries: Vec<PickerEntry>, _monitor_dim: Dimension, _scale: f32) {
         *self.entries.borrow_mut() = entries;
         self.visible = true;
@@ -909,18 +1068,11 @@ impl PickerApi for NoopPicker {
 }
 
 struct MockOverlays {
-    overlay_update_count: Rc<Cell<u32>>,
-    last_visible_frame: Rc<Cell<Option<Dimension<Physical>>>>,
-    tiling_overlay_update_count: Rc<Cell<u32>>,
-    tiling_overlay_clear_count: Rc<Cell<u32>>,
-    tiling_overlay_setwindowpos_count: Rc<Cell<u32>>,
-    float_overlay_apply_theme_count: Rc<Cell<u32>>,
-    tiling_overlay_apply_theme_count: Rc<Cell<u32>>,
-    float_overlay_apply_font_count: Rc<Cell<u32>>,
-    tiling_overlay_apply_font_count: Rc<Cell<u32>>,
+    tiling_overlay: MockTilingOverlay,
+    float_overlay: MockFloatOverlay,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
-    z_model: ZOrderModel,
+    z_stack: ZOrderStack,
     next_float_overlay_id: Rc<Cell<isize>>,
 }
 
@@ -933,34 +1085,30 @@ impl CreateOverlay for MockOverlays {
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         // Mirror production: CreateWindowExW seeds at top of normal band, then
         // we explicitly drop the overlay to HWND_BOTTOM.
-        self.z_model.simulate_create(HwndId::test(9999));
-        self.z_model.move_to_bottom(HwndId::test(9999));
-        Ok(Box::new(MockTilingOverlay {
-            overlay_id: HwndId::test(9999),
-            z_model: self.z_model.clone(),
-            update_count: self.tiling_overlay_update_count.clone(),
-            clear_count: self.tiling_overlay_clear_count.clone(),
-            apply_theme_count: self.tiling_overlay_apply_theme_count.clone(),
-            apply_font_count: self.tiling_overlay_apply_font_count.clone(),
-            setwindowpos_count: self.tiling_overlay_setwindowpos_count.clone(),
-            monitor: Dimension::default(),
-        }))
+        self.z_stack.simulate_create(self.tiling_overlay.overlay_id);
+        self.z_stack.move_to_bottom(self.tiling_overlay.overlay_id);
+        Ok(Box::new(self.tiling_overlay.clone()))
     }
     fn create_float_overlay(
         &self,
-        _flavor: crate::theme::Flavor,
-        _font: &crate::font::FontConfig,
+        flavor: Flavor,
+        font: &FontConfig,
         _scale: f32,
         _visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         let id = self.next_float_overlay_id.get();
         self.next_float_overlay_id.set(id + 1);
-        Ok(Box::new(MockFloatOverlay {
-            overlay_update_count: self.overlay_update_count.clone(),
-            last_visible_frame: self.last_visible_frame.clone(),
-            apply_theme_count: self.float_overlay_apply_theme_count.clone(),
-            apply_font_count: self.float_overlay_apply_font_count.clone(),
-        }))
+        // Production seeds flavor/font on float overlay creation.
+        self.float_overlay.flavor.set(flavor);
+        *self.float_overlay.font.borrow_mut() = font.clone();
+        // Mirror CreateWindowExW: seed at top of normal band. The first
+        // `update()` call will reposition (typically `ZOrder::After(float_window)`)
+        // and `hide()` removes it. Without this, the very first update would
+        // see no existing entry, and although `apply` re-inserts cleanly,
+        // having the create event modeled keeps the timeline closer to
+        // production.
+        self.z_stack.simulate_create(FLOAT_OVERLAY_ID);
+        Ok(Box::new(self.float_overlay.clone()))
     }
     fn create_picker(
         &self,
@@ -970,7 +1118,7 @@ impl CreateOverlay for MockOverlays {
         _font: &crate::font::FontConfig,
         scale: f32,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
-        let mut picker = NoopPicker {
+        let mut picker = MockPicker {
             visible: false,
             entries: self.picker_entries.clone(),
             loaded_icons: self.picker_loaded_icons.clone(),

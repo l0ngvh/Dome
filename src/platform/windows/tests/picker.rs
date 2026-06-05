@@ -5,9 +5,8 @@ fn picker_scale_reflects_focused_monitor() {
     let mut monitor = default_monitor();
     monitor.scale = 1.75;
     let mut env = TestEnv::new_with_monitors(Config::default(), vec![monitor]);
-    let w = env.spawn_window(1, "App", "app.exe");
-    env.add_window(w.clone());
-    env.minimize_window(&w);
+    let w = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.minimize_window(w);
     env.run_actions("toggle minimized");
     assert_eq!(env.picker_scale(), Some(1.75));
 }
@@ -18,9 +17,8 @@ fn picker_scale_none_when_hidden() {
     // No picker shown yet.
     assert_eq!(env.picker_scale(), None);
 
-    let w = env.spawn_window(1, "App", "app.exe");
-    env.add_window(w.clone());
-    env.minimize_window(&w);
+    let w = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.minimize_window(w);
 
     // Show picker.
     env.run_actions("toggle minimized");
@@ -34,9 +32,8 @@ fn picker_scale_none_when_hidden() {
 #[test]
 fn picker_show_same_scale_preserves_icon_cache() {
     let mut env = TestEnv::new();
-    let w = env.spawn_window(1, "App", "app.exe");
-    env.add_window(w.clone());
-    env.minimize_window(&w);
+    let w = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.minimize_window(w);
 
     // Open picker at scale 1.0.
     env.run_actions("toggle minimized");

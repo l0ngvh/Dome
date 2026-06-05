@@ -5,9 +5,7 @@ use windows::Win32::Foundation::{LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
-use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
-};
+use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow};
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
@@ -111,19 +109,6 @@ pub(crate) fn dwm_frame_bounds(hwnd: HWND) -> Option<Dimension> {
         .ok()?;
     }
     Some(rect_to_dimension(frame_rect))
-}
-
-/// Returns the work-area dimension for the given monitor handle.
-/// Returns `None` if `GetMonitorInfoW` fails (e.g. stale or null `HMONITOR`).
-pub(crate) fn monitor_info_work_area(hmonitor: HMONITOR) -> Option<Dimension> {
-    let mut info = MONITORINFO {
-        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-        ..Default::default()
-    };
-    if !unsafe { GetMonitorInfoW(hmonitor, &mut info) }.as_bool() {
-        return None;
-    }
-    Some(rect_to_dimension(info.rcWork))
 }
 
 /// Positions `hwnd` at `OFFSCREEN_POS` with z-order HWND_BOTTOM.
@@ -678,6 +663,10 @@ impl InspectExternalWindow for ExternalHwnd {
         is_manageable(self.0)
     }
 
+    fn is_minimized(&self) -> bool {
+        unsafe { IsIconic(self.0) }.as_bool()
+    }
+
     fn get_window_title(&self) -> Option<String> {
         get_window_title(self.0)
     }
@@ -694,18 +683,6 @@ impl InspectExternalWindow for ExternalHwnd {
     /// `GetWindowRect` if the DWM attribute is unavailable.
     fn get_visible_rect(&self) -> Dimension {
         dwm_frame_bounds(self.0).unwrap_or_else(|| get_dimension(self.0))
-    }
-
-    fn is_fullscreen(&self) -> bool {
-        let dim = get_dimension(self.0);
-        let monitor = unsafe { MonitorFromWindow(self.0, MONITOR_DEFAULTTONEAREST) };
-        let Some(work) = monitor_info_work_area(monitor) else {
-            return false;
-        };
-        dim.x <= work.x
-            && dim.y <= work.y
-            && dim.x + dim.width >= work.x + work.width
-            && dim.y + dim.height >= work.y + work.height
     }
 
     fn get_app_display_name(&self) -> Option<String> {
@@ -769,12 +746,5 @@ mod tests {
         assert_eq!(dim.y, Length::new(200.0));
         assert_eq!(dim.width, Length::new(300.0));
         assert_eq!(dim.height, Length::new(300.0));
-    }
-
-    #[test]
-    fn monitor_info_work_area_none_on_null_handle() {
-        // Null HMONITOR should fail GetMonitorInfoW and return None.
-        let result = monitor_info_work_area(HMONITOR(std::ptr::null_mut()));
-        assert!(result.is_none());
     }
 }

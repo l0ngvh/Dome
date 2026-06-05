@@ -10,7 +10,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
-use crate::platform::windows::dome::{Dome, HubEvent, ObservedPosition};
+use crate::platform::windows::dome::{Dome, HubEvent};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
 use crate::platform::windows::throttle::{Throttle, ThrottleResult};
@@ -106,27 +106,23 @@ impl Runner {
             }
             HubEvent::ConfigChanged(c) => {
                 self.dome.config_changed(*c);
-                self.dome.apply_layout();
             }
             HubEvent::WindowCreated(hwnd_id) => {
                 self.dispatch_window_created(hwnd_id);
             }
             HubEvent::WindowDestroyed(hwnd_id) => {
                 self.dome.window_destroyed(hwnd_id);
-                self.dome.apply_layout();
             }
             HubEvent::WindowMinimized(hwnd_id) => {
                 self.dome.window_minimized(hwnd_id);
-                self.dome.apply_layout();
             }
             HubEvent::WindowRestored(hwnd_id) => {
-                self.dome.window_restored(hwnd_id);
-                self.dome.apply_layout();
+                // On window restored, we need its actual placement in order to do correct things
+                self.dispatch_placement_read(hwnd_id);
             }
             HubEvent::WindowFocused(hwnd_id) => match self.focus_throttle.submit(hwnd_id) {
                 ThrottleResult::Send(id) => {
                     self.dome.handle_focus(id);
-                    self.dome.apply_layout();
                 }
                 ThrottleResult::Pending => {}
                 ThrottleResult::ScheduleFlush(delay) => {
@@ -180,7 +176,6 @@ impl Runner {
             }
             HubEvent::TabClicked(id, idx) => {
                 self.dome.tab_clicked(id, idx);
-                self.dome.apply_layout();
             }
         }
     }
@@ -191,19 +186,15 @@ impl Runner {
             match action {
                 Action::Focus(t) => {
                     self.dome.apply_focus(t);
-                    self.dome.apply_layout();
                 }
                 Action::Move(t) => {
                     self.dome.apply_move(t);
-                    self.dome.apply_layout();
                 }
                 Action::Toggle(t) => {
                     self.dome.apply_toggle(t);
-                    self.dome.apply_layout();
                 }
                 Action::Master(t) => {
                     self.dome.apply_master(t);
-                    self.dome.apply_layout();
                 }
                 Action::ToggleMinimized => {
                     self.dome.toggle_picker();
@@ -227,7 +218,6 @@ impl Runner {
                 }
                 Action::UnminimizeWindow(id) => {
                     self.dome.picker_unminimize_window(*id);
-                    self.dome.apply_layout();
                 }
                 Action::Mode { name } => {
                     self.keymap_state.write().unwrap().switch_mode(name);
@@ -235,6 +225,7 @@ impl Runner {
                 }
             }
         }
+        self.dome.apply_layout();
     }
 
     pub(super) fn dispatch_window_created(&mut self, hwnd_id: HwndId) {
@@ -246,23 +237,19 @@ impl Runner {
                 if !inspect.is_manageable() {
                     return None;
                 }
-                let observation = if inspect.is_fullscreen() {
-                    ObservedPosition::Fullscreen
-                } else {
-                    let rect = inspect.get_visible_rect();
-                    let monitor = inspect.get_monitor();
-                    ObservedPosition::Visible { rect, monitor }
-                };
+                let rect = inspect.get_visible_rect();
+                let monitor = inspect.get_monitor();
                 Some((
                     inspect.get_window_title(),
                     inspect.get_process_name().unwrap_or_default(),
                     inspect.get_size_constraints(),
-                    observation,
+                    rect,
+                    monitor,
                     inspect.get_app_display_name(),
                 ))
             },
             move |result, runner| {
-                let Some((title, process, constraints, observation, app_name)) = result else {
+                let Some((title, process, constraints, rect, monitor, app_name)) = result else {
                     return;
                 };
                 if runner.dome.registry_contains_hwnd(manage.id()) {
@@ -273,7 +260,8 @@ impl Runner {
                     title,
                     process,
                     constraints,
-                    observation,
+                    rect,
+                    monitor,
                     app_name,
                 );
                 // Flush unconditionally: try_manage_window may have inserted a
@@ -293,20 +281,23 @@ impl Runner {
         let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         self.dispatcher.dispatch(
             move || {
-                if inspect.is_fullscreen() {
-                    ObservedPosition::Fullscreen
-                } else {
-                    let rect = inspect.get_visible_rect();
-                    let monitor = inspect.get_monitor();
-                    ObservedPosition::Visible { rect, monitor }
+                // This means this is a stale read dispatch. Minimized event is emitted and handled
+                // properly by window_minimized, so there is no need to handle them here
+                if inspect.is_minimized() {
+                    return None;
                 }
+                let rect = inspect.get_visible_rect();
+                let monitor = inspect.get_monitor();
+                Some((rect, monitor))
             },
             move |observation, runner| {
+                let Some((rect, monitor)) = observation else {
+                    return;
+                };
                 if runner.dome.registry_get_id(hwnd_id) != Some(id) {
                     return;
                 }
-                runner.dome.window_moved(hwnd_id, observation);
-                runner.dome.apply_layout();
+                runner.dome.window_moved(hwnd_id, rect, monitor);
             },
         );
     }

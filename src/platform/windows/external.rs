@@ -33,7 +33,7 @@ impl From<HwndId> for HWND {
 
 #[cfg(test)]
 impl HwndId {
-    pub(crate) fn test(id: isize) -> Self {
+    pub(crate) const fn test(id: isize) -> Self {
         Self(id)
     }
 }
@@ -90,13 +90,14 @@ pub(crate) trait ManageExternalWindow: Send + Sync {
 /// re-fabricated.
 pub(crate) trait InspectExternalWindow: Send + Sync {
     fn is_manageable(&self) -> bool;
+    /// Live `IsIconic` query against the OS.
+    fn is_minimized(&self) -> bool;
     fn get_window_title(&self) -> Option<String>;
     fn get_process_name(&self) -> anyhow::Result<String>;
     fn get_size_constraints(&self) -> (f32, f32, f32, f32);
     /// Returns the visible frame bounds excluding invisible window borders,
     /// in physical pixels. Same coordinate space as `set_position`.
     fn get_visible_rect(&self) -> Dimension<Physical>;
-    fn is_fullscreen(&self) -> bool;
     fn get_app_display_name(&self) -> Option<String>;
     /// Native OS monitor ownership. Non-blocking; safe on external HWNDs.
     fn get_monitor(&self) -> isize;

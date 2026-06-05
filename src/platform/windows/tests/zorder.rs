@@ -26,224 +26,190 @@ fn assert_tiling_above_overlay(env: &TestEnv, tiling: &[HwndId]) {
 #[test]
 fn single_window_above_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    env.add_window(w1.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
     assert_eq!(
         env.tiling_z_order(),
-        vec![HwndId::test(1), HwndId::test(9999)]
+        vec![w1, FOCUS_SINK_ID, env.overlay_id()]
     );
 }
 
 #[test]
 fn focused_window_on_top() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    let w3 = env.spawn_window(3, "App3", "app3.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
-    env.add_window(w3.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
 
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2), HwndId::test(3)]);
+    assert_tiling_above_overlay(&env, &[w1, w2, w3]);
 }
 
 #[test]
 fn all_tiling_above_overlay() {
     let mut env = TestEnv::new();
     for i in 1..=5 {
-        let w = env.spawn_window(i, "App", "app.exe");
-        env.add_window(w);
+        env.open(i, "App", "app.exe", SPAWN_DIM);
     }
 
     let stack = env.tiling_z_order();
-    assert_eq!(stack.len(), 6); // 5 windows + overlay
+    assert_eq!(stack.len(), 7); // 5 windows + sink + overlay
     assert_eq!(*stack.last().unwrap(), env.overlay_id());
 }
 
 #[test]
 fn focus_change_preserves_overlay_behind() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    env.focus_window(&w1);
+    env.focus_window(w1);
     assert_eq!(*env.tiling_z_order().last().unwrap(), env.overlay_id());
 
-    env.focus_window(&w2);
+    env.focus_window(w2);
     assert_eq!(*env.tiling_z_order().last().unwrap(), env.overlay_id());
 
-    env.focus_window(&w1);
+    env.focus_window(w1);
     assert_eq!(*env.tiling_z_order().last().unwrap(), env.overlay_id());
 }
 
 #[test]
 fn destroy_window_rebuilds_chain() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    let w3 = env.spawn_window(3, "App3", "app3.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
-    env.add_window(w3.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
 
-    env.destroy_window(&w2);
+    env.destroy_window(w2);
 
     assert_eq!(
         env.tiling_z_order(),
-        vec![HwndId::test(3), HwndId::test(1), HwndId::test(9999),]
+        vec![w3, w1, FOCUS_SINK_ID, env.overlay_id()]
     );
 }
 
 #[test]
 fn destroy_focused_rebuilds_chain() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    let w3 = env.spawn_window(3, "App3", "app3.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
-    env.add_window(w3.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
 
-    env.destroy_window(&w3);
+    env.destroy_window(w3);
 
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2)]);
+    assert_tiling_above_overlay(&env, &[w1, w2]);
 }
 
 #[test]
 fn add_window_to_existing() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    let w3 = env.spawn_window(3, "App3", "app3.exe");
-    env.add_window(w3.clone());
+    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
 
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2), HwndId::test(3)]);
+    assert_tiling_above_overlay(&env, &[w1, w2, w3]);
 }
 
 #[test]
 fn workspace_switch_restores_zorder() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     env.run_actions("focus workspace 1");
     env.run_actions("focus workspace 0");
 
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2)]);
+    assert_tiling_above_overlay(&env, &[w1, w2]);
 }
 
 #[test]
 fn empty_workspace_overlay_focus() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    env.add_window(w1.clone());
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    env.reset_sink_focus();
     env.run_actions("focus workspace 1");
 
-    assert_eq!(env.sink_focus_count(), 1);
+    assert_eq!(env.focus_target(), FocusTarget::Sink);
 }
 
 #[test]
 fn float_window_above_tiling_and_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    let w3 = env.spawn_window(3, "App3", "app3.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
-    env.add_window(w3.clone());
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
 
     // w3 is focused. Float it.
     env.run_actions("toggle float");
 
     // w3 should be in the topmost band (first in full z_order)
     let full = env.z_order();
-    assert_eq!(full[0], HwndId::test(3));
+    assert_eq!(full[0], w3);
 
     // Normal band should have w1, w2, and overlay, with overlay last
     let normal = env.tiling_z_order();
-    assert!(!normal.contains(&HwndId::test(3)));
+    assert!(!normal.contains(&w3));
     assert_eq!(*normal.last().unwrap(), env.overlay_id());
 }
 
 #[test]
 fn unfloat_window_rejoins_tiling_chain() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     env.run_actions("toggle float");
     env.run_actions("toggle float");
 
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2)]);
+    assert_tiling_above_overlay(&env, &[w1, w2]);
 }
 
 #[test]
 fn stable_positions_still_update_zorder() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2)]);
+    assert_tiling_above_overlay(&env, &[w1, w2]);
 
     // Second apply_layout: positions unchanged, z-order should remain correct
     env.dome.apply_layout();
 
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2)]);
+    assert_tiling_above_overlay(&env, &[w1, w2]);
 }
 
 #[test]
 fn move_window_to_other_workspace() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    let w3 = env.spawn_window(3, "App3", "app3.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
-    env.add_window(w3.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
 
     // w3 is focused. Move it to workspace 1.
     env.run_actions("move workspace 1");
 
-    assert!(w3.is_offscreen());
+    assert!(env.is_offscreen(w3));
 
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2)]);
+    assert_tiling_above_overlay(&env, &[w1, w2]);
 }
 
 #[test]
 fn overlay_behind_after_empty_workspace_roundtrip() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     env.run_actions("focus workspace 1");
     env.run_actions("focus workspace 0");
 
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2)]);
+    assert_tiling_above_overlay(&env, &[w1, w2]);
 }
 
 #[test]
 fn stable_windows_skip_set_position() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     env.moves.lock().unwrap().clear();
     env.dome.apply_layout();
@@ -258,18 +224,13 @@ fn stable_windows_skip_set_position() {
 fn monitor_switch_issues_set_position() {
     let mut env = TestEnv::new();
     env.add_monitor(second_monitor());
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    env.add_window(w1.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
     env.moves.lock().unwrap().clear();
     env.run_actions("move monitor right");
 
     assert!(
-        env.moves
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|(id, ..)| *id == w1.hwnd_id),
+        env.moves.lock().unwrap().iter().any(|(id, ..)| *id == w1),
         "cross-monitor move should trigger set_position"
     );
 }
@@ -288,42 +249,38 @@ fn tiling_overlay_seeded_at_bottom() {
 #[test]
 fn unfloat_drops_window_from_topmost_band() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     // w2 is focused (last added). Float it so it enters the topmost band.
     env.run_actions("toggle float");
-    assert!(w2.is_topmost(), "floated window must be in topmost band");
+    assert!(env.is_topmost(w2), "floated window must be in topmost band");
 
     // Unfloat w2 back to tiling.
     env.run_actions("toggle float");
 
     // w2 must have left the topmost band.
     assert!(
-        !w2.is_topmost(),
+        !env.is_topmost(w2),
         "unfloated window must leave the topmost band"
     );
     // Both tiling windows sit in the normal band above the overlay.
-    assert_tiling_above_overlay(&env, &[HwndId::test(1), HwndId::test(2)]);
+    assert_tiling_above_overlay(&env, &[w1, w2]);
 }
 
 /// After the initial layout pass seeds all windows above the overlay,
-/// a second apply_layout with identical targets must not issue any
-/// SetWindowPos on the overlay (no per-pass demote).
+/// a second apply_layout with identical targets must not reorder the z-stack
+/// at all (no per-pass overlay shuffle, no managed-window churn).
 #[test]
 fn steady_state_apply_layout_does_not_touch_overlay_zorder() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1);
-    env.add_window(w2);
-    let before = env.tiling_overlay_setwindowpos_count();
+    env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let stack_before = env.z_order();
     env.dome.apply_layout();
-    let after = env.tiling_overlay_setwindowpos_count();
+    let stack_after = env.z_order();
     assert_eq!(
-        after, before,
+        stack_after, stack_before,
         "second apply_layout must not reorder the overlay"
     );
 }
@@ -334,23 +291,79 @@ fn steady_state_apply_layout_does_not_touch_overlay_zorder() {
 #[test]
 fn lift_falls_back_when_overlay_at_top() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    env.add_window(w1.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     // Corrupt overlay to topmost band so window_above() returns None.
     let overlay_id = env.overlay_id();
-    env.z_model.apply(overlay_id, ZOrder::Topmost);
+    env.z_stack.apply(overlay_id, ZOrder::Topmost);
     // Drive a workspace round-trip: switch away parks w1 offscreen, switch
     // back triggers show_tiling's lift on the Offscreen->Tiling transition.
     env.run_actions("focus workspace 1");
     env.run_actions("focus workspace 0");
-    let stack = env.z_model.normal_stack();
+    let stack = env.z_stack.normal_stack();
     assert_eq!(
         stack.last(),
         Some(&overlay_id),
         "overlay must end up at the bottom of the normal band via demote_below fallback"
     );
     assert!(
-        stack.contains(&w1.hwnd_id),
+        stack.contains(&w1),
         "w1 must be in the normal band above the overlay"
+    );
+}
+
+/// Parked-offscreen windows must sit strictly below the focus sink so that
+/// Win32's close-time focus walk lands on a Dome-owned window rather than
+/// reactivating an inactive workspace (see
+/// docs/architecture.md, "Virtual workspaces").
+#[test]
+fn focus_sink_stays_above_parked_windows() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+
+    env.run_actions("focus workspace 1");
+    assert!(env.is_offscreen(w1));
+    assert!(env.is_offscreen(w2));
+
+    let stack = env.z_order();
+    let sink_idx = stack
+        .iter()
+        .position(|&h| h == FOCUS_SINK_ID)
+        .expect("focus sink must be in z-stack");
+    let w1_idx = stack.iter().position(|&h| h == w1).unwrap();
+    let w2_idx = stack.iter().position(|&h| h == w2).unwrap();
+    assert!(
+        sink_idx < w1_idx,
+        "sink at {sink_idx} must sit above parked w1 at {w1_idx}"
+    );
+    assert!(
+        sink_idx < w2_idx,
+        "sink at {sink_idx} must sit above parked w2 at {w2_idx}"
+    );
+}
+
+/// Production positions the float overlay with `ZOrder::After(float_window)`
+/// so the overlay sits directly below its float window in the combined
+/// z-stack (see docs/architecture.md, "Displaying visual indicators":
+/// "float overlays sit inside the topmost band themselves, just below their
+/// float").
+#[test]
+fn float_overlay_sits_directly_below_float_window() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+
+    env.run_actions("toggle float");
+
+    let stack = env.z_order();
+    let w2_idx = stack.iter().position(|&h| h == w2).unwrap();
+    let overlay_idx = stack
+        .iter()
+        .position(|&h| h == FLOAT_OVERLAY_ID)
+        .expect("float overlay must be in z-stack after toggle float");
+    assert_eq!(
+        overlay_idx,
+        w2_idx + 1,
+        "float overlay (idx {overlay_idx}) must sit directly below float window w2 (idx {w2_idx})"
     );
 }

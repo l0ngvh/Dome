@@ -6,28 +6,14 @@ use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
 #[test]
 fn window_destroyed_fills_screen() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "App1",
-        "app1.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    let w2 = Arc::new(MockExternalHwnd::with_title(
-        2,
-        "App2",
-        "app2.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    env.destroy_window(&w1);
+    env.destroy_window(w1);
 
-    assert!(!w2.is_offscreen());
+    assert!(!env.is_offscreen(w2));
     assert_h_tiled(
-        &[w2.get_dim()],
+        &[env.dim(w2)],
         default_monitor().dimension,
         env.config.border_size,
     );
@@ -36,28 +22,14 @@ fn window_destroyed_fills_screen() {
 #[test]
 fn window_minimized_removes_from_tiling() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "App1",
-        "app1.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    let w2 = Arc::new(MockExternalHwnd::with_title(
-        2,
-        "App2",
-        "app2.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    env.minimize_window(&w2);
+    env.minimize_window(w2);
 
     // w1 should now fill the screen
     assert_h_tiled(
-        &[w1.get_dim()],
+        &[env.dim(w1)],
         default_monitor().dimension,
         env.config.border_size,
     );
@@ -69,34 +41,20 @@ fn window_minimized_removes_from_tiling() {
 #[test]
 fn user_minimize_then_restore() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "App1",
-        "app1.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    let w2 = Arc::new(MockExternalHwnd::with_title(
-        2,
-        "App2",
-        "app2.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    env.minimize_window(&w2);
+    env.minimize_window(w2);
     env.run_actions("toggle minimized");
     assert_eq!(env.picker_entries.borrow().len(), 1);
     env.run_actions("toggle minimized"); // hide
 
-    env.restore_window(&w2);
+    env.restore_window(w2);
     env.run_actions("toggle minimized"); // show again with fresh entries
     assert_eq!(env.picker_entries.borrow().len(), 0);
     // Both windows should be tiled again
     assert_h_tiled(
-        &[w1.get_dim(), w2.get_dim()],
+        &[env.dim(w1), env.dim(w2)],
         default_monitor().dimension,
         env.config.border_size,
     );
@@ -114,81 +72,45 @@ fn on_open_moves_window_to_workspace() {
     });
     let mut env = TestEnv::new_with_config(config);
 
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "Terminal",
-        "terminal.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w1.clone());
-
-    let w2 = Arc::new(MockExternalHwnd::with_title(
-        2,
-        "Slack",
-        "slack.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "Terminal", "terminal.exe", SPAWN_DIM);
+    let w2 = env.open(2, "Slack", "slack.exe", SPAWN_DIM);
 
     // Slack moved to workspace 3, should be offscreen
-    assert!(w2.is_offscreen());
-    assert!(!w1.is_offscreen());
+    assert!(env.is_offscreen(w2));
+    assert!(!env.is_offscreen(w1));
 }
 
 #[test]
 fn move_size_suppresses_placement() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "App1",
-        "app1.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w1.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    let placed = w1.get_dim();
+    let placed = env.dim(w1);
 
     // Simulate user starting a drag
-    env.dome.move_size_started(w1.hwnd_id);
+    env.dome.move_size_started(w1);
 
-    // Add a second window — triggers relayout, but w1 should be skipped
-    let w2 = Arc::new(MockExternalHwnd::with_title(
-        2,
-        "App2",
-        "app2.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w2.clone());
+    // Add a second window -- triggers relayout, but w1 should be skipped
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     // w1 should still be at its original position (drag suppresses placement)
-    assert_eq!(w1.get_dim(), placed);
+    assert_eq!(env.dim(w1), placed);
 
-    // End drag — w1 should be repositioned on next layout
-    env.dome.move_size_ended(w1.hwnd_id);
+    // End drag -- w1 should be repositioned on next layout
+    env.dome.move_size_ended(w1);
     env.dome.apply_layout();
 
     // Now both should be tiled
-    assert!(!w1.is_offscreen());
-    assert!(!w2.is_offscreen());
+    assert!(!env.is_offscreen(w1));
+    assert!(!env.is_offscreen(w2));
 }
 
 #[test]
 fn monitors_changed_updates_layout() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "App1",
-        "app1.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w1.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    let before = w1.get_dim();
+    let before = env.dim(w1);
 
     // Monitor shrinks
     let new_monitor = MonitorInfo {
@@ -206,7 +128,7 @@ fn monitors_changed_updates_layout() {
     env.dome.monitors_changed(vec![new_monitor]);
     env.dome.apply_layout();
 
-    let after = w1.get_dim();
+    let after = env.dim(w1);
     assert!(
         after.width < before.width,
         "window should be narrower after monitor shrink"
@@ -220,21 +142,22 @@ fn monitors_changed_updates_layout() {
 #[test]
 fn unmanageable_window_is_ignored() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(
+    let arc = Arc::new(
         MockExternalHwnd::with_title(
             1,
             "App1",
             "app1.exe",
             env.moves.clone(),
-            env.z_model.clone(),
+            env.z_stack.clone(),
+            env.focus_target.clone(),
         )
         .with_manageable(false),
     );
-    let initial = w1.get_dim();
-    env.add_window(w1.clone());
+    let initial = arc.get_dim();
+    let w1 = env.add_window(arc);
 
-    // Window should not have been positioned — still at initial dimension
-    assert_eq!(w1.get_dim(), initial);
+    // Window should not have been positioned -- still at initial dimension
+    assert_eq!(env.dim(w1), initial);
 }
 
 #[test]
@@ -246,37 +169,22 @@ fn ignored_window_rule_prevents_insertion() {
     });
     let mut env = TestEnv::new_with_config(config);
 
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "Bloat",
-        "bloat.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    let initial = w1.get_dim();
-    env.add_window(w1.clone());
+    let w1 = env.open(1, "Bloat", "bloat.exe", SPAWN_DIM);
 
-    assert_eq!(w1.get_dim(), initial);
+    assert_eq!(env.dim(w1), SPAWN_DIM);
 }
 
 #[test]
 fn title_changed_manages_unknown_window() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "App1",
-        "app1.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
 
     // Title change on an unknown window should try to manage it
-    // (Runner dispatches as WindowCreated — here we simulate directly)
-    env.add_window(w1.clone());
+    // (Runner dispatches as WindowCreated -- here we simulate directly)
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    assert!(!w1.is_offscreen());
+    assert!(!env.is_offscreen(w1));
     assert_h_tiled(
-        &[w1.get_dim()],
+        &[env.dim(w1)],
         default_monitor().dimension,
         env.config.border_size,
     );
@@ -285,111 +193,85 @@ fn title_changed_manages_unknown_window() {
 #[test]
 fn delete_currently_displayed_window() {
     let mut env = TestEnv::new();
-    let w1 = Arc::new(MockExternalHwnd::with_title(
-        1,
-        "App1",
-        "app1.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    let w2 = Arc::new(MockExternalHwnd::with_title(
-        2,
-        "App2",
-        "app2.exe",
-        env.moves.clone(),
-        env.z_model.clone(),
-    ));
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    env.destroy_window(&w1);
+    env.destroy_window(w1);
 
     // Remaining window fills screen
-    assert!(!w2.is_offscreen());
+    assert!(!env.is_offscreen(w2));
     assert_h_tiled(
-        &[w2.get_dim()],
+        &[env.dim(w2)],
         default_monitor().dimension,
         env.config.border_size,
     );
 
     // Second apply_layout proves displayed state was cleaned up
     env.dome.apply_layout();
-    assert!(!w2.is_offscreen());
+    assert!(!env.is_offscreen(w2));
 }
 
 #[test]
 fn destroy_last_window_focuses_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    env.add_window(w1.clone());
-    env.reset_sink_focus();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    env.destroy_window(&w1);
-    assert_eq!(env.sink_focus_count(), 1);
+    env.destroy_window(w1);
+    assert_eq!(env.focus_target(), FocusTarget::Sink);
 }
 
 #[test]
 fn destroy_one_of_two_windows_does_not_focus_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
-    env.reset_sink_focus();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    env.destroy_window(&w2);
-    assert_eq!(env.sink_focus_count(), 0);
+    env.destroy_window(w2);
+    assert_eq!(env.focus_target(), FocusTarget::Window(w1));
 }
 
 #[test]
 fn workspace_switch_to_empty_focuses_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    env.add_window(w1.clone());
-    env.reset_sink_focus();
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
     env.run_actions("focus workspace 1");
-    assert_eq!(env.sink_focus_count(), 1);
+    assert_eq!(env.focus_target(), FocusTarget::Sink);
 }
 
 #[test]
 fn workspace_switch_back_does_not_focus_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    env.add_window(w1.clone());
-    env.reset_sink_focus();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
     env.run_actions("focus workspace 1");
-    env.reset_sink_focus();
     env.run_actions("focus workspace 0");
-    assert_eq!(env.sink_focus_count(), 0);
+    assert_eq!(env.focus_target(), FocusTarget::Window(w1));
 }
 
 #[test]
 fn focus_parent_focuses_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
-    env.reset_sink_focus();
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     env.run_actions("focus parent");
-    assert_eq!(env.sink_focus_count(), 1);
+    assert_eq!(env.focus_target(), FocusTarget::Sink);
 }
 
 #[test]
 fn focus_child_after_parent_does_not_focus_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     env.run_actions("focus parent");
-    env.reset_sink_focus();
     env.run_actions("focus down");
-    assert_eq!(env.sink_focus_count(), 0);
+    assert!(
+        matches!(env.focus_target(), FocusTarget::Window(_)),
+        "after focus down from container, a window must be the focus target, got {:?}",
+        env.focus_target()
+    );
 }
 
 #[test]
@@ -397,19 +279,16 @@ fn monitor_switch_empty_to_empty_focuses_overlay() {
     let mut env = TestEnv::new();
     env.add_monitor(second_monitor());
     env.run_actions("focus workspace 1");
-    env.reset_sink_focus();
 
     env.run_actions("focus monitor right");
-    assert_eq!(env.sink_focus_count(), 1);
+    assert_eq!(env.focus_target(), FocusTarget::Sink);
 }
 
 #[test]
 fn multi_action_sequence_applies_each_hub_action() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     let actions = Actions::new(vec![
         "focus workspace 1".parse().unwrap(),
@@ -439,81 +318,83 @@ fn multi_action_sequence_applies_each_hub_action() {
     }
 
     // After "focus ws 1, focus ws 0", workspace 0 is focused and windows are visible
-    assert!(!w1.is_offscreen());
-    assert!(!w2.is_offscreen());
+    assert!(!env.is_offscreen(w1));
+    assert!(!env.is_offscreen(w2));
 }
 
 #[test]
 fn programmatic_echo_keeps_tiling_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
-
-    let update_baseline = env.tiling_overlay_update_count();
-    let clear_baseline = env.tiling_overlay_clear_count();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     // Simulate OS echoing LOCATIONCHANGE for windows we just placed.
     // Both enter MoveKind::Programmatic.
-    assert!(env.dome.location_changed(w1.hwnd_id));
-    assert!(env.dome.location_changed(w2.hwnd_id));
+    assert!(env.dome.location_changed(w1));
+    assert!(env.dome.location_changed(w2));
 
     env.dome.apply_layout();
 
-    // Overlay must not be cleared; it must receive an update with the full placement set.
-    assert_eq!(env.tiling_overlay_clear_count(), clear_baseline);
-    assert!(env.tiling_overlay_update_count() > update_baseline);
+    // Overlay must remain visible with both tiling windows; an echo round-
+    // trip must not blink the borders off.
+    let TilingOverlayState::Visible { windows, .. } = env.tiling_overlay_state() else {
+        panic!(
+            "tiling overlay should be visible after programmatic echo, got {:?}",
+            env.tiling_overlay_state()
+        );
+    };
+    assert_eq!(windows.len(), 2);
 }
 
 #[test]
 fn user_drag_keeps_tiling_overlay() {
     let mut env = TestEnv::new();
-    let w1 = env.spawn_window(1, "App1", "app1.exe");
-    let w2 = env.spawn_window(2, "App2", "app2.exe");
-    env.add_window(w1.clone());
-    env.add_window(w2.clone());
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    let placed_w1 = w1.get_dim();
+    let placed_w1 = env.dim(w1);
 
-    env.dome.move_size_started(w1.hwnd_id);
-
-    let update_baseline = env.tiling_overlay_update_count();
-    let clear_baseline = env.tiling_overlay_clear_count();
-
+    env.dome.move_size_started(w1);
     env.dome.apply_layout();
 
     // Dragged window should not have been repositioned.
-    assert_eq!(w1.get_dim(), placed_w1);
-    // Overlay must not be cleared; w2's border must survive the drag.
-    assert_eq!(env.tiling_overlay_clear_count(), clear_baseline);
-    assert!(env.tiling_overlay_update_count() > update_baseline);
+    assert_eq!(env.dim(w1), placed_w1);
+    // Overlay must remain visible with both tiling windows; w2's border
+    // must survive the drag.
+    let TilingOverlayState::Visible { windows, .. } = env.tiling_overlay_state() else {
+        panic!(
+            "tiling overlay should be visible during drag, got {:?}",
+            env.tiling_overlay_state()
+        );
+    };
+    assert_eq!(windows.len(), 2);
 }
 
 #[test]
 fn empty_monitor_clears_tiling_overlay() {
     let mut env = TestEnv::new();
     // No windows added. The primary monitor's tiling overlay exists from Dome::new.
-    let clear_baseline = env.tiling_overlay_clear_count();
-
     env.dome.apply_layout();
 
-    // Monitor has zero tiling windows and zero containers, so clear must fire.
-    assert!(env.tiling_overlay_clear_count() > clear_baseline);
+    // Monitor has zero tiling windows and zero containers, so the overlay
+    // must be hidden.
+    assert!(matches!(
+        env.tiling_overlay_state(),
+        TilingOverlayState::Hidden
+    ));
 }
 
 #[test]
 fn monitor_dpi_changed_unknown_handle_noop() {
     let mut env = TestEnv::new();
-    let w = env.spawn_window(1, "App", "app.exe");
-    env.add_window(w.clone());
-    let before = w.get_dim();
+    let w = env.open(1, "App", "app.exe", SPAWN_DIM);
+    let before = env.dim(w);
 
     // Call with a bogus handle; should not panic or change placement.
     env.dome.monitor_dpi_changed(0xDEAD_BEEF_u64 as isize, 192);
     env.dome.apply_layout();
 
-    let after = w.get_dim();
+    let after = env.dim(w);
     assert_eq!(after.x, before.x);
     assert_eq!(after.y, before.y);
     assert_eq!(after.width, before.width);
@@ -523,14 +404,13 @@ fn monitor_dpi_changed_unknown_handle_noop() {
 #[test]
 fn monitor_dpi_changed_same_scale_is_noop() {
     let mut env = TestEnv::new();
-    let w = env.spawn_window(1, "App", "app.exe");
-    env.add_window(w.clone());
-    let before = w.get_dim();
+    let w = env.open(1, "App", "app.exe", SPAWN_DIM);
+    let before = env.dim(w);
 
     // DPI 96 == scale 1.0, same as the fixture default. Placement must not change.
     env.dome.monitor_dpi_changed(1, 96);
     env.dome.apply_layout();
-    let after1 = w.get_dim();
+    let after1 = env.dim(w);
     assert_eq!(after1.x, before.x);
     assert_eq!(after1.y, before.y);
     assert_eq!(after1.width, before.width);
@@ -539,7 +419,7 @@ fn monitor_dpi_changed_same_scale_is_noop() {
     // Call again with the same DPI; still a no-op.
     env.dome.monitor_dpi_changed(1, 96);
     env.dome.apply_layout();
-    let after2 = w.get_dim();
+    let after2 = env.dim(w);
     assert_eq!(after2.x, before.x);
     assert_eq!(after2.y, before.y);
     assert_eq!(after2.width, before.width);
@@ -549,17 +429,16 @@ fn monitor_dpi_changed_same_scale_is_noop() {
 #[test]
 fn dpi_change_then_apply_layout_places_at_new_scale() {
     let mut env = TestEnv::new();
-    let w = env.spawn_window(1, "App", "app.exe");
-    env.add_window(w.clone());
+    let w = env.open(1, "App", "app.exe", SPAWN_DIM);
 
-    let before = w.get_dim();
+    let before = env.dim(w);
     assert!(before.width > Length::new(0.0));
 
     // Change primary monitor from 96 DPI (1.0x) to 144 DPI (1.5x).
     env.dome.monitor_dpi_changed(1, 144);
     env.dome.apply_layout();
 
-    let after = w.get_dim();
+    let after = env.dim(w);
     // At 1.5x, physical pixels = logical * 1.5. The window's logical rect
     // stays the same (the Hub layout is logical), but set_position receives
     // physical coords: each edge should be 1.5x the logical value.
@@ -597,29 +476,27 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     let mut env = TestEnv::new_with_monitors(Config::default(), vec![default_monitor(), second]);
 
     // Add one window on primary.
-    let w_a = env.spawn_window(1, "WinA", "a.exe");
-    env.add_window(w_a.clone());
-    let before_a = w_a.get_dim();
+    let w_a = env.open(1, "WinA", "a.exe", SPAWN_DIM);
+    let before_a = env.dim(w_a);
 
     // Add one window on secondary.
     env.run_actions("focus workspace 1");
-    let w_b = env.spawn_window(2, "WinB", "b.exe");
-    env.add_window(w_b.clone());
-    let before_b = w_b.get_dim();
+    let w_b = env.open(2, "WinB", "b.exe", SPAWN_DIM);
+    let before_b = env.dim(w_b);
 
     // Simulate DPI change only on secondary (192 DPI = 2.0x).
     env.dome.monitor_dpi_changed(2, 192);
     env.dome.apply_layout();
 
     // Primary window placement must be unchanged (scale stayed 1.0).
-    let after_a = w_a.get_dim();
+    let after_a = env.dim(w_a);
     assert_eq!(after_a.x, before_a.x);
     assert_eq!(after_a.y, before_a.y);
     assert_eq!(after_a.width, before_a.width);
     assert_eq!(after_a.height, before_a.height);
 
     // Secondary window placement must reflect the 2.0x scale change.
-    let after_b = w_b.get_dim();
+    let after_b = env.dim(w_b);
     assert!(
         (after_b.x - before_b.x * 2.0).abs() < Length::new(2.0),
         "x: expected ~{}, got {}",
