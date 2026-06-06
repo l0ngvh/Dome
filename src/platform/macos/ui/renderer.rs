@@ -161,10 +161,6 @@ impl Renderer {
         self.layer.setContentsScale(scale);
     }
 
-    pub(super) fn set_visuals(&self, visuals: egui::Visuals) {
-        self.egui_ctx.set_visuals(visuals);
-    }
-
     pub(super) fn apply_theme(&self, flavor: Flavor) {
         catppuccin_egui::set_theme(&self.egui_ctx, flavor.catppuccin_egui());
     }

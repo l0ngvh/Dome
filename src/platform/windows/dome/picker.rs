@@ -148,14 +148,6 @@ impl PickerWindow {
         let hwnd = window.hwnd();
         configure_picker_dwm(hwnd);
         let renderer = Renderer::new(instance, device, queue, hwnd, w_phys, h_phys, flavor, font)?;
-        let theme = Theme::from_flavor(flavor);
-        // Renderer::new called set_theme with this flavor, which wrote catppuccin
-        // values into egui Visuals. The set_visuals call below fully overwrites
-        // those Visuals with picker_visuals(&theme), so at runtime the earlier
-        // set_theme is redundant for the picker. We keep it so every Renderer in
-        // the process is constructed uniformly, and so the picker stays themed if
-        // this picker-specific set_visuals is ever removed.
-        renderer.set_visuals(crate::picker::picker_visuals(&theme));
 
         let mut boxed = Box::new(Self {
             renderer,
@@ -304,6 +296,15 @@ impl PickerApi for PickerWindow {
             let actions = Actions::new(vec![Action::UnminimizeWindow(id)]);
             self.hub_sender.send(HubEvent::Action(actions));
             self.window.hide();
+        }
+    }
+
+    fn apply_theme(&mut self, flavor: Flavor) {
+        self.renderer.apply_theme(flavor);
+        self.flavor = flavor;
+        tracing::info!(?flavor, "Picker theme reloaded");
+        if self.is_visible() {
+            self.rerender();
         }
     }
 }

@@ -241,6 +241,9 @@ impl Dome {
             for overlay in self.float_overlays.values_mut() {
                 overlay.apply_theme(self.config.theme);
             }
+            if let Some(picker) = self.picker.as_mut() {
+                picker.apply_theme(self.config.theme);
+            }
         }
         if font_changed(&old_font, &self.config.font) {
             for overlay in self.tiling_overlays.values_mut() {

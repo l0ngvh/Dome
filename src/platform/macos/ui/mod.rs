@@ -342,6 +342,9 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     for overlay in delegate.ivars().tiling_overlays.borrow().values() {
                         overlay.apply_theme(new_config.theme);
                     }
+                    if let Some(picker) = delegate.ivars().picker_window.borrow().as_ref() {
+                        picker.apply_theme(new_config.theme);
+                    }
                 }
                 if font_changed(&old_font, &new_config.font) {
                     for overlay in delegate.ivars().float_overlays.borrow().values() {

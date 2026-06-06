@@ -45,15 +45,6 @@ const ICON_SIZE: f32 = 24.0;
 const ROW_HEIGHT: f32 = 40.0;
 const H_PAD: f32 = 12.0;
 
-/// Returns `egui::Visuals::dark()` with `panel_fill` overridden to a slightly
-/// darker gray (30,30,30); row chrome (selection, hover, separator) is painted
-/// directly in `paint_picker` and is not derived from these visuals.
-pub(crate) fn picker_visuals(theme: &Theme) -> egui::Visuals {
-    let mut v = egui::Visuals::dark();
-    v.panel_fill = theme.picker_panel;
-    v
-}
-
 // Separator is drawn at the top of each row except (a) the first row and
 // (b) the rows immediately above and below the selected row, so the
 // selected-row highlight is not bisected by a separator line.
@@ -62,7 +53,6 @@ fn should_draw_separator(index: usize, selected_index: usize) -> bool {
 }
 
 /// Renders the minimized windows picker UI. Returns `Selected(id)` if a row was clicked.
-/// Dark visuals must be set once at context creation time, not here.
 pub(crate) fn paint_picker(
     ctx: &egui::Context,
     entries: &[PickerEntry],

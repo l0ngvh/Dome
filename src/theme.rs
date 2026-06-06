@@ -43,7 +43,6 @@ pub(crate) struct Theme {
     pub(crate) tab_bar_bg: Color32,
     pub(crate) active_tab_bg: Color32,
     pub(crate) tab_text: Color32,
-    pub(crate) picker_panel: Color32,
     pub(crate) picker_selected_row: Color32,
     pub(crate) picker_hover_row: Color32,
     pub(crate) picker_separator: Color32,
@@ -67,7 +66,6 @@ impl Theme {
             tab_bar_bg: p.mantle,
             active_tab_bg: p.surface1,
             tab_text: p.text,
-            picker_panel: p.base,
             picker_selected_row: p.surface2,
             picker_hover_row: p.surface1,
             picker_separator: p.surface0,
@@ -165,5 +163,21 @@ mod tests {
     fn theme_changed_gates_correctly() {
         assert!(!theme_changed(Flavor::Mocha, Flavor::Mocha));
         assert!(theme_changed(Flavor::Mocha, Flavor::Latte));
+    }
+
+    // Catches a regression that re-introduces a global visuals override
+    // (e.g. Visuals::dark()) that ignores the active flavor: both calls
+    // would return the same fill and the assertion would fail.
+    #[test]
+    fn catppuccin_set_theme_panel_fill_tracks_flavor() {
+        use egui::Context;
+
+        fn panel_fill(flavor: Flavor) -> egui::Color32 {
+            let ctx = Context::default();
+            catppuccin_egui::set_theme(&ctx, flavor.catppuccin_egui());
+            ctx.style().visuals.panel_fill
+        }
+
+        assert_ne!(panel_fill(Flavor::Latte), panel_fill(Flavor::Mocha));
     }
 }

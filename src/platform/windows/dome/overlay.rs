@@ -213,10 +213,6 @@ impl Renderer {
         unsafe { self.dcomp_device.Commit() }.expect("DComp commit after resize");
     }
 
-    pub(super) fn set_visuals(&self, visuals: egui::Visuals) {
-        self.egui_ctx.set_visuals(visuals);
-    }
-
     pub(super) fn apply_theme(&self, flavor: Flavor) {
         catppuccin_egui::set_theme(&self.egui_ctx, flavor.catppuccin_egui());
     }
@@ -691,6 +687,7 @@ pub(in crate::platform::windows) trait PickerApi {
     ) -> Vec<(String, HwndId)>;
     fn receive_icon(&mut self, app_id: String, image: egui::ColorImage);
     fn rerender(&mut self);
+    fn apply_theme(&mut self, flavor: Flavor);
 }
 
 pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =

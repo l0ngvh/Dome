@@ -137,7 +137,7 @@ struct PickerViewIvars {
     scale: Cell<f64>,
     hub_sender: CalloopSender<HubEvent>,
     icon_textures: RefCell<HashMap<String, Option<egui::TextureHandle>>>,
-    flavor: Flavor,
+    flavor: Cell<Flavor>,
 }
 
 define_class!(
@@ -217,14 +217,6 @@ impl PickerView {
     ) -> Retained<Self> {
         let (scale, width, height) = render_info;
         let renderer = Renderer::new(backend, scale, width, height, false, flavor, font);
-        let theme = Theme::from_flavor(flavor);
-        // Renderer::new called set_theme with this flavor, which wrote catppuccin
-        // values into egui Visuals. The set_visuals call below fully overwrites
-        // those Visuals with picker_visuals(&theme), so at runtime the earlier
-        // set_theme is redundant for the picker. We keep it so every Renderer in
-        // the process is constructed uniformly, and so the picker stays themed if
-        // this picker-specific set_visuals is ever removed.
-        renderer.set_visuals(crate::picker::picker_visuals(&theme));
         let layer = renderer.layer();
         let ivars = PickerViewIvars {
             layer: layer.clone(),
@@ -235,7 +227,7 @@ impl PickerView {
             scale: Cell::new(scale),
             hub_sender,
             icon_textures: RefCell::new(HashMap::new()),
-            flavor,
+            flavor: Cell::new(flavor),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
@@ -254,7 +246,7 @@ impl PickerView {
         let scale = ivars.scale.get();
 
         let (icon_snapshot, mut new_icons) = self.load_pending_icons(&entries);
-        let flavor = ivars.flavor;
+        let flavor = ivars.flavor.get();
 
         // Convert new ColorImages to TextureHandles inside the render closure
         // (requires egui Context), then call paint_picker with the merged map.
@@ -421,6 +413,14 @@ impl PickerPopup {
 
     pub(super) fn hide(&self) {
         self.window.orderOut(None);
+    }
+
+    pub(super) fn apply_theme(&self, flavor: Flavor) {
+        let view = self.window.ivars().view.borrow();
+        let view = view.as_ref().expect("view set during new()");
+        view.ivars().renderer.borrow().apply_theme(flavor);
+        view.ivars().flavor.set(flavor);
+        tracing::info!(?flavor, "Picker theme reloaded");
     }
 
     pub(super) fn update_and_show(

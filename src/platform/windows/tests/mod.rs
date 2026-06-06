@@ -139,6 +139,7 @@ struct TestEnv {
     float_overlay: MockFloatOverlay,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
+    picker_flavor: Rc<Cell<Flavor>>,
     z_stack: ZOrderStack,
     focus_target: Arc<Mutex<FocusTarget>>,
 }
@@ -162,6 +163,7 @@ impl TestEnv {
         let focus_sink = MockFocusSink::new(focus_target.clone());
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let picker_loaded_icons = Rc::new(RefCell::new(HashSet::new()));
+        let picker_flavor = Rc::new(Cell::new(config.theme));
         let z_stack = ZOrderStack::new();
         // Mirror production startup: the focus-sink HWND is created and
         // parked at HWND_BOTTOM so Win32's close-time focus walk lands on a
@@ -194,6 +196,7 @@ impl TestEnv {
                 float_overlay: float_overlay.clone(),
                 picker_entries: picker_entries.clone(),
                 picker_loaded_icons: picker_loaded_icons.clone(),
+                picker_flavor: picker_flavor.clone(),
                 z_stack: z_stack.clone(),
                 next_float_overlay_id: next_float_overlay_id.clone(),
             }),
@@ -211,6 +214,7 @@ impl TestEnv {
             float_overlay,
             picker_entries,
             picker_loaded_icons,
+            picker_flavor,
             z_stack,
             focus_target,
         }
@@ -475,6 +479,10 @@ impl TestEnv {
 
     fn float_overlay_font(&self) -> FontConfig {
         self.float_overlay.font()
+    }
+
+    fn picker_flavor(&self) -> Flavor {
+        self.picker_flavor.get()
     }
 
     fn picker_loaded_icons(&self) -> HashSet<String> {
@@ -1021,6 +1029,7 @@ struct MockPicker {
     visible: bool,
     entries: Rc<RefCell<Vec<PickerEntry>>>,
     loaded_icons: Rc<RefCell<HashSet<String>>>,
+    flavor: Rc<Cell<Flavor>>,
 }
 
 impl PickerApi for MockPicker {
@@ -1065,6 +1074,10 @@ impl PickerApi for MockPicker {
     }
 
     fn rerender(&mut self) {}
+
+    fn apply_theme(&mut self, flavor: Flavor) {
+        self.flavor.set(flavor);
+    }
 }
 
 struct MockOverlays {
@@ -1072,6 +1085,7 @@ struct MockOverlays {
     float_overlay: MockFloatOverlay,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
+    picker_flavor: Rc<Cell<Flavor>>,
     z_stack: ZOrderStack,
     next_float_overlay_id: Rc<Cell<isize>>,
 }
@@ -1114,14 +1128,16 @@ impl CreateOverlay for MockOverlays {
         &self,
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
-        _flavor: crate::theme::Flavor,
+        flavor: crate::theme::Flavor,
         _font: &crate::font::FontConfig,
         scale: f32,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
+        self.picker_flavor.set(flavor);
         let mut picker = MockPicker {
             visible: false,
             entries: self.picker_entries.clone(),
             loaded_icons: self.picker_loaded_icons.clone(),
+            flavor: self.picker_flavor.clone(),
         };
         picker.show(entries, monitor_dim, scale);
         Ok(Box::new(picker))

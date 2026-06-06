@@ -437,20 +437,27 @@ fn float_overlay_updates_on_position_change() {
 fn config_reload_dispatches_apply_theme_on_flavor_change() {
     let mut env = TestEnv::new(); // default Mocha
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     env.run_actions("toggle float");
 
-    // Sanity: both overlays start at the default Mocha flavor.
+    // Open the picker so self.picker is Some and config_changed dispatches
+    // apply_theme on it.
+    env.minimize_window(w2);
+    env.run_actions("toggle minimized");
+
+    // Sanity: both overlays and picker start at the default Mocha flavor.
     assert_eq!(env.tiling_overlay_flavor(), crate::theme::Flavor::Mocha);
     assert_eq!(env.float_overlay_flavor(), crate::theme::Flavor::Mocha);
+    assert_eq!(env.picker_flavor(), crate::theme::Flavor::Mocha);
 
     let mut new_config = env.config.clone();
     new_config.theme = crate::theme::Flavor::Latte;
     env.dome.config_changed(new_config);
 
-    // After a flavor change, both overlays must end up holding Latte.
+    // After a flavor change, both overlays and picker must end up holding Latte.
     assert_eq!(env.tiling_overlay_flavor(), crate::theme::Flavor::Latte);
     assert_eq!(env.float_overlay_flavor(), crate::theme::Flavor::Latte);
+    assert_eq!(env.picker_flavor(), crate::theme::Flavor::Latte);
 }
 
 #[test]
