@@ -401,6 +401,7 @@ impl PickerPopup {
         view.ivars().layer.setMasksToBounds(true);
         window.setContentView(Some(&view));
         *window.ivars().view.borrow_mut() = Some(view.clone());
+        super::activate_self();
         window.makeKeyAndOrderFront(None);
         view.render_now();
 
@@ -420,7 +421,6 @@ impl PickerPopup {
         let view = view.as_ref().expect("view set during new()");
         view.ivars().renderer.borrow().apply_theme(flavor);
         view.ivars().flavor.set(flavor);
-        tracing::info!(?flavor, "Picker theme reloaded");
     }
 
     pub(super) fn update_and_show(
@@ -442,6 +442,7 @@ impl PickerPopup {
         let view = view.as_ref().expect("view set during new()");
         view.update(mtm, entries, scale, pw, ph);
 
+        super::activate_self();
         self.window.makeKeyAndOrderFront(None);
         view.render_now();
     }

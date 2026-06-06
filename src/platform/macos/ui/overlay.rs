@@ -13,8 +13,6 @@ use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder,
     NSView, NSWindow, NSWindowCollectionBehavior, NSWindowLevel, NSWindowStyleMask,
 };
-use objc2_application_services::AXUIElement;
-use objc2_core_foundation::kCFBooleanTrue;
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
@@ -342,14 +340,7 @@ impl TilingOverlay {
     // macOS 14+ "cooperative activation" silently ignores NSApplication.activate() for
     // self-activation. The AX API bypasses this via the privileged accessibility subsystem.
     pub(super) fn focus(&self, _mtm: MainThreadMarker) {
-        let pid = std::process::id() as i32;
-        let ax_app = unsafe { AXUIElement::new_application(pid) };
-        crate::platform::macos::objc2_wrapper::set_attribute_value(
-            &ax_app,
-            &crate::platform::macos::objc2_wrapper::kAXFrontmostAttribute(),
-            unsafe { kCFBooleanTrue.unwrap() },
-        )
-        .ok();
+        super::activate_self();
         self.window.makeKeyAndOrderFront(None);
     }
 

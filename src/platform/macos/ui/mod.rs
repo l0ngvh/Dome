@@ -14,8 +14,10 @@ use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate};
+use objc2_application_services::AXUIElement;
 use objc2_core_foundation::{
-    CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext, kCFRunLoopDefaultMode,
+    CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext, kCFBooleanTrue,
+    kCFRunLoopDefaultMode,
 };
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol};
@@ -23,6 +25,7 @@ use objc2_metal::MTLCreateSystemDefaultDevice;
 
 use super::dome::{FrameSender, HubEvent, HubMessage};
 use super::listeners::EventListener;
+use super::objc2_wrapper::{kAXFrontmostAttribute, set_attribute_value};
 use crate::config::Config;
 use crate::core::{MonitorId, WindowId};
 use crate::font::font_changed;
@@ -31,6 +34,22 @@ use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TilingOverlay};
 use picker::PickerPopup;
 use renderer::MetalBackend;
+
+/// Promote Dome's own process to OS-level frontmost via the AX API.
+///
+/// macOS 14+ "cooperative activation" silently ignores `NSApplication::activate()` for
+/// self-activation. The AX API bypasses this via the privileged accessibility subsystem.
+/// Without this, `makeKeyAndOrderFront` only makes a Dome-owned window key inside Dome's
+/// AppKit context while the OS-level foreground app stays elsewhere. Used by both the
+/// minimized-window picker on launch and the tiling overlay's focus-sink path.
+fn activate_self() {
+    let pid = std::process::id() as i32;
+    let ax_app = unsafe { AXUIElement::new_application(pid) };
+    set_attribute_value(&ax_app, &kAXFrontmostAttribute(), unsafe {
+        kCFBooleanTrue.unwrap()
+    })
+    .ok();
+}
 
 #[derive(Clone)]
 pub(super) struct MessageSender {

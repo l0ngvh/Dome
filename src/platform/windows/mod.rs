@@ -13,7 +13,6 @@ mod throttle;
 #[cfg(test)]
 mod tests;
 
-use std::mem::size_of;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -35,14 +34,11 @@ use windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     GetDpiAwarenessContextForProcess, SetProcessDpiAwarenessContext,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
-};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetForegroundWindow,
-    GetMessageW, IDC_ARROW, LoadCursorW, MSG, PostThreadMessageW, RegisterClassW, SW_SHOWNA,
-    SetForegroundWindow, ShowWindow, TranslateMessage, WM_APP, WM_DISPLAYCHANGE, WM_DPICHANGED,
-    WM_ERASEBKGND, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, IDC_ARROW,
+    LoadCursorW, MSG, PostThreadMessageW, RegisterClassW, SW_SHOWNA, ShowWindow, TranslateMessage,
+    WM_APP, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW,
+    WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR};
 
@@ -152,36 +148,7 @@ pub(super) struct AppWindowSink {
 
 impl FocusSinkApi for AppWindowSink {
     fn focus(&self) {
-        if unsafe { GetForegroundWindow() } == self.hwnd {
-            return;
-        }
-        // Alt-tap unlocks the foreground lock as a safety net for edge cases
-        // (user clicked away, then hotkeyed back).
-        let inputs = [
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_MENU,
-                        ..Default::default() // dwFlags=0 means key-down
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_MENU,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        ..Default::default() // remaining KEYBDINPUT fields unused for VK_MENU
-                    },
-                },
-            },
-        ];
-        unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
-        if !unsafe { SetForegroundWindow(self.hwnd) }.as_bool() {
-            tracing::warn!("SetForegroundWindow failed for focus sink");
-        }
+        crate::platform::windows::handle::force_set_foreground(self.hwnd);
     }
 }
 

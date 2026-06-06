@@ -558,6 +558,44 @@ impl ExternalHwnd {
     }
 }
 
+/// Activate `hwnd` as the foreground window. The leading Alt key-down/up via
+/// SendInput clears the foreground lock so SetForegroundWindow succeeds even
+/// when the calling thread does not own the foreground window. No-op when
+/// `hwnd` is already in the foreground.
+pub(super) fn force_set_foreground(hwnd: HWND) {
+    if unsafe { GetForegroundWindow() } == hwnd {
+        return;
+    }
+    let inputs = [
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VK_MENU,
+                    // wScan, time, dwExtraInfo zeroed: documented no-op values
+                    // for a synthetic VK_MENU keypress. dwFlags 0 = keydown.
+                    ..Default::default()
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VK_MENU,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    // wScan, time, dwExtraInfo zeroed: same no-op defaults.
+                    ..Default::default()
+                },
+            },
+        },
+    ];
+    unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
+    if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
+        tracing::warn!("SetForegroundWindow failed, another app may have focus lock");
+    }
+}
+
 impl ManageExternalWindow for ExternalHwnd {
     fn id(&self) -> HwndId {
         HwndId::from(self.0)
@@ -596,34 +634,7 @@ impl ManageExternalWindow for ExternalHwnd {
     }
 
     fn set_foreground_window(&self) {
-        if unsafe { GetForegroundWindow() } == self.0 {
-            return;
-        }
-        let inputs = [
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_MENU,
-                        ..Default::default()
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_MENU,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        ..Default::default()
-                    },
-                },
-            },
-        ];
-        unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
-        if !unsafe { SetForegroundWindow(self.0) }.as_bool() {
-            tracing::warn!("SetForegroundWindow failed, another app may have focus lock");
-        }
+        force_set_foreground(self.0);
     }
 
     fn is_maximized(&self) -> bool {

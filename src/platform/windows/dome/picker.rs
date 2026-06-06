@@ -17,9 +17,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, PostThreadMessageW,
-    SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_PAINT,
+    SWP_NOACTIVATE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
 };
 use windows::core::PCWSTR;
 
@@ -165,9 +164,7 @@ impl PickerWindow {
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
         boxed.window.show();
-        if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
-            tracing::warn!("SetForegroundWindow failed for picker window");
-        }
+        crate::platform::windows::handle::force_set_foreground(hwnd);
         boxed.rerender();
         Ok(boxed)
     }
@@ -202,9 +199,7 @@ impl PickerWindow {
         self.pixels_per_point = scale;
         self.pending_icons.clear();
         self.window.show();
-        if !unsafe { SetForegroundWindow(self.window.hwnd()) }.as_bool() {
-            tracing::warn!("SetForegroundWindow failed for picker window");
-        }
+        crate::platform::windows::handle::force_set_foreground(self.window.hwnd());
         self.rerender();
     }
 
@@ -302,7 +297,6 @@ impl PickerApi for PickerWindow {
     fn apply_theme(&mut self, flavor: Flavor) {
         self.renderer.apply_theme(flavor);
         self.flavor = flavor;
-        tracing::info!(?flavor, "Picker theme reloaded");
         if self.is_visible() {
             self.rerender();
         }
