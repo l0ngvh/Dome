@@ -29,7 +29,7 @@ start_at_login = false
 
 ## Window size constraints
 
-Top-level minimum and maximum window dimensions. A size value is either a number (logical pixels) or a string ending in `%` (percentage of the screen dimension).
+Top-level minimum and maximum window dimensions, enforced by both the partition tree and master strategies. A size value is either a number (logical pixels) or a string ending in `%` (percentage of the screen dimension). Per-window constraints reported by the OS take precedence over these global values.
 
 ```toml
 min_width = "5%"
@@ -93,7 +93,9 @@ The default strategy. i3-style manual tiling with split containers (horizontal, 
 
 ### Master
 
-A two-area layout: the first `master_count` windows fill a master area on the left, and the rest stack vertically on the right. Modeled on xmonad's `Tall` layout.
+A two-area layout: the first `master_count` windows fill a master pane on the left, and the rest stack vertically in a pane on the right. Modeled on xmonad's `Tall` layout.
+
+Both panes honor the global `min_width`, `min_height`, `max_width`, and `max_height` constraints above, and per-window constraints reported by the OS take precedence. Each pane scrolls vertically when per-window min heights push the pane's content past the screen height. Scroll is focus-driven, meaning that moving focus inside a pane brings the focused window into view. No new keybindings or actions are needed.
 
 ## Window rules
 

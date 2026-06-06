@@ -56,9 +56,15 @@ workspace can scroll to bring offscreen windows into view. Float windows aren't
 managed by the tiling strategy, so workspace scrolling doesn't apply to them.
 Same for fullscreen windows, which already take over the whole monitor.
 
-The other implemented tiling strategy, Master, places a workspace's first
-`master_count` windows in the master area on the left side of the monitor, and
-the rest stack vertically on the right.
+The other implemented tiling strategy, Master, splits the monitor into two
+side-by-side panes with no containers and no tabs. The first `master_count`
+windows go in the master pane on the left, and the rest go in the stack pane on
+the right. Each pane stacks its windows vertically, with `master_ratio` setting
+where the split lands. Each pane scrolls vertically and independently when its
+content overflows, with focus movement as the sole trigger. Both panes honor
+per-window min/max size constraints the same way Partition Tree does, but when
+the panes' combined min widths exceed the screen, the layout overflows past the
+edge rather than scrolling horizontally.
 
 ## macOS
 

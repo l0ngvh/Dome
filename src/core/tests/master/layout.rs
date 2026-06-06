@@ -1,10 +1,10 @@
-use super::{snapshot, validate_hub};
 use crate::config::{LayoutConfig, MasterConfig, Strategy};
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, HubConfig};
 use crate::core::node::{Dimension, Length, WindowId};
 use crate::core::strategy::TilingAction;
 use crate::core::tests::default_partition_tree_config_for_tests;
+use crate::core::tests::{snapshot, validate_hub};
 use insta::assert_snapshot;
 
 fn setup_master() -> Hub {

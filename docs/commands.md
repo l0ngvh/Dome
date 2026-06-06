@@ -8,7 +8,7 @@ Move keyboard focus to a different window, container, tab, workspace, or monitor
 
 | Action | Effect |
 |--------|--------|
-| `focus up`, `focus down`, `focus left`, `focus right` | Focus the neighboring window in the tiling tree. |
+| `focus up`, `focus down`, `focus left`, `focus right` | Focus the neighboring window in the tiling tree. In the master layout, vertical focus movement inside a pane scrolls the pane to keep the focused window visible when content overflows. |
 | `focus parent` | Focus the parent container. Subsequent `move` and `toggle` actions then target the whole group. |
 | `focus tab next` | Focus the next tab in a tabbed container. |
 | `focus tab prev` | Focus the previous tab. |
@@ -53,7 +53,7 @@ Fullscreen integrates with each platform's native fullscreen behavior: macOS Spa
 
 ## Master area
 
-The master-stack layout reserves a configurable area on one side for `master_count` windows. These actions adjust that area at runtime, and have effect only when the master-stack layout is active. They are transient: the next config hot-reload resets the master area to the values in `config.toml`, which is the source of truth (see [configuration.md](configuration.md) for the config reference).
+The master-stack layout reserves a configurable area on one side for `master_count` windows. These actions adjust that area at runtime, and have effect only when the master-stack layout is active. They are transient: the next config hot-reload resets the master area to the values in `config.toml`, which is the source of truth (see [configuration.md](configuration.md) for the config reference). Per-window min-width constraints can override the ratio when honoring them requires a wider pane than the ratio would allow.
 
 | Action | Effect |
 |--------|--------|
