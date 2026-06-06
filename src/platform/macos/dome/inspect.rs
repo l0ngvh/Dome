@@ -213,6 +213,10 @@ pub(in crate::platform::macos) fn compute_window_positions(
         let Some(window) = tracked.get(&ax.cg_id()) else {
             continue;
         };
+        // This window is minimized before the move/resize event is processed
+        if window.ext.is_minimized(marker) {
+            continue;
+        }
         let Ok((x, y)) = window.ext.get_position(marker) else {
             continue;
         };
