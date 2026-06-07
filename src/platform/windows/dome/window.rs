@@ -1,10 +1,39 @@
+use std::sync::Arc;
+
 use super::Dome;
+use super::registry::ManagedWindow;
 use crate::core::{
     Dimension, FloatWindowPlacement, Length, MonitorId, Physical, TilingWindowPlacement, WindowId,
-    WindowRestrictions,
+    WindowRestrictions, WorkspaceId,
 };
-use crate::platform::windows::external::{HwndId, ShowCmd, ZOrder};
+use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
+
+/// Per-window metadata gathered by the inspection worker that travels
+/// together through `add_window` and the per-mode `insert_*_window`
+/// helpers. Exists to keep those signatures from accumulating ~five
+/// always-co-occurring scalars apiece.
+pub(in crate::platform::windows) struct NewWindow {
+    pub(in crate::platform::windows) ext: Arc<dyn ManageExternalWindow>,
+    pub(in crate::platform::windows) title: Option<String>,
+    pub(in crate::platform::windows) process: String,
+    pub(in crate::platform::windows) constraints: (f32, f32, f32, f32),
+    pub(in crate::platform::windows) app_name: Option<String>,
+}
+
+impl std::fmt::Display for NewWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[pid={}|hwnd={}] ", self.ext.pid(), self.ext.id())?;
+        match self.app_name.as_deref() {
+            Some(name) => write!(f, "{name} ({})", self.process)?,
+            None => write!(f, "{}", self.process)?,
+        }
+        if let Some(title) = &self.title {
+            write!(f, " - {title}")?;
+        }
+        Ok(())
+    }
+}
 
 pub(super) const MAX_DRIFT_RETRIES: u8 = 5;
 
@@ -90,6 +119,82 @@ impl std::fmt::Display for WindowState {
 }
 
 impl Dome {
+    #[tracing::instrument(skip_all, fields(window = %new))]
+    pub(super) fn insert_tiling_window(
+        &mut self,
+        new: NewWindow,
+        rect: Dimension<Physical>,
+        target_ws: WorkspaceId,
+    ) {
+        let id = self.hub.insert_tiling(target_ws);
+        let state = WindowState::Positioned(PositionedState::Offscreen {
+            retries: 0,
+            actual: rect,
+        });
+        self.finalize_inserted_window(new, id, state);
+        tracing::info!(window_id = %id, "New tiling window");
+    }
+
+    #[tracing::instrument(skip_all, fields(window = %new))]
+    pub(super) fn insert_float_window(
+        &mut self,
+        new: NewWindow,
+        rect: Dimension<Physical>,
+        target_ws: WorkspaceId,
+    ) {
+        let id = self.hub.insert_float(target_ws, rect);
+        let state = WindowState::Positioned(PositionedState::Offscreen {
+            retries: 0,
+            actual: rect,
+        });
+        self.finalize_inserted_window(new, id, state);
+        tracing::info!(window_id = %id, "New float window");
+    }
+
+    #[tracing::instrument(skip_all, fields(window = %new))]
+    pub(super) fn insert_fullscreen_window(
+        &mut self,
+        new: NewWindow,
+        target_ws: WorkspaceId,
+        restrictions: WindowRestrictions,
+    ) {
+        let id = self.hub.insert_fullscreen(target_ws, restrictions);
+        let state = WindowState::BorderlessFullscreen;
+        self.finalize_inserted_window(new, id, state);
+        tracing::info!(window_id = %id, ?restrictions, "New borderless fullscreen window");
+    }
+
+    fn finalize_inserted_window(&mut self, new: NewWindow, id: WindowId, state: WindowState) {
+        let NewWindow {
+            ext,
+            title,
+            process,
+            constraints,
+            app_name,
+        } = new;
+        let id_key = ext.id();
+        self.set_constraints(id, constraints);
+        if let Some(title) = &title {
+            self.hub.set_window_title(id, title.clone());
+        }
+        self.recovery.track(&ext);
+
+        self.registry.insert(
+            id_key,
+            id,
+            ManagedWindow {
+                ext,
+                state,
+                is_minimized: false,
+                title,
+                process,
+                app_name,
+                window_id: id,
+            },
+        );
+        self.pending_created.push(id);
+    }
+
     #[tracing::instrument(
         level = "trace",
         skip(self, wp),
@@ -390,6 +495,7 @@ impl Dome {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
+        let is_fullscreen = self.is_borderless_fullscreen_at(new_placement, monitor_handle);
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
@@ -398,18 +504,6 @@ impl Dome {
             self.hub.unminimize_window(id);
             entry.is_minimized = false;
         }
-
-        let is_fullscreen = self
-            .monitor_handles
-            .get(&monitor_handle)
-            .and_then(|monitor_id| self.monitors.get(monitor_id))
-            .map(|m| {
-                new_placement.x <= m.dimension.x
-                    && new_placement.y <= m.dimension.y
-                    && new_placement.x + new_placement.width >= m.dimension.x + m.dimension.width
-                    && new_placement.y + new_placement.height >= m.dimension.y + m.dimension.height
-            })
-            .unwrap_or(false);
 
         match (&mut entry.state, is_fullscreen) {
             (WindowState::ExclusiveFullscreen, _) => {}
@@ -509,7 +603,13 @@ impl Dome {
                 }
             }
 
-            (WindowState::Positioned(PositionedState::Offscreen { retries, actual }), true) => {
+            (
+                WindowState::Positioned(PositionedState::Offscreen {
+                    retries: _,
+                    actual: _,
+                }),
+                true,
+            ) => {
                 // Window turned fullscreen, but not visible, so we hide it again.
                 self.hub
                     .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
@@ -544,6 +644,23 @@ impl Dome {
     /// `reverse_inset`, both of which operate in physical pixels on Windows.
     pub(super) fn physical_border(&self, monitor: MonitorId) -> Length<Physical> {
         Length::new(self.config.border_size * self.monitors[&monitor].scale)
+    }
+
+    pub(super) fn is_borderless_fullscreen_at(
+        &self,
+        rect: Dimension<Physical>,
+        monitor: isize,
+    ) -> bool {
+        self.monitor_handles
+            .get(&monitor)
+            .and_then(|mid| self.monitors.get(mid))
+            .map(|m| {
+                rect.x <= m.dimension.x
+                    && rect.y <= m.dimension.y
+                    && rect.x + rect.width >= m.dimension.x + m.dimension.width
+                    && rect.y + rect.height >= m.dimension.y + m.dimension.height
+            })
+            .unwrap_or(false)
     }
 }
 

@@ -6,8 +6,8 @@ use insta::assert_snapshot;
 #[test]
 fn move_container_to_monitor() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.add_monitor(
         "monitor-1".to_string(),
         Dimension::new(
@@ -35,8 +35,8 @@ fn move_container_to_monitor() {
 #[test]
 fn move_container_to_monitor_no_target() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.add_monitor(
         "monitor-1".to_string(),
         Dimension::new(
@@ -96,11 +96,11 @@ fn move_container_to_monitor_no_target() {
 #[test]
 fn move_container_to_monitor_with_floats_on_workspace() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_float();
     hub.focus_left();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     hub.add_monitor(
         "monitor-1".to_string(),

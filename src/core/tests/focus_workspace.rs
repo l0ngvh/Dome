@@ -5,17 +5,17 @@ use insta::assert_snapshot;
 fn switch_workspace_attaches_windows_correctly() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_workspace("1");
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_workspace("0");
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
@@ -63,7 +63,7 @@ fn switch_workspace_attaches_windows_correctly() {
 fn focus_same_workspace() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     let initial_workspace = hub.current_workspace();
     hub.focus_workspace("0");
 

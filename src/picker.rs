@@ -201,9 +201,9 @@ mod tests {
     #[test]
     fn build_entries_resolves_app_id() {
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling();
-        let w2 = hub.insert_tiling();
-        let w3 = hub.insert_tiling();
+        let w1 = hub.insert_tiling(hub.current_workspace());
+        let w2 = hub.insert_tiling(hub.current_workspace());
+        let w3 = hub.insert_tiling(hub.current_workspace());
         let minimized = vec![
             (w1, "Window One".to_string()),
             (w2, "Window Two".to_string()),
@@ -241,8 +241,8 @@ mod tests {
     #[test]
     fn build_entries_duplicate_app_id() {
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling();
-        let w2 = hub.insert_tiling();
+        let w1 = hub.insert_tiling(hub.current_workspace());
+        let w2 = hub.insert_tiling(hub.current_workspace());
         let minimized = vec![(w1, "Chrome 1".to_string()), (w2, "Chrome 2".to_string())];
         let entries = build_picker_entries(&minimized, |_| {
             (
@@ -266,9 +266,9 @@ mod tests {
         let theme = Theme::from_flavor(Flavor::Mocha);
 
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling();
-        let w2 = hub.insert_tiling();
-        let w3 = hub.insert_tiling();
+        let w1 = hub.insert_tiling(hub.current_workspace());
+        let w2 = hub.insert_tiling(hub.current_workspace());
+        let w3 = hub.insert_tiling(hub.current_workspace());
         let entries = vec![
             PickerEntry {
                 id: w1,

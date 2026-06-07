@@ -49,14 +49,9 @@ impl WindowRegistry {
         }
     }
 
-    pub(super) fn insert(
-        &mut self,
-        id: HwndId,
-        window_id: WindowId,
-        entry: ManagedWindow,
-    ) -> &ManagedWindow {
+    pub(super) fn insert(&mut self, id: HwndId, window_id: WindowId, entry: ManagedWindow) {
         self.by_hwnd.insert(id, window_id);
-        self.by_id.entry(window_id).insert_entry(entry).into_mut()
+        self.by_id.insert(window_id, entry);
     }
 
     pub(super) fn remove_by_hwnd(&mut self, id: HwndId) -> Option<WindowId> {

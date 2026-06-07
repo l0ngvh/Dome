@@ -460,8 +460,8 @@ fn focus_tab_change_workspace_focus_to_tabbed_container_active_tab_focused() {
 fn toggle_tabbed_off() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_container_layout();
     hub.toggle_container_layout();
 
@@ -1080,9 +1080,9 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     let mut hub = setup();
 
     // Create horizontal container with 3 windows
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     // Make it tabbed
     hub.toggle_container_layout();
@@ -1090,7 +1090,7 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     // Create a vertical nested container in the middle tab
     hub.focus_prev_tab();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     // Focus parent and toggle back to split (horizontal)
     hub.focus_parent();

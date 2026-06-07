@@ -15,7 +15,7 @@ use crate::core::tests::{setup, snapshot, snapshot_text};
 #[test]
 fn add_monitor_creates_workspace_on_new_monitor() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.add_monitor(
         "monitor-1".to_string(),
@@ -29,7 +29,7 @@ fn add_monitor_creates_workspace_on_new_monitor() {
     );
 
     hub.focus_workspace("monitor-1");
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -76,7 +76,7 @@ fn add_monitor_creates_workspace_on_new_monitor() {
 #[test]
 fn remove_monitor_migrates_workspaces_to_fallback() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     let primary = hub.focused_monitor();
     let m1 = hub.add_monitor(
@@ -91,8 +91,8 @@ fn remove_monitor_migrates_workspaces_to_fallback() {
     );
 
     hub.focus_workspace("monitor-1");
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.remove_monitor(m1, primary);
 
@@ -179,8 +179,8 @@ fn remove_monitor_panics_if_fallback_same_as_removed() {
 #[test]
 fn update_monitor_dimension_adjusts_workspaces() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.add_monitor(
         "external".to_string(),
@@ -221,7 +221,7 @@ fn focus_monitor_by_direction() {
     use crate::action::MonitorTarget;
 
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     // Monitor to the right
     hub.add_monitor(
@@ -299,7 +299,7 @@ fn focus_monitor_by_name() {
     use crate::action::MonitorTarget;
 
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.add_monitor(
         "external".to_string(),
@@ -328,8 +328,8 @@ fn move_to_monitor_moves_focused_window() {
     use crate::action::MonitorTarget;
 
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.add_monitor(
         "right-monitor".to_string(),
@@ -360,7 +360,7 @@ fn move_to_monitor_by_name() {
     use crate::action::MonitorTarget;
 
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.add_monitor(
         "external".to_string(),
@@ -390,12 +390,15 @@ fn move_float_to_monitor() {
     use crate::core::Dimension;
 
     let mut hub = setup();
-    hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(10.0),
-        Length::new(50.0),
-        Length::new(20.0),
-    ));
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(10.0),
+            Length::new(50.0),
+            Length::new(20.0),
+        ),
+    );
 
     hub.add_monitor(
         "external".to_string(),
@@ -424,7 +427,7 @@ fn monitor_noop_cases() {
     // Single monitor: focus_monitor is no-op
     {
         let mut hub = setup();
-        hub.insert_tiling();
+        hub.insert_tiling(hub.current_workspace());
         let before = snapshot_text(&hub);
         hub.focus_monitor(&MonitorTarget::Right);
         assert_eq!(snapshot_text(&hub), before);
@@ -433,7 +436,7 @@ fn monitor_noop_cases() {
     // Single monitor with tiling: move_focused_to_monitor is no-op
     {
         let mut hub = setup();
-        hub.insert_tiling();
+        hub.insert_tiling(hub.current_workspace());
         let before = snapshot_text(&hub);
         hub.move_focused_to_monitor(&MonitorTarget::Right);
         assert_eq!(snapshot_text(&hub), before);
@@ -442,7 +445,7 @@ fn monitor_noop_cases() {
     // Two monitors, move to same monitor: no-op
     {
         let mut hub = setup();
-        hub.insert_tiling();
+        hub.insert_tiling(hub.current_workspace());
         hub.add_monitor(
             "external".to_string(),
             Dimension::new(
@@ -482,8 +485,8 @@ fn move_to_monitor_does_not_change_focus() {
     use crate::action::MonitorTarget;
 
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.add_monitor(
         "external".to_string(),
@@ -558,8 +561,8 @@ fn monitor_scale_multiplies_config_lengths() {
             ..Default::default()
         },
     );
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_container_layout(); // switch split -> Tabbed
 
     // Tabbed container shows only the active tab's window.
@@ -628,7 +631,7 @@ fn monitor_scale_multiplies_config_lengths() {
         },
     );
     for _ in 0..6 {
-        hub2.insert_tiling();
+        hub2.insert_tiling(hub2.current_workspace());
     }
     let min_w: f32 = tiling_frames(&hub2)
         .iter()

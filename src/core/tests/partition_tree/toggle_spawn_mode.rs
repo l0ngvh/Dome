@@ -5,10 +5,10 @@ use insta::assert_snapshot;
 fn toggle_spawn_mode_creates_new_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -56,9 +56,9 @@ fn toggle_spawn_mode_creates_new_container() {
 fn toggle_spawn_mode_in_single_window_workspace_creates_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -105,12 +105,12 @@ fn toggle_spawn_mode_in_single_window_workspace_creates_vertical_container() {
 fn toggle_spawn_mode_in_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))

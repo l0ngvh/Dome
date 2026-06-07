@@ -8,14 +8,14 @@ mod window;
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use crate::action::Query;
 use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
+use crate::config::{Config, WindowMode, WindowsWindow};
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, MonitorId,
     MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
+    WorkspaceId,
 };
 use crate::font::{FontConfig, font_changed};
 use crate::picker::{PickerEntry, build_picker_entries};
@@ -24,11 +24,13 @@ use crate::theme::{Flavor, theme_changed};
 use self::overlay::{FloatOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
-use self::registry::{ManagedWindow, WindowRegistry};
+use self::registry::WindowRegistry;
 use self::window::{PositionedState, WindowState};
 
+pub(super) use self::window::NewWindow;
+
 use super::MonitorInfo;
-use super::external::{HwndId, ManageExternalWindow, ShowCmd};
+use super::external::{HwndId, ShowCmd};
 use super::taskbar::ManageTaskbar;
 
 pub(super) enum HubEvent {
@@ -352,85 +354,52 @@ impl Dome {
         self.registry.get_id(id)
     }
 
-    pub(super) fn try_manage_window(
-        &mut self,
-        ext: Arc<dyn ManageExternalWindow>,
-        title: Option<String>,
-        process: String,
-        constraints: (f32, f32, f32, f32),
-        rect: Dimension<Physical>,
-        monitor: isize,
-        app_name: Option<String>,
-    ) -> Option<Actions> {
-        if should_ignore(&process, title.as_deref(), &self.config.windows.ignore) {
-            return None;
+    /// Single entry point for adding a newly-detected external window.
+    ///
+    /// Mirrors macOS's `reconcile_windows` insert path: applies the
+    /// already-known shell-side filters (ignore-rules, on-open lookup,
+    /// borderless-fullscreen detection, `should_float`) and dispatches to the
+    /// matching `insert_*_window` helper, then flushes layout. The
+    /// `is_manageable` filter still lives on the inspection side (the worker
+    /// thread that produces this call's arguments) so unmanageable windows
+    /// never reach this function.
+    #[tracing::instrument(skip_all, fields(window = %new))]
+    pub(super) fn add_window(&mut self, new: NewWindow, rect: Dimension<Physical>, monitor: isize) {
+        if self.registry.contains_hwnd(new.ext.id()) {
+            return;
         }
-        let actions = on_open_actions(&process, title.as_deref(), &self.config.windows.on_open);
-        self.insert_window(ext, title, process, constraints, rect, monitor, app_name);
-        actions
-    }
-
-    fn insert_window(
-        &mut self,
-        ext: Arc<dyn ManageExternalWindow>,
-        title: Option<String>,
-        process: String,
-        constraints: (f32, f32, f32, f32),
-        rect: Dimension<Physical>,
-        monitor: isize,
-        app_name: Option<String>,
-    ) {
-        let id_key = ext.id();
-
-        let is_fullscreen = self
-            .monitor_handles
-            .get(&monitor)
-            .and_then(|mid| self.monitors.get(mid))
-            .map(|m| {
-                rect.x <= m.dimension.x
-                    && rect.y <= m.dimension.y
-                    && rect.x + rect.width >= m.dimension.x + m.dimension.width
-                    && rect.y + rect.height >= m.dimension.y + m.dimension.height
-            })
-            .unwrap_or(false);
-        let (state, id) = if is_fullscreen {
-            (
-                WindowState::BorderlessFullscreen,
-                self.hub
-                    .insert_fullscreen(WindowRestrictions::ProtectFullscreen),
-            )
-        } else {
-            let offscreen = WindowState::Positioned(PositionedState::Offscreen {
-                retries: 0,
-                actual: rect,
-            });
-            if ext.should_float() {
-                (offscreen, self.hub.insert_float(rect))
+        if should_ignore(&new, &self.config.windows.ignore) {
+            return;
+        }
+        let (target_ws, mode_override) = self.resolve_on_open(&new);
+        let resolved_mode = mode_override.unwrap_or_else(|| {
+            if self.is_borderless_fullscreen_at(rect, monitor) {
+                WindowMode::Fullscreen
+            } else if new.ext.should_float() {
+                WindowMode::Float
             } else {
-                (offscreen, self.hub.insert_tiling())
+                WindowMode::Tiling
             }
-        };
-        self.set_constraints(id, constraints);
-        if let Some(title) = &title {
-            self.hub.set_window_title(id, title.clone());
+        });
+        match resolved_mode {
+            WindowMode::Tiling => {
+                self.insert_tiling_window(new, rect, target_ws);
+            }
+            WindowMode::Float => {
+                self.insert_float_window(new, rect, target_ws);
+            }
+            WindowMode::Fullscreen => {
+                // mode_override == Some(Fullscreen) is a user-explicit rule -> no protection.
+                // mode_override == None && is_borderless_fullscreen_at is shell-detected -> protect.
+                let restrictions = if mode_override.is_some() {
+                    WindowRestrictions::None
+                } else {
+                    WindowRestrictions::ProtectFullscreen
+                };
+                self.insert_fullscreen_window(new, target_ws, restrictions);
+            }
         }
-        self.recovery.track(&ext);
-
-        let entry = self.registry.insert(
-            id_key,
-            id,
-            ManagedWindow {
-                ext,
-                state,
-                is_minimized: false,
-                title,
-                process,
-                app_name,
-                window_id: id,
-            },
-        );
-        tracing::info!(%state, %entry, "Window managed");
-        self.pending_created.push(id);
+        self.apply_layout();
     }
 
     fn resolve_window_monitor(&self, id: WindowId) -> MonitorId {
@@ -576,6 +545,7 @@ impl Dome {
         };
         self.hub.handle_tiling_action(action);
     }
+
     pub(super) fn toggle_picker(&mut self) {
         match &mut self.picker {
             Some(pw) if pw.is_visible() => {
@@ -1053,21 +1023,28 @@ impl Dome {
         self.hub.update_monitor(id, current_dim, scale);
         tracing::info!(%id, dpi, scale, ?previous, "Monitor scale updated via DPI change");
     }
+
+    fn resolve_on_open(&mut self, new: &NewWindow) -> (WorkspaceId, Option<WindowMode>) {
+        let rule = self
+            .config
+            .windows
+            .on_open
+            .iter()
+            .find(|r| r.matches(&new.process, new.title.as_deref()));
+        let target_ws = self
+            .hub
+            .resolve_workspace(rule.and_then(|r| r.workspace.as_deref()));
+        let mode_override = rule.and_then(|r| r.mode);
+        (target_ws, mode_override)
+    }
 }
 
-fn on_open_actions(
-    process: &str,
-    title: Option<&str>,
-    rules: &[WindowsOnOpenRule],
-) -> Option<Actions> {
-    let rule = rules.iter().find(|r| r.window.matches(process, title))?;
-    tracing::debug!(%process, ?title, actions = %rule.run, "Running on_open actions");
-    Some(rule.run.clone())
-}
-
-fn should_ignore(process: &str, title: Option<&str>, rules: &[WindowsWindow]) -> bool {
-    if let Some(rule) = rules.iter().find(|r| r.matches(process, title)) {
-        tracing::debug!(%process, ?title, ?rule, "Window ignored by rule");
+pub(super) fn should_ignore(new: &NewWindow, rules: &[WindowsWindow]) -> bool {
+    if let Some(rule) = rules
+        .iter()
+        .find(|r| r.matches(&new.process, new.title.as_deref()))
+    {
+        tracing::debug!(%new, ?rule, "Window ignored by rule");
         return true;
     }
     false

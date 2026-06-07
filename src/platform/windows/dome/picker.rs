@@ -457,10 +457,10 @@ mod tests {
     #[test]
     fn icons_to_load_filters_dispatched_and_loaded() {
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling();
-        let w2 = hub.insert_tiling();
-        let w3 = hub.insert_tiling();
-        let w4 = hub.insert_tiling();
+        let w1 = hub.insert_tiling(hub.current_workspace());
+        let w2 = hub.insert_tiling(hub.current_workspace());
+        let w3 = hub.insert_tiling(hub.current_workspace());
+        let w4 = hub.insert_tiling(hub.current_workspace());
         let entries = vec![
             PickerEntry {
                 id: w1,

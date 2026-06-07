@@ -13,15 +13,17 @@ mod tests;
 mod workspace;
 
 pub(crate) use hub::Hub;
+#[cfg(target_os = "macos")]
+pub(crate) use hub::MonitorPlacements;
 pub(crate) use hub::{
-    ContainerPlacement, FloatWindowPlacement, MonitorLayout, MonitorPlacements, SpawnIndicator,
-    TilingWindowPlacement,
+    ContainerPlacement, FloatWindowPlacement, MonitorLayout, SpawnIndicator, TilingWindowPlacement,
 };
 pub(crate) use node::Direction;
 #[cfg(target_os = "windows")]
 pub(crate) use node::Physical;
 pub(crate) use node::{
     ContainerId, Dimension, Length, Logical, MonitorId, Unit, WindowId, WindowRestrictions,
+    WorkspaceId,
 };
 pub(crate) use strategy::TilingAction;
 

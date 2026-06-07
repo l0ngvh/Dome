@@ -3,11 +3,11 @@ use crate::core::tests::{setup, snapshot};
 #[test]
 fn move_right_from_vertical_container_to_horizontal_parent() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.move_right();
     insta::assert_snapshot!(snapshot(&hub), @"
@@ -57,12 +57,12 @@ fn move_right_from_vertical_container_to_horizontal_parent() {
 #[test]
 fn move_down_from_horizontal_container_to_vertical_parent() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.move_down();
     insta::assert_snapshot!(snapshot(&hub), @"
@@ -112,10 +112,10 @@ fn move_down_from_horizontal_container_to_vertical_parent() {
 #[test]
 fn move_right_from_vertical_container_creates_new_root_container() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.move_right();
     insta::assert_snapshot!(snapshot(&hub), @"
@@ -164,9 +164,9 @@ fn move_right_from_vertical_container_creates_new_root_container() {
 #[test]
 fn move_right_from_vertical_container_replaces_new_root_container() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.move_right();
     insta::assert_snapshot!(snapshot(&hub), @"
@@ -213,9 +213,9 @@ fn move_right_from_vertical_container_replaces_new_root_container() {
 #[test]
 fn move_down_from_horizontal_container_creates_new_root_container() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.move_down();
     insta::assert_snapshot!(snapshot(&hub), @"
@@ -264,8 +264,8 @@ fn move_down_from_horizontal_container_creates_new_root_container() {
 #[test]
 fn move_down_from_horizontal_container_replaces_new_root_container() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.move_down();
     insta::assert_snapshot!(snapshot(&hub), @"
@@ -312,13 +312,13 @@ fn move_down_from_horizontal_container_replaces_new_root_container() {
 #[test]
 fn move_right_at_edge_goes_to_horizontal_grandparent() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.move_right();
     insta::assert_snapshot!(snapshot(&hub), @"
@@ -370,13 +370,13 @@ fn move_right_at_edge_goes_to_horizontal_grandparent() {
 #[test]
 fn move_left_at_edge_goes_to_horizontal_grandparent() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_left();
     hub.focus_left();
 
@@ -430,14 +430,14 @@ fn move_left_at_edge_goes_to_horizontal_grandparent() {
 #[test]
 fn move_down_at_edge_goes_to_vertical_grandparent() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.move_down();
     insta::assert_snapshot!(snapshot(&hub), @"
@@ -489,14 +489,14 @@ fn move_down_at_edge_goes_to_vertical_grandparent() {
 #[test]
 fn move_up_at_edge_goes_to_vertical_grandparent() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_up();
     hub.focus_up();
 
@@ -550,8 +550,8 @@ fn move_up_at_edge_goes_to_vertical_grandparent() {
 #[test]
 fn swap_right_in_horizontal_container() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_left();
 
     hub.move_right();
@@ -599,9 +599,9 @@ fn swap_right_in_horizontal_container() {
 #[test]
 fn swap_down_in_vertical_container() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_up();
 
     hub.move_down();
@@ -803,14 +803,14 @@ fn move_from_nested_container_skip_tabbed_grandparent() {
 #[test]
 fn move_container_up_toggles_direction_when_matching_parent() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
 
     hub.move_up();
@@ -863,13 +863,13 @@ fn move_container_up_toggles_direction_when_matching_parent() {
 #[test]
 fn move_container_left_toggles_direction_when_matching_parent() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
 
     hub.move_left();

@@ -120,8 +120,8 @@ master_count = 1            # number of master windows, >= 1
 #   { bundle_id = "com.apple.finder", title = "Trash" },
 # ]
 # on_open = [
-#   { app = "Slack", run = ["move workspace 3"] },
-#   { app = "Safari", run = ["toggle float"] },
+#   { app = "Slack", mode = "float", workspace = "3" },
+#   { app = "Safari", mode = "fullscreen" },
 # ]
 
 # Windows rules
@@ -132,5 +132,5 @@ ignore = [
   # { title = "Task Manager" },
 ]
 # on_open = [
-#   { process = "slack.exe", run = ["move workspace 3"] },
+#   { process = "slack.exe", mode = "float", workspace = "3" },
 # ]

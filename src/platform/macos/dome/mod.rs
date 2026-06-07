@@ -19,10 +19,11 @@ use std::time::Instant;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, MacosOnOpenRule, MacosWindow};
+use crate::action::{FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
+use crate::config::{Config, MacosWindow, WindowMode};
 use crate::core::{
     ContainerId, Dimension, Direction, Hub, Length, Logical, TilingAction, WindowId,
+    WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 use crate::platform::macos::MonitorInfo;
@@ -31,18 +32,42 @@ use crate::platform::macos::accessibility::ExternalWindow;
 use monitor::MonitorRegistry;
 use recovery::Recovery;
 use registry::{ManagedWindow, WindowRegistry};
-use window::RoundedDimension;
+
+pub(in crate::platform::macos) use window::RoundedDimension;
 
 pub(in crate::platform::macos) struct NewWindow {
     pub(in crate::platform::macos) ax: Arc<dyn ExternalWindow>,
     pub(in crate::platform::macos) app_name: Option<String>,
     pub(in crate::platform::macos) bundle_id: Option<String>,
     pub(in crate::platform::macos) title: Option<String>,
-    pub(in crate::platform::macos) x: i32,
-    pub(in crate::platform::macos) y: i32,
-    pub(in crate::platform::macos) w: i32,
-    pub(in crate::platform::macos) h: i32,
-    pub(in crate::platform::macos) is_native_fullscreen: bool,
+}
+
+impl std::fmt::Display for NewWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[pid={}|cg={}] {}",
+            self.ax.pid(),
+            self.ax.cg_id(),
+            self.app_name.as_deref().unwrap_or("Unknown"),
+        )?;
+        if let Some(bundle_id) = &self.bundle_id {
+            write!(f, " ({bundle_id})")?;
+        }
+        if let Some(title) = &self.title {
+            write!(f, " - {title}")?;
+        }
+        Ok(())
+    }
+}
+
+pub(in crate::platform::macos) enum PendingAdd {
+    Positioned {
+        new: NewWindow,
+        dim: RoundedDimension,
+    },
+    /// Native fullscreen windows lives on their own space and thus has no dimension
+    NativeFullscreen { new: NewWindow },
 }
 
 /// Timestamps of the first and last AX move/resize notifications in a
@@ -141,10 +166,10 @@ impl Dome {
         refresh: &[ExtRefresh],
         removed: &[CGWindowID],
         minimized: &[CGWindowID],
-        added: Vec<NewWindow>,
+        added: Vec<PendingAdd>,
         to_enter_native_fullscreen: &[CGWindowID],
         to_exit_native_fullscreen: &[ExitNativeFullscreen],
-    ) -> Vec<Actions> {
+    ) {
         self.refresh_ext_cache(refresh);
         for &cg_id in removed {
             if let Some(entry) = self.registry.get(cg_id) {
@@ -156,52 +181,64 @@ impl Dome {
                 self.minimize_window(entry.window_id);
             }
         }
-        let mut on_open = Vec::new();
-        for new in added {
-            let NewWindow {
-                ax,
-                app_name,
-                bundle_id,
-                title,
-                x,
-                y,
-                w,
-                h,
-                is_native_fullscreen,
-            } = new;
-            if self.registry.contains(ax.cg_id()) {
+        for pending in added {
+            let new_ref = match &pending {
+                PendingAdd::Positioned { new, .. } | PendingAdd::NativeFullscreen { new } => new,
+            };
+            if self.registry.contains(new_ref.ax.cg_id()) {
                 continue;
             }
-            let window_id = if is_native_fullscreen {
-                self.add_native_fullscreen_window(
-                    ax.clone(),
-                    app_name.clone(),
-                    bundle_id.clone(),
-                    title.clone(),
+
+            let rule = self.config.macos.on_open.iter().find(|r| {
+                r.matches(
+                    new_ref.app_name.as_deref(),
+                    new_ref.bundle_id.as_deref(),
+                    new_ref.title.as_deref(),
                 )
-            } else {
-                self.add_window(
-                    ax.clone(),
-                    RoundedDimension {
-                        x,
-                        y,
-                        width: w,
-                        height: h,
-                    },
-                    app_name.clone(),
-                    bundle_id.clone(),
-                    title.clone(),
-                )
-            };
-            self.recovery.track(ax, w, h, self.primary_monitor);
-            let actions = {
-                let Some(entry) = self.registry.by_id(window_id) else {
-                    continue;
-                };
-                on_open_actions(entry, &self.config.macos.on_open)
-            };
-            if let Some(actions) = actions {
-                on_open.push(actions);
+            });
+            let target_ws = self
+                .hub
+                .resolve_workspace(rule.and_then(|r| r.workspace.as_deref()));
+            let mode_override = rule.and_then(|r| r.mode);
+
+            match pending {
+                PendingAdd::NativeFullscreen { new } => {
+                    self.add_native_fullscreen_window(new, target_ws);
+                }
+                PendingAdd::Positioned { new, dim } => {
+                    let ax_for_recovery = new.ax.clone();
+                    let resolved_mode = mode_override.unwrap_or_else(|| {
+                        if self.is_borderless_fullscreen_at(dim) {
+                            WindowMode::Fullscreen
+                        } else {
+                            WindowMode::Tiling
+                        }
+                    });
+                    match resolved_mode {
+                        WindowMode::Tiling => {
+                            self.add_tiling_window(new, dim, target_ws);
+                        }
+                        WindowMode::Float => {
+                            self.add_float_window(new, dim, target_ws);
+                        }
+                        WindowMode::Fullscreen => {
+                            // mode_override == Some(Fullscreen) is a user-explicit rule -> no protection.
+                            // mode_override == None && is_borderless_fullscreen is shell-detected -> protect.
+                            let restrictions = if mode_override.is_some() {
+                                WindowRestrictions::None
+                            } else {
+                                WindowRestrictions::ProtectFullscreen
+                            };
+                            self.add_borderless_fullscreen_window(new, target_ws, restrictions);
+                        }
+                    }
+                    self.recovery.track(
+                        ax_for_recovery,
+                        dim.width,
+                        dim.height,
+                        self.primary_monitor,
+                    );
+                }
             }
         }
         for &cg_id in to_enter_native_fullscreen {
@@ -216,6 +253,7 @@ impl Dome {
             {
                 let window_id = entry.window_id;
                 let now = Instant::now();
+                // NativeFullscreen doesn't emit any move/resize event, so we need to simulate one
                 self.window_moved(
                     window_id,
                     e.x,
@@ -230,7 +268,6 @@ impl Dome {
             }
         }
         self.flush_layout();
-        on_open
     }
 
     #[tracing::instrument(skip_all)]
@@ -325,21 +362,19 @@ impl Dome {
     /// Handles the frontmost window entering native fullscreen after a space
     /// change. If `cg_id` is tracked, transitions it to `NativeFullscreen`
     /// state. If untracked, inserts it as a new fullscreen window.
-    #[tracing::instrument(skip(self, ax, app_name, bundle_id, title), fields(cg_id = %cg_id, window = tracing::field::Empty))]
+    #[tracing::instrument(skip(self, new), fields(cg_id = %cg_id, window = tracing::field::Empty))]
     pub(in crate::platform::macos) fn enter_native_fullscreen(
         &mut self,
         cg_id: CGWindowID,
-        ax: Arc<dyn ExternalWindow>,
-        app_name: Option<String>,
-        bundle_id: Option<String>,
-        title: Option<String>,
+        new: NewWindow,
     ) {
         if let Some(entry) = self.registry.get(cg_id) {
             tracing::Span::current().record("window", entry.to_string());
             let window_id = entry.window_id;
             self.window_entered_native_fullscreen(window_id);
         } else {
-            self.add_native_fullscreen_window(ax, app_name, bundle_id, title);
+            let target_ws = self.hub.current_workspace();
+            self.add_native_fullscreen_window(new, target_ws);
         }
         self.flush_layout();
     }
@@ -636,16 +671,4 @@ fn reconcile_monitors(hub: &mut Hub, registry: &mut MonitorRegistry, monitors: &
             hub.update_monitor(monitor_id, monitor.dimension, 1.0);
         }
     }
-}
-
-fn on_open_actions(entry: &ManagedWindow, rules: &[MacosOnOpenRule]) -> Option<Actions> {
-    let rule = rules.iter().find(|r| {
-        r.window.matches(
-            entry.app_name.as_deref(),
-            entry.bundle_id.as_deref(),
-            entry.title.as_deref(),
-        )
-    })?;
-    tracing::debug!(%entry, actions = %rule.run, "Running on_open actions");
-    Some(rule.run.clone())
 }

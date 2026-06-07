@@ -6,6 +6,7 @@ use objc2_core_graphics::CGWindowID;
 use crate::core::WindowId;
 
 use super::super::accessibility::ExternalWindow;
+use super::NewWindow;
 use super::window::WindowState;
 
 #[derive(Clone)]
@@ -109,19 +110,17 @@ impl WindowRegistry {
         self.windows.iter().map(|(&cg_id, w)| (cg_id, w))
     }
 
-    pub(super) fn insert(
-        &mut self,
-        ax: Arc<dyn ExternalWindow>,
-        window_id: WindowId,
-        state: WindowState,
-        app_name: Option<String>,
-        bundle_id: Option<String>,
-        title: Option<String>,
-    ) -> Option<&ManagedWindow> {
+    pub(super) fn insert(&mut self, new: NewWindow, window_id: WindowId, state: WindowState) {
+        let NewWindow {
+            ax,
+            app_name,
+            bundle_id,
+            title,
+        } = new;
         let cg_id = ax.cg_id();
         let pid = ax.pid();
         if pid as u32 == std::process::id() {
-            return None;
+            return;
         }
         self.id_to_cg.insert(window_id, cg_id);
         self.pid_to_cg.entry(pid).or_default().push(cg_id);
@@ -139,7 +138,6 @@ impl WindowRegistry {
                 is_moving: false,
             },
         );
-        self.windows.get(&cg_id)
     }
 
     pub(super) fn set_pid_moving(&mut self, pid: i32, moving: bool) {

@@ -64,11 +64,10 @@ fn user_minimize_then_restore() {
 fn on_open_moves_window_to_workspace() {
     let mut config = Config::default();
     config.windows.on_open.push(WindowsOnOpenRule {
-        window: WindowsWindow {
-            process: Some("slack.exe".to_string()),
-            title: None,
-        },
-        run: Actions::new(vec!["move workspace 3".parse().unwrap()]),
+        process: Some("slack.exe".to_string()),
+        title: None,
+        mode: None,
+        workspace: Some("3".to_string()),
     });
     let mut env = TestEnv::new_with_config(config);
 
@@ -154,9 +153,10 @@ fn unmanageable_window_is_ignored() {
         .with_manageable(false),
     );
     let initial = arc.get_dim();
-    let w1 = env.add_window(arc);
 
-    // Window should not have been positioned -- still at initial dimension
+    assert!(!arc.manageable, "precondition");
+    let w1 = env.open_with(arc);
+
     assert_eq!(env.dim(w1), initial);
 }
 

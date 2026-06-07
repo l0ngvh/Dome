@@ -1,7 +1,6 @@
 use crate::config::{LayoutConfig, MasterConfig, Strategy};
 use crate::core::hub::{Hub, HubConfig};
 use crate::core::node::{Dimension, Length, WindowRestrictions};
-use crate::core::strategy::TilingAction;
 
 use super::{
     default_layout_for_tests, default_partition_tree_config_for_tests, setup_hub, snapshot,
@@ -38,8 +37,8 @@ fn setup_hub_with_layout(layout_cfg: LayoutConfig) -> Hub {
 #[test]
 fn sync_config_no_op_when_layout_unchanged() {
     let mut hub = setup_hub();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     let ws = hub.current_workspace();
     let focus_before = hub.focused_tiling_window(ws);
     let snap_before = snapshot(&hub);
@@ -51,8 +50,8 @@ fn sync_config_no_op_when_layout_unchanged() {
 #[test]
 fn sync_config_inactive_master_field_change_preserves_tree() {
     let mut hub = setup_hub();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     // Create a tabbed container to verify tree state survives.
     hub.toggle_container_layout();
     let ws = hub.current_workspace();
@@ -115,10 +114,10 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
 #[test]
 fn sync_config_switches_partition_tree_to_master() {
     let mut hub = setup_hub();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.sync_config(HubConfig {
         layout: layout(Strategy::Master, 0.5, 1),
@@ -170,10 +169,10 @@ fn sync_config_switches_partition_tree_to_master() {
 #[test]
 fn sync_config_switches_master_to_partition_tree() {
     let mut hub = setup_hub_with_layout(layout(Strategy::Master, 0.5, 1));
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.sync_config(HubConfig::default());
 
@@ -229,9 +228,9 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
         Length::new(30.0),
         Length::new(20.0),
     );
-    hub.insert_tiling();
-    let _float_id = hub.insert_float(float_dim);
-    let _fs_id = hub.insert_fullscreen(WindowRestrictions::None);
+    hub.insert_tiling(hub.current_workspace());
+    let _float_id = hub.insert_float(hub.current_workspace(), float_dim);
+    let _fs_id = hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::None);
 
     // With fullscreen on top, only it is visible.
     assert_snapshot!(snapshot(&hub), @"
@@ -339,23 +338,23 @@ fn sync_config_swap_empty_workspace_no_panic() {
 fn sync_config_swap_iterates_every_active_workspace() {
     let mut hub = setup_hub();
     // Workspace "0": two tiling windows.
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_workspace("1");
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     let float_dim = Dimension::new(
         Length::new(10.0),
         Length::new(5.0),
         Length::new(30.0),
         Length::new(20.0),
     );
-    let _float_id = hub.insert_float(float_dim);
+    let _float_id = hub.insert_float(hub.current_workspace(), float_dim);
 
     // Go back to workspace "0" so post-swap snapshot shows it.
     hub.focus_workspace("0");
@@ -454,18 +453,17 @@ fn sync_config_swap_iterates_every_active_workspace() {
 #[test]
 fn sync_config_swap_preserves_float_focus() {
     let mut hub = setup_hub();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     let float_dim = Dimension::new(
         Length::new(10.0),
         Length::new(5.0),
         Length::new(30.0),
         Length::new(20.0),
     );
-    let float_id = hub.insert_float(float_dim);
+    let float_id = hub.insert_float(hub.current_workspace(), float_dim);
     // Focus the float so is_float_focused becomes true.
     hub.set_focus(float_id);
 
-    let ws = hub.current_workspace();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

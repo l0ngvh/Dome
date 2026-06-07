@@ -5,8 +5,8 @@ use insta::assert_snapshot;
 fn toggle_direction_on_focused_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     hub.toggle_direction();
 
@@ -55,8 +55,8 @@ fn toggle_direction_on_focused_container() {
 fn toggle_direction_on_window() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @"
@@ -104,10 +104,10 @@ fn toggle_direction_on_window() {
 fn toggle_direction_on_window_nested() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_direction();
 
     assert_snapshot!(snapshot(&hub), @"

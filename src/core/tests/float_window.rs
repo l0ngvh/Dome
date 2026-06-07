@@ -6,12 +6,15 @@ use insta::assert_snapshot;
 #[test]
 fn insert_float_window() {
     let mut hub = setup();
-    hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    ));
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -49,13 +52,16 @@ fn insert_float_window() {
 #[test]
 fn float_window_with_tiling() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_float(Dimension::new(
-        Length::new(50.0),
-        Length::new(5.0),
-        Length::new(40.0),
-        Length::new(15.0),
-    ));
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(50.0),
+            Length::new(5.0),
+            Length::new(40.0),
+            Length::new(15.0),
+        ),
+    );
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -99,13 +105,16 @@ fn float_window_with_tiling() {
 #[test]
 fn move_float_to_workspace() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_float(Dimension::new(
-        Length::new(50.0),
-        Length::new(5.0),
-        Length::new(40.0),
-        Length::new(15.0),
-    ));
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(50.0),
+            Length::new(5.0),
+            Length::new(40.0),
+            Length::new(15.0),
+        ),
+    );
     hub.move_focused_to_workspace("1");
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -149,13 +158,16 @@ fn move_float_to_workspace() {
 #[test]
 fn focus_falls_back_to_tiling_after_float_delete() {
     let mut hub = setup();
-    hub.insert_tiling();
-    let f0 = hub.insert_float(Dimension::new(
-        Length::new(50.0),
-        Length::new(5.0),
-        Length::new(40.0),
-        Length::new(15.0),
-    ));
+    hub.insert_tiling(hub.current_workspace());
+    let f0 = hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(50.0),
+            Length::new(5.0),
+            Length::new(40.0),
+            Length::new(15.0),
+        ),
+    );
     // Float is focused after insert
     hub.delete_window(f0);
     // Focus should fall back to tiling window
@@ -201,18 +213,24 @@ fn focus_falls_back_to_tiling_after_float_delete() {
 #[test]
 fn focus_falls_back_to_last_float() {
     let mut hub = setup();
-    hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(10.0),
-    ));
-    let f1 = hub.insert_float(Dimension::new(
-        Length::new(50.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(10.0),
-    ));
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(10.0),
+        ),
+    );
+    let f1 = hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(50.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(10.0),
+        ),
+    );
     // f1 is focused
     hub.delete_window(f1);
     // Focus should fall back to f0
@@ -243,7 +261,7 @@ fn focus_falls_back_to_last_float() {
 #[test]
 fn toggle_tiling_to_float() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -287,12 +305,15 @@ fn toggle_tiling_to_float() {
 #[test]
 fn toggle_float_to_tiling() {
     let mut hub = setup();
-    hub.insert_float(Dimension::new(
-        Length::new(50.0),
-        Length::new(5.0),
-        Length::new(40.0),
-        Length::new(15.0),
-    ));
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(50.0),
+            Length::new(5.0),
+            Length::new(40.0),
+            Length::new(15.0),
+        ),
+    );
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -336,8 +357,8 @@ fn toggle_float_to_tiling() {
 #[test]
 fn toggle_tiling_to_float_scenarios() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     // Toggle W1 to float (covers toggle with existing tiling + position preservation at x=75)
     hub.toggle_float();
@@ -428,16 +449,19 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     // Regression test: workspace should not be deleted if it still has floats
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_workspace("1");
-    let f0 = hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    ));
-    let w1 = hub.insert_tiling();
+    let f0 = hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
+    let w1 = hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -533,13 +557,16 @@ fn delete_unfocused_float_window() {
     use crate::core::node::{Dimension, Length};
     let mut hub = setup();
 
-    let f0 = hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    ));
-    hub.insert_tiling();
+    let f0 = hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
+    hub.insert_tiling(hub.current_workspace());
 
     hub.delete_window(f0);
 
@@ -587,12 +614,15 @@ fn delete_float_workspace_pruning() {
     // Scenario 1: delete float on current workspace -- workspace kept
     {
         let mut hub = setup();
-        let f0 = hub.insert_float(Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ));
+        let f0 = hub.insert_float(
+            hub.current_workspace(),
+            Dimension::new(
+                Length::new(10.0),
+                Length::new(5.0),
+                Length::new(30.0),
+                Length::new(20.0),
+            ),
+        );
         hub.delete_window(f0);
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=None)
@@ -604,13 +634,16 @@ fn delete_float_workspace_pruning() {
     {
         let mut hub = setup();
         hub.focus_workspace("1");
-        hub.insert_tiling();
-        let f0 = hub.insert_float(Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ));
+        hub.insert_tiling(hub.current_workspace());
+        let f0 = hub.insert_float(
+            hub.current_workspace(),
+            Dimension::new(
+                Length::new(10.0),
+                Length::new(5.0),
+                Length::new(30.0),
+                Length::new(20.0),
+            ),
+        );
         hub.focus_workspace("0");
         hub.delete_window(f0);
         assert_snapshot!(snapshot(&hub), @"
@@ -628,18 +661,24 @@ fn delete_float_workspace_pruning() {
     {
         let mut hub = setup();
         hub.focus_workspace("1");
-        let f0 = hub.insert_float(Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ));
-        hub.insert_float(Dimension::new(
-            Length::new(50.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ));
+        let f0 = hub.insert_float(
+            hub.current_workspace(),
+            Dimension::new(
+                Length::new(10.0),
+                Length::new(5.0),
+                Length::new(30.0),
+                Length::new(20.0),
+            ),
+        );
+        hub.insert_float(
+            hub.current_workspace(),
+            Dimension::new(
+                Length::new(50.0),
+                Length::new(5.0),
+                Length::new(30.0),
+                Length::new(20.0),
+            ),
+        );
         hub.focus_workspace("0");
         hub.delete_window(f0);
         assert_snapshot!(snapshot(&hub), @"
@@ -657,12 +696,15 @@ fn delete_float_workspace_pruning() {
     {
         let mut hub = setup();
         hub.focus_workspace("1");
-        let f0 = hub.insert_float(Dimension::new(
-            Length::new(10.0),
-            Length::new(5.0),
-            Length::new(30.0),
-            Length::new(20.0),
-        ));
+        let f0 = hub.insert_float(
+            hub.current_workspace(),
+            Dimension::new(
+                Length::new(10.0),
+                Length::new(5.0),
+                Length::new(30.0),
+                Length::new(20.0),
+            ),
+        );
         hub.focus_workspace("0");
         hub.delete_window(f0);
         assert_snapshot!(snapshot(&hub), @"
@@ -680,13 +722,16 @@ fn delete_float_workspace_pruning() {
 #[test]
 fn insert_float_offscreen_does_not_scroll_viewport() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    hub.insert_float(Dimension::new(
-        Length::new(200.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    ));
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(200.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
 
     let _ws_id = hub.current_workspace();
     assert_snapshot!(snapshot(&hub), @"
@@ -731,12 +776,15 @@ fn insert_float_offscreen_does_not_scroll_viewport() {
 #[test]
 fn update_float_dimension_writes_new_dim() {
     let mut hub = setup();
-    hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    ));
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
     hub.update_float_dimension(
         WindowId::new(0),
         Dimension::new(
@@ -788,24 +836,33 @@ fn update_float_dimension_writes_new_dim() {
 #[test]
 fn update_float_dimension_preserves_z_order() {
     let mut hub = setup();
-    let a = hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    ));
-    hub.insert_float(Dimension::new(
-        Length::new(50.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    ));
-    hub.insert_float(Dimension::new(
-        Length::new(90.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    ));
+    let a = hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(50.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(90.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
     // Move a (index 0) without changing z-order or focus (c stays topmost/focused)
     hub.update_float_dimension(
         a,
@@ -861,7 +918,7 @@ fn update_float_dimension_preserves_z_order() {
 #[should_panic(expected = "is not Float")]
 fn update_float_dimension_on_tiling_panics() {
     let mut hub = setup();
-    let w = hub.insert_tiling();
+    let w = hub.insert_tiling(hub.current_workspace());
     hub.update_float_dimension(
         w,
         Dimension::new(
@@ -877,12 +934,15 @@ fn update_float_dimension_on_tiling_panics() {
 #[should_panic]
 fn update_float_dimension_on_unknown_panics() {
     let mut hub = setup();
-    hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    ));
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
     // WindowId(999) was never inserted -- panics in allocator.get()
     hub.update_float_dimension(
         WindowId::new(999),

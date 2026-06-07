@@ -6,10 +6,10 @@ fn focus_parent_twice_nested_containers() {
     let mut hub = setup();
 
     // Create nested containers
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_parent();
     hub.focus_parent();
@@ -61,8 +61,8 @@ fn focus_parent_twice_nested_containers() {
 fn focus_parent_twice_single_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_parent();
     hub.focus_parent();
@@ -112,8 +112,8 @@ fn focus_parent_twice_single_container() {
 fn focus_parent_then_toggle_float() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     // After focus_parent, focused_tiling_window() returns None (container highlighted).
     // toggle_float is a no-op: both windows stay tiling, container stays highlighted.
@@ -163,8 +163,8 @@ fn focus_parent_then_toggle_float() {
 #[test]
 fn focus_parent_then_toggle_fullscreen() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     // toggle_fullscreen is a no-op when a container is highlighted
     hub.toggle_fullscreen();
@@ -213,8 +213,8 @@ fn focus_parent_then_toggle_fullscreen() {
 #[test]
 fn container_highlight_persists_after_noop_toggle_float() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     // toggle_float is a no-op when a container is highlighted;
     // the container highlight should persist

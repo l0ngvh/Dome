@@ -4,9 +4,9 @@ use insta::assert_snapshot;
 #[test]
 fn auto_tile_sets_horizontal_spawn_mode_when_width_greater_than_height() {
     let mut hub = setup_with_automatic_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -55,21 +55,21 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
     // Going on a round trip to ensure that we can always create a horizontal container with 6
     // direct children, as the auto tile logic can get confused when width is approximately equal
     // to height, due to floating precision lost
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_direction();
     // Each window is 25x30, height > width, so spawn mode should be vertical
     hub.set_focus(w0);
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(6))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -170,12 +170,12 @@ fn auto_tile_preserves_tab_spawn_mode() {
 #[test]
 fn auto_tile_adjusts_after_toggle_direction() {
     let mut hub = setup_with_automatic_tiling();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_direction();
     hub.set_focus(w0);
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -322,7 +322,7 @@ fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
     ");
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))

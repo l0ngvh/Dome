@@ -5,19 +5,22 @@ use insta::assert_snapshot;
 #[test]
 fn focus_falls_back_to_container_focus_after_float_delete() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     // Focus W1 (middle window)
     hub.focus_left();
 
-    let f0 = hub.insert_float(Dimension::new(
-        Length::new(50.0),
-        Length::new(5.0),
-        Length::new(40.0),
-        Length::new(15.0),
-    ));
+    let f0 = hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(50.0),
+            Length::new(5.0),
+            Length::new(40.0),
+            Length::new(15.0),
+        ),
+    );
 
     hub.delete_window(f0);
 
@@ -67,17 +70,20 @@ fn focus_falls_back_to_container_focus_after_float_delete() {
 #[test]
 fn toggle_float_to_tiling_with_nested_containers() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_float(Dimension::new(
-        Length::new(50.0),
-        Length::new(5.0),
-        Length::new(40.0),
-        Length::new(15.0),
-    ));
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(50.0),
+            Length::new(5.0),
+            Length::new(40.0),
+            Length::new(15.0),
+        ),
+    );
     hub.toggle_float();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -127,8 +133,8 @@ fn toggle_float_to_tiling_with_nested_containers() {
 fn toggle_float_with_container_focused() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     // After focus_parent, focused_tiling_window() returns None (container highlighted).
     // toggle_float is a no-op: both windows stay tiling, container stays highlighted.
@@ -178,11 +184,11 @@ fn toggle_float_with_container_focused() {
 #[test]
 fn toggle_float_with_scrolled_viewport() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
-    let w1 = hub.insert_tiling();
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.set_window_constraint(w1, Some(100.0), None, None, None);
-    let w2 = hub.insert_tiling();
+    let w2 = hub.insert_tiling(hub.current_workspace());
     hub.set_window_constraint(w2, Some(100.0), None, None, None);
 
     // Focus w2 scrolls viewport right (offset = 150, since total 300px, screen 150px)
@@ -235,9 +241,9 @@ fn toggle_float_with_scrolled_viewport() {
 #[test]
 fn toggle_float_to_tiling_with_scrolled_viewport() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
-    let w1 = hub.insert_tiling();
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.set_window_constraint(w1, Some(100.0), None, None, None);
 
     // Make w1 a float

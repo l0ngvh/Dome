@@ -499,25 +499,14 @@ impl MacosWindow {
         bundle_id: Option<&str>,
         title: Option<&str>,
     ) -> bool {
-        if let Some(pattern) = &self.app
-            && !app.is_some_and(|a| pattern_matches(pattern, a))
-        {
-            return false;
-        }
-        if let Some(b) = &self.bundle_id
-            && bundle_id != Some(b.as_str())
-        {
-            return false;
-        }
-        if let Some(pattern) = &self.title
-            && !title.is_some_and(|t| pattern_matches(pattern, t))
-        {
-            return false;
-        }
-        if app.is_none() && bundle_id.is_none() && title.is_none() {
-            return false;
-        }
-        self.app.is_some() || self.bundle_id.is_some() || self.title.is_some()
+        macos_predicate_matches(
+            self.app.as_deref(),
+            self.bundle_id.as_deref(),
+            self.title.as_deref(),
+            app,
+            bundle_id,
+            title,
+        )
     }
 }
 
@@ -532,17 +521,12 @@ pub(crate) struct WindowsWindow {
 #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
 impl WindowsWindow {
     pub(crate) fn matches(&self, process: &str, title: Option<&str>) -> bool {
-        if let Some(pattern) = &self.process
-            && !pattern_matches(pattern, process)
-        {
-            return false;
-        }
-        if let Some(pattern) = &self.title
-            && !title.is_some_and(|t| pattern_matches(pattern, t))
-        {
-            return false;
-        }
-        self.process.is_some() || self.title.is_some()
+        windows_predicate_matches(
+            self.process.as_deref(),
+            self.title.as_deref(),
+            process,
+            title,
+        )
     }
 }
 
@@ -556,22 +540,85 @@ fn pattern_matches(pattern: &str, text: &str) -> bool {
     }
 }
 
-#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct MacosOnOpenRule {
-    #[serde(flatten)]
-    pub(crate) window: MacosWindow,
-    #[serde(default)]
-    pub(crate) run: Actions,
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum WindowMode {
+    Tiling,
+    Float,
+    Fullscreen,
 }
 
-#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
+#[cfg_attr(
+    not(target_os = "macos"),
+    expect(dead_code, reason = "macOS-only schema")
+)]
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct WindowsOnOpenRule {
-    #[serde(flatten)]
-    pub(crate) window: WindowsWindow,
+#[serde(deny_unknown_fields)]
+pub(crate) struct MacosOnOpenRule {
     #[serde(default)]
-    pub(crate) run: Actions,
+    pub(crate) app: Option<String>,
+    #[serde(default)]
+    pub(crate) bundle_id: Option<String>,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+    #[serde(default)]
+    pub(crate) mode: Option<WindowMode>,
+    #[serde(default)]
+    pub(crate) workspace: Option<String>,
+}
+
+#[cfg_attr(
+    not(target_os = "macos"),
+    expect(dead_code, reason = "macOS-only schema")
+)]
+impl MacosOnOpenRule {
+    pub(crate) fn matches(
+        &self,
+        app: Option<&str>,
+        bundle_id: Option<&str>,
+        title: Option<&str>,
+    ) -> bool {
+        macos_predicate_matches(
+            self.app.as_deref(),
+            self.bundle_id.as_deref(),
+            self.title.as_deref(),
+            app,
+            bundle_id,
+            title,
+        )
+    }
+}
+
+#[cfg_attr(
+    not(target_os = "windows"),
+    expect(dead_code, reason = "Windows-only schema")
+)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WindowsOnOpenRule {
+    #[serde(default)]
+    pub(crate) process: Option<String>,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+    #[serde(default)]
+    pub(crate) mode: Option<WindowMode>,
+    #[serde(default)]
+    pub(crate) workspace: Option<String>,
+}
+
+#[cfg_attr(
+    not(target_os = "windows"),
+    expect(dead_code, reason = "Windows-only schema")
+)]
+impl WindowsOnOpenRule {
+    pub(crate) fn matches(&self, process: &str, title: Option<&str>) -> bool {
+        windows_predicate_matches(
+            self.process.as_deref(),
+            self.title.as_deref(),
+            process,
+            title,
+        )
+    }
 }
 
 #[cfg_attr(not(target_os = "macos"), expect(dead_code))]
@@ -850,6 +897,62 @@ pub(crate) fn start_config_watcher(
     watcher.watch(&watch_dir, RecursiveMode::NonRecursive)?;
     tracing::info!(path = config_path, "Config watcher started");
     Ok(watcher)
+}
+
+/// Evaluates macOS on-open and ignore-rule predicates. Returns false when:
+/// - any specified predicate does not match its corresponding window field,
+/// - all window metadata fields are None (empty-predicate guard), or
+/// - no predicate field is set on the rule at all.
+fn macos_predicate_matches(
+    rule_app: Option<&str>,
+    rule_bundle_id: Option<&str>,
+    rule_title: Option<&str>,
+    app: Option<&str>,
+    bundle_id: Option<&str>,
+    title: Option<&str>,
+) -> bool {
+    if let Some(p) = rule_app
+        && !app.is_some_and(|a| pattern_matches(p, a))
+    {
+        return false;
+    }
+    // bundle_id matches by exact equality, not pattern_matches.
+    if let Some(b) = rule_bundle_id
+        && bundle_id != Some(b)
+    {
+        return false;
+    }
+    if let Some(p) = rule_title
+        && !title.is_some_and(|t| pattern_matches(p, t))
+    {
+        return false;
+    }
+    // Reject when all window metadata is absent. Without this a rule with
+    // e.g. only `app` set would spuriously match windows whose AX query
+    // returned no metadata at all.
+    if app.is_none() && bundle_id.is_none() && title.is_none() {
+        return false;
+    }
+    rule_app.is_some() || rule_bundle_id.is_some() || rule_title.is_some()
+}
+
+fn windows_predicate_matches(
+    rule_process: Option<&str>,
+    rule_title: Option<&str>,
+    process: &str,
+    title: Option<&str>,
+) -> bool {
+    if let Some(p) = rule_process
+        && !pattern_matches(p, process)
+    {
+        return false;
+    }
+    if let Some(p) = rule_title
+        && !title.is_some_and(|t| pattern_matches(p, t))
+    {
+        return false;
+    }
+    rule_process.is_some() || rule_title.is_some()
 }
 
 #[cfg(test)]

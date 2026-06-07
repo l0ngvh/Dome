@@ -20,7 +20,7 @@ use crate::font::FontConfig;
 use crate::picker::PickerEntry;
 use crate::platform::windows::MonitorInfo;
 use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
-use crate::platform::windows::dome::{CreateOverlay, Dome, FocusSinkApi, QueryDisplay};
+use crate::platform::windows::dome::{CreateOverlay, Dome, FocusSinkApi, NewWindow, QueryDisplay};
 use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
 use crate::theme::Flavor;
@@ -232,49 +232,38 @@ impl TestEnv {
             )
             .with_dimension(dim),
         );
-        self.add_window(ext)
+        self.open_with(ext)
     }
 
-    fn add_window(&mut self, ext: Arc<MockExternalHwnd>) -> HwndId {
+    /// Mirrors the runner's window-creation pipeline:
+    /// the inspection step (worker thread) gates on `is_manageable`, and only
+    /// manageable windows reach `Dome::add_window`. Unmanageable mocks are
+    /// only registered for `env.dim` lookup so tests can inspect their
+    /// untouched dimension.
+    fn open_with(&mut self, ext: Arc<MockExternalHwnd>) -> HwndId {
         let hwnd_id = ext.hwnd_id;
         self.mocks.insert(hwnd_id, ext.clone());
         if !ext.manageable {
             return hwnd_id;
         }
-        if ext.minimized.load(Ordering::Relaxed) {
-            // Mirrors production: `is_manageable` rejects already-minimized
-            // HWNDs at registration. They re-enter the create path when the
-            // user restores the window.
-            return hwnd_id;
-        }
         let dim = ext.get_dim();
-        let on_open = self.dome.try_manage_window(
-            ext.clone(),
-            ext.title.clone(),
-            ext.process.clone(),
-            (
-                ext.min_size.0,
-                ext.min_size.1,
-                ext.max_size.0,
-                ext.max_size.1,
-            ),
+        let constraints = (
+            ext.min_size.0,
+            ext.min_size.1,
+            ext.max_size.0,
+            ext.max_size.1,
+        );
+        self.dome.add_window(
+            NewWindow {
+                ext: ext.clone(),
+                title: ext.title.clone(),
+                process: ext.process.clone(),
+                constraints,
+                app_name: ext.app_name.clone(),
+            },
             dim,
             1,
-            ext.app_name.clone(),
         );
-        if let Some(actions) = on_open {
-            for action in &actions {
-                match action {
-                    Action::Focus(t) => self.dome.apply_focus(t),
-                    Action::Move(t) => self.dome.apply_move(t),
-                    Action::Toggle(t) => self.dome.apply_toggle(t),
-                    Action::Master(t) => self.dome.apply_master(t),
-                    Action::ToggleMinimized => self.dome.toggle_picker(),
-                    _ => {}
-                }
-            }
-        }
-        self.dome.apply_layout();
         hwnd_id
     }
 

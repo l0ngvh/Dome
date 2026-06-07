@@ -106,7 +106,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
 
             let op_str = match op {
                 Op::InsertTiling => {
-                    let id = hub.insert_tiling();
+                    let id = hub.insert_tiling(hub.current_workspace());
                     windows.push(id);
                     format!("InsertTiling -> {id}")
                 }
@@ -117,7 +117,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
                         Length::new(rng.random_range(10.0..50.0)),
                         Length::new(rng.random_range(5.0..15.0)),
                     );
-                    let id = hub.insert_float(dim);
+                    let id = hub.insert_float(hub.current_workspace(), dim);
                     windows.push(id);
                     format!("InsertFloat -> {id}")
                 }
@@ -127,7 +127,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, make_hub: fn() -> Hub) {
                         1 => WindowRestrictions::BlockAll,
                         _ => WindowRestrictions::ProtectFullscreen,
                     };
-                    let id = hub.insert_fullscreen(restrictions);
+                    let id = hub.insert_fullscreen(hub.current_workspace(), restrictions);
                     windows.push(id);
                     format!("InsertFullscreen({id}, {restrictions:?})")
                 }
@@ -427,7 +427,7 @@ fn strategy_smoke_test() {
     use crate::core::hub::MonitorLayout;
 
     let mut hub = setup();
-    let id = hub.insert_tiling();
+    let id = hub.insert_tiling(hub.current_workspace());
     let placements = hub.get_visible_placements();
 
     assert_eq!(placements.monitors.len(), 1);

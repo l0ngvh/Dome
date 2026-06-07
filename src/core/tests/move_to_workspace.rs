@@ -5,8 +5,8 @@ use insta::assert_snapshot;
 fn move_window_to_empty_workspace() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @"
@@ -90,10 +90,10 @@ fn move_window_to_empty_workspace() {
 fn move_window_to_workspace_with_windows() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_workspace("1");
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_workspace("0");
     hub.move_focused_to_workspace("1");
 
@@ -180,7 +180,7 @@ fn move_window_to_workspace_with_windows() {
 fn move_only_window_to_workspace() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @"
@@ -231,8 +231,8 @@ fn move_only_window_to_workspace() {
 fn move_to_same_workspace_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.move_focused_to_workspace("0");
 
     assert_snapshot!(snapshot(&hub), @"

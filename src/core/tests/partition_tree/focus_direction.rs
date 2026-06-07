@@ -5,9 +5,9 @@ use insta::assert_snapshot;
 fn focus_left_right_in_horizontal_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @"
@@ -98,10 +98,10 @@ fn focus_left_right_in_horizontal_container() {
 fn focus_up_down_in_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_up();
     assert_snapshot!(snapshot(&hub), @"
@@ -192,13 +192,13 @@ fn focus_up_down_in_vertical_container() {
 fn focus_right_selects_first_child_of_next_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_up();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     // Focus w0
     hub.focus_left();
@@ -298,12 +298,12 @@ fn focus_left_selects_last_child_of_previous_container() {
     let mut hub = setup();
 
     // Create: [w0, w1] [w2]
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -397,12 +397,12 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     let mut hub = setup();
 
     // Create: [w0, [w1, [w2, w3]]]
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @"
@@ -499,15 +499,15 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
 fn focus_down_from_nested_container_goes_to_grandparent_next() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_up();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_left();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -603,12 +603,12 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
     let mut hub = setup();
 
     // Create: [w0, w1] [w2]
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     // Focus w1 (last in nested container)
     hub.focus_left();
@@ -704,12 +704,12 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
 fn focus_down_into_horizontal_nested_container() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     // Move to middle
     hub.focus_left();
@@ -808,8 +808,8 @@ fn focus_down_into_horizontal_nested_container() {
 fn focus_left_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_left();
     hub.focus_left(); // Already at leftmost
 
@@ -858,8 +858,8 @@ fn focus_left_at_boundary_does_nothing() {
 fn focus_right_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_right(); // Already at rightmost
 
     assert_snapshot!(snapshot(&hub), @"
@@ -907,9 +907,9 @@ fn focus_right_at_boundary_does_nothing() {
 fn focus_up_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_up();
     hub.focus_up(); // Already at topmost
 
@@ -958,9 +958,9 @@ fn focus_up_at_boundary_does_nothing() {
 fn focus_down_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_down(); // Already at bottommost
 
     assert_snapshot!(snapshot(&hub), @"
@@ -1061,11 +1061,11 @@ fn focus_from_inside_tabbed_parent_goes_to_parent_sibling() {
 fn focus_into_container_uses_container_focus() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_up();
     assert_snapshot!(snapshot(&hub), @"

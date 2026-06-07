@@ -12,9 +12,9 @@ use crate::{
 #[test]
 fn scroll_vertically_to_focus() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w1 = hub.insert_tiling();
+    let w1 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, Some(20.0), None, None);
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
@@ -64,12 +64,12 @@ fn scroll_vertically_to_focus() {
 #[test]
 fn scroll_horizontally_to_focus() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling();
+    let w2 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w3 = hub.insert_tiling();
+    let w3 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, Some(50.0), None, None, None);
     hub.set_window_constraint(w2, Some(100.0), None, None, None);
@@ -123,11 +123,11 @@ fn scroll_horizontally_to_focus() {
 #[test]
 fn scroll_container_into_focus() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode(); // vertical
-    hub.insert_tiling();
-    let w3 = hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    let w3 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
     hub.set_window_constraint(w3, Some(100.0), None, None, None);
@@ -182,17 +182,17 @@ fn scroll_container_into_focus() {
 #[test]
 fn scroll_window_into_view_in_vertical_child_container() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w1 = hub.insert_tiling();
-    let w2 = hub.insert_tiling();
+    let w1 = hub.insert_tiling(hub.current_workspace());
+    let w2 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, Some(100.0), Some(20.0), None, None);
     hub.set_window_constraint(w1, Some(100.0), Some(20.0), None, None);
     hub.set_window_constraint(w2, Some(100.0), Some(20.0), None, None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_left();
 
     assert_snapshot!(snapshot(&hub), @"
@@ -293,18 +293,18 @@ fn scroll_view_port_also_scroll_max_constrained_window() {
         ..Default::default()
     });
 
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.set_focus(w0);
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(8))
@@ -365,24 +365,24 @@ fn laying_out_max_constrained_windows_leaves_no_hole() {
         ..Default::default()
     });
 
-    let w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.set_window_constraint(w1, None, None, Some(120.0), None);
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling();
+    let w2 = hub.insert_tiling(hub.current_workspace());
     hub.set_window_constraint(w2, None, Some(25.), None, None);
     hub.toggle_spawn_mode();
-    let w3 = hub.insert_tiling();
+    let w3 = hub.insert_tiling(hub.current_workspace());
     hub.set_window_constraint(w3, Some(50.), None, None, None);
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w5 = hub.insert_tiling();
+    let w5 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(10))

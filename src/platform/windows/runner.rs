@@ -10,7 +10,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
-use crate::platform::windows::dome::{Dome, HubEvent};
+use crate::platform::windows::dome::{Dome, HubEvent, NewWindow};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
 use crate::platform::windows::throttle::{Throttle, ThrottleResult};
@@ -237,39 +237,23 @@ impl Runner {
                 if !inspect.is_manageable() {
                     return None;
                 }
-                let rect = inspect.get_visible_rect();
-                let monitor = inspect.get_monitor();
                 Some((
-                    inspect.get_window_title(),
-                    inspect.get_process_name().unwrap_or_default(),
-                    inspect.get_size_constraints(),
-                    rect,
-                    monitor,
-                    inspect.get_app_display_name(),
+                    NewWindow {
+                        ext: manage,
+                        title: inspect.get_window_title(),
+                        process: inspect.get_process_name().unwrap_or_default(),
+                        constraints: inspect.get_size_constraints(),
+                        app_name: inspect.get_app_display_name(),
+                    },
+                    inspect.get_visible_rect(),
+                    inspect.get_monitor(),
                 ))
             },
             move |result, runner| {
-                let Some((title, process, constraints, rect, monitor, app_name)) = result else {
+                let Some((new, rect, monitor)) = result else {
                     return;
                 };
-                if runner.dome.registry_contains_hwnd(manage.id()) {
-                    return;
-                }
-                let actions = runner.dome.try_manage_window(
-                    manage,
-                    title,
-                    process,
-                    constraints,
-                    rect,
-                    monitor,
-                    app_name,
-                );
-                // Flush unconditionally: try_manage_window may have inserted a
-                // window even when returning None (inserted but no on_open rules).
-                runner.dome.apply_layout();
-                if let Some(actions) = actions {
-                    runner.handle_actions(&actions);
-                }
+                runner.dome.add_window(new, rect, monitor);
             },
         );
     }

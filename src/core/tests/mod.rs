@@ -764,7 +764,7 @@ impl Hub {
     /// Non-tabbed tests should keep calling `insert_tiling` directly to avoid
     /// churning the `titles=[...]` textual line in their snapshots.
     pub(crate) fn insert_tiling_titled(&mut self) -> WindowId {
-        let id = self.insert_tiling();
+        let id = self.insert_tiling(self.current_workspace());
         self.set_window_title(id, format!("W{}", id.get()));
         id
     }

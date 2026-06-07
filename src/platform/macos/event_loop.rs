@@ -17,8 +17,8 @@ use crate::keymap::KeymapState;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::GcdDispatcher;
 use crate::platform::macos::dome::{
-    DebounceBurst, Dome, HubEvent, WindowMove, compute_reconcile_all, compute_reconciliation,
-    compute_window_positions,
+    DebounceBurst, Dome, HubEvent, NewWindow, PendingAdd, WindowMove, compute_reconcile_all,
+    compute_reconciliation, compute_window_positions,
 };
 use crate::platform::macos::running_application::RunningApp;
 
@@ -244,7 +244,7 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
         },
         |result, runner| {
             if let Some(result) = result {
-                let on_open = runner.dome.reconcile_windows(
+                runner.dome.reconcile_windows(
                     &result.refresh,
                     &result.to_remove,
                     &result.to_minimize,
@@ -252,9 +252,6 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
                     &result.to_enter_native_fullscreen,
                     &result.to_exit_native_fullscreen,
                 );
-                for actions in on_open {
-                    process_actions(runner, &actions);
-                }
             }
         },
     );
@@ -360,9 +357,15 @@ fn dispatch_space_changed(runner: &mut DomeRunner) {
                 return;
             };
             if is_native_fs {
-                runner
-                    .dome
-                    .enter_native_fullscreen(cg_id, ax, app_name, bundle_id, title);
+                runner.dome.enter_native_fullscreen(
+                    cg_id,
+                    NewWindow {
+                        ax,
+                        app_name,
+                        bundle_id,
+                        title,
+                    },
+                );
             } else if let (Some(pos), Some(size)) = (pos, size) {
                 runner.dome.exit_native_fullscreen(cg_id, pos, size);
             }
@@ -393,8 +396,16 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
             // especially when there are multiple windows and viewport keeps being scrolled as
             // windows are inserted. So we gives these newly inserted windows extra synthetic
             // movement notification so constraint detection can work.
-            let added_pids: HashSet<i32> = result.to_add.iter().map(|w| w.ax.pid()).collect();
-            let on_open = runner.dome.reconcile_windows(
+            let added_pids: HashSet<i32> = result
+                .to_add
+                .iter()
+                .map(|p| match p {
+                    PendingAdd::Positioned { new, .. } | PendingAdd::NativeFullscreen { new } => {
+                        new.ax.pid()
+                    }
+                })
+                .collect();
+            runner.dome.reconcile_windows(
                 &result.refresh,
                 &result.to_remove,
                 &result.to_minimize,
@@ -402,9 +413,6 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
                 &result.to_enter_native_fullscreen,
                 &result.to_exit_native_fullscreen,
             );
-            for actions in on_open {
-                process_actions(runner, &actions);
-            }
             // Periodic position check for all observed PIDs — compensates for
             // missed move/resize events during operation.
             let pids_to_check: Vec<_> = runner

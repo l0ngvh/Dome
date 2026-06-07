@@ -11,8 +11,8 @@ use crate::core::tests::{
 #[test]
 fn set_min_size_respects_minimum_width() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
 
@@ -60,9 +60,9 @@ fn set_min_size_respects_minimum_width() {
 #[test]
 fn set_min_size_respects_minimum_height() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, Some(20.0), None, None);
 
@@ -110,9 +110,9 @@ fn set_min_size_respects_minimum_height() {
 #[test]
 fn set_min_size_distributes_remaining_space_equally() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
 
@@ -161,10 +161,10 @@ fn set_min_size_distributes_remaining_space_equally() {
 #[test]
 fn set_min_size_propagates_to_parent_container() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling();
+    let w2 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w2, Some(100.0), None, None, None);
 
@@ -214,8 +214,8 @@ fn set_min_size_propagates_to_parent_container() {
 #[test]
 fn children_combined_size_exceeds_screen_size() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
     hub.set_window_constraint(w1, Some(100.0), None, None, None);
@@ -264,12 +264,12 @@ fn children_combined_size_exceeds_screen_size() {
 #[test]
 fn children_combined_size_exceeds_container_size() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling();
+    let w2 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w3 = hub.insert_tiling();
+    let w3 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w2, Some(100.0), None, None, None);
     hub.set_window_constraint(w3, Some(100.0), None, None, None);
@@ -321,9 +321,9 @@ fn children_combined_size_exceeds_container_size() {
 #[test]
 fn children_combined_size_exceeds_screen_height() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w1 = hub.insert_tiling();
+    let w1 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, Some(20.0), None, None);
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
@@ -428,12 +428,12 @@ fn set_min_size_tabbed_child_container() {
 #[test]
 fn delete_window_with_min_size_shrinks_parent_container() {
     let mut hub = setup();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w1 = hub.insert_tiling();
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling();
-    let w3 = hub.insert_tiling();
+    let w2 = hub.insert_tiling(hub.current_workspace());
+    let w3 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w1, Some(100.0), None, None, None);
     hub.set_window_constraint(w2, Some(100.0), None, None, None);
@@ -531,8 +531,8 @@ fn delete_window_with_min_size_shrinks_parent_container() {
 #[test]
 fn delete_window_with_min_size_allows_siblings_to_expand() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
 
@@ -621,8 +621,8 @@ fn delete_window_with_min_size_allows_siblings_to_expand() {
 #[test]
 fn max_height_centers_window_vertically_in_horizontal_split() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, None, None, Some(15.0));
 
@@ -670,9 +670,9 @@ fn max_height_centers_window_vertically_in_horizontal_split() {
 #[test]
 fn max_width_centers_window_horizontally_in_vertical_split() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, None, Some(50.0), None);
 
@@ -720,8 +720,8 @@ fn max_width_centers_window_horizontally_in_vertical_split() {
 #[test]
 fn max_width_limits_window_in_horizontal_split() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, None, Some(30.0), None);
 
@@ -769,8 +769,8 @@ fn max_width_limits_window_in_horizontal_split() {
 #[test]
 fn both_windows_at_max_centered_collectively() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, None, Some(30.0), None);
     hub.set_window_constraint(w1, None, None, Some(30.0), None);
@@ -860,10 +860,10 @@ fn tabbed_window_with_max_size_is_centered() {
 #[test]
 fn nested_window_center_due_to_max_constraints() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling();
+    let w2 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, None, None, Some(10.0));
 
@@ -911,8 +911,8 @@ fn nested_window_center_due_to_max_constraints() {
 #[test]
 fn global_max_applies_to_all_windows() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.sync_config(HubConfig {
         layout: LayoutConfig {
@@ -970,8 +970,8 @@ fn global_max_applies_to_all_windows() {
 #[test]
 fn per_window_max_overrides_global() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.sync_config(HubConfig {
         layout: LayoutConfig {
@@ -1030,7 +1030,7 @@ fn per_window_max_overrides_global() {
 #[test]
 fn single_window_with_max_size_centered() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, None, Some(60.0), Some(15.0));
 
@@ -1069,7 +1069,7 @@ fn single_window_with_max_size_centered() {
 #[test]
 fn single_window_with_max_larger_than_screen_fills_screen() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, None, None, Some(200.0), Some(50.0));
 
@@ -1115,8 +1115,8 @@ fn single_window_with_max_larger_than_screen_fills_screen() {
 #[test]
 fn clearing_constraint_allows_window_to_resize() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
 
@@ -1206,8 +1206,8 @@ fn clearing_constraint_allows_window_to_resize() {
 #[test]
 fn new_max_clamps_existing_min() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.set_window_constraint(w0, Some(100.0), None, Some(50.0), None);
 
@@ -1255,8 +1255,8 @@ fn new_max_clamps_existing_min() {
 #[test]
 fn raising_min_above_existing_max_raises_max() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     // Set max_h=10. In a horizontal split with screen height 30,
     // w0 height is capped at 10, centered vertically.
@@ -1349,8 +1349,8 @@ fn raising_min_above_existing_max_raises_max() {
 #[test]
 fn setting_max_to_zero_clears_constraint() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     // Cap w0 height at 10. w0 takes 75x10 centered.
     hub.set_window_constraint(w0, None, None, None, Some(10.0));
@@ -1484,8 +1484,8 @@ fn setting_max_to_zero_clears_constraint() {
 #[test]
 fn setting_min_below_existing_max_keeps_max() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     // Cap w0 height at 20. w0 takes 75x20 centered.
     hub.set_window_constraint(w0, None, None, None, Some(20.0));
@@ -1576,7 +1576,7 @@ fn setting_min_below_existing_max_keeps_max() {
 #[test]
 fn window_max_smaller_than_global_min_width() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
 
     hub.sync_config(HubConfig {
         min_width: SizeConstraint::Pixels(Length::new(300.0)),
@@ -1628,7 +1628,7 @@ fn window_max_smaller_than_global_min_width() {
 #[test]
 fn window_max_height_smaller_than_global_min_height() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
 
     hub.sync_config(HubConfig {
         min_height: SizeConstraint::Pixels(Length::new(300.0)),
@@ -1670,8 +1670,8 @@ fn window_max_height_smaller_than_global_min_height() {
 #[test]
 fn window_max_width_smaller_than_global_min_width() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.sync_config(HubConfig {
         min_width: SizeConstraint::Pixels(Length::new(100.0)),

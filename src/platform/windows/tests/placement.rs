@@ -460,7 +460,7 @@ fn window_min_size_constraint_on_high_dpi_monitor() {
         )
         .with_min_size(2000.0, 100.0),
     );
-    let w1 = env.add_window(arc);
+    let w1 = env.open_with(arc);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     env.settle(10);
 

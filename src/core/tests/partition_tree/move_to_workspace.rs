@@ -5,10 +5,10 @@ use insta::assert_snapshot;
 fn move_container_to_workspace() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     hub.move_focused_to_workspace("1");
 
@@ -95,13 +95,13 @@ fn move_container_to_workspace() {
 fn move_container_to_workspace_with_matching_direction() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
 
     hub.focus_workspace("1");
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_workspace("0");
     hub.move_focused_to_workspace("1");
@@ -159,12 +159,12 @@ fn move_container_to_workspace_with_matching_direction() {
 fn move_horizontal_container_to_workspace_with_one_window() {
     let mut hub = setup();
 
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
 
     hub.focus_workspace("1");
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_workspace("0");
     hub.move_focused_to_workspace("1");
@@ -221,13 +221,13 @@ fn move_horizontal_container_to_workspace_with_one_window() {
 fn move_vertical_container_to_workspace_with_one_window() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
 
     hub.focus_workspace("1");
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.focus_workspace("0");
     hub.move_focused_to_workspace("1");
@@ -284,14 +284,14 @@ fn move_vertical_container_to_workspace_with_one_window() {
 fn move_container_to_workspace_with_container_direction_matching_workspace_spawn_direction() {
     let mut hub = setup();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
 
     hub.focus_workspace("1");
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
 
     hub.focus_workspace("0");
@@ -419,13 +419,13 @@ fn move_container_to_tabbed_workspace() {
 fn move_to_empty_workspace_resets_spawn_mode() {
     let mut hub = setup_with_automatic_tiling();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     hub.move_focused_to_workspace("1");
     hub.focus_workspace("1");
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -470,14 +470,14 @@ fn move_to_empty_workspace_resets_spawn_mode() {
     // Move a container (not just a window) to verify spawn mode resets for containers too
     let mut hub = setup_with_automatic_tiling();
 
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
 
     hub.move_focused_to_workspace("1");
     hub.focus_workspace("1");
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -526,16 +526,16 @@ fn move_to_empty_workspace_resets_spawn_mode() {
 fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
     let mut hub = setup_with_automatic_tiling();
 
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.focus_workspace("1");
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
     hub.toggle_spawn_mode();
-    hub.insert_tiling();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
 
     hub.toggle_float();
 
@@ -595,8 +595,8 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
 #[test]
 fn move_container_to_same_workspace_noop() {
     let mut hub = setup();
-    hub.insert_tiling();
-    hub.insert_tiling();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
     hub.focus_parent();
     // Target == current workspace ("0" is the default). Should be a no-op.
     hub.move_focused_to_workspace("0");

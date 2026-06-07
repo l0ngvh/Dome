@@ -1,13 +1,12 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crate::core::{Dimension, Length, MonitorId, Unit, WindowId, WindowRestrictions};
+use crate::core::{Dimension, Length, MonitorId, Unit, WindowId, WindowRestrictions, WorkspaceId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 
-use super::{DebounceBurst, Dome};
+use super::{DebounceBurst, Dome, NewWindow};
 
 const MAX_ENFORCEMENT_RETRIES: u8 = 5;
 
@@ -244,11 +243,11 @@ struct RawConstraint {
 /// pixel-exact comparison — floating-point coordinates would introduce rounding
 /// ambiguity in drift detection.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(super) struct RoundedDimension {
-    pub(super) x: i32,
-    pub(super) y: i32,
-    pub(super) width: i32,
-    pub(super) height: i32,
+pub(in crate::platform::macos) struct RoundedDimension {
+    pub(in crate::platform::macos) x: i32,
+    pub(in crate::platform::macos) y: i32,
+    pub(in crate::platform::macos) width: i32,
+    pub(in crate::platform::macos) height: i32,
 }
 
 impl RoundedDimension {
@@ -330,95 +329,73 @@ fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
 }
 
 impl Dome {
-    #[tracing::instrument(skip(self, ax), fields(window = tracing::field::Empty))]
-    pub(super) fn add_window(
+    #[tracing::instrument(skip_all, fields(window = %new))]
+    pub(super) fn add_tiling_window(
         &mut self,
-        ax: Arc<dyn ExternalWindow>,
+        new: NewWindow,
         dim: RoundedDimension,
-        app_name: Option<String>,
-        bundle_id: Option<String>,
-        title: Option<String>,
+        target_ws: WorkspaceId,
     ) -> WindowId {
-        let monitor = self
-            .monitor_registry
-            .find_monitor_at(dim.x as f32, dim.y as f32);
-        let is_borderless_fullscreen = monitor.is_some_and(|m| {
-            let mon = &m.dimension;
-            let tolerance = 2;
-            (dim.x - mon.x.value() as i32).abs() <= tolerance
-                && (dim.y - mon.y.value() as i32).abs() <= tolerance
-                && (dim.width - mon.width.value() as i32).abs() <= tolerance
-                && (dim.height - mon.height.value() as i32).abs() <= tolerance
-        });
-        if is_borderless_fullscreen {
-            let window_id = self
-                .hub
-                .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
-            if let Some(title) = title.clone() {
-                self.hub.set_window_title(window_id, title);
-            }
-            if let Some(entry) = self.registry.insert(
-                ax.clone(),
-                window_id,
-                WindowState::BorderlessFullscreen,
-                app_name.clone(),
-                bundle_id.clone(),
-                title.clone(),
-            ) {
-                tracing::Span::current().record("window", entry.to_string());
-            }
-            tracing::info!(%window_id, "New borderless fullscreen window");
-            self.pending_created.push(window_id);
-            window_id
-        } else {
-            let window_id = self.hub.insert_tiling();
-            if let Some(title) = title.clone() {
-                self.hub.set_window_title(window_id, title);
-            }
-            if let Some(entry) = self.registry.insert(
-                ax.clone(),
-                window_id,
-                WindowState::Positioned(PositionedState::Offscreen(OffscreenPlacement::new(dim))),
-                app_name,
-                bundle_id,
-                title,
-            ) {
-                tracing::Span::current().record("window", entry.to_string());
-            }
-            tracing::info!(%window_id, "New tiling window");
-            self.pending_created.push(window_id);
-            window_id
-        }
+        let window_id = self.hub.insert_tiling(target_ws);
+        let state =
+            WindowState::Positioned(PositionedState::Offscreen(OffscreenPlacement::new(dim)));
+        self.finalize_added_window(new, window_id, state);
+        tracing::info!(%window_id, "New tiling window");
+        window_id
     }
 
-    #[tracing::instrument(skip(self, ax), fields(window = tracing::field::Empty))]
+    #[tracing::instrument(skip_all, fields(window = %new))]
+    pub(super) fn add_float_window(
+        &mut self,
+        new: NewWindow,
+        dim: RoundedDimension,
+        target_ws: WorkspaceId,
+    ) -> WindowId {
+        // Convert the observed content rect back to an outer-frame dimension
+        // (mirrors what window_moved does for float observations).
+        let outer_dim = reverse_inset(dim, Length::<Unit>::new(self.config.border_size));
+        let window_id = self.hub.insert_float(target_ws, outer_dim);
+        let state = WindowState::Positioned(PositionedState::Float(FloatPlacement::new(dim)));
+        self.finalize_added_window(new, window_id, state);
+        tracing::info!(%window_id, "New float window");
+        window_id
+    }
+
+    #[tracing::instrument(skip_all, fields(window = %new))]
+    pub(super) fn add_borderless_fullscreen_window(
+        &mut self,
+        new: NewWindow,
+        target_ws: WorkspaceId,
+        restrictions: WindowRestrictions,
+    ) -> WindowId {
+        let window_id = self.hub.insert_fullscreen(target_ws, restrictions);
+        self.finalize_added_window(new, window_id, WindowState::BorderlessFullscreen);
+        tracing::info!(%window_id, ?restrictions, "New borderless fullscreen window");
+        window_id
+    }
+
+    #[tracing::instrument(skip_all, fields(window = %new))]
     pub(super) fn add_native_fullscreen_window(
         &mut self,
-        ax: Arc<dyn ExternalWindow>,
-        app_name: Option<String>,
-        bundle_id: Option<String>,
-        title: Option<String>,
+        new: NewWindow,
+        target_ws: WorkspaceId,
     ) -> WindowId {
         let window_id = self
             .hub
-            .insert_fullscreen(WindowRestrictions::ProtectFullscreen);
-        if let Some(ref title) = title {
-            self.hub.set_window_title(window_id, title.clone());
-        }
-        if let Some(entry) = self.registry.insert(
-            ax,
-            window_id,
-            WindowState::NativeFullscreen,
-            app_name,
-            bundle_id,
-            title,
-        ) {
-            tracing::Span::current().record("window", entry.to_string());
-        }
+            .insert_fullscreen(target_ws, WindowRestrictions::ProtectFullscreen);
+        self.finalize_added_window(new, window_id, WindowState::NativeFullscreen);
         tracing::info!(%window_id, "New native fullscreen window");
-        self.pending_created.push(window_id);
         window_id
     }
+
+    fn finalize_added_window(&mut self, new: NewWindow, window_id: WindowId, state: WindowState) {
+        if let Some(ref title) = new.title {
+            self.hub.set_window_title(window_id, title.clone());
+        }
+        self.registry.insert(new, window_id, state);
+        self.pending_created.push(window_id);
+    }
+
     #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]
     pub(super) fn show_tiling(&mut self, window_id: WindowId, dim: Dimension) {
         let Some(window) = self.registry.by_id_mut(window_id) else {
@@ -613,21 +590,11 @@ impl Dome {
             width: w,
             height: h,
         };
+        let is_borderless_fullscreen = self.is_borderless_fullscreen_at(new_placement);
         let monitors = self.monitor_registry.all_monitors();
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
-        let monitor = self
-            .monitor_registry
-            .find_monitor_at(new_placement.x as f32, new_placement.y as f32);
-        let is_borderless_fullscreen = monitor.is_some_and(|m| {
-            let mon = &m.dimension;
-            let tolerance = 2;
-            (new_placement.x - mon.x.value() as i32).abs() <= tolerance
-                && (new_placement.y - mon.y.value() as i32).abs() <= tolerance
-                && (new_placement.width - mon.width.value() as i32).abs() <= tolerance
-                && (new_placement.height - mon.height.value() as i32).abs() <= tolerance
-        });
 
         tracing::Span::current().record("window", window.to_string());
 
@@ -893,5 +860,19 @@ impl Dome {
         let window = self.registry.by_id_mut(window_id).unwrap();
         self.hub.minimize_window(window_id);
         window.is_minimized = true;
+    }
+
+    pub(super) fn is_borderless_fullscreen_at(&self, dim: RoundedDimension) -> bool {
+        let monitor = self
+            .monitor_registry
+            .find_monitor_at(dim.x as f32, dim.y as f32);
+        monitor.is_some_and(|m| {
+            let mon = &m.dimension;
+            let tolerance = 2;
+            (dim.x - mon.x.value() as i32).abs() <= tolerance
+                && (dim.y - mon.y.value() as i32).abs() <= tolerance
+                && (dim.width - mon.width.value() as i32).abs() <= tolerance
+                && (dim.height - mon.height.value() as i32).abs() <= tolerance
+        })
     }
 }

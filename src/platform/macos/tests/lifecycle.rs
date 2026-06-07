@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::action::{Action, Actions};
-use crate::config::{Config, MacosOnOpenRule, MacosWindow};
-use crate::platform::macos::dome::{ExtRefresh, NewWindow};
+use crate::config::{Config, MacosOnOpenRule, WindowMode};
+use crate::platform::macos::dome::{ExtRefresh, NewWindow, PendingAdd};
 
 use super::*;
 
@@ -14,16 +14,13 @@ fn discover_native_fullscreen_window() {
     let cg1 = macos.spawn_window(100, "Safari", "Google");
     let ax = macos.window(cg1);
     ax.set_native_fullscreen(true);
-    let nw = NewWindow {
-        ax: Arc::new(ax.clone()),
-        app_name: Some("Safari".to_owned()),
-        bundle_id: None,
-        title: Some("Google".to_owned()),
-        x: 0,
-        y: 0,
-        w: 1920,
-        h: 1080,
-        is_native_fullscreen: true,
+    let nw = PendingAdd::NativeFullscreen {
+        new: NewWindow {
+            ax: Arc::new(ax.clone()),
+            app_name: Some("Safari".to_owned()),
+            bundle_id: None,
+            title: Some("Google".to_owned()),
+        },
     };
     dome.reconcile_windows(&[], &[], &[], vec![nw], &[], &[]);
     macos.settle(&mut dome, 10);
@@ -36,12 +33,11 @@ fn on_open_moves_window_to_other_workspace() {
     let mut macos = MacOS::new();
     let mut config = Config::default();
     config.macos.on_open.push(MacosOnOpenRule {
-        window: MacosWindow {
-            app: Some("Slack".to_owned()),
-            bundle_id: None,
-            title: None,
-        },
-        run: Actions::new(vec!["move workspace 3".parse().unwrap()]),
+        app: Some("Slack".to_owned()),
+        bundle_id: None,
+        title: None,
+        mode: None,
+        workspace: Some("3".to_owned()),
     });
     let mut dome = macos.setup_dome_with_config(config);
 
@@ -49,37 +45,92 @@ fn on_open_moves_window_to_other_workspace() {
     dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
     macos.settle(&mut dome, 10);
 
-    // on_open rule moves Slack to workspace 3; hide_window called while Offscreen
+    // Rule moves Slack to workspace 3 internally. The window is offscreen
+    // because workspace 3 is not the active workspace.
     let cg2 = macos.spawn_window(200, "Slack", "General");
-    let on_open = dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg2)], &[], &[]);
-    for actions in on_open {
-        for action in &actions {
-            match action {
-                Action::Focus(t) => {
-                    dome.apply_focus(t);
-                    dome.flush_layout();
-                }
-                Action::Move(t) => {
-                    dome.apply_move(t);
-                    dome.flush_layout();
-                }
-                Action::Toggle(t) => {
-                    dome.apply_toggle(t);
-                    dome.flush_layout();
-                }
-                Action::Master(t) => {
-                    dome.apply_master(t);
-                    dome.flush_layout();
-                }
-                Action::ToggleMinimized => dome.toggle_picker(),
-                _ => {}
-            }
-        }
-    }
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg2)], &[], &[]);
     macos.settle(&mut dome, 10);
 
     assert!(macos.is_offscreen(cg2));
     assert!(!macos.is_offscreen(cg1));
+}
+
+#[test]
+fn on_open_rule_floats_window() {
+    let mut macos = MacOS::new();
+    let mut config = Config::default();
+    config.macos.on_open.push(MacosOnOpenRule {
+        app: Some("Slack".to_owned()),
+        bundle_id: None,
+        title: None,
+        mode: Some(WindowMode::Float),
+        workspace: None,
+    });
+    let mut dome = macos.setup_dome_with_config(config);
+
+    let cg_slack = macos.spawn_window(200, "Slack", "General");
+    let cg_safari = macos.spawn_window(201, "Safari", "Google");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg_slack), new_window(&macos, cg_safari)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+
+    // Focus the tiling sibling. An unfocused float goes offscreen, while an
+    // unfocused tiling window keeps its tile -- so an offscreen Slack proves
+    // the rule produced a float.
+    dome.mirror_clicked(cg_safari);
+    macos.settle(&mut dome, 10);
+    assert!(
+        macos.is_offscreen(cg_slack),
+        "float-rule window should be hidden offscreen when unfocused",
+    );
+    assert!(
+        !macos.is_offscreen(cg_safari),
+        "tiling sibling should remain on screen",
+    );
+}
+
+#[test]
+fn on_open_rule_fullscreens_window() {
+    let mut macos = MacOS::new();
+    let mut config = Config::default();
+    config.macos.on_open.push(MacosOnOpenRule {
+        app: Some("Slack".to_owned()),
+        bundle_id: None,
+        title: None,
+        mode: Some(WindowMode::Fullscreen),
+        workspace: None,
+    });
+    let mut dome = macos.setup_dome_with_config(config);
+
+    let cg_slack = macos.spawn_window(200, "Slack", "General");
+    let cg_safari = macos.spawn_window(201, "Safari", "Google");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg_slack), new_window(&macos, cg_safari)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+
+    // Slack opened as fullscreen pushes the tiling sibling offscreen. If the
+    // rule had been ignored, Slack would be tiling and both windows would
+    // share the screen.
+    assert!(
+        macos.is_offscreen(cg_safari),
+        "fullscreen workspace should hide tiling siblings offscreen",
+    );
+    assert!(
+        !macos.is_offscreen(cg_slack),
+        "the fullscreen window itself stays on screen",
+    );
 }
 
 #[test]

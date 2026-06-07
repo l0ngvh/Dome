@@ -6,9 +6,9 @@ use objc2_core_graphics::CGWindowID;
 use crate::config::MacosWindow;
 use crate::platform::macos::accessibility::{AXApp, ExternalWindow};
 use crate::platform::macos::dispatcher::DispatcherMarker;
-use crate::platform::macos::dome::NewWindow;
 use crate::platform::macos::dome::registry::ManagedWindow;
-use crate::platform::macos::dome::window::WindowState;
+use crate::platform::macos::dome::window::{RoundedDimension, WindowState};
+use crate::platform::macos::dome::{NewWindow, PendingAdd};
 use crate::platform::macos::running_application::RunningApp;
 
 /// A window currently returned by the app's `kAXWindowsAttribute` query
@@ -32,7 +32,7 @@ pub(in crate::platform::macos) struct ExitNativeFullscreen {
 pub(in crate::platform::macos) struct ReconcileResult {
     pub(in crate::platform::macos) to_remove: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_minimize: Vec<CGWindowID>,
-    pub(in crate::platform::macos) to_add: Vec<NewWindow>,
+    pub(in crate::platform::macos) to_add: Vec<PendingAdd>,
     pub(in crate::platform::macos) to_enter_native_fullscreen: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_exit_native_fullscreen: Vec<ExitNativeFullscreen>,
     pub(in crate::platform::macos) refresh: Vec<ExtRefresh>,
@@ -43,7 +43,7 @@ pub(in crate::platform::macos) struct ReconcileAllResult {
     pub(in crate::platform::macos) hidden_pids: Vec<i32>,
     pub(in crate::platform::macos) to_remove: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_minimize: Vec<CGWindowID>,
-    pub(in crate::platform::macos) to_add: Vec<NewWindow>,
+    pub(in crate::platform::macos) to_add: Vec<PendingAdd>,
     pub(in crate::platform::macos) to_enter_native_fullscreen: Vec<CGWindowID>,
     pub(in crate::platform::macos) to_exit_native_fullscreen: Vec<ExitNativeFullscreen>,
     pub(in crate::platform::macos) refresh: Vec<ExtRefresh>,
@@ -159,30 +159,33 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         let app_name = ax.app_name().map(str::to_owned);
         let bundle_id = ax.bundle_id().map(str::to_owned);
         let title = ax.title().map(str::to_owned);
-        if should_ignore(
-            app_name.as_deref(),
-            bundle_id.as_deref(),
-            title.as_deref(),
-            ignore_rules,
-        ) {
-            continue;
-        }
-        let Ok((x, y)) = ax.get_position() else {
-            continue;
-        };
-        let Ok((w, h)) = ax.get_size() else {
-            continue;
-        };
-        to_add.push(NewWindow {
-            x: x.value() as i32,
-            y: y.value() as i32,
-            w: w.value() as i32,
-            h: h.value() as i32,
-            is_native_fullscreen: ax.is_native_fullscreen(),
+        let new = NewWindow {
+            ax: Arc::new(ax),
             app_name,
             bundle_id,
             title,
-            ax: Arc::new(ax),
+        };
+        if should_ignore(&new, ignore_rules) {
+            continue;
+        }
+        if new.ax.is_native_fullscreen(marker) {
+            to_add.push(PendingAdd::NativeFullscreen { new });
+            continue;
+        }
+        let Ok((x, y)) = new.ax.get_position(marker) else {
+            continue;
+        };
+        let Ok((w, h)) = new.ax.get_size(marker) else {
+            continue;
+        };
+        to_add.push(PendingAdd::Positioned {
+            new,
+            dim: RoundedDimension {
+                x: x.value() as i32,
+                y: y.value() as i32,
+                width: w.value() as i32,
+                height: h.value() as i32,
+            },
         });
     }
 
@@ -292,15 +295,16 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
     }
 }
 
-fn should_ignore(
-    app_name: Option<&str>,
-    bundle_id: Option<&str>,
-    title: Option<&str>,
-    rules: &[MacosWindow],
-) -> bool {
-    let matched = rules.iter().find(|r| r.matches(app_name, bundle_id, title));
+fn should_ignore(new: &NewWindow, rules: &[MacosWindow]) -> bool {
+    let matched = rules.iter().find(|r| {
+        r.matches(
+            new.app_name.as_deref(),
+            new.bundle_id.as_deref(),
+            new.title.as_deref(),
+        )
+    });
     if let Some(rule) = matched {
-        tracing::debug!(?app_name, ?title, ?rule, "Window ignored by rule");
+        tracing::debug!(%new, ?rule, "Window ignored by rule");
         return true;
     }
     false

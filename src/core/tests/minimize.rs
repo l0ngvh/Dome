@@ -5,8 +5,8 @@ use insta::assert_snapshot;
 #[test]
 fn minimize_tiling_window() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w1);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -51,13 +51,16 @@ fn minimize_tiling_window() {
 #[test]
 fn minimize_float_window() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(40.0),
-        Length::new(10.0),
-    ));
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(40.0),
+            Length::new(10.0),
+        ),
+    );
     hub.minimize_window(w1);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -102,8 +105,8 @@ fn minimize_float_window() {
 #[test]
 fn minimize_fullscreen_window() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.set_fullscreen(w1, WindowRestrictions::None);
     hub.minimize_window(w1);
     assert_snapshot!(snapshot(&hub), @"
@@ -149,7 +152,7 @@ fn minimize_fullscreen_window() {
 #[test]
 fn minimize_already_minimized_noop() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w0);
     hub.minimize_window(w0);
     assert_eq!(hub.minimized_windows().len(), 1);
@@ -158,8 +161,8 @@ fn minimize_already_minimized_noop() {
 #[test]
 fn unminimize_restores_to_current_workspace() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w1);
     hub.focus_workspace("1");
     hub.unminimize_window(w1);
@@ -205,7 +208,7 @@ fn unminimize_restores_to_current_workspace() {
 #[test]
 fn unminimize_not_minimized_noop() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.unminimize_window(w0);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -249,8 +252,8 @@ fn unminimize_not_minimized_noop() {
 #[test]
 fn delete_minimized_window() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w1);
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @"
@@ -295,7 +298,7 @@ fn delete_minimized_window() {
 #[test]
 fn delete_minimized_window_after_workspace_pruned() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w0);
     hub.focus_workspace("1");
     hub.delete_window(w0);
@@ -305,8 +308,8 @@ fn delete_minimized_window_after_workspace_pruned() {
 #[test]
 fn set_focus_on_minimized_unminimizes() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w1);
     hub.set_focus(w1);
     assert!(hub.minimized_windows().is_empty());
@@ -354,8 +357,8 @@ fn set_focus_on_minimized_unminimizes() {
 #[test]
 fn set_fullscreen_on_minimized_window() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w1);
     hub.set_fullscreen(w1, WindowRestrictions::None);
     assert!(hub.minimized_windows().is_empty());
@@ -401,7 +404,7 @@ fn set_fullscreen_on_minimized_window() {
 #[test]
 fn minimize_last_window_on_workspace() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w0);
     assert_eq!(hub.minimized_windows().len(), 1);
     assert_snapshot!(snapshot(&hub), @"
@@ -414,13 +417,16 @@ fn minimize_last_window_on_workspace() {
 #[test]
 fn minimize_last_tiling_with_floats_present() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    let _w1 = hub.insert_float(Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(40.0),
-        Length::new(10.0),
-    ));
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    let _w1 = hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(40.0),
+            Length::new(10.0),
+        ),
+    );
     hub.minimize_window(w0);
     assert_eq!(hub.minimized_windows().len(), 1);
     let ws_id = hub.current_workspace();
@@ -453,7 +459,7 @@ fn minimize_last_tiling_with_floats_present() {
 #[test]
 fn set_window_constraint_on_minimized_no_panic() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w0);
     hub.set_window_constraint(w0, Some(100.0), Some(50.0), None, None);
     assert_eq!(hub.minimized_windows().len(), 1);
@@ -462,7 +468,7 @@ fn set_window_constraint_on_minimized_no_panic() {
 #[test]
 fn set_window_constraint_on_minimized_pruned_workspace() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w0);
     hub.focus_workspace("1");
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
@@ -471,7 +477,7 @@ fn set_window_constraint_on_minimized_pruned_workspace() {
 #[test]
 fn unminimize_after_workspace_pruned() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w0);
     hub.focus_workspace("1");
     hub.unminimize_window(w0);
@@ -518,8 +524,8 @@ fn unminimize_after_workspace_pruned() {
 #[test]
 fn minimized_window_entries_returns_id_and_title() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.set_window_title(w0, "Firefox".into());
     hub.set_window_title(w1, "Terminal".into());
     hub.minimize_window(w0);
@@ -534,7 +540,7 @@ fn minimized_window_entries_returns_id_and_title() {
 #[test]
 fn minimized_window_entries_empty_when_none_minimized() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
     let entries = hub.minimized_window_entries();
     assert!(entries.is_empty());
 }
@@ -542,8 +548,8 @@ fn minimized_window_entries_empty_when_none_minimized() {
 #[test]
 fn unminimize_deleted_window_is_noop() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w1);
     hub.delete_window(w1);
     hub.unminimize_window(w1);
@@ -553,14 +559,14 @@ fn unminimize_deleted_window_is_noop() {
 #[test]
 fn unminimize_float_window_restores_mode_and_dimension() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
     let float_dim = Dimension::new(
         Length::new(10.0),
         Length::new(5.0),
         Length::new(40.0),
         Length::new(10.0),
     );
-    let w_float = hub.insert_float(float_dim);
+    let w_float = hub.insert_float(hub.current_workspace(), float_dim);
 
     hub.minimize_window(w_float);
     assert_eq!(hub.minimized_windows().len(), 1);
@@ -610,8 +616,8 @@ fn unminimize_float_window_restores_mode_and_dimension() {
 #[test]
 fn unminimize_fullscreen_window_restores_mode_and_restrictions() {
     let mut hub = setup();
-    let _w0 = hub.insert_tiling();
-    let w1 = hub.insert_tiling();
+    let _w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
     hub.set_fullscreen(w1, WindowRestrictions::BlockAll);
 
     hub.minimize_window(w1);

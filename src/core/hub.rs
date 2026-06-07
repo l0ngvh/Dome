@@ -563,43 +563,40 @@ impl Hub {
         }
     }
 
-    /// Insert a new window as tiling to the current workspace.
-    /// Update workspace focus to the newly inserted window.
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_tiling(&mut self) -> WindowId {
-        let current_ws = self.current_workspace();
-        let window_id = self.access.windows.allocate(Window::tiling(current_ws));
+    pub(crate) fn insert_tiling(&mut self, target_ws: WorkspaceId) -> WindowId {
+        let window_id = self.access.windows.allocate(Window::tiling(target_ws));
         self.strategy
-            .attach_window(&mut self.access, window_id, current_ws);
-        window_id
-    }
-
-    /// Insert a new window as float to the current workspace.
-    /// Update workspace focus to the newly inserted window.
-    #[cfg_attr(
-        all(target_os = "macos", not(test)),
-        expect(dead_code, reason = "used on Windows")
-    )]
-    #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_float(&mut self, dimension: Dimension) -> WindowId {
-        let current_ws = self.current_workspace();
-        let window_id = self
-            .access
-            .windows
-            .allocate(Window::float(current_ws, dimension));
-        tracing::debug!("Inserting float window {window_id} with dimension {dimension:?}");
-        self.attach_float_to_workspace(current_ws, window_id, dimension);
+            .attach_window(&mut self.access, window_id, target_ws);
         window_id
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_fullscreen(&mut self, restrictions: WindowRestrictions) -> WindowId {
-        let current_ws = self.current_workspace();
+    pub(crate) fn insert_float(
+        &mut self,
+        target_ws: WorkspaceId,
+        dimension: Dimension,
+    ) -> WindowId {
         let window_id = self
             .access
             .windows
-            .allocate(Window::fullscreen(current_ws, restrictions));
-        self.attach_fullscreen_to_workspace(current_ws, window_id);
+            .allocate(Window::float(target_ws, dimension));
+        tracing::debug!(%window_id, ?dimension, "Inserting float window");
+        self.attach_float_to_workspace(target_ws, window_id, dimension);
+        window_id
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub(crate) fn insert_fullscreen(
+        &mut self,
+        target_ws: WorkspaceId,
+        restrictions: WindowRestrictions,
+    ) -> WindowId {
+        let window_id = self
+            .access
+            .windows
+            .allocate(Window::fullscreen(target_ws, restrictions));
+        self.attach_fullscreen_to_workspace(target_ws, window_id);
         self.set_focus(window_id);
         window_id
     }
@@ -735,6 +732,13 @@ impl Hub {
         }
 
         tracing::debug!("Moved to workspace");
+    }
+
+    pub(crate) fn resolve_workspace(&mut self, name: Option<&str>) -> WorkspaceId {
+        match name {
+            Some(n) => self.get_or_create_workspace(n),
+            None => self.current_workspace(),
+        }
     }
 
     pub(super) fn get_or_create_workspace(&mut self, name: &str) -> WorkspaceId {
