@@ -6,16 +6,12 @@ use crate::core::strategy::TilingStrategy;
 use super::PartitionTreeStrategy;
 
 impl PartitionTreeStrategy {
-    pub(super) fn focused_split_child(&self, hub: &HubAccess) -> Option<Child> {
+    pub(super) fn focused_child(&self, hub: &HubAccess) -> Option<Child> {
         let ws_id = hub.monitors.get(hub.focused_monitor).active_workspace;
         self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling)
     }
 
-    pub(super) fn focused_split_child_in(
-        &self,
-        _hub: &HubAccess,
-        ws_id: WorkspaceId,
-    ) -> Option<Child> {
+    pub(super) fn focused_child_in(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child> {
         self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling)
     }
 
@@ -26,10 +22,10 @@ impl PartitionTreeStrategy {
         forward: bool,
     ) {
         let current_ws = hub.monitors.get(hub.focused_monitor).active_workspace;
-        let Some(child) = self.focused_split_child_in(hub, current_ws) else {
+        let Some(child) = self.focused_child_in(hub, current_ws) else {
             return;
         };
-        let Parent::Container(direct_parent_id) = self.get_parent(child) else {
+        let Parent::Container(direct_parent_id) = self.parent(child) else {
             return;
         };
 
@@ -54,63 +50,49 @@ impl PartitionTreeStrategy {
             }
         }
 
-        let mut current_anchor = Child::Container(direct_parent_id);
-
-        for _ in crate::core::bounded_loop() {
-            let parent = self.get_parent(current_anchor);
-            match parent {
-                Parent::Container(container_id) => {
-                    let container = self.containers.get(container_id);
-
-                    if container.direction().is_none_or(|d| d != direction) {
-                        current_anchor = Child::Container(container_id);
-                        continue;
-                    }
-
-                    let pos = container
-                        .children
-                        .iter()
-                        .position(|c| *c == current_anchor)
-                        .unwrap();
-                    let insert_pos = if forward { pos + 1 } else { pos };
-
-                    tracing::debug!(
-                        ?child, from = %direct_parent_id, to = %container_id, insert_pos, "Moving child to ancestor"
-                    );
-                    self.detach_split_child_from_container(direct_parent_id, child);
-                    self.attach_split_child_to_container(
-                        hub,
-                        child,
-                        container_id,
-                        Some(insert_pos),
-                    );
-                    self.layout_workspace(hub, current_ws);
-                    self.set_focus_child(hub, child);
-                    return;
-                }
-                Parent::Workspace(workspace_id) => {
-                    tracing::debug!(?child, %workspace_id, "Moving child to new root container");
-                    self.detach_split_child_from_container(direct_parent_id, child);
-                    let root = self.ws_state(workspace_id).root.unwrap();
-
-                    let children = if forward {
-                        vec![root, child]
-                    } else {
-                        vec![child, root]
-                    };
-                    let new_root_id = self.replace_anchor_with_container(
-                        hub,
-                        children,
-                        root,
-                        SpawnMode::from_direction(direction),
-                    );
-                    self.ws_state_mut(workspace_id).root = Some(Child::Container(new_root_id));
-
-                    self.layout_workspace(hub, current_ws);
-                    self.set_focus_child(hub, child);
-                    return;
-                }
+        let mut found_ancestor = None;
+        for (current_anchor, container_id) in self.ancestors_of(Child::Container(direct_parent_id))
+        {
+            let container = self.containers.get(container_id);
+            if container.direction().is_none_or(|d| d != direction) {
+                continue;
             }
+            let pos = container
+                .children
+                .iter()
+                .position(|c| *c == current_anchor)
+                .unwrap();
+            let insert_pos = if forward { pos + 1 } else { pos };
+            found_ancestor = Some((container_id, insert_pos));
+            break;
+        }
+
+        if let Some((container_id, insert_pos)) = found_ancestor {
+            tracing::debug!(
+                ?child, from = %direct_parent_id, to = %container_id, insert_pos, "Moving child to ancestor"
+            );
+            self.detach_child_from_container(direct_parent_id, child);
+            self.attach_child_to_container(hub, child, container_id, Some(insert_pos));
+            self.layout_workspace(hub, current_ws);
+            self.set_focus_child(hub, child);
+        } else {
+            tracing::debug!(?child, %current_ws, "Moving child to new root container");
+            self.detach_child_from_container(direct_parent_id, child);
+            let root = self.ws_state(current_ws).root.unwrap();
+            let children = if forward {
+                vec![root, child]
+            } else {
+                vec![child, root]
+            };
+            let new_root_id = self.replace_anchor_with_container(
+                hub,
+                children,
+                root,
+                SpawnMode::from_direction(direction),
+            );
+            self.ws_state_mut(current_ws).root = Some(Child::Container(new_root_id));
+            self.layout_workspace(hub, current_ws);
+            self.set_focus_child(hub, child);
         }
     }
 
@@ -120,26 +102,16 @@ impl PartitionTreeStrategy {
         direction: Direction,
         forward: bool,
     ) {
-        let Some(focused) = self.focused_split_child(hub) else {
+        let Some(focused) = self.focused_child(hub) else {
             return;
         };
 
-        let mut current = focused;
-
-        for _ in crate::core::bounded_loop() {
-            let Parent::Container(container_id) = self.get_parent(current) else {
-                return;
-            };
-            if self
-                .containers
-                .get(container_id)
-                .direction()
-                .is_none_or(|d| d != direction)
-            {
-                current = Child::Container(container_id);
+        let mut sibling_found = None;
+        for (current, parent_id) in self.ancestors_of(focused) {
+            let container = self.containers.get(parent_id);
+            if container.direction().is_none_or(|d| d != direction) {
                 continue;
             }
-            let container = self.containers.get(container_id);
             let pos = container.position_of(current);
             let has_sibling = if forward {
                 pos + 1 < container.children.len()
@@ -148,37 +120,32 @@ impl PartitionTreeStrategy {
             };
             if has_sibling {
                 let sibling_pos = if forward { pos + 1 } else { pos - 1 };
-                let sibling = container.children[sibling_pos];
-                let focus_target = match sibling {
-                    Child::Window(_) => sibling,
-                    Child::Container(id) => self.containers.get(id).focused,
-                };
-                tracing::debug!(?direction, forward, from = ?focused, to = ?focus_target, "Changing focus");
-                self.set_focus_child(hub, focus_target);
-                return;
+                sibling_found = Some(container.children[sibling_pos]);
+                break;
             }
-            current = Child::Container(container_id);
+        }
+        if let Some(sibling) = sibling_found {
+            let focus_target = self.descend_to_focused(sibling);
+            tracing::debug!(?direction, forward, from = ?focused, to = ?focus_target, "Changing focus");
+            self.set_focus_child(hub, focus_target);
         }
     }
 
-    pub(super) fn toggle_direction(&mut self, hub: &mut HubAccess) {
+    pub(super) fn toggle_focused_layout_direction(&mut self, hub: &mut HubAccess) {
         let workspace_id = hub.monitors.get(hub.focused_monitor).active_workspace;
-        let Some(focused) = self.focused_split_child_in(hub, workspace_id) else {
+        let Some(focused) = self.focused_child_in(hub, workspace_id) else {
             return;
         };
         let mut root_id = match focused {
             Child::Container(id) => id,
             Child::Window(_) => {
-                let Parent::Container(id) = self.get_parent(focused) else {
+                let Parent::Container(id) = self.parent(focused) else {
                     return;
                 };
                 id
             }
         };
-        for _ in crate::core::bounded_loop() {
-            let Parent::Container(parent_id) = self.containers.get(root_id).parent else {
-                break;
-            };
+        for (_, parent_id) in self.ancestors_of(Child::Container(root_id)) {
             if self.containers.get(parent_id).is_tabbed {
                 break;
             }
@@ -189,7 +156,7 @@ impl PartitionTreeStrategy {
         self.layout_workspace(hub, workspace_id);
     }
 
-    pub(super) fn toggle_layout_for_container(
+    pub(super) fn convert_container_layout(
         &mut self,
         hub: &mut HubAccess,
         container_id: ContainerId,
@@ -214,7 +181,7 @@ impl PartitionTreeStrategy {
                 .unwrap();
             self.containers
                 .get_mut(container_id)
-                .set_active_tab(active_tab);
+                .set_active_tab_to_child(active_tab);
         } else {
             // Toggled from tabbed to split
             self.maintain_direction_invariance(Parent::Container(container_id));
@@ -242,7 +209,10 @@ impl PartitionTreeStrategy {
         let new_mode = current_mode.toggle();
 
         match focused {
-            Child::Container(id) => self.containers.get_mut(id).switch_spawn_mode(new_mode),
+            Child::Container(id) => self
+                .containers
+                .get_mut(id)
+                .set_spawn_mode_keep_history(new_mode),
             Child::Window(id) => {
                 let td = self.tiling_data_mut(id);
                 td.spawn_mode = td.spawn_mode.switch_to(new_mode);
@@ -263,20 +233,20 @@ impl PartitionTreeStrategy {
                 if w.is_float() || w.is_fullscreen() {
                     return;
                 }
-                match self.get_parent(Child::Window(id)) {
+                match self.parent(Child::Window(id)) {
                     Parent::Container(cid) => cid,
                     Parent::Workspace(_) => return,
                 }
             }
         };
-        self.toggle_layout_for_container(hub, container_id);
+        self.convert_container_layout(hub, container_id);
     }
 
     pub(super) fn focus_tab(&mut self, hub: &mut HubAccess, forward: bool) {
-        let Some(focused) = self.focused_split_child(hub) else {
+        let Some(focused) = self.focused_child(hub) else {
             return;
         };
-        let Some(container_id) = self.find_tabbed_ancestor(focused) else {
+        let Some(container_id) = self.find_tabbed_self_or_ancestor(focused) else {
             return;
         };
         let new_child = self
@@ -284,10 +254,7 @@ impl PartitionTreeStrategy {
             .get_mut(container_id)
             .switch_tab(forward)
             .unwrap();
-        let focus_target = match new_child {
-            Child::Window(_) => new_child,
-            Child::Container(id) => self.containers.get(id).focused,
-        };
+        let focus_target = self.descend_to_focused(new_child);
         tracing::debug!(forward, %container_id, ?focus_target, "Focusing tab");
         self.set_focus_child(hub, focus_target);
     }
@@ -305,10 +272,7 @@ impl PartitionTreeStrategy {
         else {
             return;
         };
-        let focus_target = match new_child {
-            Child::Window(_) => new_child,
-            Child::Container(id) => self.containers.get(id).focused,
-        };
+        let focus_target = self.descend_to_focused(new_child);
         self.set_focus_child(hub, focus_target);
     }
 
@@ -317,10 +281,10 @@ impl PartitionTreeStrategy {
     /// No managed windows should receive keyboard focus in this mode.
     /// Move-to-workspace operates on the whole container.
     pub(super) fn focus_parent(&mut self, hub: &mut HubAccess) {
-        let Some(focused) = self.focused_split_child(hub) else {
+        let Some(focused) = self.focused_child(hub) else {
             return;
         };
-        let Parent::Container(container_id) = self.get_parent(focused) else {
+        let Parent::Container(container_id) = self.parent(focused) else {
             tracing::debug!("Cannot focus parent of workspace root, ignoring");
             return;
         };

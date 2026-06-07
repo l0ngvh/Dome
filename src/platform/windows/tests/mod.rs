@@ -30,11 +30,7 @@ use crate::theme::Flavor;
 #[derive(Clone, Debug)]
 enum TilingOverlayState {
     Hidden,
-    Visible {
-        monitor: Dimension,
-        windows: Vec<TilingWindowPlacement>,
-        containers: Vec<ContainerPlacement>,
-    },
+    Visible { windows: Vec<TilingWindowPlacement> },
 }
 
 /// Mirrors what the real float overlay shows on screen. `update` writes
@@ -980,7 +976,7 @@ impl TilingOverlayApi for MockTilingOverlay {
         &mut self,
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
-        containers: &[(ContainerPlacement, Vec<String>)],
+        _containers: &[(ContainerPlacement, Vec<String>)],
         _scale: f32,
     ) {
         if self.monitor.get() != monitor {
@@ -991,9 +987,7 @@ impl TilingOverlayApi for MockTilingOverlay {
         // Same-monitor path: no z-order call. Matches production behavior
         // where show_tiling's per-window lift maintains the invariant.
         *self.state.borrow_mut() = TilingOverlayState::Visible {
-            monitor,
             windows: windows.to_vec(),
-            containers: containers.iter().map(|(c, _)| c.clone()).collect(),
         };
     }
     fn clear(&mut self) {

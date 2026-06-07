@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use crate::core::hub::{HubAccess, TilingWindowPlacement};
 use crate::core::node::{Dimension, Direction, Length, WindowId, WorkspaceId};
-use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, clip, translate};
+use crate::core::strategy::{
+    TilingAction, TilingPlacements, TilingStrategy, clip, distribute_space, translate,
+};
 
 /// XMonad-style tiling: a master area on the left and a stack on the right.
 /// No containers, no tabs. Each pane scrolls vertically and independently when
@@ -856,56 +858,4 @@ fn apply_max_constraint(max: Length, slot_extent: Length) -> (Length, Length) {
     };
     let offset = (slot_extent - size) / 2.0;
     (size, offset.max(Length::ZERO))
-}
-
-/// Binary-search distribution: finds a uniform target size such that each child
-/// clamped to its (min, max) sums to container_size. When sum of mins exceeds
-/// the container, each child gets exactly its min.
-fn distribute_space(constraints: &[(Length, Length)], container_size: Length) -> Vec<Length> {
-    let constraints: Vec<(Length, Length)> = constraints
-        .iter()
-        .map(|&(min, max)| {
-            let max = if max == Length::ZERO {
-                Length::new(f32::INFINITY)
-            } else {
-                max
-            };
-            (min, max)
-        })
-        .collect();
-
-    let sum_mins: Length = constraints.iter().map(|(min, _)| *min).sum();
-    if sum_mins >= container_size {
-        return constraints.iter().map(|(min, _)| *min).collect();
-    }
-
-    let all_finite = constraints.iter().all(|(_, max)| max.value().is_finite());
-    if all_finite {
-        let sum_maxes: Length = constraints.iter().map(|(_, max)| *max).sum();
-        if sum_maxes <= container_size {
-            return constraints.iter().map(|(_, max)| *max).collect();
-        }
-    }
-
-    let mut low = 0.0_f32;
-    let mut high = container_size.value();
-    const EPSILON: f32 = 0.001;
-
-    while high - low > EPSILON {
-        let mid = (low + high) / 2.0;
-        let total: f32 = constraints
-            .iter()
-            .map(|(min, max)| mid.clamp(min.value(), max.value()))
-            .sum();
-        if total > container_size.value() {
-            high = mid;
-        } else {
-            low = mid;
-        }
-    }
-
-    constraints
-        .iter()
-        .map(|(min, max)| Length::new(low.clamp(min.value(), max.value())))
-        .collect()
 }

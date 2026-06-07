@@ -1,7 +1,26 @@
+//! Layout pipeline for the partition tree.
+//!
+//! `do_layout_workspace` runs two passes:
+//! 1. Bottom-up `update_container_min_size` walk: a container's minimum
+//!    is the sum (along its split axis) or max (across) of its
+//!    children's minimums. Must complete before pass 2 because the
+//!    root's minimum can exceed the screen.
+//! 2. Top-down `do_layout_top_down`: places the root, then
+//!    distributes each container's space to its children using the
+//!    current viewport offset.
+//!
+//! `scroll_into_view` then clamps and adjusts the viewport offset to
+//! keep the focused node visible. When the offset moves it re-runs
+//! `do_layout_top_down` so max-constrained windows recenter inside
+//! the new visible section. The `initial` capture in
+//! `scroll_into_view` gates this re-run: layout converges in one extra
+//! pass at most because the second `do_layout_top_down` does not
+//! move the focused node.
+
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
-use crate::core::partition_tree::{Child, SpawnMode};
-use crate::core::strategy::clip;
+use crate::core::partition_tree::{Child, Constraints, SpawnMode};
+use crate::core::strategy::{clip, distribute_space};
 
 use super::PartitionTreeStrategy;
 
@@ -21,17 +40,7 @@ impl PartitionTreeStrategy {
             let scale = monitor.scale;
 
             // Collect containers in pre-order
-            let mut stack = vec![root_id];
-            let mut order = vec![];
-            for _ in crate::core::bounded_loop() {
-                let Some(cid) = stack.pop() else { break };
-                order.push(cid);
-                for child in &self.containers.get(cid).children {
-                    if let Child::Container(child_cid) = child {
-                        stack.push(*child_cid);
-                    }
-                }
-            }
+            let order: Vec<_> = self.containers_preorder(root_id).collect();
 
             // Update minimum sizes bottom-up, as parent's minimum size depends on children's
             for &cid in order.iter().rev() {
@@ -39,16 +48,13 @@ impl PartitionTreeStrategy {
             }
         }
 
-        self.distribute_dimensions(hub, ws_id);
+        self.do_layout_top_down(hub, ws_id);
         self.scroll_into_view(hub, ws_id);
     }
 
-    /// Top-down distribution: places the root and distributes space to each
-    /// container's children using the current viewport_offset. Called from
-    /// do_layout_workspace after the bottom-up min-size pass, and again from
-    /// scroll_into_view when the viewport offset changes so that
-    /// max-constrained windows re-center in the new visible section.
-    pub(super) fn distribute_dimensions(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
+    /// Top-down placement pass: places the root and distributes space to
+    /// each container's children using the current viewport_offset.
+    pub(super) fn do_layout_top_down(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
         let Some(ws_state) = self.workspaces.get(&ws_id) else {
             return;
         };
@@ -66,24 +72,14 @@ impl PartitionTreeStrategy {
             return;
         };
 
-        let mut stack = vec![root_id];
-        let mut order = vec![];
-        for _ in crate::core::bounded_loop() {
-            let Some(cid) = stack.pop() else { break };
-            order.push(cid);
-            for child in &self.containers.get(cid).children {
-                if let Child::Container(child_cid) = child {
-                    stack.push(*child_cid);
-                }
-            }
-        }
+        let order: Vec<_> = self.containers_preorder(root_id).collect();
 
         for cid in order {
             let container = self.containers.get(cid);
             let dim = container.dimension;
             let children = container.children.clone();
             let direction = container.direction();
-            for (child, child_dim) in children.iter().zip(self.layout_split_children(
+            for (child, child_dim) in children.iter().zip(self.layout_children(
                 hub,
                 &children,
                 dim,
@@ -91,121 +87,18 @@ impl PartitionTreeStrategy {
                 scale,
                 viewport_rect,
             )) {
-                self.set_split_child_dimension(hub, *child, child_dim);
+                self.set_child_dimension(hub, *child, child_dim);
             }
         }
     }
 
-    /// Lays out children within the given dimension.
+    /// Adjust the workspace's viewport offset so the focused node is fully
+    /// visible.
     ///
-    /// For split containers, space is distributed along the split axis while
-    /// respecting min/max constraints. If total size is less than available
-    /// (due to max constraints), the group is centered. Windows hitting max
-    /// size on the perpendicular axis are also centered. For tabbed containers,
-    /// each child is assigned the full area below the tab bar, centered if
-    /// constrained.
-    fn layout_split_children(
-        &self,
-        hub: &HubAccess,
-        children: &[Child],
-        dim: Dimension,
-        direction: Option<Direction>,
-        scale: f32,
-        viewport_rect: Dimension,
-    ) -> Vec<Dimension> {
-        let constraints = self.collect_constraints(hub, children);
-
-        match direction {
-            Some(Direction::Horizontal) => {
-                let height = dim.height.max(
-                    constraints
-                        .iter()
-                        .map(|c| c.2)
-                        .fold(Length::ZERO, Length::max),
-                );
-                let width_constraints: Vec<_> = constraints.iter().map(|c| (c.0, c.1)).collect();
-                let widths = distribute_space(&width_constraints, dim.width);
-
-                let visible = clip(dim, viewport_rect).unwrap_or(dim);
-                let group_total: Length = widths.iter().copied().sum();
-                let half_gap = (visible.width - group_total).max(Length::ZERO) / 2.0;
-                let raw_offset = (visible.x - dim.x) + half_gap;
-                let max_offset = dim.width - group_total;
-                let mut x = dim.x + raw_offset.clamp(Length::ZERO, max_offset);
-
-                let mut result = Vec::with_capacity(children.len());
-                for i in 0..children.len() {
-                    let (_, _, _, max_h) = constraints[i];
-                    let (h, y_off) =
-                        apply_max_constraint(max_h, height, visible.height, visible.y - dim.y);
-                    result.push(Dimension::new(x, dim.y + y_off, widths[i], h));
-                    x += widths[i];
-                }
-                result
-            }
-            Some(Direction::Vertical) => {
-                let width = dim.width.max(
-                    constraints
-                        .iter()
-                        .map(|c| c.0)
-                        .fold(Length::ZERO, Length::max),
-                );
-                let height_constraints: Vec<_> = constraints.iter().map(|c| (c.2, c.3)).collect();
-                let heights = distribute_space(&height_constraints, dim.height);
-
-                let visible = clip(dim, viewport_rect).unwrap_or(dim);
-                let group_total: Length = heights.iter().copied().sum();
-                let half_gap = (visible.height - group_total).max(Length::ZERO) / 2.0;
-                let raw_offset = (visible.y - dim.y) + half_gap;
-                let max_offset = dim.height - group_total;
-                let mut y = dim.y + raw_offset.clamp(Length::ZERO, max_offset);
-
-                let mut result = Vec::with_capacity(children.len());
-                for i in 0..children.len() {
-                    let (_, max_w, _, _) = constraints[i];
-                    let (w, x_off) =
-                        apply_max_constraint(max_w, width, visible.width, visible.x - dim.x);
-                    result.push(Dimension::new(dim.x + x_off, y, w, heights[i]));
-                    y += heights[i];
-                }
-                result
-            }
-            None => {
-                let tab_bar = hub
-                    .config
-                    .layout
-                    .partition_tree
-                    .tab_bar_height
-                    .to_unit(scale)
-                    .value();
-                let tab_bar_len = Length::new(tab_bar);
-                let content_y = dim.y + tab_bar_len;
-                let content_height = dim.height - tab_bar_len;
-
-                let visible = clip(dim, viewport_rect).unwrap_or(dim);
-                let visible_content_y = visible.y.max(content_y);
-                let visible_content_height =
-                    (visible.y + visible.height - visible_content_y).max(Length::ZERO);
-                let visible_origin_y = visible_content_y - content_y;
-                let visible_origin_x = visible.x - dim.x;
-
-                let mut result = Vec::with_capacity(children.len());
-                for (_, max_w, _, max_h) in constraints {
-                    let (w, x_off) =
-                        apply_max_constraint(max_w, dim.width, visible.width, visible_origin_x);
-                    let (h, y_off) = apply_max_constraint(
-                        max_h,
-                        content_height,
-                        visible_content_height,
-                        visible_origin_y,
-                    );
-                    result.push(Dimension::new(dim.x + x_off, content_y + y_off, w, h));
-                }
-                result
-            }
-        }
-    }
-
+    /// Captures `initial` before clamping so the trailing
+    /// `do_layout_top_down` only re-runs when the offset actually moved.
+    /// The re-run lets max-constrained children recenter in the new visible
+    /// section.
     pub(super) fn scroll_into_view(&mut self, hub: &mut HubAccess, workspace_id: WorkspaceId) {
         let Some(initial) = self
             .workspaces
@@ -225,33 +118,121 @@ impl PartitionTreeStrategy {
         let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
 
         if let Some(focused) = ws_state.focused_tiling {
-            let focused_dim = match focused {
-                Child::Window(id) => self.tiling_data(id).dimension,
-                Child::Container(id) => self.containers.get(id).dimension,
-            };
-
-            if focused_dim.x - offset_x + focused_dim.width > screen.width {
-                offset_x = focused_dim.x + focused_dim.width - screen.width;
-            }
-            if focused_dim.x - offset_x < Length::ZERO {
-                offset_x = focused_dim.x;
-            }
-
-            if focused_dim.y - offset_y + focused_dim.height > screen.height {
-                offset_y = focused_dim.y + focused_dim.height - screen.height;
-            }
-            if focused_dim.y - offset_y < Length::ZERO {
-                offset_y = focused_dim.y;
-            }
-
+            let focused_dim = self.child_dimension(focused);
+            offset_x =
+                nudge_offset_into_view(offset_x, focused_dim.x, focused_dim.width, screen.width);
+            offset_y =
+                nudge_offset_into_view(offset_y, focused_dim.y, focused_dim.height, screen.height);
             self.ws_state_mut(workspace_id).viewport_offset = (offset_x, offset_y);
         }
 
         if (offset_x, offset_y) != initial {
-            self.distribute_dimensions(hub, workspace_id);
+            self.do_layout_top_down(hub, workspace_id);
         }
     }
 
+    fn layout_children(
+        &self,
+        hub: &HubAccess,
+        children: &[Child],
+        dim: Dimension,
+        direction: Option<Direction>,
+        scale: f32,
+        viewport_rect: Dimension,
+    ) -> Vec<Dimension> {
+        match direction {
+            Some(dir) => self.layout_split_axis_children(hub, children, dim, dir, viewport_rect),
+            None => self.layout_tabbed_children(hub, children, dim, scale, viewport_rect),
+        }
+    }
+
+    fn layout_split_axis_children(
+        &self,
+        hub: &HubAccess,
+        children: &[Child],
+        dim: Dimension,
+        direction: Direction,
+        viewport_rect: Dimension,
+    ) -> Vec<Dimension> {
+        let constraints: Vec<Constraints> = children
+            .iter()
+            .map(|&c| self.get_effective_constraints(hub, c))
+            .collect();
+        let axis = Axis::from_direction(direction);
+
+        let cross_extent = axis.cross_extent(dim).max(
+            constraints
+                .iter()
+                .map(|c| axis.cross_min(c))
+                .fold(Length::ZERO, Length::max),
+        );
+        let along_pairs: Vec<_> = constraints.iter().map(|c| axis.along_min_max(c)).collect();
+        let along_sizes = distribute_space(&along_pairs, axis.along_extent(dim));
+
+        let visible = clip(dim, viewport_rect).unwrap_or(dim);
+        let group_total: Length = along_sizes.iter().copied().sum();
+        let (_, group_off) = apply_max_constraint(
+            group_total,
+            axis.along_extent(dim),
+            axis.along_extent(visible),
+            axis.along_origin(visible) - axis.along_origin(dim),
+        );
+
+        let mut along_cursor = axis.along_origin(dim) + group_off;
+        let mut result = Vec::with_capacity(children.len());
+        for (i, &along_size) in along_sizes.iter().enumerate() {
+            let (cross_size, cross_off) = apply_max_constraint(
+                axis.cross_max(&constraints[i]),
+                cross_extent,
+                axis.cross_extent(visible),
+                axis.cross_origin(visible) - axis.cross_origin(dim),
+            );
+            result.push(axis.compose(
+                along_cursor,
+                along_size,
+                axis.cross_origin(dim) + cross_off,
+                cross_size,
+            ));
+            along_cursor += along_size;
+        }
+        result
+    }
+
+    fn layout_tabbed_children(
+        &self,
+        hub: &HubAccess,
+        children: &[Child],
+        dim: Dimension,
+        scale: f32,
+        viewport_rect: Dimension,
+    ) -> Vec<Dimension> {
+        let constraints: Vec<Constraints> = children
+            .iter()
+            .map(|&c| self.get_effective_constraints(hub, c))
+            .collect();
+        let tab_bar = tab_bar_length(hub, scale);
+        let content = Dimension::new(dim.x, dim.y + tab_bar, dim.width, dim.height - tab_bar);
+
+        let outer_visible = clip(dim, viewport_rect).unwrap_or(dim);
+        let visible_content_y = outer_visible.y.max(content.y);
+        let visible_content_height =
+            (outer_visible.y + outer_visible.height - visible_content_y).max(Length::ZERO);
+        let visible_content = Dimension::new(
+            outer_visible.x,
+            visible_content_y,
+            outer_visible.width,
+            visible_content_height,
+        );
+
+        constraints
+            .iter()
+            .map(|c| place_in_visible(content, (c.max_width, c.max_height), visible_content))
+            .collect()
+    }
+
+    /// Clamp the workspace's viewport offset against the root's dimension.
+    /// With no root, resets to `(ZERO, ZERO)` so a later attach starts from a
+    /// known origin instead of inheriting a stale offset from a previous tree.
     fn clamp_viewport_offset(&mut self, hub: &mut HubAccess, workspace_id: WorkspaceId) {
         let Some(ws_state) = self.workspaces.get(&workspace_id) else {
             return;
@@ -263,25 +244,23 @@ impl PartitionTreeStrategy {
         let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
 
         let root_dim = match ws_state.root {
-            Some(Child::Window(id)) => self.tiling_data(id).dimension,
-            Some(Child::Container(id)) => self.containers.get(id).dimension,
+            Some(child) => self.child_dimension(child),
             None => {
                 self.ws_state_mut(workspace_id).viewport_offset = (Length::ZERO, Length::ZERO);
                 return;
             }
         };
 
-        offset_x = offset_x.clamp(
-            Length::ZERO,
-            (root_dim.width - screen.width).max(Length::ZERO),
-        );
-        offset_y = offset_y.clamp(
-            Length::ZERO,
-            (root_dim.height - screen.height).max(Length::ZERO),
-        );
+        offset_x = clamp_offset(offset_x, root_dim.width, screen.width);
+        offset_y = clamp_offset(offset_y, root_dim.height, screen.height);
         self.ws_state_mut(workspace_id).viewport_offset = (offset_x, offset_y);
     }
 
+    /// Place the root child within the screen. Base dimension is
+    /// `screen.max(min)` on each axis: the root grows past the screen when a
+    /// descendant's minimum exceeds the screen, and the viewport scrolls to it
+    /// instead of clipping. Then applies the root's max constraint with the
+    /// current viewport for centering.
     fn set_root_dimension(
         &mut self,
         hub: &mut HubAccess,
@@ -289,28 +268,23 @@ impl PartitionTreeStrategy {
         screen: Dimension,
         viewport_rect: Dimension,
     ) {
-        let (min_w, min_h, max_w, max_h) = self.get_effective_constraints(hub, root);
+        let c = self.get_effective_constraints(hub, root);
         let base_dim: Dimension = Dimension::new(
             Length::ZERO,
             Length::ZERO,
-            screen.width.max(min_w),
-            screen.height.max(min_h),
+            screen.width.max(c.min_width),
+            screen.height.max(c.min_height),
         );
         let visible = clip(base_dim, viewport_rect).unwrap_or(base_dim);
+        let dim = place_in_visible(base_dim, (c.max_width, c.max_height), visible);
 
-        let (w, x_off) =
-            apply_max_constraint(max_w, base_dim.width, visible.width, visible.x - base_dim.x);
-        let (h, y_off) = apply_max_constraint(
-            max_h,
-            base_dim.height,
-            visible.height,
-            visible.y - base_dim.y,
-        );
-        let dim = Dimension::new(base_dim.x + x_off, base_dim.y + y_off, w, h);
-
-        self.set_split_child_dimension(hub, root, dim);
+        self.set_child_dimension(hub, root, dim);
     }
 
+    /// Bottom-up minimum size for one container. For split containers, sums
+    /// along the split axis and maxes across. For tabbed containers, maxes both
+    /// axes (tabs share area) and adds `tab_bar_length` to the height for the
+    /// tab strip above the active child.
     fn update_container_min_size(
         &mut self,
         hub: &HubAccess,
@@ -321,52 +295,38 @@ impl PartitionTreeStrategy {
         let children = container.children.clone();
         let direction = container.direction();
 
-        let child_mins: Vec<(Length, Length)> = children
+        let child_constraints: Vec<Constraints> = children
             .iter()
-            .map(|&c| {
-                let (min_w, min_h, _, _) = self.get_effective_constraints(hub, c);
-                (min_w, min_h)
-            })
+            .map(|&c| self.get_effective_constraints(hub, c))
             .collect();
 
         let (min_w, min_h) = match direction {
             Some(Direction::Horizontal) => {
-                let sum_w: Length = child_mins.iter().map(|(w, _)| *w).sum();
-                let max_h = child_mins
+                let sum_w: Length = child_constraints.iter().map(|c| c.min_width).sum();
+                let max_h = child_constraints
                     .iter()
-                    .map(|(_, h)| *h)
+                    .map(|c| c.min_height)
                     .fold(Length::ZERO, Length::max);
                 (sum_w, max_h)
             }
             Some(Direction::Vertical) => {
-                let max_w = child_mins
+                let max_w = child_constraints
                     .iter()
-                    .map(|(w, _)| *w)
+                    .map(|c| c.min_width)
                     .fold(Length::ZERO, Length::max);
-                let sum_h: Length = child_mins.iter().map(|(_, h)| *h).sum();
+                let sum_h: Length = child_constraints.iter().map(|c| c.min_height).sum();
                 (max_w, sum_h)
             }
             None => {
-                let max_w = child_mins
+                let max_w = child_constraints
                     .iter()
-                    .map(|(w, _)| *w)
+                    .map(|c| c.min_width)
                     .fold(Length::ZERO, Length::max);
-                let max_h = child_mins
+                let max_h = child_constraints
                     .iter()
-                    .map(|(_, h)| *h)
+                    .map(|c| c.min_height)
                     .fold(Length::ZERO, Length::max);
-                (
-                    max_w,
-                    max_h
-                        + Length::new(
-                            hub.config
-                                .layout
-                                .partition_tree
-                                .tab_bar_height
-                                .to_unit(scale)
-                                .value(),
-                        ),
-                )
+                (max_w, max_h + tab_bar_length(hub, scale))
             }
         };
 
@@ -382,21 +342,11 @@ impl PartitionTreeStrategy {
         }
     }
 
-    fn collect_constraints(
-        &self,
-        hub: &HubAccess,
-        children: &[Child],
-    ) -> Vec<(Length, Length, Length, Length)> {
-        children
-            .iter()
-            .map(|&c| {
-                let (min_w, min_h, max_w, max_h) = self.get_effective_constraints(hub, c);
-                (min_w, max_w, min_h, max_h)
-            })
-            .collect()
-    }
-
-    fn set_split_child_dimension(&mut self, hub: &mut HubAccess, child: Child, dim: Dimension) {
+    /// Write `dim` to `child` and, when `automatic_tiling` is on, set the
+    /// child's `spawn_mode` to match the new aspect ratio (Horizontal if wider
+    /// than tall, otherwise Vertical). The `!is_tab()` guard keeps tabbed
+    /// children from being demoted to a split mode by a layout pass.
+    fn set_child_dimension(&mut self, hub: &mut HubAccess, child: Child, dim: Dimension) {
         let spawn_mode = if dim.width >= dim.height {
             SpawnMode::horizontal()
         } else {
@@ -407,33 +357,30 @@ impl PartitionTreeStrategy {
                 let td = self.tiling_data_mut(wid);
                 td.dimension = dim;
                 if hub.config.layout.partition_tree.automatic_tiling && !td.spawn_mode.is_tab() {
-                    td.spawn_mode = SpawnMode::clean(spawn_mode);
+                    td.spawn_mode = SpawnMode::without_history(spawn_mode);
                 }
             }
             Child::Container(cid) => {
                 let c = self.containers.get_mut(cid);
                 c.dimension = dim;
                 if hub.config.layout.partition_tree.automatic_tiling && !c.spawn_mode().is_tab() {
-                    c.set_spawn_mode(spawn_mode);
+                    c.set_spawn_mode_reset(spawn_mode);
                 }
             }
         }
     }
 
-    /// Returns (min_w, min_h, max_w, max_h). Window-specific max takes precedence over global min.
-    fn get_effective_constraints(
-        &self,
-        hub: &HubAccess,
-        child: Child,
-    ) -> (Length, Length, Length, Length) {
-        let ws_id = match child {
-            Child::Window(id) => hub
-                .windows
-                .get(id)
-                .workspace()
-                .expect("tiling window has a workspace"),
-            Child::Container(id) => self.containers.get(id).workspace,
-        };
+    /// Resolve the effective constraints for a child.
+    ///
+    /// Window: per-instance max (`Window::max_size`) wins when non-zero,
+    /// otherwise the global `max_*` config applies. The resolved max also caps
+    /// the effective min so a window's min cannot exceed its max.
+    ///
+    /// Container: returns its tracked `min_size` and `(ZERO, ZERO)` for max.
+    /// Containers have no max constraint. `ZERO` is the sentinel that
+    /// downstream layout reads as "unconstrained".
+    fn get_effective_constraints(&self, hub: &HubAccess, child: Child) -> Constraints {
+        let ws_id = self.child_workspace(hub, child);
         let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
         let screen = monitor.dimension;
         let scale = monitor.scale;
@@ -477,14 +424,32 @@ impl PartitionTreeStrategy {
                     win_min_h.max(global_min_h)
                 };
 
-                (min_w, min_h, max_w, max_h)
+                Constraints {
+                    min_width: min_w,
+                    min_height: min_h,
+                    max_width: max_w,
+                    max_height: max_h,
+                }
             }
             Child::Container(id) => {
                 let (min_w, min_h) = self.containers.get(id).min_size();
-                (min_w, min_h, Length::ZERO, Length::ZERO)
+                Constraints {
+                    min_width: min_w,
+                    min_height: min_h,
+                    max_width: Length::ZERO,
+                    max_height: Length::ZERO,
+                }
             }
         }
     }
+}
+
+pub(super) fn tab_bar_length(hub: &HubAccess, scale: f32) -> Length {
+    hub.config
+        .layout
+        .partition_tree
+        .tab_bar_height
+        .to_unit(scale)
 }
 
 /// Returns (size, offset) for a max-constrained child.
@@ -513,63 +478,129 @@ fn apply_max_constraint(
     (size, raw_offset.clamp(Length::ZERO, max_offset))
 }
 
-/// Find a distribution of the available space for all split children of a container, so that all
-/// windows that haven't approached its max/min constraints must share the same size.
-fn distribute_space(constraints: &[(Length, Length)], container_size: Length) -> Vec<Length> {
-    let constraints: Vec<(Length, Length)> = constraints
-        .iter()
-        .map(|&(min, max)| {
-            let max = if max == Length::ZERO {
-                Length::new(f32::INFINITY)
-            } else {
-                max
-            };
-            (min, max)
-        })
-        .collect();
+fn place_in_visible(container: Dimension, max: (Length, Length), visible: Dimension) -> Dimension {
+    let (max_w, max_h) = max;
+    let (w, x_off) = apply_max_constraint(
+        max_w,
+        container.width,
+        visible.width,
+        visible.x - container.x,
+    );
+    let (h, y_off) = apply_max_constraint(
+        max_h,
+        container.height,
+        visible.height,
+        visible.y - container.y,
+    );
+    Dimension::new(container.x + x_off, container.y + y_off, w, h)
+}
 
-    let sum_mins: Length = constraints.iter().map(|(min, _)| *min).sum();
-    if sum_mins >= container_size {
-        return constraints.iter().map(|(min, _)| *min).collect();
+fn nudge_offset_into_view(
+    offset: Length,
+    dim_origin: Length,
+    dim_extent: Length,
+    screen_extent: Length,
+) -> Length {
+    let mut offset = offset;
+    if dim_origin - offset + dim_extent > screen_extent {
+        offset = dim_origin + dim_extent - screen_extent;
     }
+    if dim_origin - offset < Length::ZERO {
+        offset = dim_origin;
+    }
+    offset
+}
 
-    let all_finite = constraints.iter().all(|(_, max)| max.value().is_finite());
-    if all_finite {
-        let sum_maxes: Length = constraints.iter().map(|(_, max)| *max).sum();
-        if sum_maxes <= container_size {
-            return constraints.iter().map(|(_, max)| *max).collect();
+fn clamp_offset(offset: Length, root_extent: Length, screen_extent: Length) -> Length {
+    offset.clamp(
+        Length::ZERO,
+        (root_extent - screen_extent).max(Length::ZERO),
+    )
+}
+
+#[derive(Copy, Clone)]
+enum Axis {
+    X,
+    Y,
+}
+
+impl Axis {
+    fn from_direction(direction: Direction) -> Self {
+        match direction {
+            Direction::Horizontal => Axis::X,
+            Direction::Vertical => Axis::Y,
         }
     }
 
-    let mut low = 0.0_f32;
-    let mut high = container_size.value();
-    const EPSILON: f32 = 0.001;
-
-    while high - low > EPSILON {
-        let mid = (low + high) / 2.0;
-        let total: f32 = constraints
-            .iter()
-            .map(|(min, max)| mid.clamp(min.value(), max.value()))
-            .sum();
-        if total > container_size.value() {
-            high = mid;
-        } else {
-            low = mid;
+    fn along_extent(self, dim: Dimension) -> Length {
+        match self {
+            Axis::X => dim.width,
+            Axis::Y => dim.height,
         }
     }
 
-    constraints
-        .iter()
-        .map(|(min, max)| Length::new(low.clamp(min.value(), max.value())))
-        .collect()
+    fn along_origin(self, dim: Dimension) -> Length {
+        match self {
+            Axis::X => dim.x,
+            Axis::Y => dim.y,
+        }
+    }
+
+    fn cross_extent(self, dim: Dimension) -> Length {
+        match self {
+            Axis::X => dim.height,
+            Axis::Y => dim.width,
+        }
+    }
+
+    fn cross_origin(self, dim: Dimension) -> Length {
+        match self {
+            Axis::X => dim.y,
+            Axis::Y => dim.x,
+        }
+    }
+
+    fn along_min_max(self, c: &Constraints) -> (Length, Length) {
+        match self {
+            Axis::X => (c.min_width, c.max_width),
+            Axis::Y => (c.min_height, c.max_height),
+        }
+    }
+
+    fn cross_min(self, c: &Constraints) -> Length {
+        match self {
+            Axis::X => c.min_height,
+            Axis::Y => c.min_width,
+        }
+    }
+
+    fn cross_max(self, c: &Constraints) -> Length {
+        match self {
+            Axis::X => c.max_height,
+            Axis::Y => c.max_width,
+        }
+    }
+
+    fn compose(
+        self,
+        along_origin: Length,
+        along_size: Length,
+        cross_origin: Length,
+        cross_size: Length,
+    ) -> Dimension {
+        match self {
+            Axis::X => Dimension::new(along_origin, cross_origin, along_size, cross_size),
+            Axis::Y => Dimension::new(cross_origin, along_origin, cross_size, along_size),
+        }
+    }
 }
 
 // apply_max_constraint is module-private and exposing it just for tests would
 // leak test-only public API. Using #[cfg(test)] keeps the helper internal.
 #[cfg(test)]
 mod tests {
-    use super::apply_max_constraint;
-    use crate::core::node::Length;
+    use super::{apply_max_constraint, clamp_offset, nudge_offset_into_view, place_in_visible};
+    use crate::core::node::{Dimension, Length};
 
     #[test]
     fn apply_max_constraint_unchanged_when_visible_equals_container() {
@@ -596,5 +627,131 @@ mod tests {
         let (size, offset) = apply_max_constraint(max, container, container, Length::ZERO);
         assert_eq!(size, container);
         assert_eq!(offset, Length::ZERO);
+    }
+
+    #[test]
+    fn place_in_visible_centers_within_visible_section() {
+        let container = Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            Length::new(100.0),
+            Length::new(100.0),
+        );
+        let visible = Dimension::new(
+            Length::new(10.0),
+            Length::new(10.0),
+            Length::new(80.0),
+            Length::new(80.0),
+        );
+        let max = (Length::new(60.0), Length::new(60.0));
+        let result = place_in_visible(container, max, visible);
+        assert_eq!(
+            result,
+            Dimension::new(
+                Length::new(20.0),
+                Length::new(20.0),
+                Length::new(60.0),
+                Length::new(60.0),
+            )
+        );
+
+        // Unconstrained (max == 0): returns full container, no offset
+        let result = place_in_visible(container, (Length::ZERO, Length::ZERO), visible);
+        assert_eq!(result, container);
+    }
+
+    #[test]
+    fn place_in_visible_clamps_to_container() {
+        let container = Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            Length::new(100.0),
+            Length::new(100.0),
+        );
+        // Visible section shifted far enough that raw centering would exceed container bounds
+        let visible = Dimension::new(
+            Length::new(50.0),
+            Length::new(50.0),
+            Length::new(80.0),
+            Length::new(80.0),
+        );
+        let max = (Length::new(60.0), Length::new(60.0));
+        let result = place_in_visible(container, max, visible);
+        // Offset clamps to container_extent - size = 100 - 60 = 40
+        assert_eq!(
+            result,
+            Dimension::new(
+                Length::new(40.0),
+                Length::new(40.0),
+                Length::new(60.0),
+                Length::new(60.0),
+            )
+        );
+    }
+
+    #[test]
+    fn nudge_offset_into_view_in_bounds_no_op() {
+        let offset = Length::new(50.0);
+        let dim_origin = Length::new(60.0);
+        let dim_extent = Length::new(30.0);
+        let screen_extent = Length::new(100.0);
+        // dim_origin - offset + dim_extent = 60 - 50 + 30 = 40, which is <= 100
+        // dim_origin - offset = 10, which is >= 0
+        let result = nudge_offset_into_view(offset, dim_origin, dim_extent, screen_extent);
+        assert_eq!(result, offset);
+    }
+
+    #[test]
+    fn nudge_offset_into_view_off_right() {
+        let offset = Length::new(10.0);
+        let dim_origin = Length::new(80.0);
+        let dim_extent = Length::new(40.0);
+        let screen_extent = Length::new(100.0);
+        // dim_origin - offset + dim_extent = 80 - 10 + 40 = 110 > 100 (off right)
+        let result = nudge_offset_into_view(offset, dim_origin, dim_extent, screen_extent);
+        // Expected: dim_origin + dim_extent - screen_extent = 80 + 40 - 100 = 20
+        assert_eq!(result, Length::new(20.0));
+    }
+
+    #[test]
+    fn nudge_offset_into_view_off_left() {
+        let offset = Length::new(100.0);
+        let dim_origin = Length::new(50.0);
+        let dim_extent = Length::new(30.0);
+        let screen_extent = Length::new(200.0);
+        // dim_origin - offset = 50 - 100 = -50 < 0 (off left)
+        let result = nudge_offset_into_view(offset, dim_origin, dim_extent, screen_extent);
+        // Expected: dim_origin = 50
+        assert_eq!(result, Length::new(50.0));
+    }
+
+    #[test]
+    fn clamp_offset_within_range() {
+        let offset = Length::new(30.0);
+        let root_extent = Length::new(200.0);
+        let screen_extent = Length::new(100.0);
+        // max = root - screen = 100, offset 30 is within [0, 100]
+        let result = clamp_offset(offset, root_extent, screen_extent);
+        assert_eq!(result, offset);
+    }
+
+    #[test]
+    fn clamp_offset_beyond_max() {
+        let offset = Length::new(150.0);
+        let root_extent = Length::new(200.0);
+        let screen_extent = Length::new(100.0);
+        // max = root - screen = 100, offset 150 exceeds it
+        let result = clamp_offset(offset, root_extent, screen_extent);
+        assert_eq!(result, Length::new(100.0));
+    }
+
+    #[test]
+    fn clamp_offset_root_smaller_than_screen() {
+        let offset = Length::new(50.0);
+        let root_extent = Length::new(80.0);
+        let screen_extent = Length::new(100.0);
+        // root < screen, so max = max(80 - 100, 0) = 0, clamps to ZERO
+        let result = clamp_offset(offset, root_extent, screen_extent);
+        assert_eq!(result, Length::ZERO);
     }
 }

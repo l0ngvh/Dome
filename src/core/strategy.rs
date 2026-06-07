@@ -1,8 +1,7 @@
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
 
-/// Actions that are specific to the tiling strategy. Hub routes these through
-/// `TilingStrategy::handle_action` after checking window restrictions.
+/// Actions that are specific to the tiling strategy.
 #[derive(Debug)]
 pub(crate) enum TilingAction {
     FocusDirection {
@@ -31,16 +30,15 @@ pub(crate) enum TilingAction {
 }
 
 /// Tiling window and container placements collected by the strategy for a
-/// single workspace. Hub merges these with float placements to build the
-/// final `MonitorLayout`.
+/// single workspace.
 pub(crate) struct TilingPlacements {
     pub(crate) windows: Vec<TilingWindowPlacement>,
     pub(crate) containers: Vec<ContainerPlacement>,
 }
 
-/// Abstraction over tiling behavior. Hub delegates all tiling-specific
-/// operations to the active strategy, keeping generic window management
-/// (monitors, workspaces, float, fullscreen, focus priority) on Hub itself.
+/// Abstraction over tiling behavior. Tiling-specific operations live here;
+/// generic window management (monitors, workspaces, float, fullscreen, focus
+/// priority) does not.
 ///
 /// Each method receives `&mut HubAccess` (or `&HubAccess`) so the strategy
 /// can read/write monitors, workspaces, and windows without borrowing Hub.
@@ -99,7 +97,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Returns the number of tiling windows in the workspace.
     fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize;
 
-    /// Remove per-workspace tiling state. Called before workspace deletion.
+    /// Remove per-workspace tiling state.
     fn prune_workspace(&mut self, ws_id: WorkspaceId);
 
     /// Refresh config-derived internal state and relayout every workspace.
@@ -137,4 +135,118 @@ pub(crate) fn clip<U>(dim: Dimension<U>, bounds: Dimension<U>) -> Option<Dimensi
         return None;
     }
     Some(Dimension::new(x1, y1, x2 - x1, y2 - y1))
+}
+
+/// Distribute `container_size` across `constraints` so every child whose
+/// (min, max) range straddles the result receives the same uniform size.
+pub(crate) fn distribute_space(
+    constraints: &[(Length, Length)],
+    container_size: Length,
+) -> Vec<Length> {
+    let constraints: Vec<(Length, Length)> = constraints
+        .iter()
+        .map(|&(min, max)| {
+            let max = if max == Length::ZERO {
+                Length::new(f32::INFINITY)
+            } else {
+                max
+            };
+            (min, max)
+        })
+        .collect();
+
+    let sum_mins: Length = constraints.iter().map(|(min, _)| *min).sum();
+    if sum_mins >= container_size {
+        return constraints.iter().map(|(min, _)| *min).collect();
+    }
+
+    let all_finite = constraints.iter().all(|(_, max)| max.value().is_finite());
+    if all_finite {
+        let sum_maxes: Length = constraints.iter().map(|(_, max)| *max).sum();
+        if sum_maxes <= container_size {
+            return constraints.iter().map(|(_, max)| *max).collect();
+        }
+    }
+
+    let mut uniform_low = 0.0_f32;
+    let mut uniform_high = container_size.value();
+    const EPSILON: f32 = 0.001;
+
+    // Binary search converges in ~log2(container_size / EPSILON) iterations,
+    // typically ~24 for monitor-sized inputs. Cap at 64 per AGENTS.md no-unbounded-loop rule.
+    for _ in 0..64 {
+        if uniform_high - uniform_low <= EPSILON {
+            break;
+        }
+        let uniform_candidate = (uniform_low + uniform_high) / 2.0;
+        let total: f32 = constraints
+            .iter()
+            .map(|(min, max)| uniform_candidate.clamp(min.value(), max.value()))
+            .sum();
+        if total > container_size.value() {
+            uniform_high = uniform_candidate;
+        } else {
+            uniform_low = uniform_candidate;
+        }
+    }
+
+    constraints
+        .iter()
+        .map(|(min, max)| Length::new(uniform_low.clamp(min.value(), max.value())))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::node::Length;
+
+    #[test]
+    fn distribute_space_returns_mins_when_sum_exceeds_container() {
+        let constraints = vec![
+            (Length::new(60.0), Length::ZERO),
+            (Length::new(60.0), Length::ZERO),
+        ];
+        let result = distribute_space(&constraints, Length::new(100.0));
+        assert_eq!(result, vec![Length::new(60.0), Length::new(60.0)]);
+    }
+
+    #[test]
+    fn distribute_space_returns_maxes_when_all_fit() {
+        let constraints = vec![
+            (Length::new(10.0), Length::new(20.0)),
+            (Length::new(10.0), Length::new(20.0)),
+        ];
+        let result = distribute_space(&constraints, Length::new(100.0));
+        assert_eq!(result, vec![Length::new(20.0), Length::new(20.0)]);
+    }
+
+    #[test]
+    fn distribute_space_splits_uniformly_with_mixed_caps() {
+        // Child 0: uncapped (max=0 -> infinity), child 1: max=20, child 2: uncapped
+        let constraints = vec![
+            (Length::ZERO, Length::ZERO),
+            (Length::ZERO, Length::new(20.0)),
+            (Length::ZERO, Length::ZERO),
+        ];
+        let result = distribute_space(&constraints, Length::new(100.0));
+        // Child 1 pins at 20. Remaining 80 splits evenly between children 0 and 2.
+        assert!((result[1].value() - 20.0).abs() < 0.01);
+        assert!((result[0].value() - 40.0).abs() < 0.01);
+        assert!((result[2].value() - 40.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn distribute_space_pins_min_when_below_uniform() {
+        // Child 0 has min=50, so it stays at 50 when uniform target is ~35.
+        let constraints = vec![
+            (Length::new(50.0), Length::ZERO),
+            (Length::ZERO, Length::ZERO),
+            (Length::ZERO, Length::ZERO),
+        ];
+        let result = distribute_space(&constraints, Length::new(120.0));
+        assert!((result[0].value() - 50.0).abs() < 0.01);
+        assert!((result[1].value() - 35.0).abs() < 0.01);
+        assert!((result[2].value() - 35.0).abs() < 0.01);
+    }
 }

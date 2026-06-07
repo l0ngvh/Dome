@@ -61,11 +61,9 @@ impl PartitionTreeStrategy {
             .unwrap_or_else(|| panic!("no TilingWindowData for {id:?} -- not a tiling window"))
     }
 
-    /// Internal attach that works with `Child` (window or container). The public
-    /// `attach_window` wraps a `WindowId` and delegates here. `move_focused_to_workspace`
-    /// calls this directly to handle container moves.
-    fn attach_child_internal(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
-        self.set_workspace(hub, child, ws_id);
+    /// Attach a `Child` (window or container) to a workspace.
+    fn attach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
+        self.assign_subtree_to_workspace(hub, child, ws_id);
         if let Child::Window(wid) = child {
             self.tiling_windows.insert(
                 wid,
@@ -88,37 +86,29 @@ impl PartitionTreeStrategy {
             return;
         };
 
-        let spawn_mode = match insert_anchor {
-            Child::Container(id) => self.containers.get(id).spawn_mode(),
-            Child::Window(id) => self.tiling_data(id).spawn_mode,
-        };
+        let spawn_mode = self.child_spawn_mode(insert_anchor);
 
         if spawn_mode.is_tab()
-            && let Some(tabbed_ancestor) = self.find_tabbed_ancestor(insert_anchor)
+            && let Some(tabbed_self_or_ancestor) = self.find_tabbed_self_or_ancestor(insert_anchor)
         {
-            let container = self.containers.get(tabbed_ancestor);
-            self.attach_split_child_to_container(
+            let container = self.containers.get(tabbed_self_or_ancestor);
+            self.attach_child_to_container(
                 hub,
                 child,
-                tabbed_ancestor,
+                tabbed_self_or_ancestor,
                 Some(container.active_tab_index() + 1),
             );
         } else if let Child::Container(cid) = insert_anchor
-            && self.containers.get(cid).can_accomodate(spawn_mode)
+            && self.containers.get(cid).can_accommodate(spawn_mode)
         {
-            self.attach_split_child_to_container(hub, child, cid, None);
+            self.attach_child_to_container(hub, child, cid, None);
         } else {
-            match self.get_parent(insert_anchor) {
+            match self.parent(insert_anchor) {
                 Parent::Container(container_id) => {
-                    self.try_attach_split_child_to_container_next_to(
-                        hub,
-                        child,
-                        container_id,
-                        insert_anchor,
-                    );
+                    self.attach_child_next_to_anchor(hub, child, container_id, insert_anchor);
                 }
                 Parent::Workspace(workspace_id) => {
-                    self.attach_split_child_next_to_workspace_root(hub, child, workspace_id);
+                    self.attach_child_next_to_workspace_root(hub, child, workspace_id);
                 }
             }
         }
@@ -127,23 +117,14 @@ impl PartitionTreeStrategy {
         self.set_focus_child(hub, child);
     }
 
-    /// Internal detach that works with `Child` (window or container). The public
-    /// `detach_window` wraps a `WindowId` and delegates here. `move_focused_to_workspace`
-    /// calls this directly to handle container moves.
-    fn detach_child_internal(&mut self, hub: &mut HubAccess, child: Child) {
-        let workspace_id = match child {
-            Child::Window(id) => hub
-                .windows
-                .get(id)
-                .workspace()
-                .expect("detaching tiling window has a workspace"),
-            Child::Container(id) => self.containers.get(id).workspace,
-        };
+    /// Detach a `Child` (window or container) from its workspace.
+    fn detach_child(&mut self, hub: &mut HubAccess, child: Child) {
+        let workspace_id = self.child_workspace(hub, child);
 
-        let parent = self.get_parent(child);
+        let parent = self.parent(child);
         match parent {
             Parent::Container(parent_id) => {
-                self.detach_split_child_from_container(parent_id, child);
+                self.detach_child_from_container(parent_id, child);
                 self.layout_workspace(hub, workspace_id);
             }
             Parent::Workspace(workspace_id) => {
@@ -162,42 +143,40 @@ impl PartitionTreeStrategy {
         }
     }
 
-    /// Internal set_focus that works with `Child` (window or container). The public
-    /// `set_focus` wraps a `WindowId` and delegates here.
+    /// Internal set_focus that works with `Child` (window or container).
     ///
-    /// Writes `child` (the original argument, which can be a window or container) to
-    /// `container.focused` on every ancestor from `child` up to the workspace root. This
-    /// means all ancestors share the same `focused` value. For tabbed containers, also calls
-    /// `set_active_tab(current)` with the direct child (the walk position), not the target.
-    ///
-    /// At the workspace level, sets `focused_tiling = Some(child)` and clears
-    /// `is_float_focused`.
+    /// Establish invariant 3 of `Container` for `child`: writes `child` to
+    /// `container.focused` on every ancestor up to the workspace, and updates
+    /// `active_tab` on each tabbed ancestor with the walk position (not
+    /// `child`). At the workspace level, sets `focused_tiling = Some(child)`
+    /// and clears `is_float_focused`.
     fn set_focus_child(&mut self, hub: &mut HubAccess, child: Child) {
-        let mut current = child;
-        for _ in crate::core::bounded_loop() {
-            match self.get_parent(current) {
-                Parent::Container(cid) => {
-                    let container = self.containers.get_mut(cid);
-                    if container.is_tabbed {
-                        container.set_active_tab(current);
-                    }
-                    container.focused = child;
-                    current = Child::Container(cid);
-                }
-                Parent::Workspace(ws) => {
-                    self.ws_state_or_default(ws).focused_tiling = Some(child);
-                    hub.workspaces.get_mut(ws).is_float_focused = false;
-                    self.scroll_into_view(hub, ws);
-                    break;
-                }
+        let path: Vec<_> = self.ancestors_of(child).collect();
+        for (walk_pos, parent_id) in &path {
+            let container = self.containers.get_mut(*parent_id);
+            if container.is_tabbed {
+                container.set_active_tab_to_child(*walk_pos);
             }
+            container.focused = child;
         }
+        // Workspace-level focus state lives above the container tree.
+        // ancestors_of terminates at the workspace boundary, so handle it here.
+        let ws_child = match path.last() {
+            Some((_, last_pid)) => Child::Container(*last_pid),
+            None => child,
+        };
+        let Parent::Workspace(ws) = self.parent(ws_child) else {
+            panic!("set_focus_child: top of ancestor path has no workspace parent");
+        };
+        self.ws_state_or_default(ws).focused_tiling = Some(child);
+        hub.workspaces.get_mut(ws).is_float_focused = false;
+        self.scroll_into_view(hub, ws);
     }
 }
 
 impl TilingStrategy for PartitionTreeStrategy {
     fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId) {
-        self.attach_child_internal(hub, Child::Window(window_id), ws_id);
+        self.attach_child(hub, Child::Window(window_id), ws_id);
     }
 
     fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> Dimension {
@@ -215,7 +194,7 @@ impl TilingStrategy for PartitionTreeStrategy {
 
         // Capture offset/screen before detach because detach triggers layout,
         // which can change viewport_offset.
-        self.detach_child_internal(hub, Child::Window(window_id));
+        self.detach_child(hub, Child::Window(window_id));
 
         // Convert layout-space coordinates to screen-absolute. Layout positions are
         // relative to workspace origin (0,0) plus viewport offset; screen-absolute
@@ -237,7 +216,7 @@ impl TilingStrategy for PartitionTreeStrategy {
                 self.move_in_direction(hub, direction, forward)
             }
             TilingAction::ToggleSpawnMode => self.toggle_spawn_mode(hub),
-            TilingAction::ToggleDirection => self.toggle_direction(hub),
+            TilingAction::ToggleDirection => self.toggle_focused_layout_direction(hub),
             TilingAction::ToggleContainerLayout => self.toggle_container_layout(hub),
             TilingAction::FocusParent => self.focus_parent(hub),
             TilingAction::FocusTab { forward } => self.focus_tab(hub, forward),
@@ -288,13 +267,15 @@ impl TilingStrategy for PartitionTreeStrategy {
         let mut windows = Vec::new();
         let mut containers = Vec::new();
 
+        // Hand-rolled DFS kept because tabbed containers push only the active
+        // tab, not all children. This visible-only traversal differs from the
+        // full pre-order that children_dfs provides.
         let mut stack: Vec<Child> = ws_state.root.into_iter().collect();
         for _ in crate::core::bounded_loop() {
             let Some(child) = stack.pop() else { break };
             match child {
                 Child::Window(id) => {
-                    let td = self.tiling_data(id);
-                    let frame = translate(td.dimension, offset_x, offset_y, screen);
+                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
                     if let Some(visible_frame) = clip(frame, screen) {
                         let is_highlighted = focused == Some(Child::Window(id));
                         windows.push(TilingWindowPlacement {
@@ -303,7 +284,9 @@ impl TilingStrategy for PartitionTreeStrategy {
                             visible_frame,
                             is_highlighted,
                             spawn_indicator: if is_highlighted {
-                                Some(SpawnIndicator::from_spawn_mode(td.spawn_mode))
+                                Some(SpawnIndicator::from_spawn_mode(
+                                    self.child_spawn_mode(child),
+                                ))
                             } else {
                                 None
                             },
@@ -312,7 +295,7 @@ impl TilingStrategy for PartitionTreeStrategy {
                 }
                 Child::Container(id) => {
                     let container = self.containers.get(id);
-                    let frame = translate(container.dimension, offset_x, offset_y, screen);
+                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
                     let Some(visible_frame) = clip(frame, screen) else {
                         continue;
                     };
@@ -323,7 +306,9 @@ impl TilingStrategy for PartitionTreeStrategy {
                         visible_frame,
                         is_highlighted,
                         spawn_indicator: if is_highlighted {
-                            Some(SpawnIndicator::from_spawn_mode(container.spawn_mode()))
+                            Some(SpawnIndicator::from_spawn_mode(
+                                self.child_spawn_mode(child),
+                            ))
                         } else {
                             None
                         },
@@ -376,8 +361,8 @@ impl TilingStrategy for PartitionTreeStrategy {
         let Some(focused) = self.workspaces.get(&from_ws).and_then(|s| s.focused_tiling) else {
             return;
         };
-        self.detach_child_internal(hub, focused);
-        self.attach_child_internal(hub, focused, to_ws);
+        self.detach_child(hub, focused);
+        self.attach_child(hub, focused, to_ws);
     }
 
     fn has_tiling_windows(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> bool {
@@ -393,20 +378,9 @@ impl TilingStrategy for PartitionTreeStrategy {
         let Some(root) = self.workspaces.get(&ws_id).and_then(|s| s.root) else {
             return 0;
         };
-        let mut count = 0;
-        let mut stack = vec![root];
-        for _ in crate::core::bounded_loop() {
-            let Some(child) = stack.pop() else { break };
-            match child {
-                Child::Window(_) => count += 1,
-                Child::Container(id) => {
-                    for &c in self.containers.get(id).children() {
-                        stack.push(c);
-                    }
-                }
-            }
-        }
-        count
+        self.children_dfs(root)
+            .filter(|c| matches!(c, Child::Window(_)))
+            .count()
     }
 
     fn prune_workspace(&mut self, ws_id: WorkspaceId) {
@@ -433,6 +407,9 @@ impl TilingStrategy for PartitionTreeStrategy {
             let Some(root) = self.workspaces.get(&workspace_id).and_then(|s| s.root) else {
                 continue;
             };
+            // Hand-rolled DFS kept because the walk threads expected_parent
+            // derived from the traversal structure. Using children_dfs plus
+            // parent would check the parent field against itself.
             let mut stack = vec![(root, Parent::Workspace(workspace_id))];
             for _ in crate::core::bounded_loop() {
                 let Some((child, expected_parent)) = stack.pop() else {
@@ -475,12 +452,12 @@ struct TilingWindowData {
 struct WorkspaceTilingState {
     root: Option<Child>,
     /// Tiling focus pointer. Usually a `Child::Window` (the focused window). Can be
-    /// `Child::Container` after `focus_parent`, entering container-highlight mode where
+    /// `Child::Container` for container-highlight mode, where
     /// `focused_tiling_window()` returns `None`. Can only be None in an empty workspace.
     ///
-    /// Invariant: if `focused_tiling == Some(X)`, every ancestor container of X has
-    /// `focused == X`. Walking `container.focused` from root reaches X directly.
-    /// Established by `set_focus_child`, preserved by `replace_split_child_focus`.
+    /// Anchors invariant 3 of `Container`: when this is `Some(X)`, every ancestor
+    /// container of X has `focused == X`. Established by `set_focus_child`,
+    /// preserved by `replace_child_focus`.
     focused_tiling: Option<Child>,
     viewport_offset: (Length, Length),
 }
