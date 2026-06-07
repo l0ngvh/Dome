@@ -464,7 +464,8 @@ fn sync_config_swap_preserves_float_focus() {
     // Focus the float so is_float_focused becomes true.
     hub.set_focus(float_id);
 
-    assert_snapshot!(snapshot(&hub), @"
+    let before = snapshot(&hub);
+    assert_snapshot!(before, @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
@@ -508,42 +509,5 @@ fn sync_config_swap_preserves_float_focus() {
         ..Default::default()
     });
 
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Window(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
-      )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |         ******************************                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *             F1             *                                  W0                                                                         |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         ******************************                                                                                                             |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
+    assert_eq!(snapshot(&hub), before);
 }

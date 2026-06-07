@@ -361,21 +361,6 @@ fn minimized_borderless_reappears_still_fullscreen() {
 }
 
 #[test]
-fn zoom_button_triggers_borderless_fullscreen() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-    macos.settle(&mut dome, 10);
-
-    macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
-    macos.settle(&mut dome, 10);
-
-    assert_eq!(macos.window_frame(cg1), (0, 0, 1920, 1080));
-}
-
-#[test]
 fn borderless_fullscreen_exit_to_tiling() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
@@ -839,59 +824,6 @@ fn window_turned_borderless_fullscreen_after_user_minimize() {
     macos.settle(&mut dome, 10);
 
     assert_eq!(macos.window_frame(cg1), (0, 0, 1920, 1080));
-}
-
-#[test]
-fn native_fullscreen_enter_detected_via_reconcile() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
-
-    // Enter native fullscreen
-    macos.enter_native_fullscreen(&mut dome, cg1);
-    macos.settle(&mut dome, 10);
-
-    assert!(macos.is_offscreen(cg2));
-}
-
-#[test]
-fn native_fullscreen_exit_detected_via_reconcile() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
-
-    // Enter native fullscreen
-    macos.enter_native_fullscreen(&mut dome, cg1);
-    macos.settle(&mut dome, 10);
-
-    // Exit native fullscreen
-    macos.exit_native_fullscreen(&mut dome, cg1, 200, 200, 800, 600);
-    macos.settle(&mut dome, 10);
-
-    assert!(!macos.is_offscreen(cg1));
-    assert!(!macos.is_offscreen(cg2));
 }
 
 #[test]

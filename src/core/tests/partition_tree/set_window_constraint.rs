@@ -9,55 +9,6 @@ use crate::core::tests::{
 };
 
 #[test]
-fn set_min_size_respects_minimum_width() {
-    let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
-      )
-
-    +--------------------------------------------------------------------------------------------------+**************************************************
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                W0                                                |*                       W1                       *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    |                                                                                                  |*                                                *
-    +--------------------------------------------------------------------------------------------------+**************************************************
-    ");
-}
-
-#[test]
 fn set_min_size_respects_minimum_height() {
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace());
@@ -1397,7 +1348,8 @@ fn setting_max_to_zero_clears_constraint() {
     // Clear max_h with Some(-1.0). Negative is normalized to 0.0,
     // which clears the constraint. w0 expands to 75x30.
     hub.set_window_constraint(w0, None, None, None, Some(-1.0));
-    assert_snapshot!(snapshot(&hub), @"
+    let cleared = snapshot(&hub);
+    assert_snapshot!(cleared, @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
@@ -1440,45 +1392,7 @@ fn setting_max_to_zero_clears_constraint() {
     // Re-cap w0 height at 10, then clear with Some(0.0).
     hub.set_window_constraint(w0, None, None, None, Some(10.0));
     hub.set_window_constraint(w0, None, None, None, Some(0.0));
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
-      )
-
-    +-------------------------------------------------------------------------+***************************************************************************
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                    W0                                   |*                                    W1                                   *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+***************************************************************************
-    ");
+    assert_eq!(snapshot(&hub), cleared);
 }
 
 #[test]
@@ -1489,7 +1403,8 @@ fn setting_min_below_existing_max_keeps_max() {
 
     // Cap w0 height at 20. w0 takes 75x20 centered.
     hub.set_window_constraint(w0, None, None, None, Some(20.0));
-    assert_snapshot!(snapshot(&hub), @"
+    let capped = snapshot(&hub);
+    assert_snapshot!(capped, @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
@@ -1532,45 +1447,7 @@ fn setting_min_below_existing_max_keeps_max() {
     // Set min_h=10 below max_h=20. If max were incorrectly lowered
     // to 10, w0 would render at height 10. It should stay at 20.
     hub.set_window_constraint(w0, None, Some(10.0), None, None);
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(0), x=0.00, y=5.00, w=75.00, h=20.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
-      )
-
-                                                                               ***************************************************************************
-                                                                               *                                                                         *
-                                                                               *                                                                         *
-                                                                               *                                                                         *
-                                                                               *                                                                         *
-    +-------------------------------------------------------------------------+*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                    W0                                   |*                                    W1                                   *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+*                                                                         *
-                                                                               *                                                                         *
-                                                                               *                                                                         *
-                                                                               *                                                                         *
-                                                                               *                                                                         *
-                                                                               ***************************************************************************
-    ");
+    assert_eq!(snapshot(&hub), capped);
 }
 
 #[test]

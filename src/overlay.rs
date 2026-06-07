@@ -651,33 +651,22 @@ mod tests {
     use crate::core::Length;
 
     #[test]
-    fn effective_radius_no_clamp() {
-        assert_eq!(effective_radius(8.0, 100.0, 200.0), 8.0);
-    }
-
-    #[test]
-    fn effective_radius_clamp_to_half_width() {
-        assert_eq!(effective_radius(60.0, 100.0, 200.0), 50.0);
-    }
-
-    #[test]
-    fn effective_radius_clamp_to_half_height() {
-        assert_eq!(effective_radius(60.0, 200.0, 80.0), 40.0);
-    }
-
-    #[test]
-    fn effective_radius_zero() {
-        assert_eq!(effective_radius(0.0, 100.0, 100.0), 0.0);
-    }
-
-    #[test]
-    fn effective_radius_tiny_window() {
-        assert_eq!(effective_radius(10.0, 6.0, 4.0), 2.0);
-    }
-
-    #[test]
-    fn effective_radius_negative_input() {
-        assert_eq!(effective_radius(-5.0, 100.0, 100.0), 0.0);
+    fn effective_radius_cases() {
+        let cases = [
+            (8.0, 100.0, 200.0, 8.0),
+            (60.0, 100.0, 200.0, 50.0),
+            (60.0, 200.0, 80.0, 40.0),
+            (0.0, 100.0, 100.0, 0.0),
+            (10.0, 6.0, 4.0, 2.0),
+            (-5.0, 100.0, 100.0, 0.0),
+        ];
+        for (r, w, h, expected) in cases {
+            assert_eq!(
+                effective_radius(r, w, h),
+                expected,
+                "case (r={r}, w={w}, h={h})"
+            );
+        }
     }
 
     #[test]

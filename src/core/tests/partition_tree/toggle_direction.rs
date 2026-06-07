@@ -1,3 +1,4 @@
+use crate::core::node::{Dimension, Length};
 use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
@@ -493,4 +494,31 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     |                                                ||               ||              ||               ||                                                |
     +------------------------------------------------++---------------++--------------++---------------++------------------------------------------------+
     ");
+}
+
+#[test]
+fn toggle_direction_noop() {
+    let mut hub = setup();
+    let before = snapshot(&hub);
+    hub.toggle_direction();
+    assert_eq!(before, snapshot(&hub));
+
+    hub.insert_tiling(hub.current_workspace());
+    let before = snapshot(&hub);
+    hub.toggle_direction();
+    assert_eq!(before, snapshot(&hub));
+
+    let mut hub = setup();
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
+    let before = snapshot(&hub);
+    hub.toggle_direction();
+    assert_eq!(before, snapshot(&hub));
 }

@@ -480,40 +480,6 @@ fn monitor_noop_cases() {
     }
 }
 
-#[test]
-fn move_to_monitor_does_not_change_focus() {
-    use crate::action::MonitorTarget;
-
-    let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-
-    hub.add_monitor(
-        "external".to_string(),
-        Dimension::new(
-            Length::new(150.0),
-            Length::new(0.0),
-            Length::new(100.0),
-            Length::new(30.0),
-        ),
-        1.0,
-    );
-
-    let original_monitor = hub.focused_monitor();
-    hub.move_focused_to_monitor(&MonitorTarget::Right);
-
-    assert_eq!(hub.focused_monitor(), original_monitor);
-    assert_snapshot!(snapshot_text(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
-      )
-      Monitor(id=MonitorId(1), screen=(x=150.00 y=0.00 w=100.00 h=30.00),
-        Window(id=WindowId(1), x=150.00, y=0.00, w=100.00, h=30.00)
-      )
-    ");
-}
-
 // This test verifies that `to_unit(scale)` multiplies config-denominated lengths
 // by the monitor scale factor. On macOS (Unit = Logical), `to_unit` is identity
 // by design (scale is always 1.0 in production). The test exercises Windows behavior

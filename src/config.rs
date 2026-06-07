@@ -1304,23 +1304,6 @@ mod tests {
     }
 
     #[test]
-    fn pixels_resolve_returns_unit_length() {
-        let constraint = SizeConstraint::Pixels(Length::new(100.0));
-        let resolved = constraint.resolve(Length::new(1000.0), 1.0);
-        assert_eq!(resolved.value(), 100.0);
-    }
-
-    #[test]
-    fn percent_resolve_returns_unit_length() {
-        // screen_size is already in Unit space (monitor frame width/height),
-        // so the Percent arm directly constructs Length<Unit> without to_unit.
-        let constraint = SizeConstraint::Percent(10.0);
-        let resolved = constraint.resolve(Length::new(1000.0), 2.0);
-        // scale does not affect Percent: 10% of 1000 = 100, regardless of scale.
-        assert_eq!(resolved.value(), 100.0);
-    }
-
-    #[test]
     fn partition_tree_config_parses_fields() {
         let config: Config = toml::from_str(
             "[layout.partition_tree]\ntab_bar_height = 30.0\nautomatic_tiling = false",

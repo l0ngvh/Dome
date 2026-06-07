@@ -723,18 +723,11 @@ mod tests {
     }
 
     #[test]
-    fn target_scale_to_physical_inner_at_96_dpi() {
-        assert_eq!(target_scale_to_physical_inner(96), 1.0);
-    }
-
-    #[test]
-    fn target_scale_to_physical_inner_at_192_dpi() {
-        assert_eq!(target_scale_to_physical_inner(192), 2.0);
-    }
-
-    #[test]
-    fn target_scale_to_physical_inner_at_144_dpi() {
-        assert_eq!(target_scale_to_physical_inner(144), 1.5);
+    fn target_scale_to_physical_inner_dpi_table() {
+        let cases = [(96, 1.0), (144, 1.5), (192, 2.0)];
+        for (dpi, expected) in cases {
+            assert_eq!(target_scale_to_physical_inner(dpi), expected, "dpi={dpi}");
+        }
     }
 
     #[cfg(debug_assertions)]

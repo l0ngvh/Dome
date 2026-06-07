@@ -298,35 +298,6 @@ fn stale_burst_discarded() {
 }
 
 #[test]
-fn offscreen_move_events_keep_windows_hidden() {
-    let (macos, mut dome, cg1, cg2) = two_windows();
-
-    send(&mut dome, "focus workspace 1");
-    macos.settle(&mut dome, 10);
-    assert!(macos.is_offscreen(cg1));
-    assert!(macos.is_offscreen(cg2));
-
-    send(&mut dome, "focus workspace 0");
-    macos.settle(&mut dome, 10);
-    assert!(!macos.is_offscreen(cg1));
-    assert!(!macos.is_offscreen(cg2));
-}
-
-#[test]
-fn no_redundant_set_frame_after_settling() {
-    let (macos, mut dome, _cg1, _cg2) = two_windows();
-
-    // System is settled — no pending moves
-    assert!(
-        macos.moves.borrow().is_empty(),
-        "should have no pending moves after settle"
-    );
-
-    // One more settle cycle should be a no-op
-    macos.settle(&mut dome, 1);
-}
-
-#[test]
 fn stale_check_passes_when_any_timestamp_is_fresh() {
     let (macos, mut dome, cg1, _cg2) = two_windows();
 

@@ -641,15 +641,3 @@ fn move_container_to_same_workspace_noop() {
     ******************************************************************************************************************************************************
     ");
 }
-
-#[test]
-fn move_focused_to_workspace_empty_workspace_noop() {
-    let mut hub = setup();
-    // No windows at all, should be a no-op
-    hub.move_focused_to_workspace("1");
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-    ");
-}

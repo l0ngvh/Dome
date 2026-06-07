@@ -110,57 +110,26 @@ mod tests {
     }
 
     #[test]
-    fn font_validate_rejects_small_text_size() {
-        let fc = FontConfig {
-            text_size: 3.0,
-            subtext_size: 12.0,
-        };
-        assert!(fc.validate().is_err());
-    }
-
-    #[test]
-    fn font_validate_rejects_small_subtext() {
-        let fc = FontConfig {
-            text_size: 14.0,
-            subtext_size: 3.0,
-        };
-        assert!(fc.validate().is_err());
-    }
-
-    #[test]
-    fn font_validate_accepts_min() {
-        let fc = FontConfig {
-            text_size: MIN_FONT_SIZE,
-            subtext_size: MIN_FONT_SIZE,
-        };
-        assert!(fc.validate().is_ok());
-    }
-
-    #[test]
-    fn font_validate_rejects_large_text_size() {
-        let fc = FontConfig {
-            text_size: MAX_FONT_SIZE + 1.0,
-            subtext_size: 12.0,
-        };
-        assert!(fc.validate().is_err());
-    }
-
-    #[test]
-    fn font_validate_rejects_large_subtext() {
-        let fc = FontConfig {
-            text_size: 14.0,
-            subtext_size: MAX_FONT_SIZE + 1.0,
-        };
-        assert!(fc.validate().is_err());
-    }
-
-    #[test]
-    fn font_validate_accepts_max() {
-        let fc = FontConfig {
-            text_size: MAX_FONT_SIZE,
-            subtext_size: MAX_FONT_SIZE,
-        };
-        assert!(fc.validate().is_ok());
+    fn font_validate_boundaries() {
+        let cases = [
+            (3.0, 12.0, false),
+            (14.0, 3.0, false),
+            (MIN_FONT_SIZE, MIN_FONT_SIZE, true),
+            (MAX_FONT_SIZE + 1.0, 12.0, false),
+            (14.0, MAX_FONT_SIZE + 1.0, false),
+            (MAX_FONT_SIZE, MAX_FONT_SIZE, true),
+        ];
+        for (text_size, subtext_size, expected_ok) in cases {
+            let fc = FontConfig {
+                text_size,
+                subtext_size,
+            };
+            assert_eq!(
+                fc.validate().is_ok(),
+                expected_ok,
+                "case (text={text_size}, sub={subtext_size})"
+            );
+        }
     }
 
     #[test]

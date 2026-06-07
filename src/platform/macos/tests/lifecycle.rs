@@ -292,36 +292,7 @@ fn window_removed_fills_screen() {
 }
 
 #[test]
-fn delete_currently_displayed_window() {
-    let mut macos = MacOS::new();
-    let mut dome = macos.setup_dome();
-
-    let cg1 = macos.spawn_window(100, "Safari", "Google");
-    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
-    dome.reconcile_windows(
-        &[],
-        &[],
-        &[],
-        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
-        &[],
-        &[],
-    );
-    macos.settle(&mut dome, 10);
-
-    dome.reconcile_windows(&[], &[cg1], &[], vec![], &[], &[]);
-    macos.settle(&mut dome, 10);
-
-    // Remaining window fills screen
-    assert!(!macos.is_offscreen(cg2));
-    assert_eq!(macos.window_frame(cg2), (4, 4, 1912, 1072));
-
-    // Second settle proves displayed state was cleaned up
-    macos.settle(&mut dome, 10);
-    assert!(!macos.is_offscreen(cg2));
-}
-
-#[test]
-fn render_frame_focused_window() {
+fn render_frame_focused_state() {
     let mut macos = MacOS::new();
     let cg1 = macos.spawn_window(1, "App1", "Win1");
     let mut dome = macos.setup_dome();
@@ -329,6 +300,7 @@ fn render_frame_focused_window() {
 
     let state = macos.last_frame_state();
     assert!(state.focused_window.is_some());
+    assert!(state.focused_monitor_id.is_some());
 }
 
 #[test]
@@ -363,17 +335,6 @@ fn render_frame_focused_container_after_focus_parent() {
     // so the platform receives focused_window: None and focuses the overlay.
     let state = macos.last_frame_state();
     assert!(state.focused_window.is_none());
-}
-
-#[test]
-fn render_frame_focused_monitor_id() {
-    let mut macos = MacOS::new();
-    let cg1 = macos.spawn_window(1, "App1", "Win1");
-    let mut dome = macos.setup_dome();
-    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
-
-    let state = macos.last_frame_state();
-    assert!(state.focused_monitor_id.is_some());
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use crate::core::ContainerId;
 use crate::core::allocator::NodeId;
+use crate::core::node::{Dimension, Length};
 use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
@@ -277,56 +278,6 @@ fn focus_prev_tab_wraps() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                         W2                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
-    ");
-}
-
-#[test]
-fn focus_tab_change_workspace_focus_to_active_tab_window() {
-    let mut hub = setup();
-
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.toggle_container_layout();
-    hub.focus_prev_tab();
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[W0, W1, W2])
-      )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                       W0                        |                     [W1]                       |                      W2                         |
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W1                                                                         *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
@@ -1422,7 +1373,8 @@ fn focus_tab_index() {
     hub.toggle_container_layout();
 
     hub.focus_tab_index(ContainerId::new(0), 0);
-    assert_snapshot!(snapshot(&hub), @"
+    let pre = snapshot(&hub);
+    assert_snapshot!(pre, @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
@@ -1462,42 +1414,68 @@ fn focus_tab_index() {
     ");
 
     hub.focus_tab_index(ContainerId::new(0), 99);
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[W0, W1, W2])
-      )
+    assert_eq!(snapshot(&hub), pre);
+}
 
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                      [W0]                       |                      W1                        |                      W2                         |
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
-    ");
+#[test]
+fn focus_tab_noop() {
+    let mut hub = setup();
+    let before = snapshot(&hub);
+    hub.focus_next_tab();
+    assert_eq!(before, snapshot(&hub));
+    hub.focus_prev_tab();
+    assert_eq!(before, snapshot(&hub));
+
+    let mut hub = setup();
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
+    let before = snapshot(&hub);
+    hub.focus_next_tab();
+    assert_eq!(before, snapshot(&hub));
+    hub.focus_prev_tab();
+    assert_eq!(before, snapshot(&hub));
+
+    // Two tiling windows with no tabbed ancestor
+    let mut hub = setup();
+    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+    let before = snapshot(&hub);
+    hub.focus_next_tab();
+    assert_eq!(before, snapshot(&hub));
+    hub.focus_prev_tab();
+    assert_eq!(before, snapshot(&hub));
+}
+
+#[test]
+fn toggle_container_layout_noop() {
+    let mut hub = setup();
+    let before = snapshot(&hub);
+    hub.toggle_container_layout();
+    assert_eq!(before, snapshot(&hub));
+
+    hub.insert_tiling(hub.current_workspace());
+    let before = snapshot(&hub);
+    hub.toggle_container_layout();
+    assert_eq!(before, snapshot(&hub));
+
+    let mut hub = setup();
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
+    let before = snapshot(&hub);
+    hub.toggle_container_layout();
+    assert_eq!(before, snapshot(&hub));
 }

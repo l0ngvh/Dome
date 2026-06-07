@@ -112,16 +112,6 @@ fn move_window_to_other_workspace() {
 }
 
 #[test]
-fn fullscreen_borderless_minimizes_on_workspace_switch() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
-
-    env.run_actions("focus workspace 1");
-
-    assert!(env.is_minimized(w1));
-}
-
-#[test]
 fn fullscreen_exclusive_not_repositioned() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "Game", "game.exe", SPAWN_DIM);

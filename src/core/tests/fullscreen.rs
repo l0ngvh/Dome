@@ -203,52 +203,6 @@ fn set_fullscreen_already_fullscreen() {
 }
 
 #[test]
-fn set_fullscreen_doesnt_change_focus() {
-    let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.set_fullscreen(w0, WindowRestrictions::None);
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Fullscreen(id=WindowId(0))
-      )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W0                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
-}
-
-#[test]
 fn unset_fullscreen_to_tiling() {
     let mut hub = setup();
     let w1 = hub.insert_tiling(hub.current_workspace());

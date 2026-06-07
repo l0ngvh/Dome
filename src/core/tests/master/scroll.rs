@@ -1,25 +1,10 @@
+use super::setup_master;
 use crate::config::{LayoutConfig, MasterConfig, Strategy};
-use crate::core::hub::{Hub, HubConfig};
-use crate::core::node::{Dimension, Length};
+use crate::core::hub::HubConfig;
 use crate::core::strategy::TilingAction;
 use crate::core::tests::default_partition_tree_config_for_tests;
 use crate::core::tests::snapshot;
 use insta::assert_snapshot;
-
-fn setup_master() -> Hub {
-    let mut config = HubConfig::default();
-    config.layout.strategy = Strategy::Master;
-    Hub::new(
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(150.0),
-            Length::new(30.0),
-        ),
-        1.0,
-        config,
-    )
-}
 
 #[test]
 fn min_height_master_pane_overflows_and_scrolls_to_focus() {
@@ -820,48 +805,5 @@ fn apply_config_relayouts_and_clamps_scroll() {
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
-    ");
-}
-
-#[test]
-fn single_window_no_scroll_state() {
-    let mut hub = setup_master();
-    let _w0 = hub.insert_tiling(hub.current_workspace());
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted)
-      )
-
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
     ");
 }

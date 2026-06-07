@@ -521,36 +521,25 @@ mod tests {
     }
 
     #[test]
-    fn picker_physical_rect_100() {
-        let monitor = Dimension::<Physical>::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1920.0),
-            Length::new(1080.0),
-        );
-        assert_eq!(picker_physical_rect(1.0, monitor), (760, 390, 400, 300));
-    }
-
-    #[test]
-    fn picker_physical_rect_150() {
-        let monitor = Dimension::<Physical>::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(2880.0),
-            Length::new(1620.0),
-        );
-        assert_eq!(picker_physical_rect(1.5, monitor), (1140, 585, 600, 450));
-    }
-
-    #[test]
-    fn picker_physical_rect_200() {
-        let monitor = Dimension::<Physical>::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(3840.0),
-            Length::new(2160.0),
-        );
-        assert_eq!(picker_physical_rect(2.0, monitor), (1520, 780, 800, 600));
+    fn picker_physical_rect_scale_table() {
+        let cases = [
+            (1.0, 1920.0, 1080.0, (760, 390, 400, 300)),
+            (1.5, 2880.0, 1620.0, (1140, 585, 600, 450)),
+            (2.0, 3840.0, 2160.0, (1520, 780, 800, 600)),
+        ];
+        for (scale, w, h, expected) in cases {
+            let monitor = Dimension::<Physical>::new(
+                Length::new(0.0),
+                Length::new(0.0),
+                Length::new(w),
+                Length::new(h),
+            );
+            assert_eq!(
+                picker_physical_rect(scale, monitor),
+                expected,
+                "scale={scale}"
+            );
+        }
     }
 
     #[test]

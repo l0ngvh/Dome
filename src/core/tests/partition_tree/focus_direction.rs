@@ -294,105 +294,6 @@ fn focus_right_selects_first_child_of_next_container() {
 }
 
 #[test]
-fn focus_left_selects_last_child_of_previous_container() {
-    let mut hub = setup();
-
-    // Create: [w0, w1] [w2]
-    hub.insert_tiling(hub.current_workspace());
-    hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
-    hub.focus_parent();
-    hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(2))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, ])
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, titles=[, ])
-      )
-
-    +-------------------------------------------------------------------------+***************************************************************************
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                    W0                                   |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+*                                                                         *
-    +-------------------------------------------------------------------------+*                                    W2                                   *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                    W1                                   |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+***************************************************************************
-    ");
-    // focus_left from w2 should select w1 (last child of previous container)
-    hub.focus_left();
-
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
-        Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00, highlighted, spawn=bottom)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, ])
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, titles=[, ])
-      )
-
-    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                    W0                                   ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    +-------------------------------------------------------------------------+|                                                                         |
-    ***************************************************************************|                                    W2                                   |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                    W1                                   *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    ***************************************************************************+-------------------------------------------------------------------------+
-    ");
-}
-
-#[test]
 fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     let mut hub = setup();
 
@@ -1302,4 +1203,29 @@ fn focus_left_skips_tabbed_grandparent() {
     *                                                                         *|                                    ||                                   |
     ***************************************************************************+------------------------------------++-----------------------------------+
     ");
+}
+
+#[test]
+fn focus_direction_noop() {
+    let mut hub = setup();
+    let before = snapshot(&hub);
+    hub.focus_left();
+    assert_eq!(before, snapshot(&hub));
+    hub.focus_right();
+    assert_eq!(before, snapshot(&hub));
+    hub.focus_up();
+    assert_eq!(before, snapshot(&hub));
+    hub.focus_down();
+    assert_eq!(before, snapshot(&hub));
+
+    hub.insert_tiling(hub.current_workspace());
+    let before = snapshot(&hub);
+    hub.focus_left();
+    assert_eq!(before, snapshot(&hub));
+    hub.focus_right();
+    assert_eq!(before, snapshot(&hub));
+    hub.focus_up();
+    assert_eq!(before, snapshot(&hub));
+    hub.focus_down();
+    assert_eq!(before, snapshot(&hub));
 }

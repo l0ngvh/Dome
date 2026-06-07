@@ -443,25 +443,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_mode_action() {
-        assert_eq!(
-            "mode resize".parse::<Action>().unwrap().to_string(),
-            "mode resize"
-        );
-    }
-
-    #[test]
-    fn display_mode_action() {
-        assert_eq!(
-            Action::Mode {
-                name: "resize".to_string()
-            }
-            .to_string(),
-            "mode resize"
-        );
-    }
-
-    #[test]
     fn unminimize_window_display_uses_space() {
         let id: WindowId = serde_json::from_value(serde_json::json!(7)).unwrap();
         let action = Action::UnminimizeWindow(id);

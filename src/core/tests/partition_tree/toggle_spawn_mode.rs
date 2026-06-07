@@ -1,3 +1,4 @@
+use crate::core::node::{Dimension, Length};
 use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
@@ -630,4 +631,26 @@ fn spawn_non_tab_in_tabbed_parent_with_focused_container() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
+}
+
+#[test]
+fn toggle_spawn_mode_noop() {
+    let mut hub = setup();
+    let before = snapshot(&hub);
+    hub.toggle_spawn_mode();
+    assert_eq!(before, snapshot(&hub));
+
+    let mut hub = setup();
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
+    let before = snapshot(&hub);
+    hub.toggle_spawn_mode();
+    assert_eq!(before, snapshot(&hub));
 }

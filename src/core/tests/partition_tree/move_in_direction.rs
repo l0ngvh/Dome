@@ -1,3 +1,4 @@
+use crate::core::node::{Dimension, Length};
 use crate::core::tests::{setup, snapshot};
 
 #[test]
@@ -917,4 +918,49 @@ fn move_container_left_toggles_direction_when_matching_parent() {
     |                                                |*                                                *|                                                |
     +------------------------------------------------+**************************************************+------------------------------------------------+
     ");
+}
+
+#[test]
+fn move_in_direction_noop() {
+    let mut hub = setup();
+    let before = snapshot(&hub);
+    hub.move_left();
+    assert_eq!(before, snapshot(&hub));
+    hub.move_right();
+    assert_eq!(before, snapshot(&hub));
+    hub.move_up();
+    assert_eq!(before, snapshot(&hub));
+    hub.move_down();
+    assert_eq!(before, snapshot(&hub));
+
+    hub.insert_tiling(hub.current_workspace());
+    let before = snapshot(&hub);
+    hub.move_left();
+    assert_eq!(before, snapshot(&hub));
+    hub.move_right();
+    assert_eq!(before, snapshot(&hub));
+    hub.move_up();
+    assert_eq!(before, snapshot(&hub));
+    hub.move_down();
+    assert_eq!(before, snapshot(&hub));
+
+    let mut hub = setup();
+    hub.insert_float(
+        hub.current_workspace(),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+    );
+    let before = snapshot(&hub);
+    hub.move_left();
+    assert_eq!(before, snapshot(&hub));
+    hub.move_right();
+    assert_eq!(before, snapshot(&hub));
+    hub.move_up();
+    assert_eq!(before, snapshot(&hub));
+    hub.move_down();
+    assert_eq!(before, snapshot(&hub));
 }

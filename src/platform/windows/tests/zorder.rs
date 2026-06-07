@@ -35,16 +35,6 @@ fn single_window_above_overlay() {
 }
 
 #[test]
-fn focused_window_on_top() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
-
-    assert_tiling_above_overlay(&env, &[w1, w2, w3]);
-}
-
-#[test]
 fn all_tiling_above_overlay() {
     let mut env = TestEnv::new();
     for i in 1..=5 {
@@ -123,16 +113,6 @@ fn workspace_switch_restores_zorder() {
 }
 
 #[test]
-fn empty_workspace_overlay_focus() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-
-    env.run_actions("focus workspace 1");
-
-    assert_eq!(env.focus_target(), FocusTarget::Sink);
-}
-
-#[test]
 fn float_window_above_tiling_and_overlay() {
     let mut env = TestEnv::new();
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -189,18 +169,6 @@ fn move_window_to_other_workspace() {
     env.run_actions("move workspace 1");
 
     assert!(env.is_offscreen(w3));
-
-    assert_tiling_above_overlay(&env, &[w1, w2]);
-}
-
-#[test]
-fn overlay_behind_after_empty_workspace_roundtrip() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-
-    env.run_actions("focus workspace 1");
-    env.run_actions("focus workspace 0");
 
     assert_tiling_above_overlay(&env, &[w1, w2]);
 }

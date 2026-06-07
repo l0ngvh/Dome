@@ -612,7 +612,7 @@ fn delete_unfocused_float_window() {
 #[test]
 fn delete_float_workspace_pruning() {
     // Scenario 1: delete float on current workspace -- workspace kept
-    {
+    let canonical = {
         let mut hub = setup();
         let f0 = hub.insert_float(
             hub.current_workspace(),
@@ -624,11 +624,13 @@ fn delete_float_workspace_pruning() {
             ),
         );
         hub.delete_window(f0);
-        assert_snapshot!(snapshot(&hub), @"
+        let snap = snapshot(&hub);
+        assert_snapshot!(snap, @"
         Hub(focused=None)
           Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
         ");
-    }
+        snap
+    };
 
     // Scenario 2: non-current workspace kept because tiling exists
     {
@@ -646,10 +648,7 @@ fn delete_float_workspace_pruning() {
         );
         hub.focus_workspace("0");
         hub.delete_window(f0);
-        assert_snapshot!(snapshot(&hub), @"
-        Hub(focused=None)
-          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-        ");
+        assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
             hub.all_workspaces().len(),
             2,
@@ -681,10 +680,7 @@ fn delete_float_workspace_pruning() {
         );
         hub.focus_workspace("0");
         hub.delete_window(f0);
-        assert_snapshot!(snapshot(&hub), @"
-        Hub(focused=None)
-          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-        ");
+        assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
             hub.all_workspaces().len(),
             2,
@@ -707,10 +703,7 @@ fn delete_float_workspace_pruning() {
         );
         hub.focus_workspace("0");
         hub.delete_window(f0);
-        assert_snapshot!(snapshot(&hub), @"
-        Hub(focused=None)
-          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-        ");
+        assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
             hub.all_workspaces().len(),
             1,

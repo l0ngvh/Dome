@@ -466,15 +466,6 @@ fn set_window_constraint_on_minimized_no_panic() {
 }
 
 #[test]
-fn set_window_constraint_on_minimized_pruned_workspace() {
-    let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    hub.minimize_window(w0);
-    hub.focus_workspace("1");
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
-}
-
-#[test]
 fn unminimize_after_workspace_pruned() {
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace());

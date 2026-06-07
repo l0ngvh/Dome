@@ -1,6 +1,12 @@
 use crate::core::tests::{setup, snapshot};
 use insta::assert_snapshot;
 
+fn snapshot_with_only_w0_fullscreen() -> String {
+    let mut hub = setup();
+    hub.insert_tiling(hub.current_workspace());
+    snapshot(&hub)
+}
+
 #[test]
 fn move_window_to_empty_workspace() {
     let mut hub = setup();
@@ -97,43 +103,7 @@ fn move_window_to_workspace_with_windows() {
     hub.focus_workspace("0");
     hub.move_focused_to_workspace("1");
 
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
-      )
-
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
-    ");
+    assert_eq!(snapshot(&hub), snapshot_with_only_w0_fullscreen());
     hub.focus_workspace("1");
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -188,43 +158,7 @@ fn move_only_window_to_workspace() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
     hub.focus_workspace("1");
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
-      )
-
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
-    ");
+    assert_eq!(snapshot(&hub), snapshot_with_only_w0_fullscreen());
 }
 
 #[test]

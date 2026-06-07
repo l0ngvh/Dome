@@ -1,26 +1,12 @@
+use super::setup_master;
 use crate::config::{LayoutConfig, MasterConfig, Strategy};
 use crate::core::allocator::NodeId;
-use crate::core::hub::{Hub, HubConfig};
-use crate::core::node::{Dimension, Length, WindowId};
+use crate::core::hub::HubConfig;
+use crate::core::node::WindowId;
 use crate::core::strategy::TilingAction;
 use crate::core::tests::default_partition_tree_config_for_tests;
 use crate::core::tests::{snapshot, validate_hub};
 use insta::assert_snapshot;
-
-fn setup_master() -> Hub {
-    let mut config = HubConfig::default();
-    config.layout.strategy = Strategy::Master;
-    Hub::new(
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(150.0),
-            Length::new(30.0),
-        ),
-        1.0,
-        config,
-    )
-}
 
 #[test]
 fn single_window_layout() {
@@ -552,7 +538,8 @@ fn increment_decrement_master_count() {
 
     // Decrement back to 1
     hub.handle_tiling_action(TilingAction::FewerMaster);
-    assert_snapshot!(snapshot(&hub), @"
+    let after_decrement = snapshot(&hub);
+    assert_snapshot!(after_decrement, @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
@@ -594,45 +581,7 @@ fn increment_decrement_master_count() {
 
     // Decrement below 1 is no-op
     hub.handle_tiling_action(TilingAction::FewerMaster);
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(2))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
-        Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=15.00, highlighted)
-      )
-
-    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                    W1                                   |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         |+-------------------------------------------------------------------------+
-    |                                    W0                                   |***************************************************************************
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                    W2                                   *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+***************************************************************************
-    ");
+    assert_eq!(snapshot(&hub), after_decrement);
 }
 
 #[test]
