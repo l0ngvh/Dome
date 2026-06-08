@@ -1,8 +1,8 @@
-mod drift;
 mod lifecycle;
 mod picker;
 mod placement;
 mod transitions;
+mod uncooperative;
 mod zorder;
 
 use std::cell::{Cell, RefCell};

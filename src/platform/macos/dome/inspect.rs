@@ -105,7 +105,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         }
 
         let already_minimized =
-            entry.is_minimized || matches!(entry.state, WindowState::BorderlessMinimized);
+            entry.is_minimized || matches!(entry.state, WindowState::BorderlessMinimized { .. });
         if !already_minimized && entry.ext.is_minimized(marker) {
             to_minimize.push(cg_id);
             continue;

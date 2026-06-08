@@ -297,7 +297,7 @@ impl Dome {
         };
         tracing::Span::current().record("window", entry.to_string());
         // Dome-initiated minimize
-        if matches!(entry.state, WindowState::BorderlessMinimized) {
+        if matches!(entry.state, WindowState::BorderlessMinimized { .. }) {
             return;
         }
         self.hub.minimize_window(id);

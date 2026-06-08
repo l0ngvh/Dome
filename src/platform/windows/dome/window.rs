@@ -83,7 +83,7 @@ pub(super) enum WindowState {
     /// brings it back. Mutually exclusive with the user-initiated
     /// `is_minimized` flag on `ManagedWindow`: the user can't minimize a
     /// window that's already hidden by Dome on an inactive workspace.
-    BorderlessMinimized,
+    BorderlessMinimized { retries: u8 },
     /// D3D/Vulkan exclusive fullscreen. Dome must not reposition or minimize
     /// these windows — doing so can crash the application or corrupt the
     /// display. Detected via `is_d3d_exclusive_fullscreen_active` in
@@ -112,7 +112,7 @@ impl std::fmt::Display for WindowState {
             Self::Positioned(PositionedState::Float(_)) => write!(f, "float"),
             Self::Positioned(PositionedState::Offscreen { .. }) => write!(f, "offscreen"),
             Self::BorderlessFullscreen => write!(f, "borderless-fullscreen"),
-            Self::BorderlessMinimized => write!(f, "borderless-minimized"),
+            Self::BorderlessMinimized { .. } => write!(f, "borderless-minimized"),
             Self::ExclusiveFullscreen => write!(f, "exclusive-fullscreen"),
         }
     }
@@ -222,7 +222,7 @@ impl Dome {
 
         let (needs_topmost, settled) = match entry.state {
             WindowState::BorderlessFullscreen
-            | WindowState::BorderlessMinimized
+            | WindowState::BorderlessMinimized { .. }
             | WindowState::ExclusiveFullscreen => {
                 debug_assert!(
                     false,
@@ -381,7 +381,7 @@ impl Dome {
             // Fullscreen and borderless-minimized variants are early-returned
             // above; reaching here means the guard was bypassed or removed.
             WindowState::BorderlessFullscreen
-            | WindowState::BorderlessMinimized
+            | WindowState::BorderlessMinimized { .. }
             | WindowState::ExclusiveFullscreen => {
                 unreachable!(
                     "fullscreen / borderless-minimized variants are handled by the \
@@ -409,14 +409,14 @@ impl Dome {
         // Borderless-fullscreen window hidden by Dome because its workspace
         // was inactive. The workspace is now visible again, so transition
         // back and drive the OS-side restore.
-        if matches!(entry.state, WindowState::BorderlessMinimized) {
+        if matches!(entry.state, WindowState::BorderlessMinimized { .. }) {
             entry.ext.show_cmd(ShowCmd::Restore);
             entry.state = WindowState::BorderlessFullscreen;
             return;
         }
         match entry.state {
             WindowState::BorderlessFullscreen
-            | WindowState::BorderlessMinimized
+            | WindowState::BorderlessMinimized { .. }
             | WindowState::ExclusiveFullscreen => {}
             WindowState::Positioned(ps) => {
                 let new_target = dimension.round();
@@ -445,7 +445,7 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        if entry.is_minimized || matches!(entry.state, WindowState::BorderlessMinimized) {
+        if entry.is_minimized || matches!(entry.state, WindowState::BorderlessMinimized { .. }) {
             // Already hidden via minimize (by user or by Dome); nothing to do.
             return;
         }
@@ -473,14 +473,16 @@ impl Dome {
             }
             WindowState::BorderlessFullscreen => {
                 entry.ext.show_cmd(ShowCmd::Minimize);
-                entry.state = WindowState::BorderlessMinimized;
+                entry.state = WindowState::BorderlessMinimized { retries: 0 };
             }
             WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => {
                 if actual.x > OFFSCREEN_POS && actual.y > OFFSCREEN_POS {
                     entry.ext.move_offscreen();
                 }
             }
-            WindowState::BorderlessMinimized => unreachable!("handled by early return above"),
+            WindowState::BorderlessMinimized { .. } => {
+                unreachable!("handled by early return above")
+            }
             WindowState::ExclusiveFullscreen => {}
         }
     }
@@ -522,12 +524,21 @@ impl Dome {
                 self.hub.unset_fullscreen(id);
             }
 
-            (WindowState::BorderlessMinimized, true) => {
-                // TODO: might worth putting a retry limit here to prevent infinite loop.
-                // BorderlessFullscreen window in another workspace resurfaced, hide them.
+            (WindowState::BorderlessMinimized { retries }, true) => {
+                *retries = retries.saturating_add(1);
+                if *retries > MAX_DRIFT_RETRIES {
+                    // Uses `>` (5 retries before give-up) to match the macOS
+                    // `Placement::just_gave_up` pattern, keeping cross-platform
+                    // symmetry. The neighbouring Offscreen arm uses `>=` (4 retries)
+                    // because it inherited the older convention.
+                    if *retries == MAX_DRIFT_RETRIES + 1 {
+                        tracing::debug!(%id, "BorderlessMinimized resurface retries exhausted, giving up");
+                    }
+                    return;
+                }
                 entry.ext.show_cmd(ShowCmd::Minimize);
             }
-            (WindowState::BorderlessMinimized, false) => {
+            (WindowState::BorderlessMinimized { .. }, false) => {
                 // Resurfaced but not fullscreen-shaped: user dragged or shrunk
                 // it. Demote to Offscreen.
                 tracing::trace!(%id, "Previously-minimized borderless-fullscreen window reappeared");
@@ -613,7 +624,7 @@ impl Dome {
                 // Window turned fullscreen, but not visible, so we hide it again.
                 self.hub
                     .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
-                entry.state = WindowState::BorderlessMinimized;
+                entry.state = WindowState::BorderlessMinimized { retries: 0 };
                 entry.ext.show_cmd(ShowCmd::Minimize);
             }
 

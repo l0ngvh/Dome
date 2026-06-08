@@ -138,3 +138,50 @@ fn offscreen_retries_reset_on_fresh_hide() {
         "should have given up again"
     );
 }
+
+#[test]
+fn borderless_minimized_resurface_loop_caps() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    env.run_actions("focus workspace 1");
+    env.settle(20);
+    assert!(env.is_minimized(w1));
+
+    for _ in 0..7 {
+        env.set_minimized(w1, false);
+        env.set_dim(w1, fullscreen_dim());
+        env.simulate_external_move(w1);
+        env.flush_moves();
+    }
+    assert!(!env.is_minimized(w1));
+}
+
+#[test]
+fn borderless_minimized_retries_reset_on_workspace_return() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "Game", "game.exe", fullscreen_dim());
+    env.run_actions("focus workspace 1");
+    env.settle(20);
+    assert!(env.is_minimized(w1));
+
+    // Exhaust the retry cap.
+    for _ in 0..7 {
+        env.set_minimized(w1, false);
+        env.set_dim(w1, fullscreen_dim());
+        env.simulate_external_move(w1);
+        env.flush_moves();
+    }
+    assert!(!env.is_minimized(w1));
+
+    // Switch back then away: variant rebuilt with retries: 0.
+    env.run_actions("focus workspace 0");
+    env.run_actions("focus workspace 1");
+    env.settle(20);
+    assert!(env.is_minimized(w1));
+
+    env.set_minimized(w1, false);
+    env.set_dim(w1, fullscreen_dim());
+    env.simulate_external_move(w1);
+    env.flush_moves();
+    assert!(env.is_minimized(w1));
+}

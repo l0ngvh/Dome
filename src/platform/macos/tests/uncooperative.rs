@@ -468,3 +468,80 @@ fn mixed_freshness_burst_runs_constraint_detection() {
         "cg1 should shrink after cg2's constraint is recorded: before {w1_before}, after {w1_after}"
     );
 }
+
+#[test]
+fn borderless_minimized_resurface_loop_caps() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    let cg1 = macos.spawn_window(100, "Game", "game.exe");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+
+    // Park cg1 in BorderlessMinimized via zoom + workspace switch.
+    macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
+    macos.settle(&mut dome, 10);
+    send(&mut dome, "focus workspace 1");
+    macos.settle(&mut dome, 10);
+    assert!(macos.is_minimized(cg1));
+
+    // Resurface MAX_ENFORCEMENT_RETRIES + 2 times. Each simulate_external_move
+    // clears is_minimized. Dome re-issues minimize until the cap is crossed.
+    for _ in 0..7 {
+        macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
+        macos.settle(&mut dome, 10);
+    }
+    // Past the cap, Dome stops re-minimizing: the last simulate's
+    // is_minimized=false survives.
+    assert!(!macos.is_minimized(cg1));
+}
+
+#[test]
+fn borderless_minimized_retries_reset_on_workspace_return() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+    let cg1 = macos.spawn_window(100, "Game", "game.exe");
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(
+        &[],
+        &[],
+        &[],
+        vec![new_window(&macos, cg1), new_window(&macos, cg2)],
+        &[],
+        &[],
+    );
+    macos.settle(&mut dome, 10);
+
+    // Park cg1 in BorderlessMinimized via zoom + workspace switch.
+    macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
+    macos.settle(&mut dome, 10);
+    send(&mut dome, "focus workspace 1");
+    macos.settle(&mut dome, 10);
+    assert!(macos.is_minimized(cg1));
+
+    // Exhaust the retry cap.
+    for _ in 0..7 {
+        macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
+        macos.settle(&mut dome, 10);
+    }
+    assert!(!macos.is_minimized(cg1));
+
+    // Switch back to cg1's workspace then away again. The variant is rebuilt
+    // with retries: 0, so the next resurface is re-minimized.
+    send(&mut dome, "focus workspace 0");
+    macos.settle(&mut dome, 10);
+    send(&mut dome, "focus workspace 1");
+    macos.settle(&mut dome, 10);
+    assert!(macos.is_minimized(cg1));
+
+    macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
+    macos.settle(&mut dome, 10);
+    assert!(macos.is_minimized(cg1));
+}

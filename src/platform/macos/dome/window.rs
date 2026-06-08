@@ -19,7 +19,9 @@ pub(super) enum WindowState {
     /// Distinct from native fullscreen — no separate Space is created.
     BorderlessFullscreen,
     /// Borderless-fullscreen window currently minimized by Dome because its workspace is inactive.
-    BorderlessMinimized,
+    BorderlessMinimized {
+        retries: u8,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -454,7 +456,7 @@ impl Dome {
                     "Borderless fullscreen windows must be set by `place_fullscreen_window`"
                 )
             }
-            WindowState::BorderlessMinimized => {
+            WindowState::BorderlessMinimized { .. } => {
                 unreachable!("BorderlessMinimized windows must be set by `place_fullscreen_window`")
             }
         }
@@ -503,7 +505,7 @@ impl Dome {
                     "Borderless fullscreen windows must be set by `place_fullscreen_window`"
                 )
             }
-            WindowState::BorderlessMinimized => {
+            WindowState::BorderlessMinimized { .. } => {
                 unreachable!("BorderlessMinimized windows must be set by `place_fullscreen_window`")
             }
         }
@@ -521,7 +523,7 @@ impl Dome {
         let monitor = self.monitor_registry.get_entry_mut(monitor_id);
         let monitor_dim = monitor.info.dimension;
         match &mut window.state {
-            WindowState::BorderlessMinimized => {
+            WindowState::BorderlessMinimized { .. } => {
                 // BorderlessFullscreen windows previously in other workspaces. Restore it
                 if let Err(err) = window.ext.unminimize() {
                     tracing::trace!("Failed to unminimize window: {err:#}");
@@ -610,7 +612,7 @@ impl Dome {
                     // Window turned fullscreen, but not visible, so we hide it again.
                     self.hub
                         .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
-                    window.state = WindowState::BorderlessMinimized;
+                    window.state = WindowState::BorderlessMinimized { retries: 0 };
                     if let Err(e) = window.ext.minimize() {
                         tracing::trace!("Failed to minimize window: {e:#}");
                     }
@@ -712,18 +714,20 @@ impl Dome {
                     reverse_inset(new_placement, Length::<Unit>::new(self.config.border_size));
                 self.hub.update_float_dimension(window_id, outer_dim);
             }
-            WindowState::BorderlessMinimized => {
-                // Window somehow got brought back to screen, maybe through window focused but the
-                // notification was not fired
+            WindowState::BorderlessMinimized { retries } => {
                 tracing::trace!("Previously minimized borderless fullscreen window reappeared");
                 if is_borderless_fullscreen {
-                    // TODO: might worth putting a retry limit here to prevent infinite loop
+                    *retries = retries.saturating_add(1);
+                    if *retries > MAX_ENFORCEMENT_RETRIES {
+                        if *retries == MAX_ENFORCEMENT_RETRIES + 1 {
+                            tracing::debug!(%window_id, "BorderlessMinimized resurface retries exhausted, giving up");
+                        }
+                        return;
+                    }
                     if let Err(e) = window.ext.minimize() {
                         tracing::trace!("Failed to minimize window: {e:#}");
                     }
-                }
-                // No longer fullscreen borderless, so bring them back and put in offscreen
-                else {
+                } else {
                     if let Err(e) = window.ext.unminimize() {
                         tracing::debug!("Failed to unminimize window: {e:#}");
                     }
@@ -754,7 +758,7 @@ impl Dome {
                     } else {
                         // Window exited native fullscreen on an unfocused workspace.
                         // Hide via BorderlessMinimized so it does not stay visible.
-                        window.state = WindowState::BorderlessMinimized;
+                        window.state = WindowState::BorderlessMinimized { retries: 0 };
                         if let Err(e) = window.ext.minimize() {
                             tracing::trace!("Failed to minimize window: {e:#}");
                         }
@@ -784,10 +788,10 @@ impl Dome {
         // 2. Moving offscreen triggers handle_window_moved which detects fullscreen exit
         let result = match &window.state {
             WindowState::BorderlessFullscreen => {
-                window.state = WindowState::BorderlessMinimized;
+                window.state = WindowState::BorderlessMinimized { retries: 0 };
                 window.ext.minimize()
             }
-            WindowState::NativeFullscreen | WindowState::BorderlessMinimized => Ok(()),
+            WindowState::NativeFullscreen | WindowState::BorderlessMinimized { .. } => Ok(()),
             WindowState::Positioned(positioned_state) => match positioned_state {
                 PositionedState::Tiling(placement) => {
                     let offscreen = OffscreenPlacement::new(placement.actual);
