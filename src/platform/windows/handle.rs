@@ -17,13 +17,14 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor,
-    GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, HWND_BOTTOM,
-    IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, SET_WINDOW_POS_FLAGS, SMTO_ABORTIFHUNG,
-    SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE,
-    SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow, SetWindowPos, ShowWindow,
-    ShowWindowAsync, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_DLGMODALFRAME,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
+    EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE,
+    GetAncestor, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowRect,
+    GetWindowThreadProcessId, HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO,
+    SET_WINDOW_POS_FLAGS, SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
+    SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW,
+    SetForegroundWindow, SetWindowPos, ShowWindow, ShowWindowAsync, WM_GETMINMAXINFO, WM_GETTEXT,
+    WM_GETTEXTLENGTH, WS_CHILD, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TRANSPARENT,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -251,47 +252,38 @@ pub(crate) fn is_manageable(hwnd: HWND) -> bool {
         tracing::trace!(?hwnd, reason = "WS_EX_NOACTIVATE", "not manageable");
         return false;
     }
+    if ex_style & WS_EX_TRANSPARENT.0 != 0 {
+        tracing::trace!(?hwnd, reason = "WS_EX_TRANSPARENT", "not manageable");
+        return false;
+    }
+    // Mirror the Windows Shell's taskbar/Alt-Tab rule: a top-level app window
+    // is either ownerless or sets WS_EX_APPWINDOW. Owned windows without that
+    // flag are transients (dialogs, tool palettes, custom popups). Steam's main
+    // window passes because it is ownerless despite using WS_POPUP. GW_OWNER is
+    // used (not GA_ROOTOWNER) because it returns the direct owner, matching the
+    // Shell's documented rule
+    // (https://learn.microsoft.com/en-us/windows/win32/shell/taskbar#managing-taskbar-buttons).
+    // Treat both Err and Ok(invalid) as ownerless:
+    // upstream gates (IsWindowVisible, is_cloaked, GetAncestor(GA_ROOT) == hwnd)
+    // already established a valid top-level HWND.
+    let has_owner = matches!(
+        unsafe { GetWindow(hwnd, GW_OWNER) },
+        Ok(h) if !h.is_invalid(),
+    );
+    if has_owner && ex_style & WS_EX_APPWINDOW.0 == 0 {
+        tracing::trace!(
+            ?hwnd,
+            reason = "owned without WS_EX_APPWINDOW",
+            "not manageable"
+        );
+        return false;
+    }
     let dim = get_dimension(hwnd);
     if dim.width == Length::ZERO || dim.height == Length::ZERO {
         tracing::trace!(?hwnd, reason = "zero dimension", "not manageable");
         return false;
     }
     true
-}
-
-pub(crate) fn should_float(hwnd: HWND) -> bool {
-    let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
-    let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
-
-    if style & WS_POPUP.0 != 0 {
-        tracing::debug!(?hwnd, "Window identified as float due to WS_POPUP style.");
-        return true;
-    }
-    if style & WS_THICKFRAME.0 == 0 {
-        tracing::debug!(?hwnd, "Window identified as float due to no WS_THICKFRAME.");
-        return true;
-    }
-    if ex_style & WS_EX_TOPMOST.0 != 0 {
-        tracing::debug!(?hwnd, "Window identified as float due to WS_EX_TOPMOST.");
-        return true;
-    }
-    if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
-        tracing::debug!(
-            ?hwnd,
-            "Window identified as float due to WS_EX_DLGMODALFRAME."
-        );
-        return true;
-    }
-    // WS_EX_LAYERED is not checked because apps like Steam use it for custom UI rendering.
-    // WS_EX_TRANSPARENT catches actual overlay windows that should float.
-    if ex_style & WS_EX_TRANSPARENT.0 != 0 {
-        tracing::debug!(
-            ?hwnd,
-            "Window identified as float due to WS_EX_TRANSPARENT."
-        );
-        return true;
-    }
-    false
 }
 
 /// Target-dependent scale factor for values returned by WM_GETMINMAXINFO.
@@ -611,10 +603,6 @@ impl ManageExternalWindow for ExternalHwnd {
             tracing::warn!(id = %HwndId::from(self.0), "GetWindowThreadProcessId returned 0");
         }
         pid
-    }
-
-    fn should_float(&self) -> bool {
-        should_float(self.0)
     }
 
     fn set_position(&self, z: ZOrder, dim: Dimension) {

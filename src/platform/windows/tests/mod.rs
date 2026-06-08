@@ -658,7 +658,6 @@ struct MockExternalHwnd {
     app_name: Option<String>,
     dimension: Mutex<Dimension>,
     override_position: Mutex<Option<(i32, i32, i32, i32)>>,
-    should_float: bool,
     minimized: AtomicBool,
     min_size: (f32, f32),
     max_size: (f32, f32),
@@ -691,7 +690,6 @@ impl MockExternalHwnd {
                 Length::new(600.0),
             )),
             override_position: Mutex::new(None),
-            should_float: false,
             minimized: AtomicBool::new(false),
             min_size: (0.0, 0.0),
             max_size: (0.0, 0.0),
@@ -739,10 +737,6 @@ impl ManageExternalWindow for MockExternalHwnd {
         // Tests do not exercise pid plumbing yet; return a deterministic
         // sentinel derived from the hwnd so log output stays stable.
         1
-    }
-
-    fn should_float(&self) -> bool {
-        self.should_float
     }
 
     fn set_position(&self, z: ZOrder, dim: Dimension) {

@@ -358,7 +358,7 @@ impl Dome {
     ///
     /// Mirrors macOS's `reconcile_windows` insert path: applies the
     /// already-known shell-side filters (ignore-rules, on-open lookup,
-    /// borderless-fullscreen detection, `should_float`) and dispatches to the
+    /// borderless-fullscreen detection) and dispatches to the
     /// matching `insert_*_window` helper, then flushes layout. The
     /// `is_manageable` filter still lives on the inspection side (the worker
     /// thread that produces this call's arguments) so unmanageable windows
@@ -375,8 +375,6 @@ impl Dome {
         let resolved_mode = mode_override.unwrap_or_else(|| {
             if self.is_borderless_fullscreen_at(rect, monitor) {
                 WindowMode::Fullscreen
-            } else if new.ext.should_float() {
-                WindowMode::Float
             } else {
                 WindowMode::Tiling
             }
