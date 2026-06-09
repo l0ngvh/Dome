@@ -100,7 +100,7 @@ impl fmt::Display for HubEvent {
 pub(in crate::platform::macos) enum HubMessage {
     Frame(RenderFrame),
     RefreshObservers,
-    ConfigChanged(Config),
+    ConfigChanged(Box<Config>),
     PickerToggle {
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,

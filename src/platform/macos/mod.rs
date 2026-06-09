@@ -2,6 +2,7 @@ mod accessibility;
 mod dispatcher;
 mod dome;
 mod event_loop;
+mod font;
 mod keyboard;
 mod listeners;
 mod login_item;

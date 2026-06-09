@@ -14,11 +14,11 @@ use objc2_quartz_core::CAMetalLayer;
 
 use super::renderer::{MetalBackend, Renderer};
 use crate::action::{Action, Actions};
+use crate::config::Config;
 use crate::core::Dimension;
-use crate::font::FontConfig;
 use crate::picker::{PickerEntry, PickerResult};
 use crate::platform::macos::dome::HubEvent;
-use crate::theme::{Flavor, Theme};
+use crate::theme::Theme;
 
 /// Snapshot of the icon texture cache plus newly loaded images awaiting TextureHandle conversion.
 type PendingIcons = (
@@ -137,7 +137,7 @@ struct PickerViewIvars {
     scale: Cell<f64>,
     hub_sender: CalloopSender<HubEvent>,
     icon_textures: RefCell<HashMap<String, Option<egui::TextureHandle>>>,
-    flavor: Cell<Flavor>,
+    config: RefCell<Config>,
 }
 
 define_class!(
@@ -212,11 +212,18 @@ impl PickerView {
         entries: Vec<PickerEntry>,
         render_info: (f64, f64, f64),
         hub_sender: CalloopSender<HubEvent>,
-        flavor: Flavor,
-        font: &FontConfig,
+        config: Config,
     ) -> Retained<Self> {
         let (scale, width, height) = render_info;
-        let renderer = Renderer::new(backend, scale, width, height, false, flavor, font);
+        let renderer = Renderer::new(
+            backend,
+            scale,
+            width,
+            height,
+            false,
+            config.theme,
+            &config.font,
+        );
         let layer = renderer.layer();
         let ivars = PickerViewIvars {
             layer: layer.clone(),
@@ -227,7 +234,7 @@ impl PickerView {
             scale: Cell::new(scale),
             hub_sender,
             icon_textures: RefCell::new(HashMap::new()),
-            flavor: Cell::new(flavor),
+            config: RefCell::new(config),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
@@ -246,7 +253,7 @@ impl PickerView {
         let scale = ivars.scale.get();
 
         let (icon_snapshot, mut new_icons) = self.load_pending_icons(&entries);
-        let flavor = ivars.flavor.get();
+        let flavor = ivars.config.borrow().theme;
 
         // Convert new ColorImages to TextureHandles inside the render closure
         // (requires egui Context), then call paint_picker with the merged map.
@@ -358,8 +365,7 @@ impl PickerPopup {
         entries: Vec<PickerEntry>,
         monitor: (Dimension, NSRect, f64),
         hub_sender: CalloopSender<HubEvent>,
-        flavor: Flavor,
-        font: &FontConfig,
+        config: Config,
     ) -> Self {
         let (monitor_dim, cocoa_frame, scale) = monitor;
         let pw = PICKER_WIDTH.min(monitor_dim.width.value() as f64);
@@ -388,15 +394,7 @@ impl PickerPopup {
         unsafe { window.setReleasedWhenClosed(false) };
         window.setAcceptsMouseMovedEvents(true);
 
-        let view = PickerView::new(
-            mtm,
-            backend,
-            entries,
-            (scale, pw, ph),
-            hub_sender,
-            flavor,
-            font,
-        );
+        let view = PickerView::new(mtm, backend, entries, (scale, pw, ph), hub_sender, config);
         view.ivars().layer.setCornerRadius(12.0);
         view.ivars().layer.setMasksToBounds(true);
         window.setContentView(Some(&view));
@@ -416,11 +414,26 @@ impl PickerPopup {
         self.window.orderOut(None);
     }
 
-    pub(super) fn apply_theme(&self, flavor: Flavor) {
+    pub(super) fn set_config(&self, config: &Config) {
         let view = self.window.ivars().view.borrow();
         let view = view.as_ref().expect("view set during new()");
-        view.ivars().renderer.borrow().apply_theme(flavor);
-        view.ivars().flavor.set(flavor);
+        let prev = view.ivars().config.borrow().clone();
+        if prev.theme != config.theme {
+            view.ivars().renderer.borrow().apply_theme(config.theme);
+        }
+        if prev.font != config.font {
+            if prev.font.family != config.font.family {
+                view.ivars()
+                    .renderer
+                    .borrow()
+                    .reinstall_fonts(config.font.family.as_deref());
+            }
+            view.ivars().renderer.borrow().apply_font(&config.font);
+        }
+        *view.ivars().config.borrow_mut() = config.clone();
+        if self.is_visible() {
+            view.render_now();
+        }
     }
 
     pub(super) fn update_and_show(

@@ -17,9 +17,7 @@ use crate::core::{
     MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
     WorkspaceId,
 };
-use crate::font::{FontConfig, font_changed};
 use crate::picker::{PickerEntry, build_picker_entries};
-use crate::theme::{Flavor, theme_changed};
 
 use self::overlay::{FloatOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
@@ -81,8 +79,7 @@ pub(super) trait CreateOverlay {
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
     fn create_float_overlay(
         &self,
-        flavor: Flavor,
-        font: &FontConfig,
+        config: Config,
         scale: f32,
         visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
@@ -90,8 +87,7 @@ pub(super) trait CreateOverlay {
         &self,
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
-        flavor: Flavor,
-        font: &FontConfig,
+        config: Config,
         scale: f32,
     ) -> anyhow::Result<Box<dyn overlay::PickerApi>>;
 }
@@ -229,31 +225,16 @@ impl Dome {
     }
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
-        let old_flavor = self.config.theme;
-        let old_font = self.config.font.clone();
         self.hub.sync_config(new_config.clone().into());
-        for overlay in self.tiling_overlays.values_mut() {
-            overlay.set_config(new_config.clone());
-        }
         self.config = new_config;
-        if theme_changed(old_flavor, self.config.theme) {
-            for overlay in self.tiling_overlays.values_mut() {
-                overlay.apply_theme(self.config.theme);
-            }
-            for overlay in self.float_overlays.values_mut() {
-                overlay.apply_theme(self.config.theme);
-            }
-            if let Some(picker) = self.picker.as_mut() {
-                picker.apply_theme(self.config.theme);
-            }
+        for overlay in self.tiling_overlays.values_mut() {
+            overlay.set_config(&self.config);
         }
-        if font_changed(&old_font, &self.config.font) {
-            for overlay in self.tiling_overlays.values_mut() {
-                overlay.apply_font(&self.config.font);
-            }
-            for overlay in self.float_overlays.values_mut() {
-                overlay.apply_font(&self.config.font);
-            }
+        for overlay in self.float_overlays.values_mut() {
+            overlay.set_config(&self.config);
+        }
+        if let Some(picker) = self.picker.as_mut() {
+            picker.set_config(&self.config);
         }
         tracing::info!("Config reloaded");
         self.apply_layout();
@@ -586,8 +567,7 @@ impl Dome {
                 match self.overlay_factory.create_picker(
                     entries,
                     monitor_dim,
-                    self.config.theme,
-                    &self.config.font,
+                    self.config.clone(),
                     self.monitors[&focused_monitor].scale,
                 ) {
                     Ok(pw) => {
@@ -823,8 +803,7 @@ impl Dome {
                 }
                 if !self.float_overlays.contains_key(&wp.id) {
                     match self.overlay_factory.create_float_overlay(
-                        self.config.theme,
-                        &self.config.font,
+                        self.config.clone(),
                         self.monitors[&data.monitor_id].scale,
                         wp.visible_frame,
                     ) {

@@ -28,8 +28,6 @@ use super::listeners::EventListener;
 use super::objc2_wrapper::{kAXFrontmostAttribute, set_attribute_value};
 use crate::config::Config;
 use crate::core::{MonitorId, WindowId};
-use crate::font::font_changed;
-use crate::theme::theme_changed;
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TilingOverlay};
 use picker::PickerPopup;
@@ -340,38 +338,16 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 delegate.ivars().event_listener.refresh_all_observers();
             }
             HubMessage::ConfigChanged(new_config) => {
-                let old_flavor = delegate.ivars().config.borrow().theme;
-                let old_font = delegate.ivars().config.borrow().font.clone();
+                let new_config = *new_config;
                 *delegate.ivars().config.borrow_mut() = new_config.clone();
                 for overlay in delegate.ivars().float_overlays.borrow_mut().values_mut() {
-                    overlay.set_config(new_config.clone());
+                    overlay.set_config(&new_config);
                 }
                 for overlay in delegate.ivars().tiling_overlays.borrow().values() {
-                    overlay.set_config(new_config.clone());
+                    overlay.set_config(&new_config);
                 }
-                // Each for-loop's borrow on float_overlays / tiling_overlays must
-                // stay scoped to that loop statement. Do not hoist the borrow into
-                // a local above the loops — apply_theme and set_config both borrow
-                // these RefCells indirectly via the ivars, and overlapping borrows
-                // would panic at runtime.
-                if theme_changed(old_flavor, new_config.theme) {
-                    for overlay in delegate.ivars().float_overlays.borrow().values() {
-                        overlay.apply_theme(new_config.theme);
-                    }
-                    for overlay in delegate.ivars().tiling_overlays.borrow().values() {
-                        overlay.apply_theme(new_config.theme);
-                    }
-                    if let Some(picker) = delegate.ivars().picker_window.borrow().as_ref() {
-                        picker.apply_theme(new_config.theme);
-                    }
-                }
-                if font_changed(&old_font, &new_config.font) {
-                    for overlay in delegate.ivars().float_overlays.borrow().values() {
-                        overlay.apply_font(&new_config.font);
-                    }
-                    for overlay in delegate.ivars().tiling_overlays.borrow().values() {
-                        overlay.apply_font(&new_config.font);
-                    }
+                if let Some(picker) = delegate.ivars().picker_window.borrow().as_ref() {
+                    picker.set_config(&new_config);
                 }
             }
             HubMessage::PickerToggle {
@@ -391,17 +367,15 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     None => {
                         let backend = delegate.ivars().backend.clone();
                         let hub_sender = delegate.ivars().hub_sender.clone();
-                        let config = delegate.ivars().config.borrow();
+                        let config = delegate.ivars().config.borrow().clone();
                         let picker = PickerPopup::new(
                             mtm,
                             backend,
                             entries,
                             (monitor_dim, cocoa_frame, scale),
                             hub_sender,
-                            config.theme,
-                            &config.font,
+                            config,
                         );
-                        drop(config);
                         *pw = Some(picker);
                     }
                 }

@@ -290,7 +290,7 @@ impl Dome {
     pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
         self.hub.sync_config(new_config.clone().into());
         self.sender
-            .send(HubMessage::ConfigChanged(new_config.clone()));
+            .send(HubMessage::ConfigChanged(Box::new(new_config.clone())));
         self.config = new_config;
         tracing::info!("Config reloaded");
         self.flush_layout();

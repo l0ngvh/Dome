@@ -2,6 +2,7 @@ mod display;
 mod dome;
 mod event_listener;
 mod external;
+mod font;
 mod handle;
 mod keyboard;
 mod login_item;

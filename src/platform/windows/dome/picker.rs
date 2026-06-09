@@ -42,13 +42,13 @@ fn configure_picker_dwm(hwnd: HWND) {
 use super::HubEvent;
 use super::overlay::{OwnedHwnd, PickerApi, Renderer};
 use crate::action::{Action, Actions};
+use crate::config::Config;
 use crate::core::{Dimension, Physical, WindowId};
-use crate::font::FontConfig;
 use crate::picker::{PickerEntry, PickerResult};
 use crate::platform::windows::HubSender;
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::{WM_APP_DPI_CHANGE, WM_GETDPISCALEDSIZE};
-use crate::theme::{Flavor, Theme};
+use crate::theme::Theme;
 
 const PICKER_WIDTH_LOGICAL: f32 = 400.0;
 const PICKER_HEIGHT_LOGICAL: f32 = 300.0;
@@ -114,7 +114,7 @@ pub(in crate::platform::windows) struct PickerWindow {
     /// during render). Raw ColorImage results are staged here until the next
     /// render converts them.
     pending_icons: Vec<(String, egui::ColorImage)>,
-    flavor: Flavor,
+    config: Config,
 }
 
 impl PickerWindow {
@@ -129,8 +129,7 @@ impl PickerWindow {
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
         hub_sender: HubSender,
-        flavor: Flavor,
-        font: &FontConfig,
+        config: Config,
         scale: f32,
     ) -> anyhow::Result<Box<Self>> {
         let (x, y, w_phys, h_phys) = picker_physical_rect(scale, monitor_dim);
@@ -146,7 +145,16 @@ impl PickerWindow {
         )?;
         let hwnd = window.hwnd();
         configure_picker_dwm(hwnd);
-        let renderer = Renderer::new(instance, device, queue, hwnd, w_phys, h_phys, flavor, font)?;
+        let renderer = Renderer::new(
+            instance,
+            device,
+            queue,
+            hwnd,
+            w_phys,
+            h_phys,
+            config.theme,
+            &config.font,
+        )?;
 
         let mut boxed = Box::new(Self {
             renderer,
@@ -160,7 +168,7 @@ impl PickerWindow {
             pixels_per_point: scale,
             icon_textures: HashMap::new(),
             pending_icons: Vec::new(),
-            flavor,
+            config,
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
         boxed.window.show();
@@ -248,7 +256,7 @@ impl PickerApi for PickerWindow {
         let entries = &self.entries;
         let selected_index = self.selected_index;
         let icon_textures = &self.icon_textures;
-        let flavor = self.flavor;
+        let flavor = self.config.theme;
         let mut pending_opt = Some(pending);
         let (result, new_textures) = self.renderer.render(
             self.width_phys,
@@ -294,11 +302,34 @@ impl PickerApi for PickerWindow {
         }
     }
 
-    fn apply_theme(&mut self, flavor: Flavor) {
-        self.renderer.apply_theme(flavor);
-        self.flavor = flavor;
+    fn set_config(&mut self, config: &Config) {
+        if self.config.theme != config.theme {
+            self.renderer.apply_theme(config.theme);
+        }
+        if self.config.font != config.font {
+            if self.config.font.family != config.font.family {
+                self.reinstall_fonts(config.font.family.as_deref());
+            }
+            self.renderer.apply_font(&config.font);
+        }
+        self.config = config.clone();
         if self.is_visible() {
             self.rerender();
+        }
+    }
+}
+
+impl PickerWindow {
+    fn reinstall_fonts(&mut self, family: Option<&str>) {
+        if let Some(family) = family {
+            match crate::platform::windows::font::resolve_system_font(family) {
+                Ok(bytes) => crate::font::install_fonts(bytes, self.renderer.egui_ctx()),
+                Err(e) => tracing::warn!(
+                    family = %family,
+                    error = %e,
+                    "font reload failed"
+                ),
+            }
         }
     }
 }

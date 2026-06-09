@@ -27,13 +27,6 @@ impl Flavor {
     }
 }
 
-/// Trivial wrapper around `!=` that names the invariant at call sites.
-/// A raw `!=` on two `Flavor` values reads as a generic equality check;
-/// `theme_changed(old, new)` documents why we compare.
-pub(crate) fn theme_changed(old: Flavor, new: Flavor) -> bool {
-    old != new
-}
-
 // DTO: a resolved palette with no invariants. pub(crate) fields are intentional.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Theme {
@@ -157,12 +150,6 @@ mod tests {
             Flavor::Latte.catppuccin_egui().base,
             Flavor::Mocha.catppuccin_egui().base,
         );
-    }
-
-    #[test]
-    fn theme_changed_gates_correctly() {
-        assert!(!theme_changed(Flavor::Mocha, Flavor::Mocha));
-        assert!(theme_changed(Flavor::Mocha, Flavor::Latte));
     }
 
     // Catches a regression that re-introduces a global visuals override

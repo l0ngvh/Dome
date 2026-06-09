@@ -199,8 +199,17 @@ impl FloatOverlay {
         self.window.setIsVisible(true);
     }
 
-    pub(super) fn set_config(&mut self, config: Config) {
-        self.config = config;
+    pub(super) fn set_config(&mut self, config: &Config) {
+        if self.config.theme != config.theme {
+            self.renderer.apply_theme(config.theme);
+        }
+        if self.config.font != config.font {
+            if self.config.font.family != config.font.family {
+                self.renderer.reinstall_fonts(config.font.family.as_deref());
+            }
+            self.renderer.apply_font(&config.font);
+        }
+        self.config = config.clone();
         if let Some(placement) = self.placement {
             let config = &self.config;
             let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
@@ -231,14 +240,6 @@ impl FloatOverlay {
                     );
                 });
         }
-    }
-
-    pub(super) fn apply_theme(&self, flavor: Flavor) {
-        self.renderer.apply_theme(flavor);
-    }
-
-    pub(super) fn apply_font(&self, font: &FontConfig) {
-        self.renderer.apply_font(font);
     }
 
     pub(super) fn apply_frame(&mut self, surface: &IOSurface) {
@@ -344,16 +345,8 @@ impl TilingOverlay {
         self.window.makeKeyAndOrderFront(None);
     }
 
-    pub(super) fn set_config(&self, config: Config) {
+    pub(super) fn set_config(&self, config: &Config) {
         self.view.set_config(config);
-    }
-
-    pub(super) fn apply_theme(&self, flavor: Flavor) {
-        self.view.apply_theme(flavor);
-    }
-
-    pub(super) fn apply_font(&self, font: &FontConfig) {
-        self.view.apply_font(font);
     }
 }
 
@@ -563,17 +556,22 @@ impl TilingOverlayView {
         ivars.containers.borrow_mut().clear();
     }
 
-    fn set_config(&self, config: Config) {
-        *self.ivars().config.borrow_mut() = config;
+    fn set_config(&self, config: &Config) {
+        let prev = self.ivars().config.borrow().clone();
+        if prev.theme != config.theme {
+            self.ivars().renderer.borrow().apply_theme(config.theme);
+        }
+        if prev.font != config.font {
+            if prev.font.family != config.font.family {
+                self.ivars()
+                    .renderer
+                    .borrow()
+                    .reinstall_fonts(config.font.family.as_deref());
+            }
+            self.ivars().renderer.borrow().apply_font(&config.font);
+        }
+        *self.ivars().config.borrow_mut() = config.clone();
         self.render_now();
-    }
-
-    fn apply_theme(&self, flavor: Flavor) {
-        self.ivars().renderer.borrow().apply_theme(flavor);
-    }
-
-    fn apply_font(&self, font: &FontConfig) {
-        self.ivars().renderer.borrow().apply_font(font);
     }
 
     fn render_now(&self) {

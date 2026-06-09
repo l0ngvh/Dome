@@ -136,6 +136,8 @@ struct TestEnv {
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
     picker_flavor: Rc<Cell<Flavor>>,
+    picker_font: Rc<RefCell<FontConfig>>,
+    picker_last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
     z_stack: ZOrderStack,
     focus_target: Arc<Mutex<FocusTarget>>,
 }
@@ -160,6 +162,8 @@ impl TestEnv {
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let picker_loaded_icons = Rc::new(RefCell::new(HashSet::new()));
         let picker_flavor = Rc::new(Cell::new(config.theme));
+        let picker_font = Rc::new(RefCell::new(config.font.clone()));
+        let picker_last_reinstall_family = Rc::new(RefCell::new(None));
         let z_stack = ZOrderStack::new();
         // Mirror production startup: the focus-sink HWND is created and
         // parked at HWND_BOTTOM so Win32's close-time focus walk lands on a
@@ -171,18 +175,10 @@ impl TestEnv {
         let next_float_overlay_id = Rc::new(Cell::new(9000_isize));
         // Seed flavor/font from the config to mirror production's overlay
         // constructors.
-        let tiling_overlay = MockTilingOverlay::new(
-            TILING_OVERLAY_ID,
-            z_stack.clone(),
-            config.theme,
-            config.font.clone(),
-        );
-        let float_overlay = MockFloatOverlay::new(
-            FLOAT_OVERLAY_ID,
-            z_stack.clone(),
-            config.theme,
-            config.font.clone(),
-        );
+        let tiling_overlay =
+            MockTilingOverlay::new(TILING_OVERLAY_ID, z_stack.clone(), config.clone());
+        let float_overlay =
+            MockFloatOverlay::new(FLOAT_OVERLAY_ID, z_stack.clone(), config.clone());
 
         let dome = Dome::new(
             config.clone(),
@@ -193,6 +189,9 @@ impl TestEnv {
                 picker_entries: picker_entries.clone(),
                 picker_loaded_icons: picker_loaded_icons.clone(),
                 picker_flavor: picker_flavor.clone(),
+                picker_font: picker_font.clone(),
+                picker_last_reinstall_family: picker_last_reinstall_family.clone(),
+                picker_config: Rc::new(RefCell::new(config.clone())),
                 z_stack: z_stack.clone(),
                 next_float_overlay_id: next_float_overlay_id.clone(),
             }),
@@ -211,6 +210,8 @@ impl TestEnv {
             picker_entries,
             picker_loaded_icons,
             picker_flavor,
+            picker_font,
+            picker_last_reinstall_family,
             z_stack,
             focus_target,
         }
@@ -458,6 +459,10 @@ impl TestEnv {
         self.tiling_overlay.font()
     }
 
+    fn tiling_overlay_last_reinstall(&self) -> Option<Option<String>> {
+        self.tiling_overlay.last_reinstall_family.borrow().clone()
+    }
+
     fn float_overlay_flavor(&self) -> Flavor {
         self.float_overlay.flavor()
     }
@@ -466,8 +471,20 @@ impl TestEnv {
         self.float_overlay.font()
     }
 
+    fn float_overlay_last_reinstall(&self) -> Option<Option<String>> {
+        self.float_overlay.last_reinstall_family.borrow().clone()
+    }
+
     fn picker_flavor(&self) -> Flavor {
         self.picker_flavor.get()
+    }
+
+    fn picker_font(&self) -> FontConfig {
+        self.picker_font.borrow().clone()
+    }
+
+    fn picker_last_reinstall(&self) -> Option<Option<String>> {
+        self.picker_last_reinstall_family.borrow().clone()
     }
 
     fn picker_loaded_icons(&self) -> HashSet<String> {
@@ -874,16 +891,20 @@ struct MockFloatOverlay {
     flavor: Rc<Cell<Flavor>>,
     font: Rc<RefCell<FontConfig>>,
     state: Rc<Cell<FloatOverlayState>>,
+    last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
+    config: Rc<RefCell<Config>>,
 }
 
 impl MockFloatOverlay {
-    fn new(hwnd_id: HwndId, z_stack: ZOrderStack, flavor: Flavor, font: FontConfig) -> Self {
+    fn new(hwnd_id: HwndId, z_stack: ZOrderStack, config: Config) -> Self {
         Self {
             hwnd_id,
             z_stack,
-            flavor: Rc::new(Cell::new(flavor)),
-            font: Rc::new(RefCell::new(font)),
+            flavor: Rc::new(Cell::new(config.theme)),
+            font: Rc::new(RefCell::new(config.font.clone())),
             state: Rc::new(Cell::new(FloatOverlayState::Hidden)),
+            last_reinstall_family: Rc::new(RefCell::new(None)),
+            config: Rc::new(RefCell::new(config)),
         }
     }
 
@@ -919,11 +940,15 @@ impl FloatOverlayApi for MockFloatOverlay {
         self.state.set(FloatOverlayState::Hidden);
         self.z_stack.remove(self.hwnd_id);
     }
-    fn apply_theme(&mut self, flavor: Flavor) {
-        self.flavor.set(flavor);
-    }
-    fn apply_font(&mut self, font: &FontConfig) {
-        *self.font.borrow_mut() = font.clone();
+    fn set_config(&mut self, config: &Config) {
+        self.flavor.set(config.theme);
+        *self.font.borrow_mut() = config.font.clone();
+        if self.config.borrow().font.family != config.font.family {
+            self.last_reinstall_family
+                .borrow_mut()
+                .replace(config.font.family.clone());
+        }
+        *self.config.borrow_mut() = config.clone();
     }
 }
 
@@ -938,17 +963,21 @@ struct MockTilingOverlay {
     flavor: Rc<Cell<Flavor>>,
     font: Rc<RefCell<FontConfig>>,
     monitor: Rc<Cell<Dimension>>,
+    last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
+    config: Rc<RefCell<Config>>,
 }
 
 impl MockTilingOverlay {
-    fn new(overlay_id: HwndId, z_stack: ZOrderStack, flavor: Flavor, font: FontConfig) -> Self {
+    fn new(overlay_id: HwndId, z_stack: ZOrderStack, config: Config) -> Self {
         Self {
             overlay_id,
             z_stack,
             state: Rc::new(RefCell::new(TilingOverlayState::Hidden)),
-            flavor: Rc::new(Cell::new(flavor)),
-            font: Rc::new(RefCell::new(font)),
+            flavor: Rc::new(Cell::new(config.theme)),
+            font: Rc::new(RefCell::new(config.font.clone())),
             monitor: Rc::new(Cell::new(Dimension::default())),
+            last_reinstall_family: Rc::new(RefCell::new(None)),
+            config: Rc::new(RefCell::new(config)),
         }
     }
 
@@ -987,18 +1016,21 @@ impl TilingOverlayApi for MockTilingOverlay {
     fn clear(&mut self) {
         *self.state.borrow_mut() = TilingOverlayState::Hidden;
     }
-    fn set_config(&mut self, _: Config) {}
+    fn set_config(&mut self, config: &Config) {
+        self.flavor.set(config.theme);
+        *self.font.borrow_mut() = config.font.clone();
+        if self.config.borrow().font.family != config.font.family {
+            self.last_reinstall_family
+                .borrow_mut()
+                .replace(config.font.family.clone());
+        }
+        *self.config.borrow_mut() = config.clone();
+    }
     fn window_above(&self) -> Option<HwndId> {
         self.z_stack.window_above(self.overlay_id)
     }
     fn demote_below(&mut self, managed: HwndId) {
         self.z_stack.apply(self.overlay_id, ZOrder::After(managed));
-    }
-    fn apply_theme(&mut self, flavor: Flavor) {
-        self.flavor.set(flavor);
-    }
-    fn apply_font(&mut self, font: &FontConfig) {
-        *self.font.borrow_mut() = font.clone();
     }
 }
 
@@ -1007,6 +1039,9 @@ struct MockPicker {
     entries: Rc<RefCell<Vec<PickerEntry>>>,
     loaded_icons: Rc<RefCell<HashSet<String>>>,
     flavor: Rc<Cell<Flavor>>,
+    font: Rc<RefCell<FontConfig>>,
+    last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
+    config: Rc<RefCell<Config>>,
 }
 
 impl PickerApi for MockPicker {
@@ -1052,8 +1087,15 @@ impl PickerApi for MockPicker {
 
     fn rerender(&mut self) {}
 
-    fn apply_theme(&mut self, flavor: Flavor) {
-        self.flavor.set(flavor);
+    fn set_config(&mut self, config: &Config) {
+        self.flavor.set(config.theme);
+        *self.font.borrow_mut() = config.font.clone();
+        if self.config.borrow().font.family != config.font.family {
+            self.last_reinstall_family
+                .borrow_mut()
+                .replace(config.font.family.clone());
+        }
+        *self.config.borrow_mut() = config.clone();
     }
 }
 
@@ -1063,6 +1105,9 @@ struct MockOverlays {
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
     picker_flavor: Rc<Cell<Flavor>>,
+    picker_font: Rc<RefCell<FontConfig>>,
+    picker_last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
+    picker_config: Rc<RefCell<Config>>,
     z_stack: ZOrderStack,
     next_float_overlay_id: Rc<Cell<isize>>,
 }
@@ -1082,16 +1127,16 @@ impl CreateOverlay for MockOverlays {
     }
     fn create_float_overlay(
         &self,
-        flavor: Flavor,
-        font: &FontConfig,
+        config: Config,
         _scale: f32,
         _visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         let id = self.next_float_overlay_id.get();
         self.next_float_overlay_id.set(id + 1);
         // Production seeds flavor/font on float overlay creation.
-        self.float_overlay.flavor.set(flavor);
-        *self.float_overlay.font.borrow_mut() = font.clone();
+        self.float_overlay.flavor.set(config.theme);
+        *self.float_overlay.font.borrow_mut() = config.font.clone();
+        *self.float_overlay.config.borrow_mut() = config;
         // Mirror CreateWindowExW: seed at top of normal band. The first
         // `update()` call will reposition (typically `ZOrder::After(float_window)`)
         // and `hide()` removes it. Without this, the very first update would
@@ -1105,16 +1150,20 @@ impl CreateOverlay for MockOverlays {
         &self,
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
-        flavor: crate::theme::Flavor,
-        _font: &crate::font::FontConfig,
+        config: Config,
         scale: f32,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
-        self.picker_flavor.set(flavor);
+        self.picker_flavor.set(config.theme);
+        *self.picker_font.borrow_mut() = config.font.clone();
+        *self.picker_config.borrow_mut() = config.clone();
         let mut picker = MockPicker {
             visible: false,
             entries: self.picker_entries.clone(),
             loaded_icons: self.picker_loaded_icons.clone(),
             flavor: self.picker_flavor.clone(),
+            font: self.picker_font.clone(),
+            last_reinstall_family: self.picker_last_reinstall_family.clone(),
+            config: self.picker_config.clone(),
         };
         picker.show(entries, monitor_dim, scale);
         Ok(Box::new(picker))

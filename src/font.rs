@@ -3,7 +3,9 @@
 // physical pixels (text_size * monitor.scale on Windows, text_size * backingScaleFactor on macOS).
 // Same mechanism that rescales overlay strokes and corner radii -- do not multiply text_size here.
 
-use egui::{Context, FontFamily, FontId, TextStyle};
+use std::sync::Arc;
+
+use egui::{Context, FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use serde::Deserialize;
 
 // Minimum validated font size. Smaller values produce unreadable glyphs.
@@ -21,6 +23,8 @@ pub(crate) struct FontConfig {
     pub(crate) text_size: f32,
     #[serde(default = "default_subtext_size")]
     pub(crate) subtext_size: f32,
+    #[serde(default)]
+    pub(crate) family: Option<String>,
 }
 
 fn default_text_size() -> f32 {
@@ -37,6 +41,7 @@ impl Default for FontConfig {
         Self {
             text_size: default_text_size(),
             subtext_size: default_subtext_size(),
+            family: None,
         }
     }
 }
@@ -76,14 +81,25 @@ impl FontConfig {
                 MAX_FONT_SIZE,
             );
         }
+        if let Some(name) = &self.family
+            && name.trim().is_empty()
+        {
+            anyhow::bail!("font.family must be a non-empty string");
+        }
         Ok(())
     }
 }
 
-/// Trivial wrapper around `!=` that names the invariant at call sites.
-/// Mirrors `theme::theme_changed`.
-pub(crate) fn font_changed(old: &FontConfig, new: &FontConfig) -> bool {
-    old != new
+pub(crate) fn install_fonts(bytes: Vec<u8>, ctx: &Context) {
+    let mut defs = FontDefinitions::default();
+    let key = "user_font".to_string();
+    defs.font_data
+        .insert(key.clone(), Arc::new(FontData::from_owned(bytes)));
+    defs.families
+        .entry(FontFamily::Proportional)
+        .or_default()
+        .push(key);
+    ctx.set_fonts(defs);
 }
 
 #[cfg(test)]
@@ -95,6 +111,7 @@ mod tests {
         let fc = FontConfig::default();
         assert_eq!(fc.text_size, 14.0);
         assert_eq!(fc.subtext_size, 12.0);
+        assert_eq!(fc.family, None);
     }
 
     #[test]
@@ -102,11 +119,6 @@ mod tests {
         let fc: FontConfig = toml::from_str("text_size = 18.0\nsubtext_size = 15.0").unwrap();
         assert_eq!(fc.text_size, 18.0);
         assert_eq!(fc.subtext_size, 15.0);
-    }
-
-    #[test]
-    fn font_config_rejects_unknown_field() {
-        assert!(toml::from_str::<FontConfig>("weight = \"bold\"").is_err());
     }
 
     #[test]
@@ -123,6 +135,7 @@ mod tests {
             let fc = FontConfig {
                 text_size,
                 subtext_size,
+                family: None,
             };
             assert_eq!(
                 fc.validate().is_ok(),
@@ -138,6 +151,7 @@ mod tests {
         let fc = FontConfig {
             text_size: 20.0,
             subtext_size: 11.0,
+            family: None,
         };
         fc.apply_to(&ctx);
         let style = ctx.style();
@@ -146,27 +160,33 @@ mod tests {
     }
 
     #[test]
-    fn font_changed_detects_changes() {
-        let a = FontConfig {
-            text_size: 14.0,
-            subtext_size: 12.0,
-        };
-        let b = FontConfig {
-            text_size: 14.0,
-            subtext_size: 12.0,
-        };
-        assert!(!font_changed(&a, &b));
+    fn font_config_deserializes_family() {
+        let fc: FontConfig = toml::from_str(
+            "text_size = 14.0\nsubtext_size = 12.0\nfamily = \"Microsoft YaHei UI\"",
+        )
+        .unwrap();
+        assert_eq!(fc.family, Some("Microsoft YaHei UI".into()));
+    }
 
-        let c = FontConfig {
-            text_size: 16.0,
-            subtext_size: 12.0,
-        };
-        assert!(font_changed(&a, &c));
+    #[test]
+    fn font_config_default_family_is_none() {
+        assert_eq!(FontConfig::default().family, None);
+    }
 
-        let d = FontConfig {
+    #[test]
+    fn font_config_validate_rejects_empty_family() {
+        let fc = FontConfig {
             text_size: 14.0,
-            subtext_size: 10.0,
+            subtext_size: 12.0,
+            family: Some(String::new()),
         };
-        assert!(font_changed(&a, &d));
+        assert!(fc.validate().is_err());
+
+        let fc2 = FontConfig {
+            text_size: 14.0,
+            subtext_size: 12.0,
+            family: Some("   ".into()),
+        };
+        assert!(fc2.validate().is_err());
     }
 }

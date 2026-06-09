@@ -137,6 +137,16 @@ impl Renderer {
         let egui_ctx = egui::Context::default();
         egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
         catppuccin_egui::set_theme(&egui_ctx, flavor.catppuccin_egui());
+        if let Some(family) = font.family.as_deref() {
+            match crate::platform::macos::font::resolve_system_font(family) {
+                Ok(bytes) => crate::font::install_fonts(bytes, &egui_ctx),
+                Err(e) => tracing::warn!(
+                    family = %family,
+                    error = %e,
+                    "font resolution failed; using egui defaults"
+                ),
+            }
+        }
         font.apply_to(&egui_ctx);
 
         Self {
@@ -163,6 +173,19 @@ impl Renderer {
 
     pub(super) fn apply_theme(&self, flavor: Flavor) {
         catppuccin_egui::set_theme(&self.egui_ctx, flavor.catppuccin_egui());
+    }
+
+    pub(super) fn reinstall_fonts(&self, family: Option<&str>) {
+        if let Some(family) = family {
+            match crate::platform::macos::font::resolve_system_font(family) {
+                Ok(bytes) => crate::font::install_fonts(bytes, &self.egui_ctx),
+                Err(e) => tracing::warn!(
+                    family = %family,
+                    error = %e,
+                    "font reload failed"
+                ),
+            }
+        }
     }
 
     pub(super) fn apply_font(&self, font: &FontConfig) {

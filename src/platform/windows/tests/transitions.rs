@@ -460,6 +460,7 @@ fn config_reload_dispatches_apply_font_on_font_change() {
     let new_font = crate::font::FontConfig {
         text_size: 18.0,
         subtext_size: 12.0,
+        family: None,
     };
     // Sanity: overlays start at the default font (different from `new_font`).
     assert_ne!(env.tiling_overlay_font(), new_font);
@@ -472,6 +473,88 @@ fn config_reload_dispatches_apply_font_on_font_change() {
     // After a font change, both overlays must hold the new font.
     assert_eq!(env.tiling_overlay_font(), new_font);
     assert_eq!(env.float_overlay_font(), new_font);
+}
+
+#[test]
+fn config_reload_dispatches_reinstall_fonts_on_font_family_change() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.run_actions("toggle float");
+
+    // Neither overlay has recorded a reinstall call yet.
+    assert_eq!(env.tiling_overlay_last_reinstall(), None);
+    assert_eq!(env.float_overlay_last_reinstall(), None);
+
+    let mut new_config = env.config.clone();
+    new_config.font.family = Some("Microsoft YaHei UI".into());
+    env.dome.config_changed(new_config);
+
+    assert_eq!(
+        env.tiling_overlay_last_reinstall(),
+        Some(Some("Microsoft YaHei UI".into()))
+    );
+    assert_eq!(
+        env.float_overlay_last_reinstall(),
+        Some(Some("Microsoft YaHei UI".into()))
+    );
+}
+
+#[test]
+fn config_reload_does_not_reinstall_fonts_when_family_unchanged() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.run_actions("toggle float");
+
+    // Change only font sizes, keep family the same (None).
+    let mut new_config = env.config.clone();
+    new_config.font.text_size = 22.0;
+    new_config.font.subtext_size = 14.0;
+    env.dome.config_changed(new_config);
+
+    // reinstall_fonts must not have fired.
+    assert_eq!(env.tiling_overlay_last_reinstall(), None);
+    assert_eq!(env.float_overlay_last_reinstall(), None);
+}
+
+#[test]
+fn config_reload_dispatches_apply_font_on_picker() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+
+    // Open the picker so config_changed dispatches set_config on it.
+    env.minimize_window(w2);
+    env.run_actions("toggle minimized");
+
+    let mut new_config = env.config.clone();
+    new_config.font.text_size += 2.0;
+    env.dome.config_changed(new_config.clone());
+
+    assert_eq!(env.picker_font(), new_config.font);
+    // Family unchanged, so no reinstall.
+    assert_eq!(env.picker_last_reinstall(), None);
+}
+
+#[test]
+fn config_reload_dispatches_reinstall_fonts_on_picker_family_change() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+
+    // Open the picker so config_changed dispatches set_config on it.
+    env.minimize_window(w2);
+    env.run_actions("toggle minimized");
+
+    let mut new_config = env.config.clone();
+    new_config.font.family = Some("Microsoft YaHei UI".into());
+    env.dome.config_changed(new_config);
+
+    assert_eq!(
+        env.picker_last_reinstall(),
+        Some(Some("Microsoft YaHei UI".into()))
+    );
 }
 
 #[test]

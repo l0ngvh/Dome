@@ -232,6 +232,10 @@ impl MacOS {
         cg_id
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test helper passing geometry directly"
+    )]
     fn spawn_window_at(
         &mut self,
         pid: i32,
@@ -506,6 +510,10 @@ fn start_drag(dome: &mut Dome, pid: i32) {
     dome.set_pid_moving(pid, true);
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test helper passing geometry directly"
+)]
 fn end_drag(
     dome: &mut Dome,
     macos: &MacOS,

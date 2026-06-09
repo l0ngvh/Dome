@@ -189,6 +189,16 @@ impl Renderer {
         let egui_ctx = egui::Context::default(); // only egui context in this overlay
         egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
         catppuccin_egui::set_theme(&egui_ctx, flavor.catppuccin_egui());
+        if let Some(family) = font.family.as_deref() {
+            match crate::platform::windows::font::resolve_system_font(family) {
+                Ok(bytes) => crate::font::install_fonts(bytes, &egui_ctx),
+                Err(e) => tracing::warn!(
+                    family = %family,
+                    error = %e,
+                    "font resolution failed; using egui defaults"
+                ),
+            }
+        }
         font.apply_to(&egui_ctx);
 
         Ok(Self {
@@ -211,6 +221,10 @@ impl Renderer {
         // configure() may create a new swap chain and call SetContent again,
         // which requires a Commit for DWM to pick up the change.
         unsafe { self.dcomp_device.Commit() }.expect("DComp commit after resize");
+    }
+
+    pub(super) fn egui_ctx(&self) -> &egui::Context {
+        &self.egui_ctx
     }
 
     pub(super) fn apply_theme(&self, flavor: Flavor) {
@@ -508,8 +522,17 @@ impl TilingOverlayApi for TilingOverlay {
         self.rerender();
     }
 
-    fn set_config(&mut self, config: Config) {
-        self.config = config;
+    fn set_config(&mut self, config: &Config) {
+        if self.config.theme != config.theme {
+            self.renderer.apply_theme(config.theme);
+        }
+        if self.config.font != config.font {
+            if self.config.font.family != config.font.family {
+                self.reinstall_fonts(config.font.family.as_deref());
+            }
+            self.renderer.apply_font(&config.font);
+        }
+        self.config = config.clone();
     }
 
     fn window_above(&self) -> Option<HwndId> {
@@ -532,13 +555,20 @@ impl TilingOverlayApi for TilingOverlay {
             .ok();
         }
     }
+}
 
-    fn apply_theme(&mut self, flavor: Flavor) {
-        self.renderer.apply_theme(flavor);
-    }
-
-    fn apply_font(&mut self, font: &FontConfig) {
-        self.renderer.apply_font(font);
+impl TilingOverlay {
+    fn reinstall_fonts(&mut self, family: Option<&str>) {
+        if let Some(family) = family {
+            match crate::platform::windows::font::resolve_system_font(family) {
+                Ok(bytes) => crate::font::install_fonts(bytes, &self.renderer.egui_ctx),
+                Err(e) => tracing::warn!(
+                    family = %family,
+                    error = %e,
+                    "font reload failed"
+                ),
+            }
+        }
     }
 }
 
@@ -648,10 +678,7 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
 pub(in crate::platform::windows) trait FloatOverlayApi {
     fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder, scale: f32);
     fn hide(&mut self);
-    // &mut self keeps the receiver consistent with the other trait
-    // methods; apply_theme only needs &self on the underlying Renderer.
-    fn apply_theme(&mut self, flavor: Flavor);
-    fn apply_font(&mut self, font: &FontConfig);
+    fn set_config(&mut self, config: &Config);
 }
 
 pub(in crate::platform::windows) trait TilingOverlayApi {
@@ -663,7 +690,7 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
         scale: f32,
     );
     fn clear(&mut self);
-    fn set_config(&mut self, config: Config);
+    fn set_config(&mut self, config: &Config);
     /// Returns the HWND sitting directly above this overlay in z-order.
     /// Wraps `GetWindow(GW_HWNDPREV)` in production; used by `show_tiling`
     /// to slot tiling windows above the overlay on band transitions.
@@ -671,10 +698,6 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     /// Demotes the overlay below `managed` via a z-only `SetWindowPos`.
     /// Fallback for when `window_above()` returns None (overlay at top).
     fn demote_below(&mut self, managed: HwndId);
-    // &mut self keeps the receiver consistent with the other trait
-    // methods; apply_theme only needs &self on the underlying Renderer.
-    fn apply_theme(&mut self, flavor: Flavor);
-    fn apply_font(&mut self, font: &FontConfig);
 }
 
 pub(in crate::platform::windows) trait PickerApi {
@@ -687,7 +710,7 @@ pub(in crate::platform::windows) trait PickerApi {
     ) -> Vec<(String, HwndId)>;
     fn receive_icon(&mut self, app_id: String, image: egui::ColorImage);
     fn rerender(&mut self);
-    fn apply_theme(&mut self, flavor: Flavor);
+    fn set_config(&mut self, config: &Config);
 }
 
 pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =
@@ -700,6 +723,7 @@ pub(in crate::platform::windows) struct FloatOverlay {
     width_phys: u32,
     height_phys: u32,
     window: OwnedHwnd,
+    config: Config,
 }
 
 impl FloatOverlay {
@@ -711,8 +735,7 @@ impl FloatOverlay {
         instance: &wgpu::Instance,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
-        flavor: Flavor,
-        font: &FontConfig,
+        config: Config,
         x: i32,
         y: i32,
         width_phys: u32,
@@ -734,14 +757,15 @@ impl FloatOverlay {
             hwnd,
             width_phys,
             height_phys,
-            flavor,
-            font,
+            config.theme,
+            &config.font,
         )?;
         let boxed = Box::new(Self {
             renderer,
             width_phys,
             height_phys,
             window,
+            config,
         });
         Ok(boxed)
     }
@@ -815,12 +839,32 @@ impl FloatOverlayApi for FloatOverlay {
         self.window.hide();
     }
 
-    fn apply_theme(&mut self, flavor: Flavor) {
-        self.renderer.apply_theme(flavor);
+    fn set_config(&mut self, config: &Config) {
+        if self.config.theme != config.theme {
+            self.renderer.apply_theme(config.theme);
+        }
+        if self.config.font != config.font {
+            if self.config.font.family != config.font.family {
+                self.reinstall_fonts(config.font.family.as_deref());
+            }
+            self.renderer.apply_font(&config.font);
+        }
+        self.config = config.clone();
     }
+}
 
-    fn apply_font(&mut self, font: &FontConfig) {
-        self.renderer.apply_font(font);
+impl FloatOverlay {
+    fn reinstall_fonts(&mut self, family: Option<&str>) {
+        if let Some(family) = family {
+            match crate::platform::windows::font::resolve_system_font(family) {
+                Ok(bytes) => crate::font::install_fonts(bytes, &self.renderer.egui_ctx),
+                Err(e) => tracing::warn!(
+                    family = %family,
+                    error = %e,
+                    "font reload failed"
+                ),
+            }
+        }
     }
 }
 
@@ -850,8 +894,7 @@ impl CreateOverlay for WgpuOverlayFactory {
     }
     fn create_float_overlay(
         &self,
-        flavor: crate::theme::Flavor,
-        font: &crate::font::FontConfig,
+        config: Config,
         _scale: f32,
         visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
@@ -860,8 +903,7 @@ impl CreateOverlay for WgpuOverlayFactory {
             &self.instance,
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
-            flavor,
-            font,
+            config,
             x_phys,
             y_phys,
             w_phys,
@@ -872,8 +914,7 @@ impl CreateOverlay for WgpuOverlayFactory {
         &self,
         entries: Vec<PickerEntry>,
         monitor_dim: Dimension,
-        flavor: crate::theme::Flavor,
-        font: &crate::font::FontConfig,
+        config: Config,
         scale: f32,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
         Ok(picker::PickerWindow::new(
@@ -883,8 +924,7 @@ impl CreateOverlay for WgpuOverlayFactory {
             entries,
             monitor_dim,
             self.hub_sender.clone(),
-            flavor,
-            font,
+            config,
             scale,
         )?)
     }

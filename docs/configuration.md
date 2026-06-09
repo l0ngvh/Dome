@@ -47,20 +47,32 @@ max_height = 0
 
 ## Font
 
-Font sizes live under the `[font]` table. Dome uses egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks); custom font families are not configurable.
+Font settings live under the `[font]` table. Dome ships with egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks). Set `family` to render glyphs that the built-in fonts do not cover (CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, etc.) using a font already installed on the system.
 
 ```toml
 [font]
 text_size = 14.0     # Body text: tab titles, picker labels.
 subtext_size = 12.0  # Secondary text: picker app-name subtext.
+family = "PingFang SC"            # macOS: render Chinese tab text via PingFang SC.
+# family = "Microsoft YaHei UI"   # Windows: English family name.
+# family = "微软雅黑"              # Windows: localized name also works.
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `font.text_size` | float | `14.0` | Body text size in points. Must be in `[4.0, 128.0]`. |
 | `font.subtext_size` | float | `12.0` | Secondary text size in points. Must be in `[4.0, 128.0]`. |
+| `font.family` | string (optional) | unset | Optional system-installed proportional font, used as a fallback after egui's built-in Ubuntu-Light. When unset, non-Latin glyphs render as tofu. |
 
 `tab_bar_height` (under `[layout.partition_tree]`) does not auto-scale with `text_size`, so long tab titles may truncate earlier as the body size grows.
+
+### Caveats
+
+- Dome does not validate the family name. Windows in particular substitutes a lookalike silently on a miss, so a typo or uninstalled name can still render something, just not what you wanted. If the result looks off, double-check the name in Font Book on macOS or `Settings > Personalization > Fonts` on Windows.
+- English and localized names both work. `"Microsoft YaHei UI"` and `"微软雅黑"` resolve to the same font on Windows, and macOS behaves the same way.
+- For fonts that bundle multiple variants in one file (TrueType collections like `msyh.ttc`), Dome picks the regular weight. Selecting a specific weight or italic from a collection is a future enhancement.
+- A small number of third-party commercial fonts are marked non-embeddable in their license metadata, and the OS won't hand their bytes to applications. Dome logs a warning and falls back to its built-in fonts. System fonts (Microsoft, Apple) and Google Noto fonts are always embeddable.
+- Changing `family` to a different value takes effect on the next render. Removing the line entirely keeps the previously-loaded font active until you restart Dome.
 
 ## Layout
 
