@@ -504,6 +504,42 @@ fn borderless_minimized_resurface_loop_caps() {
 }
 
 #[test]
+fn borderless_minimized_resurface_loop_caps_with_other_workspace_unaffected() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Game1", "game1.exe");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    macos.simulate_external_move(&mut dome, cg1, 0, 0, 1920, 1080);
+    macos.settle(&mut dome, 10);
+
+    // reconcile assigns to the active workspace, so switch to ws1 before reconciling cg2.
+    send(&mut dome, "focus workspace 1");
+    macos.settle(&mut dome, 10);
+    let cg2 = macos.spawn_window(101, "Game2", "game2.exe");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg2)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    macos.simulate_external_move(&mut dome, cg2, 0, 0, 1920, 1080);
+    macos.settle(&mut dome, 10);
+
+    // On ws0: cg1 visible, cg2 parked BorderlessMinimized.
+    send(&mut dome, "focus workspace 0");
+    macos.settle(&mut dome, 10);
+    assert!(!macos.is_minimized(cg1));
+    assert!(macos.is_minimized(cg2));
+
+    // cg2 is uncooperative. Past MAX_ENFORCEMENT_RETRIES + 2 attempts, Dome stops re-minimizing.
+    for _ in 0..7 {
+        macos.simulate_external_move(&mut dome, cg2, 0, 0, 1920, 1080);
+        macos.settle(&mut dome, 10);
+    }
+    assert!(!macos.is_minimized(cg2));
+
+    assert!(!macos.is_minimized(cg1));
+}
+
+#[test]
 fn borderless_minimized_retries_reset_on_workspace_return() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();

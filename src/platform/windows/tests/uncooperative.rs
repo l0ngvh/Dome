@@ -148,12 +148,36 @@ fn borderless_minimized_resurface_loop_caps() {
     assert!(env.is_minimized(w1));
 
     for _ in 0..7 {
-        env.set_minimized(w1, false);
-        env.set_dim(w1, fullscreen_dim());
-        env.simulate_external_move(w1);
-        env.flush_moves();
+        env.unminimize_window(w1);
     }
     assert!(!env.is_minimized(w1));
+}
+
+#[test]
+fn borderless_minimized_resurface_loop_caps_with_other_workspace_unaffected() {
+    let mut env = TestEnv::new();
+
+    let w1 = env.open(1, "Game1", "game1.exe", fullscreen_dim());
+    env.run_actions("focus workspace 1");
+    env.settle(20);
+    let w2 = env.open(2, "Game2", "game2.exe", fullscreen_dim());
+    env.settle(20);
+
+    // w1 stays BorderlessFullscreen on ws0. w2 parks BorderlessMinimized.
+    env.run_actions("focus workspace 0");
+    env.settle(20);
+    assert!(!env.is_minimized(w1));
+    assert!(env.is_minimized(w2));
+
+    // w2 is uncooperative: it resurfaces every iteration. After
+    // MAX_DRIFT_RETRIES + 2 attempts Dome gives up on it.
+    for _ in 0..7 {
+        env.unminimize_window(w2);
+    }
+    assert!(!env.is_minimized(w2));
+
+    assert!(!env.is_minimized(w1));
+    assert_eq!(env.dim(w1), fullscreen_dim());
 }
 
 #[test]
@@ -166,10 +190,7 @@ fn borderless_minimized_retries_reset_on_workspace_return() {
 
     // Exhaust the retry cap.
     for _ in 0..7 {
-        env.set_minimized(w1, false);
-        env.set_dim(w1, fullscreen_dim());
-        env.simulate_external_move(w1);
-        env.flush_moves();
+        env.unminimize_window(w1);
     }
     assert!(!env.is_minimized(w1));
 
@@ -179,9 +200,6 @@ fn borderless_minimized_retries_reset_on_workspace_return() {
     env.settle(20);
     assert!(env.is_minimized(w1));
 
-    env.set_minimized(w1, false);
-    env.set_dim(w1, fullscreen_dim());
-    env.simulate_external_move(w1);
-    env.flush_moves();
+    env.unminimize_window(w1);
     assert!(env.is_minimized(w1));
 }

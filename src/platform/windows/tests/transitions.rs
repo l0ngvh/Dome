@@ -567,16 +567,10 @@ fn tiling_state_preserved_through_user_minimize() {
     assert!(!env.is_minimized(w1));
     assert!(!env.is_offscreen(w1));
 
-    // Simulate OS minimize (user clicks taskbar). The OS minimizes before
-    // Dome receives the event.
-    env.set_minimized(w1, true);
     env.minimize_window(w1);
     assert!(env.is_minimized(w1));
 
-    // Simulate OS restore (user clicks taskbar again). The OS restores
-    // before Dome receives the event.
-    env.set_minimized(w1, false);
-    env.restore_window(w1);
+    env.unminimize_window(w1);
 
     // Geometry and mode are preserved: same tiling slot dimensions.
     assert!(!env.is_minimized(w1));
@@ -598,14 +592,10 @@ fn float_state_preserved_through_user_minimize() {
     assert!(env.is_topmost(w2));
     assert!(!env.is_minimized(w2));
 
-    // Simulate OS minimize.
-    env.set_minimized(w2, true);
     env.minimize_window(w2);
     assert!(env.is_minimized(w2));
 
-    // Simulate OS restore.
-    env.set_minimized(w2, false);
-    env.restore_window(w2);
+    env.unminimize_window(w2);
 
     // Float position and topmost are preserved.
     assert!(!env.is_minimized(w2));
@@ -627,14 +617,10 @@ fn fullscreen_borderless_state_preserved_through_user_minimize() {
     assert_eq!(dim_before, fullscreen_dim());
     assert!(!env.is_minimized(w1));
 
-    // Simulate OS minimize (user clicks taskbar).
-    env.set_minimized(w1, true);
     env.minimize_window(w1);
     assert!(env.is_minimized(w1));
 
-    // Simulate OS restore.
-    env.set_minimized(w1, false);
-    env.restore_window(w1);
+    env.unminimize_window(w1);
 
     // Fullscreen geometry is preserved.
     assert!(!env.is_minimized(w1));
@@ -669,14 +655,10 @@ fn fullscreen_exclusive_state_preserved_through_user_minimize() {
     assert!(!env.is_minimized(w1));
     assert!(!env.is_offscreen(w1));
 
-    // Simulate OS minimize (user clicks taskbar).
-    env.set_minimized(w1, true);
     env.minimize_window(w1);
     assert!(env.is_minimized(w1));
 
-    // Simulate OS restore.
-    env.set_minimized(w1, false);
-    env.restore_window(w1);
+    env.unminimize_window(w1);
 
     assert!(!env.is_minimized(w1));
     assert!(!env.is_offscreen(w1));

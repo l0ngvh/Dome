@@ -49,7 +49,7 @@ fn user_minimize_then_restore() {
     assert_eq!(env.picker_entries.borrow().len(), 1);
     env.run_actions("toggle minimized"); // hide
 
-    env.restore_window(w2);
+    env.unminimize_window(w2);
     env.run_actions("toggle minimized"); // show again with fresh entries
     assert_eq!(env.picker_entries.borrow().len(), 0);
     // Both windows should be tiled again

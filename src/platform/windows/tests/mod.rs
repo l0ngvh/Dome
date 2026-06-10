@@ -325,21 +325,18 @@ impl TestEnv {
     }
 
     fn minimize_window(&mut self, hwnd: HwndId) {
+        self.mock(hwnd).minimized.store(true, Ordering::Relaxed);
         self.dome.window_minimized(hwnd);
         self.dome.apply_layout();
     }
 
-    fn restore_window(&mut self, hwnd: HwndId) {
-        // Mirror production: EVENT_SYSTEM_MINIMIZEEND triggers
-        // `dispatch_placement_read` in the runner, whose result drives
-        // `window_moved`. The unminimize fold inside `window_moved` clears
-        // `entry.is_minimized` and calls `hub.unminimize_window`. Replay the
-        // same pipeline by pushing the current (post-restore, non-iconic)
-        // rect to the move log and letting `flush_moves` drive
-        // `placement_timeout` + `window_moved` +
-        // `apply_layout`. Callers set `ext.minimized` to false themselves
-        // (matching `minimize_window`, which leaves the OS-side flag to the
-        // caller too).
+    fn unminimize_window(&mut self, hwnd: HwndId) {
+        // Production observes a restore as a move through the placement-read
+        // pipeline, so we must drive a move event here (not just toggle a flag).
+        //
+        // Flag clear before move: `flush_moves`'s iconic guard drops moves for
+        // minimized windows. Matches OS ordering (MINIMIZEEND before LOCATIONCHANGE).
+        self.mock(hwnd).minimized.store(false, Ordering::Relaxed);
         self.simulate_external_move(hwnd);
         self.flush_moves();
     }
@@ -365,12 +362,6 @@ impl TestEnv {
 
     fn is_minimized(&self, hwnd: HwndId) -> bool {
         self.mock(hwnd).minimized.load(Ordering::Relaxed)
-    }
-
-    fn set_minimized(&self, hwnd: HwndId, minimized: bool) {
-        self.mock(hwnd)
-            .minimized
-            .store(minimized, Ordering::Relaxed);
     }
 
     fn is_offscreen(&self, hwnd: HwndId) -> bool {
