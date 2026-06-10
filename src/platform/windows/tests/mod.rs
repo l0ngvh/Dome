@@ -18,7 +18,7 @@ use crate::core::{
 };
 use crate::font::FontConfig;
 use crate::picker::PickerEntry;
-use crate::platform::windows::MonitorInfo;
+use crate::platform::windows::dome::MonitorInfo;
 use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
 use crate::platform::windows::dome::{CreateOverlay, Dome, FocusSinkApi, NewWindow, QueryDisplay};
 use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};

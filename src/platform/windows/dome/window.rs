@@ -211,8 +211,10 @@ impl Dome {
     ) {
         // Hub delivers frames in the OS-native unit (physical pixels on Windows
         // under PMv2).
-        let scale = self.monitors[&monitor].scale;
-        let border = self.physical_border(monitor);
+        let scale = self.monitors.monitor(monitor).scale();
+        let border = self
+            .monitors
+            .physical_border(monitor, self.config.border_size);
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
@@ -281,7 +283,9 @@ impl Dome {
         monitor: MonitorId,
     ) {
         // Hub delivers frames in physical pixels on Windows.
-        let border = self.physical_border(monitor);
+        let border = self
+            .monitors
+            .physical_border(monitor, self.config.border_size);
 
         let overlay = self
             .tiling_overlays
@@ -497,7 +501,9 @@ impl Dome {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
         };
-        let is_fullscreen = self.is_borderless_fullscreen_at(new_placement, monitor_handle);
+        let is_fullscreen = self
+            .monitors
+            .is_borderless_fullscreen_at(new_placement, monitor_handle);
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
@@ -579,8 +585,8 @@ impl Dome {
                     .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
             }
             (WindowState::Positioned(PositionedState::Float(fp)), false) => {
-                let resolved = match self.monitor_handles.get(&monitor_handle) {
-                    Some(&id) => id,
+                let resolved = match self.monitors.id_for_handle(monitor_handle) {
+                    Some(id) => id,
                     None => {
                         tracing::debug!(
                             handle = monitor_handle,
@@ -593,11 +599,10 @@ impl Dome {
                 };
                 fp.monitor = resolved;
                 fp.target = new_placement;
-                // Inlined: can't call self.physical_border() here because the
-                // mutable borrow on self.registry (via entry/fp) conflicts with
-                // the shared &self the method needs.
-                let scale = self.monitors[&resolved].scale;
-                let border = Length::<Physical>::new(self.config.border_size * scale);
+                let border = self
+                    .monitors
+                    .physical_border(resolved, self.config.border_size);
+                let scale = self.monitors.monitor(resolved).scale();
                 let outer_dim = reverse_inset(new_placement, border);
                 self.hub.update_float_dimension(id, outer_dim);
 
@@ -647,31 +652,6 @@ impl Dome {
             entry.state = WindowState::ExclusiveFullscreen;
         }
         self.hub.set_fullscreen(id, WindowRestrictions::BlockAll);
-    }
-
-    /// Physical-pixel border width for `monitor`. `config.border_size` is
-    /// a logical, config-denominated value; scaling it by the monitor's DPI
-    /// scale at this boundary is the shell's contract with `apply_inset` /
-    /// `reverse_inset`, both of which operate in physical pixels on Windows.
-    pub(super) fn physical_border(&self, monitor: MonitorId) -> Length<Physical> {
-        Length::new(self.config.border_size * self.monitors[&monitor].scale)
-    }
-
-    pub(super) fn is_borderless_fullscreen_at(
-        &self,
-        rect: Dimension<Physical>,
-        monitor: isize,
-    ) -> bool {
-        self.monitor_handles
-            .get(&monitor)
-            .and_then(|mid| self.monitors.get(mid))
-            .map(|m| {
-                rect.x <= m.dimension.x
-                    && rect.y <= m.dimension.y
-                    && rect.x + rect.width >= m.dimension.x + m.dimension.width
-                    && rect.y + rect.height >= m.dimension.y + m.dimension.height
-            })
-            .unwrap_or(false)
     }
 }
 

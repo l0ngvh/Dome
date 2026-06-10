@@ -33,8 +33,7 @@ use objc2_foundation::{
 use std::cell::RefCell;
 
 use crate::platform::macos::accessibility::AXApp;
-use crate::platform::macos::dome::HubEvent;
-use crate::platform::macos::get_all_monitors;
+use crate::platform::macos::dome::{HubEvent, get_all_monitors};
 use crate::platform::macos::objc2_wrapper::{
     add_observer_notification, create_observer, get_cg_window_id, get_pid,
     kAXApplicationHiddenNotification, kAXApplicationShownNotification,

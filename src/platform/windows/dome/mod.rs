@@ -1,10 +1,13 @@
 pub(super) mod icon;
+pub(super) mod monitor;
 pub(super) mod overlay;
 pub(super) mod picker;
 mod placement_tracker;
 mod recovery;
 mod registry;
 mod window;
+
+pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -27,7 +30,7 @@ use self::window::{PositionedState, WindowState};
 
 pub(super) use self::window::NewWindow;
 
-use super::MonitorInfo;
+use self::monitor::MonitorRegistry;
 use super::external::{HwndId, ShowCmd};
 use super::taskbar::ManageTaskbar;
 
@@ -49,17 +52,6 @@ pub(super) enum HubEvent {
     ConfigChanged(Box<Config>),
     TabClicked(ContainerId, usize),
     Shutdown,
-}
-
-/// Per-monitor state: physical dimension, DPI scale, and the set of windows
-/// currently laid out on this monitor (rebuilt each `apply_layout` pass).
-pub(super) struct MonitorState {
-    /// Work area of the monitor
-    dimension: Dimension,
-    /// Monitor scale factor
-    scale: f32,
-    /// List of windows currently being displayed
-    displayed: HashSet<WindowId>,
 }
 
 struct MonitorPositionData {
@@ -98,12 +90,6 @@ pub(super) trait FocusSinkApi {
     fn focus(&self);
 }
 
-pub(super) trait QueryDisplay {
-    fn get_all_monitors(&self) -> anyhow::Result<Vec<MonitorInfo>>;
-    /// Returns the hwnd of the foreground window if D3D exclusive fullscreen is active.
-    fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId>;
-}
-
 /// Platform-specific state machine that bridges Win32 window events with the core tree
 /// model. Event-loop–facing methods accept `HwndId` rather than `WindowId` because callers
 /// may dispatch work to background threads — by the time results arrive the window may
@@ -112,8 +98,7 @@ pub(super) trait QueryDisplay {
 pub(super) struct Dome {
     hub: Hub,
     registry: WindowRegistry,
-    monitor_handles: HashMap<isize, MonitorId>,
-    monitors: HashMap<MonitorId, MonitorState>,
+    monitors: MonitorRegistry,
     config: Config,
     taskbar: Rc<dyn ManageTaskbar>,
     overlay_factory: Box<dyn CreateOverlay>,
@@ -151,17 +136,13 @@ impl Dome {
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(primary.dimension, primary.scale, config.clone().into());
         let primary_monitor_id = hub.focused_monitor();
-        let mut monitor_handles = HashMap::new();
-        let mut monitor_states = HashMap::new();
+        let mut monitors_reg = MonitorRegistry::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
-        monitor_handles.insert(primary.handle, primary_monitor_id);
-        monitor_states.insert(
+        monitors_reg.insert(
+            primary.handle,
             primary_monitor_id,
-            MonitorState {
-                dimension: primary.dimension,
-                scale: primary.scale,
-                displayed: HashSet::new(),
-            },
+            primary.dimension,
+            primary.scale,
         );
         if let Ok(overlay) =
             overlay_factory.create_tiling_overlay(config.clone(), primary.dimension, primary.scale)
@@ -178,15 +159,7 @@ impl Dome {
         for monitor in &monitors {
             if monitor.handle != primary.handle {
                 let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
-                monitor_handles.insert(monitor.handle, id);
-                monitor_states.insert(
-                    id,
-                    MonitorState {
-                        dimension: monitor.dimension,
-                        scale: monitor.scale,
-                        displayed: HashSet::new(),
-                    },
-                );
+                monitors_reg.insert(monitor.handle, id, monitor.dimension, monitor.scale);
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
                     monitor.dimension,
@@ -206,8 +179,7 @@ impl Dome {
         Ok(Self {
             hub,
             registry: WindowRegistry::new(),
-            monitor_handles,
-            monitors: monitor_states,
+            monitors: monitors_reg,
             config,
             taskbar: taskbar.clone(),
             overlay_factory,
@@ -257,9 +229,7 @@ impl Dome {
         if let Some(id) = self.registry.remove_by_hwnd(id_key) {
             tracing::info!(%id, "Window removed");
             self.float_overlays.remove(&id);
-            for ms in self.monitors.values_mut() {
-                ms.displayed.remove(&id);
-            }
+            self.monitors.remove_window_from_displayed(id);
             self.hub.delete_window(id);
             self.apply_layout();
         }
@@ -354,7 +324,7 @@ impl Dome {
         }
         let (target_ws, mode_override) = self.resolve_on_open(&new);
         let resolved_mode = mode_override.unwrap_or_else(|| {
-            if self.is_borderless_fullscreen_at(rect, monitor) {
+            if self.monitors.is_borderless_fullscreen_at(rect, monitor) {
                 WindowMode::Fullscreen
             } else {
                 WindowMode::Tiling
@@ -402,7 +372,10 @@ impl Dome {
         // FIXME: resolve_window_monitor is best effort, so it can return the wrong monitor. If the
         // window is immediately minimized after spawn, then we'd get the wrong border
         let monitor = self.resolve_window_monitor(id);
-        let border = self.physical_border(monitor).value();
+        let border = self
+            .monitors
+            .physical_border(monitor, self.config.border_size)
+            .value();
         let (min_w, min_h, max_w, max_h) = constraints;
         if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
             let to_frame = |v: f32| {
@@ -544,9 +517,9 @@ impl Dome {
                     (Some(e.process.clone()), Some(display))
                 });
                 let focused_monitor = self.hub.focused_monitor();
-                let ms = &self.monitors[&focused_monitor];
-                let monitor_dim = ms.dimension;
-                let scale = ms.scale;
+                let m = self.monitors.monitor(focused_monitor);
+                let monitor_dim = m.dimension();
+                let scale = m.scale();
                 pw.show(entries, monitor_dim, scale);
             }
             None => {
@@ -563,12 +536,12 @@ impl Dome {
                     (Some(e.process.clone()), Some(display))
                 });
                 let focused_monitor = self.hub.focused_monitor();
-                let monitor_dim = self.monitors[&focused_monitor].dimension;
+                let monitor_dim = self.monitors.monitor(focused_monitor).dimension();
                 match self.overlay_factory.create_picker(
                     entries,
                     monitor_dim,
                     self.config.clone(),
-                    self.monitors[&focused_monitor].scale,
+                    self.monitors.monitor(focused_monitor).scale(),
                 ) {
                     Ok(pw) => {
                         self.picker = Some(pw);
@@ -605,7 +578,7 @@ impl Dome {
             return None;
         }
         let focused = self.hub.focused_monitor();
-        Some(self.monitors[&focused].scale)
+        Some(self.monitors.monitor(focused).scale())
     }
 
     pub(super) fn picker_rerender(&mut self) {
@@ -649,7 +622,7 @@ impl Dome {
         let mut new_displayed: HashMap<MonitorId, HashSet<WindowId>> = HashMap::new();
 
         for mp in result.monitors {
-            let dimension = self.monitors[&mp.monitor_id].dimension;
+            let dimension = self.monitors.monitor(mp.monitor_id).dimension();
 
             let mut window_ids = HashSet::new();
 
@@ -705,8 +678,8 @@ impl Dome {
         // Global diff
         let old_window_ids: HashSet<WindowId> = self
             .monitors
-            .values()
-            .flat_map(|ms| &ms.displayed)
+            .monitors()
+            .flat_map(|m| m.displayed().iter())
             .copied()
             .collect();
         let new_window_ids: HashSet<WindowId> = new_displayed.values().flatten().copied().collect();
@@ -721,13 +694,9 @@ impl Dome {
 
         // Update displayed state on each monitor.
         // Clear all first, then set the ones that have placements this pass.
-        for ms in self.monitors.values_mut() {
-            ms.displayed.clear();
-        }
+        self.monitors.clear_all_displayed();
         for (mid, dm) in new_displayed {
-            if let Some(ms) = self.monitors.get_mut(&mid) {
-                ms.displayed = dm;
-            }
+            self.monitors.set_displayed_windows(mid, dm);
         }
 
         // Hide
@@ -804,7 +773,7 @@ impl Dome {
                 if !self.float_overlays.contains_key(&wp.id) {
                     match self.overlay_factory.create_float_overlay(
                         self.config.clone(),
-                        self.monitors[&data.monitor_id].scale,
+                        self.monitors.monitor(data.monitor_id).scale(),
                         wp.visible_frame,
                     ) {
                         Ok(o) => {
@@ -847,7 +816,7 @@ impl Dome {
                 }
                 self.show_tiling(wp.id, wp, data.monitor_id);
             }
-            let scale = self.monitors[&data.monitor_id].scale;
+            let scale = self.monitors.monitor(data.monitor_id).scale();
             self.tiling_overlays
                 .get_mut(&data.monitor_id)
                 .unwrap()
@@ -878,7 +847,20 @@ impl Dome {
             tracing::warn!("Empty monitor list, skipping update");
             return Vec::new();
         }
-        self.reconcile_monitors(monitors);
+        let change = self.monitors.reconcile(&mut self.hub, &monitors);
+        for id in change.added {
+            let m = self.monitors.monitor(id);
+            if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
+                self.config.clone(),
+                m.dimension(),
+                m.scale(),
+            ) {
+                self.tiling_overlays.insert(id, overlay);
+            }
+        }
+        for id in change.removed {
+            self.tiling_overlays.remove(&id);
+        }
 
         self.registry
             .iter()
@@ -891,87 +873,6 @@ impl Dome {
             .collect()
     }
 
-    fn reconcile_monitors(&mut self, monitors: Vec<MonitorInfo>) {
-        let current_handles: HashSet<isize> = monitors.iter().map(|s| s.handle).collect();
-
-        for monitor in &monitors {
-            if !self.monitor_handles.contains_key(&monitor.handle) {
-                let id =
-                    self.hub
-                        .add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
-                self.monitor_handles.insert(monitor.handle, id);
-                self.monitors.insert(
-                    id,
-                    MonitorState {
-                        dimension: monitor.dimension,
-                        scale: monitor.scale,
-                        displayed: HashSet::new(),
-                    },
-                );
-                if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
-                    self.config.clone(),
-                    monitor.dimension,
-                    monitor.scale,
-                ) {
-                    self.tiling_overlays.insert(id, overlay);
-                }
-                tracing::info!(
-                    name = %monitor.name,
-                    handle = ?monitor.handle,
-                    dimension = ?monitor.dimension,
-                    "Monitor added"
-                );
-            }
-        }
-
-        let to_remove: Vec<_> = self
-            .monitor_handles
-            .iter()
-            .filter(|(h, _)| !current_handles.contains(h))
-            .map(|(_, &id)| id)
-            .collect();
-
-        let fallback = monitors
-            .iter()
-            .find(|s| s.is_primary)
-            .and_then(|s| self.monitor_handles.get(&s.handle).copied());
-
-        for monitor_id in to_remove {
-            if let Some(fallback_id) = fallback
-                && fallback_id != monitor_id
-            {
-                self.hub.remove_monitor(monitor_id, fallback_id);
-                self.monitor_handles.retain(|_, &mut id| id != monitor_id);
-                self.monitors.remove(&monitor_id);
-                self.tiling_overlays.remove(&monitor_id);
-                tracing::info!(%monitor_id, fallback = %fallback_id, "Monitor removed");
-            }
-        }
-
-        for monitor in &monitors {
-            if let Some(&id) = self.monitor_handles.get(&monitor.handle)
-                && let Some(ms) = self.monitors.get(&id)
-                && (ms.dimension != monitor.dimension || ms.scale != monitor.scale)
-            {
-                let old_dim = Some(ms.dimension);
-                let old_scale = Some(ms.scale);
-                tracing::info!(
-                    name = %monitor.name,
-                    ?old_dim,
-                    new_dim = ?monitor.dimension,
-                    ?old_scale,
-                    new_scale = ?monitor.scale,
-                    "Monitor dimension changed"
-                );
-                let ms = self.monitors.get_mut(&id).expect("just checked");
-                ms.dimension = monitor.dimension;
-                ms.scale = monitor.scale;
-                self.hub
-                    .update_monitor(id, monitor.dimension, monitor.scale);
-            }
-        }
-    }
-
     /// Updates the DPI scale for a monitor identified by its Win32 HMONITOR handle.
     /// Called from the dome-thread message loop when WM_APP_DPI_CHANGE arrives.
     ///
@@ -980,25 +881,7 @@ impl Dome {
     /// same monitor (all four HWNDs default to the primary monitor, so a
     /// primary-monitor DPI change posts WM_APP_DPI_CHANGE four times).
     pub(super) fn monitor_dpi_changed(&mut self, handle: isize, dpi: u32) {
-        let Some(&id) = self.monitor_handles.get(&handle) else {
-            tracing::warn!(handle, dpi, "DPI change for unknown monitor handle");
-            return;
-        };
-        let scale = dpi as f32 / crate::platform::windows::display::BASE_DPI;
-        // Same-scale early return: absorbs duplicate posts without log noise.
-        if self.monitors.get(&id).is_some_and(|ms| ms.scale == scale) {
-            return;
-        }
-        let previous = self.monitors.get_mut(&id).map(|ms| {
-            let prev = ms.scale;
-            ms.scale = scale;
-            prev
-        });
-        // Propagate the new scale into core so layout math uses the updated
-        // multiplier when the caller-scheduled apply_layout reruns.
-        let current_dim = self.monitors[&id].dimension;
-        self.hub.update_monitor(id, current_dim, scale);
-        tracing::info!(%id, dpi, scale, ?previous, "Monitor scale updated via DPI change");
+        self.monitors.apply_dpi_change(handle, dpi, &mut self.hub);
     }
 
     fn resolve_on_open(&mut self, new: &NewWindow) -> (WorkspaceId, Option<WindowMode>) {

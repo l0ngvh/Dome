@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::core::{Length, MonitorLayout, MonitorPlacements, Unit, WindowId};
+use crate::core::{Length, MonitorLayout, MonitorPlacements, WindowId};
 use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
@@ -34,9 +34,9 @@ impl Dome {
             .monitors
             .iter()
             .flat_map(|mp| {
-                let entry = self.monitor_registry.get_entry(mp.monitor_id);
+                let entry = self.monitor_registry.monitor(mp.monitor_id);
                 entry
-                    .displayed_windows
+                    .displayed()
                     .difference(&all_displayed_windows)
                     .copied()
                     .collect::<Vec<_>>()
@@ -61,8 +61,7 @@ impl Dome {
                     .collect(),
             };
             self.monitor_registry
-                .get_entry_mut(mp.monitor_id)
-                .displayed_windows = displayed;
+                .set_displayed_windows(mp.monitor_id, displayed);
             let (t, f) = self.apply_monitor_placements(&mp, focused_window);
             tiling.push(t);
             float_shows.extend(f);
@@ -112,16 +111,17 @@ impl Dome {
         match &mp.layout {
             MonitorLayout::Fullscreen(window_id) => {
                 self.place_fullscreen_window(*window_id, mp.monitor_id);
-                let info = &self.monitor_registry.get_entry(mp.monitor_id).info;
+                let monitor = self.monitor_registry.monitor(mp.monitor_id);
+                let dim = monitor.dimension();
                 (
                     MonitorTilingData {
                         monitor_id: mp.monitor_id,
-                        monitor_dim: info.dimension,
+                        monitor_dim: dim,
                         cocoa_frame: dimension_to_ns_rect_cocoa(
                             Length::new(self.primary_full_height),
-                            info.dimension,
+                            dim,
                         ),
-                        scale: info.scale,
+                        scale: monitor.egui_scale(),
                         windows: Vec::new(),
                         containers: Vec::new(),
                     },
@@ -133,11 +133,12 @@ impl Dome {
                 float_windows,
                 containers,
             } => {
-                let border_size = Length::<Unit>::new(self.config.border_size);
-                // macOS scale is always 1.0, so no to_unit(scale) needed for border.
-                let info = &self.monitor_registry.get_entry(mp.monitor_id).info;
-                let monitor_dim = info.dimension;
-                let scale = info.scale;
+                let border_size = self
+                    .monitor_registry
+                    .physical_border(mp.monitor_id, Length::new(self.config.border_size));
+                let monitor = self.monitor_registry.monitor(mp.monitor_id);
+                let monitor_dim = monitor.dimension();
+                let scale = monitor.egui_scale();
 
                 let mut placed_tiling = Vec::new();
                 let mut float_shows = Vec::new();

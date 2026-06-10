@@ -520,8 +520,8 @@ impl Dome {
         // Borderless-fullscreen window hidden by Dome because its workspace was
         // inactive. The workspace is visible again, so transition back to
         // BorderlessFullscreen and drive the OS-side restore.
-        let monitor = self.monitor_registry.get_entry_mut(monitor_id);
-        let monitor_dim = monitor.info.dimension;
+        let monitor = self.monitor_registry.monitor(monitor_id);
+        let monitor_dim = monitor.dimension();
         match &mut window.state {
             WindowState::BorderlessMinimized { .. } => {
                 // BorderlessFullscreen windows previously in other workspaces. Restore it
@@ -867,16 +867,6 @@ impl Dome {
     }
 
     pub(super) fn is_borderless_fullscreen_at(&self, dim: RoundedDimension) -> bool {
-        let monitor = self
-            .monitor_registry
-            .find_monitor_at(dim.x as f32, dim.y as f32);
-        monitor.is_some_and(|m| {
-            let mon = &m.dimension;
-            let tolerance = 2;
-            (dim.x - mon.x.value() as i32).abs() <= tolerance
-                && (dim.y - mon.y.value() as i32).abs() <= tolerance
-                && (dim.width - mon.width.value() as i32).abs() <= tolerance
-                && (dim.height - mon.height.value() as i32).abs() <= tolerance
-        })
+        self.monitor_registry.is_borderless_fullscreen_at(dim)
     }
 }

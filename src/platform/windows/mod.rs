@@ -1,4 +1,3 @@
-mod display;
 mod dome;
 mod event_listener;
 mod external;
@@ -44,7 +43,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PCWSTR};
 
 use crate::config::{Config, start_config_watcher};
-use crate::core::Dimension;
 use crate::ipc;
 use crate::keymap::KeymapState;
 use dome::overlay::{
@@ -58,16 +56,6 @@ use external::HwndId;
 const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use taskbar::Taskbar;
-
-#[derive(Clone)]
-pub(super) struct MonitorInfo {
-    pub handle: isize,
-    pub name: String,
-    pub dimension: Dimension,
-    pub is_primary: bool,
-    /// DPI scale factor for this monitor (e.g. 1.5 for 150%). Always > 0.
-    pub scale: f32,
-}
 
 /// Verifies the process is running at Per-Monitor V2 DPI awareness.
 ///
@@ -526,7 +514,7 @@ fn run_dome(config: Config, main_thread_id: u32, keymap_state: Arc<RwLock<Keymap
         config.clone(),
         Rc::new(taskbar),
         Box::new(overlays),
-        Box::new(display::Win32Display),
+        Box::new(dome::Win32Display),
         Box::new(AppWindowSink { hwnd: app_hwnd }),
     )
     .expect("Failed to initialize Dome");

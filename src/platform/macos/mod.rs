@@ -20,21 +20,16 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 
 use objc2::MainThreadMarker;
-use objc2_app_kit::NSScreen;
 use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use objc2_core_foundation::{CFDictionary, kCFBooleanTrue};
-use objc2_core_graphics::{
-    CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID, CGPreflightScreenCaptureAccess,
-    CGRequestScreenCaptureAccess,
-};
-use objc2_foundation::{NSNumber, NSString};
+use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
 use crate::config::{Config, start_config_watcher};
-use crate::core::{Dimension, Length};
 use crate::ipc;
 use crate::keymap::KeymapState;
 use crate::logging::Logger;
-use dome::{Dome, HubEvent};
+pub(in crate::platform::macos) use dome::MonitorInfo;
+use dome::{Dome, HubEvent, get_all_monitors};
 use keyboard::KeyboardListener;
 use listeners::EventListener;
 use ui::Ui;
@@ -156,71 +151,4 @@ fn send_hub_event(hub_sender: &calloop::channel::Sender<HubEvent>, event: HubEve
         let mtm = MainThreadMarker::new().unwrap();
         objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None);
     }
-}
-
-#[derive(Clone, Debug)]
-pub(in crate::platform::macos) struct MonitorInfo {
-    pub(in crate::platform::macos) display_id: CGDirectDisplayID,
-    pub(in crate::platform::macos) name: String,
-    pub(in crate::platform::macos) dimension: Dimension,
-    pub(in crate::platform::macos) full_height: f32,
-    pub(in crate::platform::macos) is_primary: bool,
-    /// NSScreen.backingScaleFactor — used for egui render density only.
-    /// This is NOT core Monitor.scale (which is always 1.0 on macOS because
-    /// AppKit already reports points, so no DPI conversion is needed).
-    pub(in crate::platform::macos) scale: f64,
-}
-
-impl std::fmt::Display for MonitorInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} (id={}, dim={:?}, scale={})",
-            self.name, self.display_id, self.dimension, self.scale
-        )
-    }
-}
-
-fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
-    let desc = screen.deviceDescription();
-    let key = NSString::from_str("NSScreenNumber");
-    desc.objectForKey(&key)
-        .and_then(|obj| {
-            let num: Option<&NSNumber> = obj.downcast_ref();
-            num.map(|n| n.unsignedIntValue())
-        })
-        .unwrap_or(0)
-}
-
-fn get_all_monitors(mtm: MainThreadMarker) -> Vec<MonitorInfo> {
-    let primary_id = CGMainDisplayID();
-
-    NSScreen::screens(mtm)
-        .iter()
-        .map(|screen| {
-            let display_id = get_display_id(&screen);
-            let name = screen.localizedName().to_string();
-            let bounds = CGDisplayBounds(display_id);
-            let frame = screen.frame();
-            let visible = screen.visibleFrame();
-
-            let top_inset =
-                (frame.origin.y + frame.size.height) - (visible.origin.y + visible.size.height);
-            let bottom_inset = visible.origin.y - frame.origin.y;
-
-            MonitorInfo {
-                display_id,
-                name,
-                dimension: Dimension::new(
-                    Length::new(bounds.origin.x as f32),
-                    Length::new((bounds.origin.y + top_inset) as f32),
-                    Length::new(bounds.size.width as f32),
-                    Length::new((bounds.size.height - top_inset - bottom_inset) as f32),
-                ),
-                full_height: bounds.size.height as f32,
-                is_primary: display_id == primary_id,
-                scale: screen.backingScaleFactor(),
-            }
-        })
-        .collect()
 }
