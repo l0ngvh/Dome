@@ -1,3 +1,20 @@
+//! Minimize boundary.
+//!
+//! Mutators on `Hub` that take a `WindowId` require the window to be
+//! non-minimized at call time. Callers observe minimized state through
+//! their own registry (e.g. `ManagedWindow::is_minimized` in the macOS
+//! and Windows shells) and must call `unminimize_window` first if they
+//! intend to mutate a minimized window. Enforcement is implicit: each
+//! in-scope mutator runs `workspace().expect("non-minimized window has
+//! a workspace")`, which panics on a minimized `WindowId` because a
+//! minimized window has no workspace. No explicit `is_minimized` assert
+//! is added on each mutator.
+//!
+//! Exemptions: `minimize_window` and `unminimize_window` (the boundary
+//! primitives defined in this module); `delete_window` (lifecycle,
+//! owned by the OS); `set_window_title` and `set_window_constraint`
+//! (bookkeeping that does not affect layout).
+
 use crate::core::{Hub, WindowId, node::DisplayMode};
 
 impl Hub {

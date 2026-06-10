@@ -71,6 +71,9 @@ impl Hub {
             window.is_float(),
             "update_float_dimension: {window_id} is not Float"
         );
+        window
+            .workspace()
+            .expect("non-minimized float window has a workspace");
         window.mode = DisplayMode::Float { dim };
     }
 

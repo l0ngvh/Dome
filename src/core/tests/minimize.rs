@@ -306,99 +306,23 @@ fn delete_minimized_window_after_workspace_pruned() {
 }
 
 #[test]
-fn set_focus_on_minimized_unminimizes() {
+#[should_panic(expected = "non-minimized window has a workspace")]
+fn set_focus_on_minimized_panics() {
     let mut hub = setup();
     let _w0 = hub.insert_tiling(hub.current_workspace());
     let w1 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w1);
     hub.set_focus(w1);
-    assert!(hub.minimized_windows().is_empty());
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
-      )
-
-    +-------------------------------------------------------------------------+***************************************************************************
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                    W0                                   |*                                    W1                                   *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+***************************************************************************
-    ");
 }
 
 #[test]
-fn set_fullscreen_on_minimized_window() {
+#[should_panic(expected = "non-minimized window has a workspace")]
+fn set_fullscreen_on_minimized_panics() {
     let mut hub = setup();
     let _w0 = hub.insert_tiling(hub.current_workspace());
     let w1 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w1);
     hub.set_fullscreen(w1, WindowRestrictions::None);
-    assert!(hub.minimized_windows().is_empty());
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Fullscreen(id=WindowId(1))
-      )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                         W1                                                                         |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
 }
 
 #[test]
@@ -463,6 +387,41 @@ fn set_window_constraint_on_minimized_no_panic() {
     hub.minimize_window(w0);
     hub.set_window_constraint(w0, Some(100.0), Some(50.0), None, None);
     assert_eq!(hub.minimized_windows().len(), 1);
+}
+
+#[test]
+#[should_panic(expected = "non-minimized float window has a workspace")]
+fn update_float_dimension_on_minimized_panics() {
+    let mut hub = setup();
+    let dim = Dimension::new(
+        Length::new(10.0),
+        Length::new(5.0),
+        Length::new(40.0),
+        Length::new(10.0),
+    );
+    let w0 = hub.insert_float(hub.current_workspace(), dim);
+    hub.minimize_window(w0);
+    hub.update_float_dimension(
+        w0,
+        Dimension::new(
+            Length::new(20.0),
+            Length::new(10.0),
+            Length::new(50.0),
+            Length::new(20.0),
+        ),
+    );
+}
+
+#[test]
+fn set_window_title_on_minimized_no_panic() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    hub.set_window_title(w0, "original".into());
+    hub.minimize_window(w0);
+    hub.set_window_title(w0, "updated".into());
+    assert_eq!(hub.minimized_windows().len(), 1);
+    let entries = hub.minimized_window_entries();
+    assert_eq!(entries[0].1, "updated");
 }
 
 #[test]

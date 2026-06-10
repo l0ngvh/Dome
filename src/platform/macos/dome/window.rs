@@ -571,9 +571,18 @@ impl Dome {
             return;
         };
         tracing::Span::current().record("window", window.to_string());
-        window.state = WindowState::NativeFullscreen;
+        let was_minimized = window.is_minimized;
+        if was_minimized {
+            self.hub.unminimize_window(window_id);
+            if let Some(window) = self.registry.by_id_mut(window_id) {
+                window.is_minimized = false;
+            }
+        }
+        if let Some(window) = self.registry.by_id_mut(window_id) {
+            window.state = WindowState::NativeFullscreen;
+        }
         self.hub
-            .set_fullscreen(window.window_id, WindowRestrictions::ProtectFullscreen);
+            .set_fullscreen(window_id, WindowRestrictions::ProtectFullscreen);
     }
 
     #[tracing::instrument(skip(self), fields(window = tracing::field::Empty))]

@@ -403,14 +403,26 @@ impl Dome {
         fields(hwnd = %id_key, window = tracing::field::Empty),
     )]
     pub(super) fn handle_focus(&mut self, id_key: HwndId) {
-        if let Some(id) = self.registry.get_id(id_key) {
-            if let Some(entry) = self.registry.get(id) {
+        let Some(id) = self.registry.get_id(id_key) else {
+            return;
+        };
+        let was_minimized = self
+            .registry
+            .get(id)
+            .map(|entry| {
                 tracing::Span::current().record("window", entry.to_string());
+                entry.is_minimized
+            })
+            .unwrap_or(false);
+        if was_minimized {
+            self.hub.unminimize_window(id);
+            if let Some(entry) = self.registry.get_mut(id) {
+                entry.is_minimized = false;
             }
-            self.hub.set_focus(id);
-            tracing::info!("Window focused");
-            self.apply_layout();
         }
+        self.hub.set_focus(id);
+        tracing::info!("Window focused");
+        self.apply_layout();
     }
 
     /// Called by the run loop when a drag safety timeout or resize debounce

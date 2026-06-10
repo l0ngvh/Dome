@@ -648,6 +648,17 @@ impl Dome {
     }
 
     pub(super) fn enter_fullscreen_exclusive(&mut self, id: WindowId) {
+        let was_minimized = self
+            .registry
+            .get(id)
+            .map(|entry| entry.is_minimized)
+            .unwrap_or(false);
+        if was_minimized {
+            self.hub.unminimize_window(id);
+            if let Some(entry) = self.registry.get_mut(id) {
+                entry.is_minimized = false;
+            }
+        }
         if let Some(entry) = self.registry.get_mut(id) {
             entry.state = WindowState::ExclusiveFullscreen;
         }

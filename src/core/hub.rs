@@ -243,10 +243,6 @@ impl Hub {
 
     #[tracing::instrument(skip(self))]
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
-        if self.access.windows.get(window_id).is_minimized() {
-            self.unminimize_window(window_id);
-            return;
-        }
         tracing::debug!("Setting focus to window");
         let window = self.access.windows.get(window_id);
         let ws = window

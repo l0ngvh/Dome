@@ -301,11 +301,17 @@ impl Dome {
 
     #[tracing::instrument(skip(self), fields(cg_id = %cg_id, window = tracing::field::Empty))]
     pub(in crate::platform::macos) fn focus_window_by_cg(&mut self, cg_id: CGWindowID) {
-        if let Some(entry) = self.registry.get(cg_id) {
-            tracing::Span::current().record("window", entry.to_string());
-            self.hub.set_focus(entry.window_id);
-            self.flush_layout();
+        let Some(entry) = self.registry.get(cg_id) else {
+            return;
+        };
+        tracing::Span::current().record("window", entry.to_string());
+        let window_id = entry.window_id;
+        let was_minimized = entry.is_minimized;
+        if was_minimized {
+            self.hub.unminimize_window(window_id);
         }
+        self.hub.set_focus(window_id);
+        self.flush_layout();
     }
 
     #[tracing::instrument(skip(self, title), fields(cg_id = %cg_id, window = tracing::field::Empty))]
@@ -343,7 +349,12 @@ impl Dome {
         };
         tracing::Span::current().record("window", entry.to_string());
         let window_id = entry.window_id;
-        if let Err(e) = entry.ext.focus() {
+        let was_minimized = entry.is_minimized;
+        let ext = entry.ext.clone();
+        if was_minimized {
+            self.hub.unminimize_window(window_id);
+        }
+        if let Err(e) = ext.focus() {
             tracing::debug!("Failed to focus window: {e:#}");
         }
         self.hub.set_focus(window_id);
