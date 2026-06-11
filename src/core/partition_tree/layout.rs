@@ -119,16 +119,38 @@ impl PartitionTreeStrategy {
 
         if let Some(focused) = ws_state.focused_tiling {
             let focused_dim = self.child_dimension(focused);
+            let scale = hub.monitors.get(monitor_id).scale;
+            let reserved_top = self.enclosing_tabbed_strip_total(hub, focused, scale);
+
             offset_x =
                 nudge_offset_into_view(offset_x, focused_dim.x, focused_dim.width, screen.width);
             offset_y =
                 nudge_offset_into_view(offset_y, focused_dim.y, focused_dim.height, screen.height);
+            // Keep enclosing tab strips visible at the top of the viewport.
+            // After this clamp, focused.y - offset_y >= reserved_top, so each
+            // enclosing strip sits on or below the top of the screen.
+            offset_y = offset_y.min(focused_dim.y - reserved_top);
+
             self.ws_state_mut(workspace_id).viewport_offset = (offset_x, offset_y);
         }
 
         if (offset_x, offset_y) != initial {
             self.do_layout_top_down(hub, workspace_id);
         }
+    }
+
+    /// Sum of `tab_bar_length` over each strict ancestor of `focused` that is
+    /// tabbed. Used by `scroll_into_view` to reserve space for tab strips when
+    /// clamping the viewport offset.
+    fn enclosing_tabbed_strip_total(&self, hub: &HubAccess, focused: Child, scale: f32) -> Length {
+        let tb = tab_bar_length(hub, scale);
+        let mut total = Length::ZERO;
+        for (_, parent_id) in self.ancestors_of(focused) {
+            if self.containers.get(parent_id).is_tabbed() {
+                total += tb;
+            }
+        }
+        total
     }
 
     fn layout_children(

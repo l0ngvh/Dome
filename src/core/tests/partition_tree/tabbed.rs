@@ -1479,3 +1479,52 @@ fn toggle_container_layout_noop() {
     hub.toggle_container_layout();
     assert_eq!(before, snapshot(&hub));
 }
+
+#[test]
+fn tab_bar_visible_when_min_height_exceeds_screen() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling_titled();
+    hub.insert_tiling_titled();
+    hub.toggle_container_layout();
+    hub.set_window_constraint(w0, None, Some(60.0), None, None);
+    hub.set_focus(w0);
+
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[W0, W1])
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                  [W0]                                    |                                  W1                                     |
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W0                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ");
+}
