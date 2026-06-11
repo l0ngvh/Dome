@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -19,9 +19,13 @@ const FOCUS_THROTTLE_INTERVAL: Duration = Duration::from_millis(500);
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 const DRAG_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
 
-enum TimerKind {
-    FocusThrottle,
-    PlacementDebounce(HwndId),
+struct MoveSettle {
+    timer_id: usize,
+    observed_at: Instant,
+}
+
+enum MoveSettleTrigger {
+    Debounce(HwndId),
     DragSafety(HwndId),
 }
 
@@ -30,7 +34,7 @@ pub(super) struct Runner {
     dispatcher: ReadDispatcher,
     focus_throttle: Throttle<HwndId>,
     focus_timer_id: Option<usize>,
-    window_timers: HashMap<HwndId, usize>,
+    move_settles: HashMap<HwndId, MoveSettle>,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
 }
@@ -47,33 +51,43 @@ impl Runner {
             dispatcher: ReadDispatcher::new(thread_id),
             focus_throttle: Throttle::new(FOCUS_THROTTLE_INTERVAL),
             focus_timer_id: None,
-            window_timers: HashMap::new(),
+            move_settles: HashMap::new(),
             main_thread_id,
             keymap_state,
         }
     }
 
-    fn schedule_timer(&mut self, kind: TimerKind, delay: Duration) -> usize {
+    fn schedule_focus_throttle(&mut self, delay: Duration) {
         // With hWnd=NULL, SetTimer ignores nIDEvent when it doesn't match an
         // existing timer and returns a new system-generated ID. Pass the
         // previous ID to replace an existing timer, or 0 to create a new one.
-        let hint = match &kind {
-            TimerKind::FocusThrottle => self.focus_timer_id.unwrap_or(0),
-            _ => 0,
-        };
+        let hint = self.focus_timer_id.unwrap_or(0);
         let id = unsafe { SetTimer(None, hint, delay.as_millis() as u32, None) };
-        match &kind {
-            TimerKind::FocusThrottle => self.focus_timer_id = Some(id),
-            TimerKind::PlacementDebounce(hwnd) | TimerKind::DragSafety(hwnd) => {
-                self.window_timers.insert(*hwnd, id);
-            }
-        }
-        id
+        self.focus_timer_id = Some(id);
     }
 
-    fn cancel_timer(&mut self, hwnd: &HwndId) {
-        if let Some(id) = self.window_timers.remove(hwnd) {
-            unsafe { KillTimer(None, id).ok() };
+    fn schedule_move_settle(
+        &mut self,
+        trigger: MoveSettleTrigger,
+        observed_at: Instant,
+        delay: Duration,
+    ) {
+        let hwnd = match trigger {
+            MoveSettleTrigger::Debounce(h) | MoveSettleTrigger::DragSafety(h) => h,
+        };
+        let timer_id = unsafe { SetTimer(None, 0, delay.as_millis() as u32, None) };
+        self.move_settles.insert(
+            hwnd,
+            MoveSettle {
+                timer_id,
+                observed_at,
+            },
+        );
+    }
+
+    fn cancel_move_settle(&mut self, hwnd: &HwndId) {
+        if let Some(entry) = self.move_settles.remove(hwnd) {
+            unsafe { KillTimer(None, entry.timer_id).ok() };
         }
     }
 
@@ -87,14 +101,17 @@ impl Runner {
             return;
         }
         let hwnd = self
-            .window_timers
+            .move_settles
             .iter()
-            .find(|(_, v)| **v == timer_id)
+            .find(|(_, v)| v.timer_id == timer_id)
             .map(|(k, _)| *k);
         if let Some(hwnd) = hwnd {
-            self.window_timers.remove(&hwnd);
-            self.dome.placement_timeout(hwnd);
-            self.dispatch_placement_read(hwnd);
+            let entry = self
+                .move_settles
+                .remove(&hwnd)
+                .expect("entry was just located by id");
+            self.dome.clear_move_state(hwnd);
+            self.dispatch_placement_read(hwnd, entry.observed_at);
         }
     }
 
@@ -116,9 +133,11 @@ impl Runner {
             HubEvent::WindowMinimized(hwnd_id) => {
                 self.dome.window_minimized(hwnd_id);
             }
-            HubEvent::WindowRestored(hwnd_id) => {
-                // On window restored, we need its actual placement in order to do correct things
-                self.dispatch_placement_read(hwnd_id);
+            HubEvent::WindowRestored {
+                hwnd_id,
+                observed_at,
+            } => {
+                self.dispatch_placement_read(hwnd_id, observed_at);
             }
             HubEvent::WindowFocused(hwnd_id) => match self.focus_throttle.submit(hwnd_id) {
                 ThrottleResult::Send(id) => {
@@ -127,24 +146,37 @@ impl Runner {
                 ThrottleResult::Pending => {}
                 ThrottleResult::ScheduleFlush(delay) => {
                     self.focus_throttle.mark_timer_scheduled();
-                    self.schedule_timer(TimerKind::FocusThrottle, delay);
+                    self.schedule_focus_throttle(delay);
                 }
             },
             HubEvent::MoveSizeStart(hwnd_id) => {
-                self.cancel_timer(&hwnd_id);
+                self.cancel_move_settle(&hwnd_id);
                 self.dome.move_size_started(hwnd_id);
-                self.schedule_timer(TimerKind::DragSafety(hwnd_id), DRAG_SAFETY_TIMEOUT);
+                self.schedule_move_settle(
+                    MoveSettleTrigger::DragSafety(hwnd_id),
+                    Instant::now(),
+                    DRAG_SAFETY_TIMEOUT,
+                );
             }
-            HubEvent::MoveSizeEnd(hwnd_id) => {
-                self.cancel_timer(&hwnd_id);
-                self.dome.move_size_ended(hwnd_id);
-                self.dome.placement_timeout(hwnd_id);
-                self.dispatch_placement_read(hwnd_id);
+            HubEvent::MoveSizeEnd {
+                hwnd_id,
+                observed_at,
+            } => {
+                self.cancel_move_settle(&hwnd_id);
+                self.dome.clear_move_state(hwnd_id);
+                self.dispatch_placement_read(hwnd_id, observed_at);
             }
-            HubEvent::LocationChanged(hwnd_id) => {
+            HubEvent::LocationChanged {
+                hwnd_id,
+                observed_at,
+            } => {
                 if self.dome.location_changed(hwnd_id) {
-                    self.cancel_timer(&hwnd_id);
-                    self.schedule_timer(TimerKind::PlacementDebounce(hwnd_id), DEBOUNCE_INTERVAL);
+                    self.cancel_move_settle(&hwnd_id);
+                    self.schedule_move_settle(
+                        MoveSettleTrigger::Debounce(hwnd_id),
+                        observed_at,
+                        DEBOUNCE_INTERVAL,
+                    );
                 }
             }
             HubEvent::WindowTitleChanged(hwnd_id) => {
@@ -258,15 +290,13 @@ impl Runner {
         );
     }
 
-    fn dispatch_placement_read(&mut self, hwnd_id: HwndId) {
+    fn dispatch_placement_read(&mut self, hwnd_id: HwndId, observed_at: Instant) {
         let Some(id) = self.dome.registry_get_id(hwnd_id) else {
             return;
         };
         let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         self.dispatcher.dispatch(
             move || {
-                // This means this is a stale read dispatch. Minimized event is emitted and handled
-                // properly by window_minimized, so there is no need to handle them here
                 if inspect.is_minimized() {
                     return None;
                 }
@@ -281,7 +311,9 @@ impl Runner {
                 if runner.dome.registry_get_id(hwnd_id) != Some(id) {
                     return;
                 }
-                runner.dome.window_moved(hwnd_id, rect, monitor);
+                runner
+                    .dome
+                    .window_moved(hwnd_id, rect, monitor, observed_at);
             },
         );
     }

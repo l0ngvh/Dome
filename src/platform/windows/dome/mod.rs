@@ -11,6 +11,7 @@ pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::time::Instant;
 
 use crate::action::Query;
 use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
@@ -38,12 +39,21 @@ pub(super) enum HubEvent {
     WindowCreated(HwndId),
     WindowDestroyed(HwndId),
     WindowMinimized(HwndId),
-    WindowRestored(HwndId),
+    WindowRestored {
+        hwnd_id: HwndId,
+        observed_at: Instant,
+    },
     WindowFocused(HwndId),
     WindowTitleChanged(HwndId),
     MoveSizeStart(HwndId),
-    MoveSizeEnd(HwndId),
-    LocationChanged(HwndId),
+    MoveSizeEnd {
+        hwnd_id: HwndId,
+        observed_at: Instant,
+    },
+    LocationChanged {
+        hwnd_id: HwndId,
+        observed_at: Instant,
+    },
     Action(Actions),
     Query {
         query: Query,
@@ -223,7 +233,7 @@ impl Dome {
             tracing::Span::current().record("window", entry.to_string());
         }
 
-        self.placement_tracker.clear(id_key);
+        self.clear_move_state(id_key);
         self.taskbar.delete_tab(id_key);
         self.recovery.untrack(id_key);
         if let Some(id) = self.registry.remove_by_hwnd(id_key) {
@@ -262,8 +272,8 @@ impl Dome {
         self.placement_tracker.drag_started(id_key);
     }
 
-    pub(super) fn move_size_ended(&mut self, id_key: HwndId) {
-        self.placement_tracker.drag_ended(id_key);
+    pub(super) fn clear_move_state(&mut self, id_key: HwndId) {
+        self.placement_tracker.clear(id_key);
     }
 
     pub(super) fn location_changed(&mut self, id_key: HwndId) -> bool {
@@ -423,12 +433,6 @@ impl Dome {
         self.hub.set_focus(id);
         tracing::info!("Window focused");
         self.apply_layout();
-    }
-
-    /// Called by the run loop when a drag safety timeout or resize debounce
-    /// timer fires. Removes the window from the placement tracker.
-    pub(super) fn placement_timeout(&mut self, id: HwndId) {
-        self.placement_tracker.clear(id);
     }
 
     pub(super) fn query_workspaces_json(&self) -> String {

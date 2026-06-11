@@ -76,6 +76,125 @@ fn drift_correction_repositions_window() {
 }
 
 #[test]
+fn stale_tiling_observation_ignored() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.settle(10);
+
+    let before = Instant::now();
+
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.settle(10);
+
+    let dim_after_retile = env.dim(w1);
+    env.moves.lock().unwrap().clear();
+
+    env.window_moved_at(w1, dim(100, 100, 400, 300), 1, before);
+
+    assert!(
+        env.moves.lock().unwrap().is_empty(),
+        "stale observation must not trigger drift correction"
+    );
+    assert_eq!(
+        env.dim(w1),
+        dim_after_retile,
+        "window dimension must not change from a stale observation"
+    );
+}
+
+#[test]
+fn fresh_tiling_observation_drift_corrects() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.settle(10);
+
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.settle(10);
+
+    let target = env.dim(w1);
+    env.moves.lock().unwrap().clear();
+
+    let off_target = dim(
+        target.x.value() as i32 + 5,
+        target.y.value() as i32,
+        target.width.value() as i32 - 10,
+        target.height.value() as i32,
+    );
+
+    env.window_moved(w1, off_target, 1);
+
+    let moves = env.moves.lock().unwrap();
+    assert!(
+        !moves.is_empty(),
+        "fresh off-target observation must trigger drift correction"
+    );
+    let corrected = moves.iter().find(|(id, _)| *id == w1);
+    assert!(
+        corrected.is_some(),
+        "drift correction must issue set_position for w1"
+    );
+    assert_eq!(
+        corrected.unwrap().1,
+        target,
+        "drift correction must re-apply the target dimension"
+    );
+}
+
+#[test]
+fn stale_tiling_observation_in_fullscreen_arm_ignored() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.settle(10);
+
+    let before = Instant::now();
+
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.settle(10);
+
+    let dim_after_retile = env.dim(w1);
+    env.moves.lock().unwrap().clear();
+
+    env.window_moved_at(w1, fullscreen_dim(), 1, before);
+
+    assert_eq!(
+        env.dim(w1),
+        dim_after_retile,
+        "stale fullscreen-shaped observation must not change window state"
+    );
+}
+
+#[test]
+fn stale_float_observation_does_not_write_target() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.run_actions("toggle float");
+    env.settle(10);
+
+    let target_before = env.dim(w1);
+    let before = Instant::now();
+
+    // Trigger a fresh show_float that bumps fp.placed_at past `before`.
+    env.run_actions("toggle float");
+    env.run_actions("toggle float");
+    env.settle(10);
+
+    env.moves.lock().unwrap().clear();
+
+    let drag_target = dim(300, 200, 500, 400);
+    env.window_moved_at(w1, drag_target, 1, before);
+
+    assert!(
+        env.moves.lock().unwrap().is_empty(),
+        "stale float observation must not trigger any set_position"
+    );
+    assert_eq!(
+        env.dim(w1),
+        target_before,
+        "float target must not change from a stale observation"
+    );
+}
+
+#[test]
 fn offscreen_window_fights_hide() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);

@@ -1,4 +1,5 @@
 use std::cell::OnceCell;
+use std::time::Instant;
 
 use anyhow::{Result, anyhow};
 use windows::Win32::Foundation::{GetLastError, HWND};
@@ -92,7 +93,10 @@ unsafe extern "system" fn event_hook_proc(
                 sender.send(HubEvent::WindowCreated(hwnd_id));
             }
             EVENT_SYSTEM_MINIMIZEEND => {
-                sender.send(HubEvent::WindowRestored(hwnd_id));
+                sender.send(HubEvent::WindowRestored {
+                    hwnd_id,
+                    observed_at: Instant::now(),
+                });
             }
             EVENT_OBJECT_NAMECHANGE => {
                 sender.send(HubEvent::WindowTitleChanged(hwnd_id));
@@ -123,10 +127,16 @@ unsafe extern "system" fn event_hook_proc(
                 sender.send(HubEvent::MoveSizeStart(hwnd_id));
             }
             EVENT_SYSTEM_MOVESIZEEND => {
-                sender.send(HubEvent::MoveSizeEnd(hwnd_id));
+                sender.send(HubEvent::MoveSizeEnd {
+                    hwnd_id,
+                    observed_at: Instant::now(),
+                });
             }
             EVENT_OBJECT_LOCATIONCHANGE => {
-                sender.send(HubEvent::LocationChanged(hwnd_id));
+                sender.send(HubEvent::LocationChanged {
+                    hwnd_id,
+                    observed_at: Instant::now(),
+                });
             }
             _ => {
                 tracing::trace!(event, "unexpected WinEvent");

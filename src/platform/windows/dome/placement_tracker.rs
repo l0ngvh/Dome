@@ -10,7 +10,7 @@ enum MoveKind {
 /// Tracks which windows are currently being moved, either by user drag or
 /// programmatic repositioning. Pure state — no timers or time awareness.
 /// The run loop is responsible for scheduling debounce/timeout timers and
-/// calling `Dome::placement_timeout` when they fire.
+/// calling `Dome::clear_move_state` when a move completes.
 pub(super) struct PlacementTracker {
     windows: HashMap<HwndId, MoveKind>,
 }
@@ -27,11 +27,6 @@ impl PlacementTracker {
         self.windows.insert(id, MoveKind::UserDrag);
     }
 
-    /// Remove a window from the moving set after a drag ends.
-    pub(super) fn drag_ended(&mut self, id: HwndId) {
-        self.windows.remove(&id);
-    }
-
     /// Record a programmatic move for a window. Returns `true` if a new
     /// debounce timer should be scheduled. Returns `false` if the window
     /// is being dragged by the user (no debounce during drag).
@@ -43,8 +38,8 @@ impl PlacementTracker {
         true
     }
 
-    /// Remove a window from the moving set. Called by `Dome::placement_timeout`
-    /// when a timer fires.
+    /// Remove a window from the moving set. Called when a move completes:
+    /// drag ended, debounce settled, drag-safety fired, or window destroyed.
     pub(super) fn clear(&mut self, id: HwndId) {
         self.windows.remove(&id);
     }

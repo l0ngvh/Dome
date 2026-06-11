@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::action::{Action, Actions};
 use crate::config::Config;
@@ -286,7 +287,7 @@ impl TestEnv {
             last_pos.insert(id, dim);
         }
         for (hwnd_id, dim) in last_pos {
-            self.dome.placement_timeout(hwnd_id);
+            self.dome.clear_move_state(hwnd_id);
             let minimized = self
                 .mocks
                 .get(&hwnd_id)
@@ -297,10 +298,24 @@ impl TestEnv {
                 // never sees an iconic observation.
                 continue;
             }
-            self.dome.window_moved(hwnd_id, dim, 1);
+            self.dome.window_moved(hwnd_id, dim, 1, Instant::now());
         }
         self.dome.apply_layout();
         true
+    }
+
+    fn window_moved(&mut self, id: HwndId, dim: Dimension, monitor: isize) {
+        self.dome.window_moved(id, dim, monitor, Instant::now());
+    }
+
+    fn window_moved_at(
+        &mut self,
+        id: HwndId,
+        dim: Dimension,
+        monitor: isize,
+        observed_at: Instant,
+    ) {
+        self.dome.window_moved(id, dim, monitor, observed_at);
     }
 
     /// Configure a window to resist repositioning and report it at `pos`.

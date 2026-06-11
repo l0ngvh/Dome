@@ -96,7 +96,7 @@ fn move_size_suppresses_placement() {
     assert_eq!(env.dim(w1), placed);
 
     // End drag -- w1 should be repositioned on next layout
-    env.dome.move_size_ended(w1);
+    env.dome.clear_move_state(w1);
     env.dome.apply_layout();
 
     // Now both should be tiled

@@ -127,10 +127,7 @@ fn float_move_writes_core_and_does_not_correct() {
     // Clear move log to establish baseline
     env.moves.lock().unwrap().clear();
 
-    // Simulate user dragging float to a new position (move_size_ended fires once at drag end)
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(w1, dim(200, 150, 600, 400), 1);
+    env.window_moved(w1, dim(200, 150, 600, 400), 1);
 
     // Float arm should NOT call set_position
     assert!(
@@ -255,11 +252,7 @@ fn show_float_places_at_125pct() {
     // Clear moves to baseline
     env.moves.lock().unwrap().clear();
 
-    // Simulate user dragging float to known physical position
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(w1, dim(200, 150, 600, 400), 1);
-
+    env.window_moved(w1, dim(200, 150, 600, 400), 1);
     // Drive the next placement cycle
     env.dome.apply_layout();
     env.settle(10);
@@ -288,9 +281,7 @@ fn show_fullscreen_window_places_at_175pct() {
         w1,
         Dimension::new(Length::ZERO, Length::ZERO, phys_w, phys_h),
     );
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(
+    env.window_moved(
         w1,
         Dimension::new(Length::ZERO, Length::ZERO, phys_w, phys_h),
         1,
@@ -315,19 +306,14 @@ fn float_round_trip_converges_at_125pct() {
     env.settle(10);
     env.moves.lock().unwrap().clear();
 
-    // Simulate user dragging float to a known physical position
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(w1, dim(300, 200, 500, 400), 1);
+    env.window_moved(w1, dim(300, 200, 500, 400), 1);
     env.dome.apply_layout();
     env.settle(10);
 
     let d1 = env.dim(w1);
 
     // Simulate the OS reporting back the position we just set (as window_drifted would)
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(w1, d1, 1);
+    env.window_moved(w1, d1, 1);
     env.dome.apply_layout();
     env.settle(10);
 
@@ -384,9 +370,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
 
     // Report an unknown monitor handle (999). The observation should be
     // dropped entirely -- no position change, no dimension change.
-    env.dome.move_size_ended(win);
-    env.dome.placement_timeout(win);
-    env.dome.window_moved(win, dim(3000, 500, 600, 400), 999);
+    env.window_moved(win, dim(3000, 500, 600, 400), 999);
     env.dome.apply_layout();
     env.settle(10);
 
@@ -485,10 +469,7 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     env.settle(10);
 
     // Anchor the float at a known position on the primary monitor
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(w1, dim(200, 150, 600, 400), 1);
-    env.dome.apply_layout();
+    env.window_moved(w1, dim(200, 150, 600, 400), 1);
     env.settle(10);
 
     let baseline_dim = env.dim(w1);
@@ -552,9 +533,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     env.settle(10);
 
     // Anchor the float at a known content rect on monitor 1
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(w1, dim(100, 100, 400, 300), 1);
+    env.window_moved(w1, dim(100, 100, 400, 300), 1);
     env.dome.apply_layout();
     env.settle(10);
 
@@ -644,7 +623,6 @@ fn float_drift_repositions_overlay() {
     env.run_actions("toggle float");
     env.settle(10);
 
-    // Simulate user dragging the float to a new position
     env.set_dim(
         w1,
         Dimension::new(
@@ -654,9 +632,7 @@ fn float_drift_repositions_overlay() {
             Length::new(250.0),
         ),
     );
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(w1, dim(500, 300, 400, 250), 1);
+    env.window_moved(w1, dim(500, 300, 400, 250), 1);
 
     // The overlay receives the border-expanded outer_dim, not the raw managed-window rect.
     let border = Length::new(env.config.border_size);
@@ -688,7 +664,6 @@ fn float_drift_does_not_touch_managed_hwnd() {
     // Clear move log to establish baseline
     env.moves.lock().unwrap().clear();
 
-    // Simulate user dragging the float to a new position
     env.set_dim(
         w1,
         Dimension::new(
@@ -698,9 +673,7 @@ fn float_drift_does_not_touch_managed_hwnd() {
             Length::new(250.0),
         ),
     );
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(w1, dim(500, 300, 400, 250), 1);
+    env.window_moved(w1, dim(500, 300, 400, 250), 1);
 
     // The fix must not call set_position on the managed HWND
     assert!(
@@ -716,7 +689,6 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
     env.run_actions("toggle float");
     env.settle(10);
 
-    // Simulate user dragging the float to a new position
     env.set_dim(
         w1,
         Dimension::new(
@@ -726,9 +698,7 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
             Length::new(250.0),
         ),
     );
-    env.dome.move_size_ended(w1);
-    env.dome.placement_timeout(w1);
-    env.dome.window_moved(w1, dim(500, 300, 400, 250), 1);
+    env.window_moved(w1, dim(500, 300, 400, 250), 1);
 
     // Snapshot the float overlay state after the first update (from window_drifted)
     let after_drift = env.float_overlay_state();

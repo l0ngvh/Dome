@@ -309,7 +309,7 @@ fn borderless_fullscreen_exit_unblocks_commands() {
     assert_eq!(env.dim(w1), dim_before);
 
     // Exit borderless FS: window reports non-fullscreen dimensions
-    env.dome.window_moved(w1, dim(100, 100, 800, 600), 1);
+    env.window_moved(w1, dim(100, 100, 800, 600), 1);
     env.dome.apply_layout();
 
     // toggle_float should now work
@@ -687,7 +687,7 @@ fn dome_issued_fullscreen_placement_does_not_flip_to_borderless_fullscreen() {
 
     // Simulate the async LOCATIONCHANGE echo: production's worker observes
     // the placed rect covering the monitor's work area.
-    env.dome.window_moved(w2, fullscreen_dim(), 1);
+    env.window_moved(w2, fullscreen_dim(), 1);
     env.dome.apply_layout();
 
     env.run_actions("toggle fullscreen");

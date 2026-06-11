@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use super::Dome;
 use super::registry::ManagedWindow;
@@ -46,6 +47,25 @@ pub(super) struct DriftState {
     pub(super) retries: u8,
     /// Monitor this window was last placed on.
     pub(super) monitor: MonitorId,
+    /// Anchor for the most recent outbound `set_position` for this state.
+    /// Observations stamped before this instant are pre-placement and dropped.
+    pub(super) placed_at: Instant,
+}
+
+impl DriftState {
+    pub(super) fn new(
+        target: Dimension<Physical>,
+        actual: Dimension<Physical>,
+        monitor: MonitorId,
+    ) -> Self {
+        Self {
+            target,
+            actual,
+            retries: 0,
+            monitor,
+            placed_at: Instant::now(),
+        }
+    }
 }
 
 /// Lightweight placement state for floating windows. Floats accept the
@@ -59,6 +79,19 @@ pub(super) struct FloatPlacement {
     /// with the rect observation in `window_moved`. Updated whenever a
     /// drift observation arrives.
     pub(super) monitor: MonitorId,
+    /// Anchor for the most recent outbound `set_position` for this float.
+    /// Observation arms write `target` directly without bumping this field.
+    pub(super) placed_at: Instant,
+}
+
+impl FloatPlacement {
+    pub(super) fn new(target: Dimension<Physical>, monitor: MonitorId) -> Self {
+        Self {
+            target,
+            monitor,
+            placed_at: Instant::now(),
+        }
+    }
 }
 
 /// Tracks the platform-level visibility and fullscreen status of a managed window.
@@ -264,10 +297,9 @@ impl Dome {
         }
 
         if !settled {
-            entry.state = WindowState::Positioned(PositionedState::Float(FloatPlacement {
-                target: new_target,
-                monitor,
-            }));
+            entry.state = WindowState::Positioned(PositionedState::Float(FloatPlacement::new(
+                new_target, monitor,
+            )));
         }
     }
 
@@ -301,12 +333,9 @@ impl Dome {
         let new_target = content.round();
 
         let tiling_state = |actual: Dimension<Physical>| {
-            WindowState::Positioned(PositionedState::Tiling(DriftState {
-                target: new_target,
-                actual,
-                retries: 0,
-                monitor,
-            }))
+            WindowState::Positioned(PositionedState::Tiling(DriftState::new(
+                new_target, actual, monitor,
+            )))
         };
 
         // Fullscreen windows should never reach show_tiling. The hub routes
@@ -435,12 +464,11 @@ impl Dome {
                     PositionedState::Float(fp) => fp.target,
                     PositionedState::Offscreen { actual, .. } => actual,
                 };
-                entry.state = WindowState::Positioned(PositionedState::Tiling(DriftState {
-                    target: new_target,
-                    actual: prev_actual,
-                    retries: 0,
+                entry.state = WindowState::Positioned(PositionedState::Tiling(DriftState::new(
+                    new_target,
+                    prev_actual,
                     monitor,
-                }));
+                )));
             }
         }
     }
@@ -497,6 +525,7 @@ impl Dome {
         id_key: HwndId,
         new_placement: Dimension<Physical>,
         monitor_handle: isize,
+        observed_at: Instant,
     ) {
         let Some(id) = self.registry.get_id(id_key) else {
             return;
@@ -557,6 +586,16 @@ impl Dome {
             }
 
             (WindowState::Positioned(PositionedState::Tiling(drift)), true) => {
+                // Strict-<: an observation timestamped at the same Instant as placed_at
+                // is fresh. A constraint enforcement echo arriving exactly at placement
+                // time is the new target, not stale.
+                if observed_at < drift.placed_at {
+                    tracing::trace!(
+                        %id, ?observed_at, placed_at = ?drift.placed_at,
+                        "stale tiling observation, ignoring",
+                    );
+                    return;
+                }
                 if drift.target == new_placement {
                     tracing::trace!(%id, "ignoring fullscreen observation: new_placement matches Dome-issued target");
                     return;
@@ -566,6 +605,13 @@ impl Dome {
                     .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
             }
             (WindowState::Positioned(PositionedState::Tiling(drift)), false) => {
+                if observed_at < drift.placed_at {
+                    tracing::trace!(
+                        %id, ?observed_at, placed_at = ?drift.placed_at,
+                        "stale tiling observation, ignoring",
+                    );
+                    return;
+                }
                 drift.actual = new_placement;
                 if drift.actual != drift.target {
                     drift.retries = drift.retries.saturating_add(1);
@@ -578,13 +624,27 @@ impl Dome {
                 }
             }
 
-            (WindowState::Positioned(PositionedState::Float(_)), true) => {
+            (WindowState::Positioned(PositionedState::Float(fp)), true) => {
+                if observed_at < fp.placed_at {
+                    tracing::trace!(
+                        %id, ?observed_at, placed_at = ?fp.placed_at,
+                        "stale float observation, ignoring",
+                    );
+                    return;
+                }
                 // Float turned borderless fullscreen
                 entry.state = WindowState::BorderlessFullscreen;
                 self.hub
                     .set_fullscreen(id, WindowRestrictions::ProtectFullscreen);
             }
             (WindowState::Positioned(PositionedState::Float(fp)), false) => {
+                if observed_at < fp.placed_at {
+                    tracing::trace!(
+                        %id, ?observed_at, placed_at = ?fp.placed_at,
+                        "stale float observation, ignoring",
+                    );
+                    return;
+                }
                 let resolved = match self.monitors.id_for_handle(monitor_handle) {
                     Some(id) => id,
                     None => {
