@@ -9,7 +9,9 @@ use crate::action::{
     Action, Actions, FocusTarget, MonitorTarget, MoveTarget, TabDirection, ToggleTarget,
 };
 use crate::core::{Length, Logical, Unit};
-use crate::font::FontConfig;
+use crate::font::{
+    FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_subtext_size, default_text_size,
+};
 use crate::theme::{Flavor, Theme};
 
 bitflags::bitflags! {
@@ -228,81 +230,405 @@ fn default_keymaps() -> ModalKeymaps {
     }
 }
 
-fn deserialize_modal_keymaps<'de, D>(deserializer: D) -> Result<ModalKeymaps, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    // The [keymaps] table mixes key-combo bindings (string -> [actions]) with a
-    // special "mode" key (table of named modes). Deserialize as raw TOML values
-    // and discriminate on the key name.
-    let raw = HashMap::<String, toml::Value>::deserialize(deserializer)?;
-    let mut default = HashMap::new();
-    let mut modes = HashMap::new();
-
-    for (key_str, value) in raw {
-        if key_str == "mode" {
-            // value is { mode_name => { key_combo => [action_strings] } }
-            let mode_table = mode_table_from_value(value).map_err(serde::de::Error::custom)?;
-            for (mode_name, bindings) in mode_table {
-                let mut mode_keymaps = HashMap::new();
-                for (k, action_strs) in bindings {
-                    let keymap = k.parse::<Keymap>().map_err(serde::de::Error::custom)?;
-                    let actions = parse_actions(&action_strs).map_err(serde::de::Error::custom)?;
-                    mode_keymaps.insert(keymap, actions);
-                }
-                modes.insert(mode_name, mode_keymaps);
-            }
-        } else {
-            let action_strs: Vec<String> = value.try_into().map_err(serde::de::Error::custom)?;
-            let keymap = key_str
-                .parse::<Keymap>()
-                .map_err(serde::de::Error::custom)?;
-            let actions = parse_actions(&action_strs).map_err(serde::de::Error::custom)?;
-            default.insert(keymap, actions);
-        }
-    }
-
-    Ok(ModalKeymaps { default, modes })
-}
-
-fn mode_table_from_value(
-    value: toml::Value,
-) -> Result<HashMap<String, HashMap<String, Vec<String>>>> {
-    let toml::Value::Table(table) = value else {
-        anyhow::bail!("expected 'mode' to be a table");
-    };
-    let mut result = HashMap::new();
-    for (mode_name, mode_val) in table {
-        let toml::Value::Table(bindings_table) = mode_val else {
-            anyhow::bail!("expected mode '{mode_name}' to be a table");
-        };
-        let mut bindings = HashMap::new();
-        for (key_combo, actions_val) in bindings_table {
-            let toml::Value::Array(arr) = actions_val else {
-                anyhow::bail!(
-                    "expected actions for key '{key_combo}' in mode '{mode_name}' to be an array"
-                );
-            };
-            let action_strs: Vec<String> = arr
-                .into_iter()
-                .map(|v| match v {
-                    toml::Value::String(s) => Ok(s),
-                    other => anyhow::bail!("expected string action, got {other}"),
-                })
-                .collect::<Result<_>>()?;
-            bindings.insert(key_combo, action_strs);
-        }
-        result.insert(mode_name, bindings);
-    }
-    Ok(result)
-}
-
 fn parse_actions(action_strs: &[String]) -> Result<Actions> {
     let actions: Vec<Action> = action_strs
         .iter()
         .map(|s| s.parse())
         .collect::<Result<_>>()?;
     Ok(Actions::new(actions))
+}
+
+fn field_path(prefix: &str, key: &str) -> String {
+    if prefix.is_empty() {
+        key.to_string()
+    } else {
+        format!("{prefix}.{key}")
+    }
+}
+
+trait WalkRecover: Sized {
+    fn walk(w: &mut Walker) -> Self;
+}
+
+trait WalkRule: serde::de::DeserializeOwned {
+    const KNOWN: &'static [&'static str];
+}
+
+struct Walker<'a> {
+    table: &'a mut toml::Table,
+    prefix: String,
+}
+
+impl<'a> Walker<'a> {
+    fn new(table: &'a mut toml::Table, prefix: impl Into<String>) -> Self {
+        Self {
+            table,
+            prefix: prefix.into(),
+        }
+    }
+
+    // Default-on-error policy: this is the single site where Walker substitutes
+    // a typed default for a user-supplied field. Reaching the default branch
+    // always follows a tracing::warn! that explains what failed. The alternative
+    // is wiping the user's whole config. This is the explicit AGENTS.md exception
+    // for Default::default() and unwrap_or_default() inside the walker.
+    fn field<T: serde::de::DeserializeOwned>(&mut self, name: &str, default: T) -> T {
+        let Some(value) = self.table.remove(name) else {
+            return default;
+        };
+        match value.try_into() {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    field = %field_path(&self.prefix, name),
+                    error = %e,
+                    "Invalid value, using default",
+                );
+                default
+            }
+        }
+    }
+
+    fn nested<T: WalkRecover>(&mut self, name: &str) -> T {
+        let sub_prefix = field_path(&self.prefix, name);
+        let mut inner = match self.table.remove(name) {
+            Some(toml::Value::Table(t)) => t,
+            Some(other) => {
+                tracing::warn!(
+                    field = %sub_prefix,
+                    error = %format!("expected table, got {}", other.type_str()),
+                    "Invalid value, using default",
+                );
+                toml::Table::new()
+            }
+            None => toml::Table::new(),
+        };
+        let mut sub = Walker::new(&mut inner, sub_prefix);
+        T::walk(&mut sub)
+    }
+
+    fn nested_or<T: WalkRecover>(&mut self, name: &str, default: T) -> T {
+        let sub_prefix = field_path(&self.prefix, name);
+        match self.table.remove(name) {
+            Some(toml::Value::Table(mut inner)) => {
+                let mut sub = Walker::new(&mut inner, sub_prefix);
+                T::walk(&mut sub)
+            }
+            Some(other) => {
+                tracing::warn!(
+                    field = %sub_prefix,
+                    error = %format!("expected table, got {}", other.type_str()),
+                    "Invalid value, using default",
+                );
+                default
+            }
+            None => default,
+        }
+    }
+
+    fn drain_table(&mut self, name: &str) -> Option<toml::Table> {
+        match self.table.remove(name) {
+            Some(toml::Value::Table(t)) => Some(t),
+            Some(other) => {
+                tracing::warn!(
+                    field = %field_path(&self.prefix, name),
+                    error = %format!("expected table, got {}", other.type_str()),
+                    "Invalid value, ignoring",
+                );
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn rule_vec<T: WalkRule>(&mut self, name: &str) -> Vec<T> {
+        let arr = match self.table.remove(name) {
+            Some(toml::Value::Array(a)) => a,
+            Some(other) => {
+                tracing::warn!(
+                    field = %field_path(&self.prefix, name),
+                    error = %format!("expected array, got {}", other.type_str()),
+                    "Invalid value, using default",
+                );
+                return Vec::new();
+            }
+            None => return Vec::new(),
+        };
+        let mut result = Vec::new();
+        for (i, elem) in arr.into_iter().enumerate() {
+            let toml::Value::Table(mut elem_table) = elem else {
+                tracing::warn!(
+                    field = %format!("{}[{}]", field_path(&self.prefix, name), i),
+                    "Expected table element, dropping",
+                );
+                continue;
+            };
+            let elem_path = format!("{}[{}]", field_path(&self.prefix, name), i);
+            elem_table.retain(|key, _| {
+                // key.as_str() resolves to unstable str::as_str here, not String::as_str.
+                let k: &str = key;
+                if T::KNOWN.contains(&k) {
+                    true
+                } else {
+                    tracing::warn!(
+                        field = %field_path(&elem_path, key),
+                        "Unknown config field, ignoring",
+                    );
+                    false
+                }
+            });
+            match toml::Value::Table(elem_table).try_into::<T>() {
+                Ok(v) => result.push(v),
+                Err(e) => {
+                    tracing::warn!(
+                        field = %elem_path,
+                        error = %e,
+                        "Invalid rule, dropping",
+                    );
+                }
+            }
+        }
+        result
+    }
+}
+
+impl Drop for Walker<'_> {
+    fn drop(&mut self) {
+        for key in self.table.keys() {
+            tracing::warn!(
+                field = %field_path(&self.prefix, key),
+                "Unknown config field, ignoring",
+            );
+        }
+    }
+}
+
+struct RawConfig;
+
+impl RawConfig {
+    fn into_config(mut table: toml::Table) -> Config {
+        let mut w = Walker::new(&mut table, "");
+        Config {
+            keymaps: walk_keymaps(&mut w),
+            border_size: w.field("border_size", default_border_size()),
+            min_width: w.field("min_width", SizeConstraint::default_min()),
+            min_height: w.field("min_height", SizeConstraint::default_min()),
+            max_width: w.field("max_width", SizeConstraint::default()),
+            max_height: w.field("max_height", SizeConstraint::default()),
+            layout: w.nested_or("layout", default_layout()),
+            theme: w.field("theme", Flavor::default()),
+            font: w.nested_or("font", FontConfig::default()),
+            macos: w.nested_or("macos", MacosConfig::default()),
+            windows: w.nested_or("windows", default_windows()),
+            log_level: w.field("log_level", LogLevel::default()),
+            start_at_login: w.field("start_at_login", false),
+        }
+    }
+}
+
+fn default_windows() -> WindowsConfig {
+    let mut config = WindowsConfig::default();
+    config.ignore.extend(default_windows_ignore());
+    config
+}
+
+impl WalkRecover for LayoutConfig {
+    fn walk(w: &mut Walker) -> Self {
+        let strategy = w.field("strategy", default_strategy());
+        let partition_tree = w.nested::<PartitionTreeConfig>("partition_tree");
+        let master = w.nested::<MasterConfig>("master");
+        LayoutConfig {
+            strategy,
+            partition_tree,
+            master,
+        }
+    }
+}
+
+impl WalkRecover for PartitionTreeConfig {
+    fn walk(w: &mut Walker) -> Self {
+        PartitionTreeConfig {
+            tab_bar_height: w.field("tab_bar_height", default_tab_bar_height()),
+            automatic_tiling: w.field("automatic_tiling", default_automatic_tiling()),
+        }
+    }
+}
+
+impl WalkRecover for MasterConfig {
+    fn walk(w: &mut Walker) -> Self {
+        let master_ratio = w.field("master_ratio", default_master_ratio());
+        let master_ratio = if (0.1..=0.9).contains(&master_ratio) {
+            master_ratio
+        } else {
+            tracing::warn!(
+                field = %field_path(&w.prefix, "master_ratio"),
+                value = master_ratio,
+                "Out of range, using default",
+            );
+            default_master_ratio()
+        };
+        let master_count = w.field("master_count", default_master_count());
+        let master_count = if master_count >= 1 {
+            master_count
+        } else {
+            tracing::warn!(
+                field = %field_path(&w.prefix, "master_count"),
+                value = master_count,
+                "Out of range, using default",
+            );
+            default_master_count()
+        };
+        MasterConfig {
+            master_ratio,
+            master_count,
+        }
+    }
+}
+
+impl WalkRecover for FontConfig {
+    fn walk(w: &mut Walker) -> Self {
+        let text_size = w.field("text_size", default_text_size());
+        let text_size = if (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&text_size) {
+            text_size
+        } else {
+            tracing::warn!(
+                field = %field_path(&w.prefix, "text_size"),
+                value = text_size,
+                "Out of range, using default",
+            );
+            default_text_size()
+        };
+        let subtext_size = w.field("subtext_size", default_subtext_size());
+        let subtext_size = if (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&subtext_size) {
+            subtext_size
+        } else {
+            tracing::warn!(
+                field = %field_path(&w.prefix, "subtext_size"),
+                value = subtext_size,
+                "Out of range, using default",
+            );
+            default_subtext_size()
+        };
+        let family: Option<String> = w.field("family", None);
+        let family = match family {
+            Some(s) if s.trim().is_empty() => {
+                tracing::warn!(
+                    field = %field_path(&w.prefix, "family"),
+                    "Blank font family, using default",
+                );
+                None
+            }
+            other => other,
+        };
+        FontConfig {
+            text_size,
+            subtext_size,
+            family,
+        }
+    }
+}
+
+impl WalkRecover for MacosConfig {
+    fn walk(w: &mut Walker) -> Self {
+        MacosConfig {
+            ignore: w.rule_vec::<MacosWindow>("ignore"),
+            on_open: w.rule_vec::<MacosOnOpenRule>("on_open"),
+        }
+    }
+}
+
+impl WalkRecover for WindowsConfig {
+    fn walk(w: &mut Walker) -> Self {
+        let mut ignore = w.rule_vec::<WindowsWindow>("ignore");
+        ignore.extend(default_windows_ignore());
+        WindowsConfig {
+            ignore,
+            on_open: w.rule_vec::<WindowsOnOpenRule>("on_open"),
+        }
+    }
+}
+
+fn walk_keymaps(w: &mut Walker) -> ModalKeymaps {
+    let Some(mut keymaps_table) = w.drain_table("keymaps") else {
+        return default_keymaps();
+    };
+
+    let mode_table = keymaps_table.remove("mode");
+
+    let default = walk_bindings_table(keymaps_table, "keymaps");
+
+    let mut modes = HashMap::new();
+    if let Some(toml::Value::Table(mode_map)) = mode_table {
+        for (mode_name, mode_val) in mode_map {
+            if mode_name == "default" {
+                tracing::warn!(
+                    field = %format!("keymaps.mode.{mode_name}"),
+                    "Reserved mode name, dropping",
+                );
+                continue;
+            }
+            if mode_name.is_empty() {
+                tracing::warn!(field = "keymaps.mode.", "Empty mode name, dropping",);
+                continue;
+            }
+            let toml::Value::Table(bindings) = mode_val else {
+                tracing::warn!(
+                    field = %format!("keymaps.mode.{mode_name}"),
+                    "Expected table for mode, dropping",
+                );
+                continue;
+            };
+            let prefix = format!("keymaps.mode.{mode_name}");
+            let mode_bindings = walk_bindings_table(bindings, &prefix);
+            modes.insert(mode_name, mode_bindings);
+        }
+    } else if let Some(_non_table) = mode_table {
+        tracing::warn!(field = "keymaps.mode", "Expected table, ignoring",);
+    }
+
+    ModalKeymaps { default, modes }
+}
+
+fn walk_bindings_table(table: toml::Table, prefix: &str) -> HashMap<Keymap, Actions> {
+    let mut result = HashMap::new();
+    for (key_str, value) in table {
+        let field = field_path(prefix, &key_str);
+        let keymap = match key_str.parse::<Keymap>() {
+            Ok(k) => k,
+            Err(e) => {
+                tracing::warn!(
+                    field = %field,
+                    error = %e,
+                    "Invalid key binding, dropping",
+                );
+                continue;
+            }
+        };
+        let action_strs: Vec<String> = match value.try_into() {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    field = %field,
+                    error = %e,
+                    "Invalid actions value, dropping",
+                );
+                continue;
+            }
+        };
+        match parse_actions(&action_strs) {
+            Ok(actions) => {
+                result.insert(keymap, actions);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    field = %field,
+                    error = %e,
+                    "Invalid action, dropping binding",
+                );
+            }
+        }
+    }
+    result
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -400,7 +726,6 @@ pub(crate) enum Strategy {
 /// relayout but never a strategy rebuild. A future field that needs to bind
 /// to the strategy instance must override `apply_config` to copy it.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct PartitionTreeConfig {
     #[serde(default = "default_tab_bar_height")]
     pub(crate) tab_bar_height: Length<Logical>,
@@ -415,7 +740,6 @@ pub(crate) struct PartitionTreeConfig {
 /// `master grow/shrink/more/fewer` commands). The TOML file is the source of
 /// truth; runtime commands are a transient override until the next reload.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct MasterConfig {
     #[serde(default = "default_master_ratio")]
     pub(crate) master_ratio: f32,
@@ -424,7 +748,6 @@ pub(crate) struct MasterConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct LayoutConfig {
     #[serde(default = "default_strategy")]
     pub(crate) strategy: Strategy,
@@ -432,21 +755,6 @@ pub(crate) struct LayoutConfig {
     pub(crate) partition_tree: PartitionTreeConfig,
     #[serde(default = "default_master_config")]
     pub(crate) master: MasterConfig,
-}
-
-impl MasterConfig {
-    pub(crate) fn validate(&self) -> Result<()> {
-        if self.master_ratio < 0.1 || self.master_ratio > 0.9 {
-            anyhow::bail!(
-                "layout.master.master_ratio ({}) must be between 0.1 and 0.9",
-                self.master_ratio
-            );
-        }
-        if self.master_count < 1 {
-            anyhow::bail!("layout.master.master_count must be >= 1");
-        }
-        Ok(())
-    }
 }
 
 fn default_strategy() -> Strategy {
@@ -510,6 +818,10 @@ impl MacosWindow {
     }
 }
 
+impl WalkRule for MacosWindow {
+    const KNOWN: &'static [&'static str] = &["app", "bundle_id", "title"];
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct WindowsWindow {
     #[serde(default)]
@@ -528,6 +840,10 @@ impl WindowsWindow {
             title,
         )
     }
+}
+
+impl WalkRule for WindowsWindow {
+    const KNOWN: &'static [&'static str] = &["process", "title"];
 }
 
 fn pattern_matches(pattern: &str, text: &str) -> bool {
@@ -553,7 +869,6 @@ pub(crate) enum WindowMode {
     expect(dead_code, reason = "macOS-only schema")
 )]
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct MacosOnOpenRule {
     #[serde(default)]
     pub(crate) app: Option<String>,
@@ -589,12 +904,15 @@ impl MacosOnOpenRule {
     }
 }
 
+impl WalkRule for MacosOnOpenRule {
+    const KNOWN: &'static [&'static str] = &["app", "bundle_id", "title", "mode", "workspace"];
+}
+
 #[cfg_attr(
     not(target_os = "windows"),
     expect(dead_code, reason = "Windows-only schema")
 )]
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct WindowsOnOpenRule {
     #[serde(default)]
     pub(crate) process: Option<String>,
@@ -619,6 +937,10 @@ impl WindowsOnOpenRule {
             title,
         )
     }
+}
+
+impl WalkRule for WindowsOnOpenRule {
+    const KNOWN: &'static [&'static str] = &["process", "title", "mode", "workspace"];
 }
 
 #[cfg_attr(not(target_os = "macos"), expect(dead_code))]
@@ -655,34 +977,18 @@ fn default_windows_ignore() -> Vec<WindowsWindow> {
     ]
 }
 
-fn deserialize_windows_ignore<'de, D>(deserializer: D) -> Result<Vec<WindowsWindow>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let mut rules: Vec<WindowsWindow> = Vec::deserialize(deserializer)?;
-    rules.extend(default_windows_ignore());
-    Ok(rules)
-}
-
 #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct WindowsConfig {
-    #[serde(
-        default = "default_windows_ignore",
-        deserialize_with = "deserialize_windows_ignore"
-    )]
+    #[serde(default)]
     pub(crate) ignore: Vec<WindowsWindow>,
     #[serde(default)]
     pub(crate) on_open: Vec<WindowsOnOpenRule>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct Config {
-    #[serde(
-        default = "default_keymaps",
-        deserialize_with = "deserialize_modal_keymaps"
-    )]
+    #[serde(skip_deserializing, default = "default_keymaps")]
     pub(crate) keymaps: ModalKeymaps,
     #[serde(default = "default_border_size")]
     pub(crate) border_size: f32,
@@ -832,7 +1138,8 @@ impl Config {
 
     pub(crate) fn load(path: &str) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&content)?;
+        let table: toml::Table = toml::from_str(&content)?;
+        let config = RawConfig::into_config(table);
         config.validate()?;
         Ok(config)
     }
@@ -854,17 +1161,6 @@ impl Config {
             && min > max
         {
             anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
-        }
-        self.font.validate()?;
-        // Validate master regardless of layout.strategy so toggling
-        // never hides errors in the inactive sub-table.
-        self.layout.master.validate()?;
-        // "default" is the reserved name for the top-level [keymaps] table.
-        if self.keymaps.modes.contains_key("default") {
-            anyhow::bail!("mode name 'default' is reserved for the top-level [keymaps] table");
-        }
-        if self.keymaps.modes.contains_key("") {
-            anyhow::bail!("mode name must not be empty");
         }
         Ok(())
     }
@@ -1117,32 +1413,45 @@ mod tests {
 
     #[test]
     fn removed_color_field_rejected() {
-        // Configs mentioning any of the five removed color field names must fail
-        // at parse time via deny_unknown_fields. This is intentional: the entire
-        // per-color config surface was replaced by a single `theme` field.
-        assert!(toml::from_str::<Config>(r##"focused_color = "#ff0000""##).is_err());
-        assert!(toml::from_str::<Config>(r##"border_color = "#ff0000""##).is_err());
-        assert!(toml::from_str::<Config>(r##"spawn_indicator_color = "#ff0000""##).is_err());
-        assert!(toml::from_str::<Config>(r##"tab_bar_background_color = "#ff0000""##).is_err());
-        assert!(toml::from_str::<Config>(r##"active_tab_background_color = "#ff0000""##).is_err());
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_color_field_{nanos}.toml"));
+        std::fs::write(&path, "focused_color = \"#ff0000\"\ntheme = \"latte\"\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.theme, Flavor::Latte);
     }
 
     #[test]
     fn removed_border_radius_rejected() {
-        // Configs mentioning `border_radius` must fail at parse time via
-        // `deny_unknown_fields`. The field was replaced by hardcoded values
-        // in `src/overlay.rs` (WINDOW_BORDER_RADIUS and tab_bar_corner_radius).
-        assert!(toml::from_str::<Config>("border_radius = 12.0").is_err());
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_border_radius_{nanos}.toml"));
+        std::fs::write(&path, "border_radius = 4\nborder_size = 5.0\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.border_size, 5.0);
     }
 
     #[test]
     fn removed_top_level_layout_fields_rejected() {
-        // `tab_bar_height` and `automatic_tiling` moved under
-        // [layout.partition_tree]. The old top-level keys must fail at parse
-        // time via deny_unknown_fields, matching the removed_color_field
-        // precedent.
-        assert!(toml::from_str::<Config>("tab_bar_height = 24.0").is_err());
-        assert!(toml::from_str::<Config>("automatic_tiling = true").is_err());
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_top_layout_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            "tab_bar_height = 30\nautomatic_tiling = true\n[layout]\nstrategy = \"master\"\n",
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.layout.strategy, Strategy::Master);
     }
 
     #[test]
@@ -1186,13 +1495,14 @@ mod tests {
 
     #[test]
     fn modal_keymaps_empty_modes() {
-        let config: Config = toml::from_str(
-            r#"
-            [keymaps]
-            "meta+h" = ["focus left"]
-            "#,
-        )
-        .unwrap();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_keymaps_empty_{nanos}.toml"));
+        std::fs::write(&path, "[keymaps]\n\"meta+h\" = [\"focus left\"]\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
         assert!(config.keymaps.modes.is_empty());
         let keymap = "meta+h".parse::<Keymap>().unwrap();
         assert!(config.keymaps.default.contains_key(&keymap));
@@ -1218,17 +1528,25 @@ mod tests {
 
     #[test]
     fn modal_keymaps_with_mode() {
-        let config: Config = toml::from_str(
-            r#"
-            [keymaps]
-            "meta+h" = ["focus left"]
-
-            [keymaps.mode.resize]
-            "h" = ["focus left"]
-            "escape" = ["mode default"]
-            "#,
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_keymaps_mode_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[keymaps]\n",
+                "\"meta+h\" = [\"focus left\"]\n",
+                "\n",
+                "[keymaps.mode.resize]\n",
+                "\"h\" = [\"focus left\"]\n",
+                "\"escape\" = [\"mode default\"]\n",
+            ),
         )
         .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
         let meta_h = "meta+h".parse::<Keymap>().unwrap();
         assert!(config.keymaps.default.contains_key(&meta_h));
         let resize = config
@@ -1243,55 +1561,60 @@ mod tests {
     }
 
     #[test]
-    fn modal_keymaps_rejects_default_mode_name() {
-        let config: Config = toml::from_str(
-            r#"
-            [keymaps]
-            "meta+h" = ["focus left"]
-
-            [keymaps.mode.default]
-            "h" = ["focus left"]
-            "#,
+    fn modal_keymaps_drops_default_mode_name() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_keymaps_default_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[keymaps]\n",
+                "\"meta+h\" = [\"focus left\"]\n",
+                "\n",
+                "[keymaps.mode.default]\n",
+                "\"h\" = [\"focus left\"]\n",
+            ),
         )
         .unwrap();
-        let err = config.validate().unwrap_err();
-        assert!(
-            err.to_string().contains("default"),
-            "expected error about 'default', got: {err}"
-        );
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        let meta_h = "meta+h".parse::<Keymap>().unwrap();
+        assert!(config.keymaps.default.contains_key(&meta_h));
+        assert!(!config.keymaps.modes.contains_key("default"));
     }
 
     #[test]
-    fn modal_keymaps_rejects_empty_mode_name() {
-        let result = toml::from_str::<Config>(
-            r#"
-            [keymaps]
-            "meta+h" = ["focus left"]
-
-            [keymaps.mode.""]
-            "h" = ["focus left"]
-            "#,
-        );
-        // Empty mode name may fail at parse time (TOML key) or at validation.
-        // Either way it should not succeed silently.
-        match result {
-            Ok(config) => {
-                let err = config.validate().unwrap_err();
-                assert!(
-                    err.to_string().contains("empty"),
-                    "expected error about empty mode name, got: {err}"
-                );
-            }
-            Err(_) => { /* parse-time rejection is fine */ }
-        }
+    fn modal_keymaps_drops_empty_mode_name() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("dome_config_keymaps_empty_mode_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[keymaps]\n",
+                "\"meta+h\" = [\"focus left\"]\n",
+                "\n",
+                "[keymaps.mode.\"\"]\n",
+                "\"h\" = [\"focus left\"]\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        let meta_h = "meta+h".parse::<Keymap>().unwrap();
+        assert!(config.keymaps.default.contains_key(&meta_h));
+        assert!(!config.keymaps.modes.contains_key(""));
     }
 
     #[test]
     fn example_config_parses() {
         let path = format!("{}/examples/config.toml", env!("CARGO_MANIFEST_DIR"));
-        let content = std::fs::read_to_string(&path).expect("failed to read example config");
-        let config: Config = toml::from_str(&content).expect("failed to parse example config");
-        config.validate().expect("example config failed validation");
+        Config::load(&path).expect("example config failed to load");
     }
 
     /// RAII guard that removes a temp file on drop, even if the test panics.
@@ -1347,52 +1670,283 @@ mod tests {
     }
 
     #[test]
-    fn layout_validates_master_ratio_low() {
-        let config: Config = toml::from_str("[layout.master]\nmaster_ratio = 0.05").unwrap();
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn layout_validates_master_ratio_high() {
-        let config: Config = toml::from_str("[layout.master]\nmaster_ratio = 0.95").unwrap();
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn layout_validates_master_count_zero() {
-        let config: Config = toml::from_str("[layout.master]\nmaster_count = 0").unwrap();
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn layout_validates_even_when_inactive() {
-        let config: Config = toml::from_str(
-            "[layout]\nstrategy = \"partition_tree\"\n[layout.master]\nmaster_ratio = 0.05",
-        )
-        .unwrap();
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
     fn layout_rejects_unknown_strategy() {
         assert!(toml::from_str::<Config>("[layout]\nstrategy = \"floating\"").is_err());
     }
 
     #[test]
     fn layout_rejects_unknown_subfield_master() {
-        assert!(toml::from_str::<Config>("[layout.master]\nfoo = 1").is_err());
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_unknown_master_{nanos}.toml"));
+        std::fs::write(&path, "[layout.master]\nfoo = 1\nmaster_ratio = 0.6\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.layout.master.master_ratio, 0.6);
     }
 
     #[test]
     fn layout_rejects_unknown_subfield_partition_tree() {
-        assert!(toml::from_str::<Config>("[layout.partition_tree]\nfoo = 1").is_err());
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_unknown_pt_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            "[layout.partition_tree]\nfoo = 1\ntab_bar_height = 30.0\n",
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 30.0);
     }
 
     #[test]
-    fn layout_master_ratio_boundary_accepts_endpoints() {
-        let low: Config = toml::from_str("[layout.master]\nmaster_ratio = 0.1").unwrap();
-        assert!(low.validate().is_ok());
-        let high: Config = toml::from_str("[layout.master]\nmaster_ratio = 0.9").unwrap();
-        assert!(high.validate().is_ok());
+    fn load_recovers_when_top_level_scalar_has_wrong_type() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_scalar_wrong_{nanos}.toml"));
+        std::fs::write(&path, "border_size = \"abc\"\ntheme = \"latte\"\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.border_size, default_border_size());
+        assert_eq!(config.theme, Flavor::Latte);
+    }
+
+    #[test]
+    fn load_recovers_when_inner_field_of_nested_struct_fails() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_nested_field_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            "[layout.master]\nmaster_ratio = \"abc\"\nmaster_count = 3\n",
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.layout.master.master_ratio, default_master_ratio());
+        assert_eq!(config.layout.master.master_count, 3);
+        assert_eq!(config.layout.strategy, default_strategy());
+        assert_eq!(
+            config.layout.partition_tree.tab_bar_height,
+            default_tab_bar_height()
+        );
+    }
+
+    #[test]
+    fn load_recovers_when_two_nested_levels_have_failures() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_two_levels_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[layout]\n",
+                "strategy = \"banana\"\n",
+                "\n",
+                "[layout.master]\n",
+                "master_ratio = 0.6\n",
+                "master_count = \"oops\"\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.layout.strategy, default_strategy());
+        assert_eq!(config.layout.master.master_ratio, 0.6);
+        assert_eq!(config.layout.master.master_count, default_master_count());
+    }
+
+    #[test]
+    fn load_warns_on_unknown_top_level_key() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_unknown_top_{nanos}.toml"));
+        std::fs::write(&path, "unknown_field = 1\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.border_size, default_border_size());
+        assert_eq!(config.theme, Flavor::default());
+    }
+
+    #[test]
+    fn load_warns_on_unknown_field_inside_nested_table() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_unknown_nested_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            "[layout]\nunknown = 1\n\n[layout.master]\nmaster_ratio = 0.7\n",
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.layout.master.master_ratio, 0.7);
+    }
+
+    #[test]
+    fn load_falls_back_to_defaults_when_validate_fails() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_validate_fail_{nanos}.toml"));
+        std::fs::write(&path, "min_width = 100\nmax_width = 50\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        assert!(Config::load(path.to_str().unwrap()).is_err());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.border_size, default_border_size());
+    }
+
+    #[test]
+    fn load_recovers_when_master_ratio_out_of_range() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_ratio_range_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            "[layout.master]\nmaster_ratio = 1.5\nmaster_count = 3\n",
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.layout.master.master_ratio, default_master_ratio());
+        assert_eq!(config.layout.master.master_count, 3);
+    }
+
+    #[test]
+    fn load_recovers_when_font_family_is_blank() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_font_blank_{nanos}.toml"));
+        std::fs::write(&path, "[font]\nfamily = \"   \"\ntext_size = 18.0\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.font.family, None);
+        assert_eq!(config.font.text_size, 18.0);
+    }
+
+    #[test]
+    fn load_drops_single_bad_keymap_binding() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_bad_binding_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[keymaps]\n",
+                "\"meta+a\" = [\"focus left\"]\n",
+                "\"unkmod+h\" = [\"focus left\"]\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        let good = "meta+a".parse::<Keymap>().unwrap();
+        assert!(config.keymaps.default.contains_key(&good));
+        assert_eq!(config.keymaps.default.len(), 1);
+    }
+
+    #[test]
+    fn load_drops_single_bad_action_in_binding() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_bad_action_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[keymaps]\n",
+                "\"meta+a\" = [\"fly to mars\"]\n",
+                "\"meta+b\" = [\"focus left\"]\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        let b = "meta+b".parse::<Keymap>().unwrap();
+        assert!(config.keymaps.default.contains_key(&b));
+        let a = "meta+a".parse::<Keymap>().unwrap();
+        assert!(!config.keymaps.default.contains_key(&a));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn load_drops_single_bad_macos_on_open_rule() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_bad_on_open_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[[macos.on_open]]\n",
+                "app = \"Finder\"\n",
+                "mode = \"float\"\n",
+                "\n",
+                "[[macos.on_open]]\n",
+                "app = \"Safari\"\n",
+                "mode = \"invalid_not_a_mode\"\n",
+                "\n",
+                "[[macos.on_open]]\n",
+                "bundle_id = \"com.apple.mail\"\n",
+                "workspace = \"mail\"\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.macos.on_open.len(), 2);
+        assert_eq!(config.macos.on_open[0].app.as_deref(), Some("Finder"));
+        assert_eq!(
+            config.macos.on_open[1].bundle_id.as_deref(),
+            Some("com.apple.mail")
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn load_warns_on_unknown_field_inside_array_of_table_element() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_unknown_arr_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[[macos.on_open]]\n",
+                "app = \"Finder\"\n",
+                "unknown_field = 42\n",
+                "mode = \"float\"\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert_eq!(config.macos.on_open.len(), 1);
+        assert_eq!(config.macos.on_open[0].app.as_deref(), Some("Finder"));
     }
 }

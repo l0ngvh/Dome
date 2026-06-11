@@ -25,8 +25,17 @@ fullscreen, and the keybindings will work again.
 
 ## My config changes didn't take effect
 
-Likely a syntax error in the TOML, an unknown action name, or an unknown
-modifier name. Check `dome.log` for the exact parse error.
+Your setting probably had an error and Dome silently replaced it with the
+default. Check `dome.log` for warning lines containing the dotted field path
+(for example, `field=layout.master.master_ratio`). These tell you exactly which
+fields failed and why.
+
+Dome recovers from most config errors per field. If a field has the wrong type,
+is out of range, or uses an unrecognized value, Dome defaults that single field
+and loads the rest of your config normally.
+
+If `dome.log` shows that Dome fell back to defaults entirely, you likely have a
+TOML syntax error (missing quotes, unmatched brackets).
 
 ## A random window got focused when the focused window closed
 

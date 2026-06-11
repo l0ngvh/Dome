@@ -9,15 +9,14 @@ use egui::{Context, FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use serde::Deserialize;
 
 // Minimum validated font size. Smaller values produce unreadable glyphs.
-const MIN_FONT_SIZE: f32 = 4.0;
+pub(crate) const MIN_FONT_SIZE: f32 = 4.0;
 // Upper bound for validated font sizes. Above this the UI breaks layout
 // (tabs overflow, picker rows overlap); catches obvious typos at load time.
-const MAX_FONT_SIZE: f32 = 128.0;
+pub(crate) const MAX_FONT_SIZE: f32 = 128.0;
 
 // DTO: a pair of font sizes with no invariants beyond the validation range.
 // pub(crate) fields are intentional (plain data, mirrors Flavor/Theme pattern).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct FontConfig {
     #[serde(default = "default_text_size")]
     pub(crate) text_size: f32,
@@ -27,11 +26,11 @@ pub(crate) struct FontConfig {
     pub(crate) family: Option<String>,
 }
 
-fn default_text_size() -> f32 {
+pub(crate) fn default_text_size() -> f32 {
     14.0
 }
 
-fn default_subtext_size() -> f32 {
+pub(crate) fn default_subtext_size() -> f32 {
     12.0
 }
 
@@ -62,31 +61,6 @@ impl FontConfig {
                 FontId::new(self.subtext_size, FontFamily::Proportional),
             );
         });
-    }
-
-    pub(crate) fn validate(&self) -> anyhow::Result<()> {
-        if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&self.text_size) {
-            anyhow::bail!(
-                "font.text_size ({}) must be in [{}, {}]",
-                self.text_size,
-                MIN_FONT_SIZE,
-                MAX_FONT_SIZE,
-            );
-        }
-        if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&self.subtext_size) {
-            anyhow::bail!(
-                "font.subtext_size ({}) must be in [{}, {}]",
-                self.subtext_size,
-                MIN_FONT_SIZE,
-                MAX_FONT_SIZE,
-            );
-        }
-        if let Some(name) = &self.family
-            && name.trim().is_empty()
-        {
-            anyhow::bail!("font.family must be a non-empty string");
-        }
-        Ok(())
     }
 }
 
@@ -122,30 +96,6 @@ mod tests {
     }
 
     #[test]
-    fn font_validate_boundaries() {
-        let cases = [
-            (3.0, 12.0, false),
-            (14.0, 3.0, false),
-            (MIN_FONT_SIZE, MIN_FONT_SIZE, true),
-            (MAX_FONT_SIZE + 1.0, 12.0, false),
-            (14.0, MAX_FONT_SIZE + 1.0, false),
-            (MAX_FONT_SIZE, MAX_FONT_SIZE, true),
-        ];
-        for (text_size, subtext_size, expected_ok) in cases {
-            let fc = FontConfig {
-                text_size,
-                subtext_size,
-                family: None,
-            };
-            assert_eq!(
-                fc.validate().is_ok(),
-                expected_ok,
-                "case (text={text_size}, sub={subtext_size})"
-            );
-        }
-    }
-
-    #[test]
     fn apply_to_sets_body_and_small_sizes() {
         let ctx = egui::Context::default();
         let fc = FontConfig {
@@ -171,22 +121,5 @@ mod tests {
     #[test]
     fn font_config_default_family_is_none() {
         assert_eq!(FontConfig::default().family, None);
-    }
-
-    #[test]
-    fn font_config_validate_rejects_empty_family() {
-        let fc = FontConfig {
-            text_size: 14.0,
-            subtext_size: 12.0,
-            family: Some(String::new()),
-        };
-        assert!(fc.validate().is_err());
-
-        let fc2 = FontConfig {
-            text_size: 14.0,
-            subtext_size: 12.0,
-            family: Some("   ".into()),
-        };
-        assert!(fc2.validate().is_err());
     }
 }

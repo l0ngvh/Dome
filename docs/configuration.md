@@ -266,8 +266,8 @@ This focuses left and enters resize mode in one keypress. If a binding lists mul
 
 #### Reserved names
 
-- `"default"` refers to the top-level `[keymaps]` section. Using it as a `[keymaps.mode.default]` section name causes a config validation error.
-- Empty string `""` is rejected as a mode name.
+- `"default"` refers to the top-level `[keymaps]` section. A `[keymaps.mode.default]` section is dropped with a warning in `dome.log`.
+- Empty string `""` is dropped as a mode name with a warning.
 
 #### Gotchas
 
@@ -278,4 +278,22 @@ This focuses left and enters resize mode in one keypress. If a binding lists mul
 **Unknown mode names are rejected.** Running `dome mode typo` or pressing a binding with `mode typo` logs a warning and leaves your current mode unchanged.
 
 **Mode state is global.** Modes are per-process, not per-workspace or per-monitor. Switching workspaces does not change the active mode.
+
+## Error handling
+
+Dome recovers from config errors at field granularity. A wrong type, out-of-range value, or unknown field does not invalidate the rest of your config. Each broken field falls back to its default, and Dome logs a warning to `dome.log` with the dotted field path (for example, `field=layout.master.master_ratio`) and the reason for the fallback. The rest of your settings load normally.
+
+Per-field recovery applies to:
+
+- Unknown fields at any nesting level, including inside window-rule entries.
+- Wrong types or shapes on any field.
+- Out-of-range values (`master_ratio`, `master_count`, `text_size`, `subtext_size`, blank `font.family`).
+- Bad keybindings in `[keymaps]`. A binding with an unparseable key or invalid action is dropped, but the remaining bindings in that mode survive.
+- Bad entries in window-rule arrays (`ignore`, `on_open`). A malformed rule is dropped, but surrounding rules survive.
+- Reserved (`default`) or empty mode names. The offending mode is dropped, but the rest of `[keymaps]` survives.
+
+Two conditions still cause the entire config to fall back to defaults:
+
+- TOML syntax errors (missing quotes, unmatched brackets, etc.).
+- Cross-field constraint violations where `min_width > max_width` or `min_height > max_height` (both in pixels, with max > 0).
 
