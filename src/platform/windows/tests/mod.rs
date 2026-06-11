@@ -234,7 +234,7 @@ impl TestEnv {
     }
 
     /// Mirrors the runner's window-creation pipeline:
-    /// the inspection step (worker thread) gates on `is_manageable`, and only
+    /// the inspection step (worker thread) gates on `check_unmanageable`, and only
     /// manageable windows reach `Dome::add_window`. Unmanageable mocks are
     /// only registered for `env.dim` lookup so tests can inspect their
     /// untouched dimension.

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 use objc2_core_graphics::CGWindowID;
 
@@ -7,6 +8,7 @@ use crate::config::MacosWindow;
 use crate::platform::macos::accessibility::{AXApp, ExternalWindow};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::registry::ManagedWindow;
+use crate::platform::macos::dome::rejection_log_filter::RejectionLogFilter;
 use crate::platform::macos::dome::window::{RoundedDimension, WindowState};
 use crate::platform::macos::dome::{NewWindow, PendingAdd};
 use crate::platform::macos::running_application::RunningApp;
@@ -58,6 +60,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
     app: &Arc<AXApp>,
     tracked: &HashMap<CGWindowID, ManagedWindow>,
     ignore_rules: &[MacosWindow],
+    log_filter: &RejectionLogFilter,
     marker: &DispatcherMarker,
 ) -> ReconcileResult {
     let pid = app.pid();
@@ -153,7 +156,11 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         if tracked.contains_key(&cg_id) {
             continue;
         }
-        if !ax.is_manageable() {
+        if let Some(reason) = ax.check_unmanageable() {
+            let pid = ax.pid();
+            if log_filter.record_and_should_log(cg_id, pid, reason, Instant::now()) {
+                tracing::trace!(window = %ax, ?reason, "not manageable");
+            }
             continue;
         }
         let app_name = ax.app_name().map(str::to_owned);
@@ -241,8 +248,11 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
     observed_pids: HashSet<i32>,
     tracked: HashMap<CGWindowID, ManagedWindow>,
     ignore_rules: Vec<MacosWindow>,
+    log_filter: Arc<RejectionLogFilter>,
     marker: &DispatcherMarker,
 ) -> ReconcileAllResult {
+    log_filter.prune(Instant::now());
+
     let running: Vec<_> = RunningApp::all().collect();
     let running_pids: HashSet<_> = running.iter().map(|app| app.pid()).collect();
 
@@ -264,7 +274,8 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
             hidden_pids.push(app.pid());
         } else {
             let ax_app = app.ax_app();
-            let result = compute_reconciliation(&ax_app, &tracked, &ignore_rules, marker);
+            let result =
+                compute_reconciliation(&ax_app, &tracked, &ignore_rules, &log_filter, marker);
             to_remove.extend(result.to_remove);
             to_minimize.extend(result.to_minimize);
             to_add.extend(result.to_add);

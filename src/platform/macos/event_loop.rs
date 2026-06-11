@@ -231,6 +231,7 @@ fn start_move_timer(runner: &mut DomeRunner, pid: i32, observed_at: Instant) {
 fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
     let tracked = runner.dome.tracked_for_pid(pid);
     let ignore_rules = runner.dome.ignore_rules();
+    let log_filter = runner.dome.log_filter();
     runner.dispatcher.dispatch(
         move |marker| {
             let app = RunningApp::new(pid)?;
@@ -239,6 +240,7 @@ fn dispatch_refresh_windows(runner: &mut DomeRunner, pid: i32) {
                 &ax_app,
                 &tracked,
                 &ignore_rules,
+                &log_filter,
                 marker,
             ))
         },
@@ -377,8 +379,11 @@ fn dispatch_reconcile_all(runner: &mut DomeRunner) {
     let observed_pids = runner.dome.observed_pids();
     let tracked = runner.dome.all_tracked();
     let ignore_rules = runner.dome.ignore_rules();
+    let log_filter = runner.dome.log_filter();
     runner.dispatcher.dispatch(
-        move |marker| compute_reconcile_all(observed_pids, tracked, ignore_rules, marker),
+        move |marker| {
+            compute_reconcile_all(observed_pids, tracked, ignore_rules, log_filter, marker)
+        },
         |result, runner| {
             for pid in result.terminated_pids {
                 if let Some((token, _)) = runner.move_state.remove(&pid) {

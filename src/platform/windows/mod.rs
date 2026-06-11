@@ -9,6 +9,7 @@ mod process;
 mod runner;
 mod taskbar;
 mod throttle;
+mod timer_registry;
 
 #[cfg(test)]
 mod tests;

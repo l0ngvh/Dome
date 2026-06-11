@@ -4,6 +4,7 @@ mod layout;
 mod monitor;
 mod recovery;
 mod registry;
+pub(super) mod rejection_log_filter;
 mod window;
 
 pub(super) use events::{HubEvent, HubMessage};
@@ -31,6 +32,7 @@ use crate::platform::macos::accessibility::ExternalWindow;
 use monitor::MonitorRegistry;
 use recovery::Recovery;
 use registry::{ManagedWindow, WindowRegistry};
+use rejection_log_filter::RejectionLogFilter;
 
 pub(in crate::platform::macos) use window::RoundedDimension;
 
@@ -112,6 +114,7 @@ pub(in crate::platform::macos) struct Dome {
     recovery: Recovery,
     pending_created: Vec<WindowId>,
     pending_deleted: Vec<WindowId>,
+    log_filter: Arc<RejectionLogFilter>,
 }
 
 impl Dome {
@@ -145,6 +148,7 @@ impl Dome {
             recovery: Recovery::new(),
             pending_created: Vec::new(),
             pending_deleted: Vec::new(),
+            log_filter: Arc::new(RejectionLogFilter::new()),
         }
     }
 
@@ -446,6 +450,10 @@ impl Dome {
 
     pub(in crate::platform::macos) fn observed_pids(&self) -> HashSet<i32> {
         self.observed_pids.clone()
+    }
+
+    pub(in crate::platform::macos) fn log_filter(&self) -> Arc<RejectionLogFilter> {
+        Arc::clone(&self.log_filter)
     }
 
     pub(in crate::platform::macos) fn set_pid_moving(&mut self, pid: i32, moving: bool) {

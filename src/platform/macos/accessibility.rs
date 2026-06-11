@@ -23,6 +23,18 @@ use crate::platform::macos::objc2_wrapper::{
     set_attribute_value,
 };
 
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub(super) enum RejectionReason {
+    NoTitle,
+    Role,
+    Subrole,
+    Root,
+    Position,
+    Size,
+    Main,
+    Minimized,
+}
+
 /// Per-app accessibility state shared across all windows of the same application.
 ///
 /// Holds the AXUIElement for the app process and cached app metadata (name, bundle ID).
@@ -322,11 +334,10 @@ impl AXWindow {
         ))
     }
 
-    pub(super) fn is_manageable(&self) -> bool {
+    pub(super) fn check_unmanageable(&self) -> Option<RejectionReason> {
         if self.title.is_none() {
-            tracing::trace!(window = %self, "not manageable: window has no title");
-            return false;
-        };
+            return Some(RejectionReason::NoTitle);
+        }
 
         let role = get_attribute::<CFString>(&self.element, &kAXRoleAttribute()).ok();
         let is_window = role
@@ -334,8 +345,7 @@ impl AXWindow {
             .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
             .unwrap_or(false);
         if !is_window {
-            tracing::trace!(window = %self, "not manageable: role is not AXWindow");
-            return false;
+            return Some(RejectionReason::Role);
         }
 
         let subrole = get_attribute::<CFString>(&self.element, &kAXSubroleAttribute()).ok();
@@ -344,40 +354,34 @@ impl AXWindow {
             .map(|sr| CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole())))
             .unwrap_or(false);
         if !is_standard {
-            tracing::trace!(window = %self, "not manageable: subrole is not AXStandardWindow");
-            return false;
+            return Some(RejectionReason::Subrole);
         }
 
         let is_root = self.app.is_root_window(&self.element);
         if !is_root {
-            tracing::trace!(window = %self, "not manageable: window is not root");
-            return false;
+            return Some(RejectionReason::Root);
         }
 
         if !is_attribute_settable(&self.element, &kAXPositionAttribute()) {
-            tracing::trace!(window = %self, "not manageable: position is not settable");
-            return false;
+            return Some(RejectionReason::Position);
         }
 
         if !is_attribute_settable(&self.element, &kAXSizeAttribute()) {
-            tracing::trace!(window = %self, "not manageable: size is not settable");
-            return false;
+            return Some(RejectionReason::Size);
         }
 
         if !is_attribute_settable(&self.element, &kAXMainAttribute()) {
-            tracing::trace!(window = %self, "not manageable: main attribute is not settable");
-            return false;
+            return Some(RejectionReason::Main);
         }
 
         let is_minimized = get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
             .map(|b| b.as_bool())
             .unwrap_or(false);
         if is_minimized {
-            tracing::trace!(window = %self, "not manageable: window is minimized");
-            return false;
+            return Some(RejectionReason::Minimized);
         }
 
-        true
+        None
     }
 
     /// Without this the windows move in a janky way

@@ -1,42 +1,35 @@
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{
-    KillTimer, PostQuitMessage, PostThreadMessageW, SetTimer, WM_QUIT,
-};
+use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
+use crate::platform::windows::dome::rejection_log_filter::RejectionLogFilter;
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
 use crate::platform::windows::throttle::{Throttle, ThrottleResult};
+use crate::platform::windows::timer_registry::{TimerKind, TimerRegistry, Win32Timer};
 
 const FOCUS_THROTTLE_INTERVAL: Duration = Duration::from_millis(500);
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 const DRAG_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
-
-struct MoveSettle {
-    timer_id: usize,
-    observed_at: Instant,
-}
-
-enum MoveSettleTrigger {
-    Debounce(HwndId),
-    DragSafety(HwndId),
-}
+const PRUNE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 pub(super) struct Runner {
     dome: Dome,
     dispatcher: ReadDispatcher,
     focus_throttle: Throttle<HwndId>,
-    focus_timer_id: Option<usize>,
-    move_settles: HashMap<HwndId, MoveSettle>,
+    // Drop order: timers is dropped after dome/dispatcher because the message loop
+    // has already exited by Runner drop, so no field dropped earlier can re-enter
+    // the registry. KillTimer is idempotent on already-fired one-shots.
+    timers: TimerRegistry,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
+    rejection_log_filter: Arc<RejectionLogFilter>,
 }
 
 impl Runner {
@@ -46,72 +39,38 @@ impl Runner {
         main_thread_id: u32,
         keymap_state: Arc<RwLock<KeymapState>>,
     ) -> Self {
+        let mut timers = TimerRegistry::new(Box::new(Win32Timer));
+        timers.schedule_prune(PRUNE_INTERVAL);
         Self {
             dome,
             dispatcher: ReadDispatcher::new(thread_id),
             focus_throttle: Throttle::new(FOCUS_THROTTLE_INTERVAL),
-            focus_timer_id: None,
-            move_settles: HashMap::new(),
+            timers,
             main_thread_id,
             keymap_state,
-        }
-    }
-
-    fn schedule_focus_throttle(&mut self, delay: Duration) {
-        // With hWnd=NULL, SetTimer ignores nIDEvent when it doesn't match an
-        // existing timer and returns a new system-generated ID. Pass the
-        // previous ID to replace an existing timer, or 0 to create a new one.
-        let hint = self.focus_timer_id.unwrap_or(0);
-        let id = unsafe { SetTimer(None, hint, delay.as_millis() as u32, None) };
-        self.focus_timer_id = Some(id);
-    }
-
-    fn schedule_move_settle(
-        &mut self,
-        trigger: MoveSettleTrigger,
-        observed_at: Instant,
-        delay: Duration,
-    ) {
-        let hwnd = match trigger {
-            MoveSettleTrigger::Debounce(h) | MoveSettleTrigger::DragSafety(h) => h,
-        };
-        let timer_id = unsafe { SetTimer(None, 0, delay.as_millis() as u32, None) };
-        self.move_settles.insert(
-            hwnd,
-            MoveSettle {
-                timer_id,
-                observed_at,
-            },
-        );
-    }
-
-    fn cancel_move_settle(&mut self, hwnd: &HwndId) {
-        if let Some(entry) = self.move_settles.remove(hwnd) {
-            unsafe { KillTimer(None, entry.timer_id).ok() };
+            rejection_log_filter: Arc::new(RejectionLogFilter::new()),
         }
     }
 
     pub(super) fn handle_timer(&mut self, timer_id: usize) {
-        unsafe { KillTimer(None, timer_id).ok() };
-        if self.focus_timer_id == Some(timer_id) {
-            if let Some(id) = self.focus_throttle.flush() {
-                self.dome.handle_focus(id);
-                self.dome.apply_layout();
-            }
+        let Some(kind) = self.timers.dispatch(timer_id) else {
+            tracing::trace!(timer_id, "WM_TIMER for unknown id");
             return;
-        }
-        let hwnd = self
-            .move_settles
-            .iter()
-            .find(|(_, v)| v.timer_id == timer_id)
-            .map(|(k, _)| *k);
-        if let Some(hwnd) = hwnd {
-            let entry = self
-                .move_settles
-                .remove(&hwnd)
-                .expect("entry was just located by id");
-            self.dome.clear_move_state(hwnd);
-            self.dispatch_placement_read(hwnd, entry.observed_at);
+        };
+        match kind {
+            TimerKind::Focus => {
+                if let Some(id) = self.focus_throttle.flush() {
+                    self.dome.handle_focus(id);
+                    self.dome.apply_layout();
+                }
+            }
+            TimerKind::MoveSettle { hwnd, observed_at } => {
+                self.dome.clear_move_state(hwnd);
+                self.dispatch_placement_read(hwnd, observed_at);
+            }
+            TimerKind::Prune => {
+                self.rejection_log_filter.prune(Instant::now());
+            }
         }
     }
 
@@ -146,23 +105,21 @@ impl Runner {
                 ThrottleResult::Pending => {}
                 ThrottleResult::ScheduleFlush(delay) => {
                     self.focus_throttle.mark_timer_scheduled();
-                    self.schedule_focus_throttle(delay);
+                    self.timers.schedule_focus(delay);
                 }
             },
             HubEvent::MoveSizeStart(hwnd_id) => {
-                self.cancel_move_settle(&hwnd_id);
                 self.dome.move_size_started(hwnd_id);
-                self.schedule_move_settle(
-                    MoveSettleTrigger::DragSafety(hwnd_id),
-                    Instant::now(),
-                    DRAG_SAFETY_TIMEOUT,
-                );
+                // schedule_move_settle cancels any existing entry internally. The move-size-started
+                // notification is independent of the cancel and may run first.
+                self.timers
+                    .schedule_move_settle(hwnd_id, Instant::now(), DRAG_SAFETY_TIMEOUT);
             }
             HubEvent::MoveSizeEnd {
                 hwnd_id,
                 observed_at,
             } => {
-                self.cancel_move_settle(&hwnd_id);
+                self.timers.cancel_move_settle(hwnd_id);
                 self.dome.clear_move_state(hwnd_id);
                 self.dispatch_placement_read(hwnd_id, observed_at);
             }
@@ -171,12 +128,8 @@ impl Runner {
                 observed_at,
             } => {
                 if self.dome.location_changed(hwnd_id) {
-                    self.cancel_move_settle(&hwnd_id);
-                    self.schedule_move_settle(
-                        MoveSettleTrigger::Debounce(hwnd_id),
-                        observed_at,
-                        DEBOUNCE_INTERVAL,
-                    );
+                    self.timers
+                        .schedule_move_settle(hwnd_id, observed_at, DEBOUNCE_INTERVAL);
                 }
             }
             HubEvent::WindowTitleChanged(hwnd_id) => {
@@ -264,9 +217,19 @@ impl Runner {
         let ext = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         let inspect: Arc<dyn InspectExternalWindow> = ext.clone();
         let manage: Arc<dyn ManageExternalWindow> = ext;
+        let log_filter = Arc::clone(&self.rejection_log_filter);
         self.dispatcher.dispatch(
             move || {
-                if !inspect.is_manageable() {
+                if let Some(reason) = inspect.check_unmanageable() {
+                    let pid = manage.pid();
+                    if pid == 0 {
+                        // Zombie HWND: GetWindowThreadProcessId returned 0. No
+                        // stable key for dedup, log unconditionally.
+                        tracing::trace!(?hwnd_id, ?reason, "not manageable");
+                    } else if log_filter.record_and_should_log(hwnd_id, pid, reason, Instant::now())
+                    {
+                        tracing::trace!(?hwnd_id, ?reason, "not manageable");
+                    }
                     return None;
                 }
                 Some((

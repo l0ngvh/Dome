@@ -5,6 +5,7 @@ pub(super) mod picker;
 mod placement_tracker;
 mod recovery;
 mod registry;
+pub(crate) mod rejection_log_filter;
 mod window;
 
 pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};
@@ -315,15 +316,7 @@ impl Dome {
         self.registry.get_id(id)
     }
 
-    /// Single entry point for adding a newly-detected external window.
-    ///
-    /// Mirrors macOS's `reconcile_windows` insert path: applies the
-    /// already-known shell-side filters (ignore-rules, on-open lookup,
-    /// borderless-fullscreen detection) and dispatches to the
-    /// matching `insert_*_window` helper, then flushes layout. The
-    /// `is_manageable` filter still lives on the inspection side (the worker
-    /// thread that produces this call's arguments) so unmanageable windows
-    /// never reach this function.
+    /// Adding a manageable window.
     #[tracing::instrument(skip_all, fields(window = %new))]
     pub(super) fn add_window(&mut self, new: NewWindow, rect: Dimension<Physical>, monitor: isize) {
         if self.registry.contains_hwnd(new.ext.id()) {
