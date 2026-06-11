@@ -7,7 +7,6 @@ use objc2::Message;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSString, NSUInteger};
-use objc2_io_surface::IOSurface;
 use objc2_metal::*;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
 
@@ -18,7 +17,6 @@ pub(in crate::platform::macos) struct MetalBackend {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
     command_queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
     egui_pipeline: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
-    mirror_pipeline: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     sampler: Retained<ProtocolObject<dyn MTLSamplerState>>,
 }
 
@@ -38,9 +36,6 @@ impl MetalBackend {
         let fragment_egui_fn = library
             .newFunctionWithName(&NSString::from_str("fragment_egui"))
             .expect("fragment_egui not found");
-        let fragment_mirror_fn = library
-            .newFunctionWithName(&NSString::from_str("fragment_mirror"))
-            .expect("fragment_mirror not found");
 
         let vertex_desc = MTLVertexDescriptor::vertexDescriptor();
         let attrs = vertex_desc.attributes();
@@ -60,17 +55,10 @@ impl MetalBackend {
         unsafe { layout0.setStride(VERTEX_STRIDE) };
         layout0.setStepFunction(MTLVertexStepFunction::PerVertex);
 
-        // Two pipelines share the same vertex shader but differ in fragment processing:
-        // egui premultiplies color by alpha for correct text/UI blending;
-        // mirror passes through captured pixels as-is since they're already composited.
         let egui_pipeline =
             Self::create_pipeline(device, &vertex_fn, &fragment_egui_fn, &vertex_desc);
-        let mirror_pipeline =
-            Self::create_pipeline(device, &vertex_fn, &fragment_mirror_fn, &vertex_desc);
 
-        // Linear smooths the mirror quad when capture resolution doesn't exactly match
-        // the drawable (rounding between logical and physical pixels). egui works with
-        // either filter mode, but its official backends also use linear.
+        // Linear smooths egui textures. Its official backends also use linear.
         let sampler_desc = MTLSamplerDescriptor::new();
         sampler_desc.setMinFilter(MTLSamplerMinMagFilter::Linear);
         sampler_desc.setMagFilter(MTLSamplerMinMagFilter::Linear);
@@ -82,7 +70,6 @@ impl MetalBackend {
             device: device.retain(),
             command_queue,
             egui_pipeline,
-            mirror_pipeline,
             sampler,
         })
     }
@@ -93,14 +80,13 @@ impl MetalBackend {
 }
 
 /// Unified renderer for overlay and opaque UI windows. Owns the Metal layer, egui context,
-/// texture cache, and optional mirror texture. Callers pass `FnOnce(&egui::Context)`
-/// and create their own `egui::Area`s inside.
+/// and texture cache. Callers pass `FnOnce(&egui::Context)` and create their own
+/// `egui::Area`s inside.
 pub(super) struct Renderer {
     backend: Rc<MetalBackend>,
     layer: Retained<CAMetalLayer>,
     egui_ctx: egui::Context,
     egui_textures: HashMap<egui::TextureId, Retained<ProtocolObject<dyn MTLTexture>>>,
-    mirror_texture: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
     opaque: bool,
 }
 
@@ -154,7 +140,6 @@ impl Renderer {
             layer,
             egui_ctx,
             egui_textures: HashMap::new(),
-            mirror_texture: None,
             opaque,
         }
     }
@@ -192,60 +177,17 @@ impl Renderer {
         font.apply_to(&self.egui_ctx);
     }
 
-    fn backend(&self) -> &MetalBackend {
-        &self.backend
-    }
-
-    /// Wraps the IOSurface as a Metal texture for zero-copy GPU reads from the capture buffer.
-    #[tracing::instrument(skip_all)]
-    pub(super) fn set_mirror_surface(&mut self, surface: &IOSurface) {
-        let w = surface.width() as usize;
-        let h = surface.height() as usize;
-        // BGRA8 to match SCStream's capture pixel format. No mipmaps — displayed at ~1:1.
-        let desc = unsafe {
-            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                MTLPixelFormat::BGRA8Unorm,
-                w,
-                h,
-                false,
-            )
-        };
-        // ShaderRead-only — the GPU only samples this; capture writes to the IOSurface directly.
-        desc.setUsage(MTLTextureUsage::ShaderRead);
-        // objc2 has separate IOSurface and IOSurfaceRef types for the same underlying CF type.
-        let surface_ref: &objc2_io_surface::IOSurfaceRef =
-            unsafe { &*(surface as *const IOSurface as *const objc2_io_surface::IOSurfaceRef) };
-        self.mirror_texture = self
-            .backend
-            .device
-            // Plane 0 — BGRA is a single interleaved plane (unlike YCbCr which has separate planes).
-            .newTextureWithDescriptor_iosurface_plane(&desc, surface_ref, 0);
-        if self.mirror_texture.is_none() {
-            tracing::trace!("failed to create mirror texture from IOSurface");
-        }
-    }
-
-    pub(super) fn clear_mirror(&mut self) {
-        self.mirror_texture = None;
-    }
-
-    /// Runs the full render pipeline: egui layout → optional mirror quad → egui meshes.
+    /// Runs the full render pipeline: egui layout then egui meshes.
     /// `ctx_fn` receives `&egui::Context` and should create its own `egui::Area`s.
     #[tracing::instrument(skip_all)]
     pub(super) fn render<R>(
         &mut self,
         pixels_per_point: f32,
         events: Vec<egui::Event>,
-        mirror_bounds: Option<[f32; 4]>,
         ctx_fn: impl FnMut(&egui::Context) -> R,
     ) -> R {
         let (meshes, delta, surface_size, result) = self.prepare(pixels_per_point, events, ctx_fn);
         if let Some(ctx) = self.begin_frame(&delta, surface_size) {
-            if let Some(tex) = &self.mirror_texture
-                && let Some(bounds) = mirror_bounds
-            {
-                draw_mirror_quad(self.backend(), &ctx, tex, bounds);
-            }
             self.draw_egui_meshes(&ctx, &meshes, pixels_per_point);
             // Suppress implicit Core Animation on the contents property change.
             // With presentsWithTransaction = true, finish() calls drawable.present()
@@ -578,18 +520,9 @@ fragment float4 fragment_egui(
     color.rgb *= color.a;
     return color;
 }
-
-fragment float4 fragment_mirror(
-    VertexOut in [[stage_in]],
-    texture2d<float> tex [[texture(0)]],
-    sampler smp [[sampler(0)]]
-) {
-    return tex.sample(smp, in.uv);
-}
 "#;
 
-/// pos(f32×2) + uv(f32×2) + color(u8×4). Shared by egui meshes and mirror quad
-/// so both can use the same vertex descriptor and pipeline layout.
+/// pos(f32x2) + uv(f32x2) + color(u8x4).
 const VERTEX_STRIDE: usize = 20;
 
 impl MetalBackend {
@@ -654,74 +587,5 @@ impl Drop for FrameContext {
             self.cmd_buf.commit();
             self.cmd_buf.waitUntilCompleted();
         }
-    }
-}
-
-/// `visible_content_bound` is `[x, y, w, h]` in logical points, overlay-local (top-left origin).
-/// Vertices share the same coordinate space as egui meshes, so `vertex_main` handles both.
-#[tracing::instrument(skip_all)]
-fn draw_mirror_quad(
-    b: &MetalBackend,
-    ctx: &FrameContext,
-    texture: &ProtocolObject<dyn MTLTexture>,
-    visible_content_bound: [f32; 4],
-) {
-    let [mx, my, mw, mh] = visible_content_bound;
-    let encoder = &ctx.encoder;
-    encoder.setRenderPipelineState(&b.mirror_pipeline);
-    // [pos_x, pos_y, u, v, _]. UVs 0→1 sample the full texture, which already
-    // contains only the visible portion (capture source rect matches mirror_rect).
-    let verts: [[f32; 5]; 4] = [
-        [mx, my, 0.0, 0.0, 0.0],
-        [mx + mw, my, 1.0, 0.0, 0.0],
-        [mx, my + mh, 0.0, 1.0, 0.0],
-        [mx + mw, my + mh, 1.0, 1.0, 0.0],
-    ];
-    // Pack into vertex layout: 4 floats (pos + uv) + 4 color bytes.
-    // Color is white — unused by mirror fragment shader but fills the shared layout.
-    let mut vert_data = Vec::with_capacity(4 * VERTEX_STRIDE);
-    for v in &verts {
-        vert_data.extend_from_slice(&v[0].to_le_bytes());
-        vert_data.extend_from_slice(&v[1].to_le_bytes());
-        vert_data.extend_from_slice(&v[2].to_le_bytes());
-        vert_data.extend_from_slice(&v[3].to_le_bytes());
-        vert_data.extend_from_slice(&[255, 255, 255, 255]);
-    }
-    // Two triangles forming a quad: top-left (0,1,2) and bottom-right (2,1,3).
-    let indices: [u32; 6] = [0, 1, 2, 2, 1, 3];
-    // Shared storage — CPU writes, GPU reads. Fine for small per-frame buffers.
-    // Vertex buffer: per-corner data (pos, uv, color).
-    // Index buffer: which vertices form each triangle, so shared corners aren't duplicated.
-    let Some(vbuf) = (unsafe {
-        b.device.newBufferWithBytes_length_options(
-            NonNull::new(vert_data.as_ptr() as *mut c_void).unwrap(),
-            vert_data.len() as NSUInteger,
-            MTLResourceOptions::StorageModeShared,
-        )
-    }) else {
-        tracing::trace!("failed to create mirror vertex buffer");
-        return;
-    };
-    let Some(ibuf) = (unsafe {
-        b.device.newBufferWithBytes_length_options(
-            NonNull::new(indices.as_ptr() as *mut c_void).unwrap(),
-            (indices.len() * 4) as NSUInteger,
-            MTLResourceOptions::StorageModeShared,
-        )
-    }) else {
-        tracing::trace!("failed to create mirror index buffer");
-        return;
-    };
-
-    unsafe {
-        encoder.setVertexBuffer_offset_atIndex(Some(&vbuf), 0, 0);
-        encoder.setFragmentTexture_atIndex(Some(texture), 0);
-        encoder.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset(
-            MTLPrimitiveType::Triangle,
-            6,
-            MTLIndexType::UInt32,
-            &ibuf,
-            0,
-        );
     }
 }

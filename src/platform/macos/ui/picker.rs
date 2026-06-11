@@ -261,7 +261,7 @@ impl PickerView {
             ivars
                 .renderer
                 .borrow_mut()
-                .render(scale as f32, events, None, |ctx| {
+                .render(scale as f32, events, |ctx| {
                     let mut all_icons = icon_snapshot.clone();
                     let mut created = Vec::new();
                     for (app_id, image) in new_icons.drain(..) {

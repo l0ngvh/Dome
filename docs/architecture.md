@@ -123,10 +123,12 @@ the window level (`NSFloatingWindowLevel`) of windows it does not own. Without
 it, a float window would drop behind whichever window currently takes focus. To
 emulate this, given that float windows are mostly used for reading and rarely
 interacted with, the shell captures the real window through `ScreenCaptureKit`
-and draws the resulting frames into a Dome-owned window. When the float does
-need input, the shell swaps the real window back into place and stops the
-mirror, rather than forwarding events from the mirror to the real window. This
-has two consequences. Captured frames carry the source monitor's pixel density,
+and presents the resulting frames in a Dome-owned window. Each captured frame
+is an `IOSurface` set directly as a `CALayer`'s contents, so Core Animation
+composites the pixels without any Dome-side GPU work. When the float does need
+input, the shell swaps the real window back into place and stops the mirror,
+rather than forwarding events from the mirror to the real window. This has two
+consequences. Captured frames carry the source monitor's pixel density,
 so the mirror can look blurry when the real window is parked on a lower-DPI
 monitor than the one showing it. Each swap also produces a brief flicker.
 
@@ -236,9 +238,12 @@ option if that changes.
 ### Displaying visual indicators {#macos-displaying-visual-indicators}
 
 To render visual indicators, the macOS shell owns borderless transparent
-`NSWindow`s backed by `CAMetalLayer`s, called overlay windows. Tiled windows
-dominate any normal session and floats are rare, so the shell batches tiling
-overlays into one overlay window per monitor, while each float gets its own.
+`NSWindow`s called overlay windows. Tiled windows dominate any normal session
+and floats are rare, so the shell batches tiling overlays into one overlay
+window per monitor, while each float gets its own. Tiling overlays are backed
+by a single `CAMetalLayer`. Float overlays use a two-sublayer stack: a plain
+`CALayer` below that presents the captured `IOSurface`, and a `CAMetalLayer`
+above for the border decoration only.
 
 Click handling has to stay clear of managed windows, and macOS offers no
 per-region click-through, so the overlay parks at `NSNormalWindowLevel - 1`,

@@ -280,7 +280,6 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         &show.placement,
                         show.cocoa_frame,
                         show.scale,
-                        show.content_dim,
                         frame.focused_window == Some(show.placement.id),
                     );
 

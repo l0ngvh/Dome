@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use calloop::channel::Sender as CalloopSender;
 use objc2::rc::Retained;
+use objc2::runtime::AnyObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSEvent, NSFloatingWindowLevel, NSNormalWindowLevel, NSResponder,
@@ -16,7 +17,9 @@ use objc2_app_kit::{
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_io_surface::IOSurface;
-use objc2_quartz_core::CAMetalLayer;
+use objc2_quartz_core::{
+    CAAutoresizingMask, CALayer, CAMetalLayer, CATransaction, kCAGravityResize,
+};
 
 use super::super::dome::HubEvent;
 use super::renderer::{MetalBackend, Renderer};
@@ -65,8 +68,9 @@ const FLOAT_OVERLAY_LEVEL: NSWindowLevel = NSFloatingWindowLevel;
 pub(super) struct FloatOverlay {
     window: Retained<NSWindow>,
     renderer: Renderer,
+    mirror_layer: Retained<CALayer>,
+    is_focused: Cell<bool>,
     placement: Option<FloatWindowPlacement>,
-    visible_content_bounds: Option<[f32; 4]>,
     scale: f64,
     config: Config,
 }
@@ -118,10 +122,24 @@ impl FloatOverlay {
             flavor,
             font,
         );
+        let metal_layer = renderer.layer();
+
+        let root_layer = CALayer::layer();
+        let mirror_layer = CALayer::layer();
+        let mask = CAAutoresizingMask::LayerWidthSizable | CAAutoresizingMask::LayerHeightSizable;
+        unsafe {
+            mirror_layer.setAutoresizingMask(mask);
+            mirror_layer.setContentsGravity(kCAGravityResize);
+            mirror_layer.setContentsScale(scale);
+            metal_layer.setAutoresizingMask(mask);
+            root_layer.addSublayer(&mirror_layer);
+            root_layer.addSublayer(&metal_layer);
+        }
+
         let view = FloatOverlayView::new(
             mtm,
             NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
-            renderer.layer(),
+            root_layer.clone(),
             hub_sender,
             cg_id,
         );
@@ -130,8 +148,9 @@ impl FloatOverlay {
         Self {
             window,
             renderer,
+            mirror_layer,
+            is_focused: Cell::new(false),
             placement: None,
-            visible_content_bounds: None,
             scale: 1.0,
             config,
         }
@@ -142,36 +161,29 @@ impl FloatOverlay {
         placement: &FloatWindowPlacement,
         cocoa_frame: NSRect,
         scale: f64,
-        content_dim: Dimension,
         is_focused: bool,
     ) {
         self.placement = Some(*placement);
         self.scale = scale;
+        self.is_focused.set(is_focused);
 
         self.window.setFrame_display(cocoa_frame, true);
         self.renderer
             .resize(cocoa_frame.size.width, cocoa_frame.size.height, scale);
+        self.mirror_layer.setContentsScale(scale);
 
         if !is_focused {
             self.window.setIgnoresMouseEvents(false);
+            self.mirror_layer.setHidden(false);
         } else {
             self.window.setIgnoresMouseEvents(true);
-            self.renderer.clear_mirror();
+            self.mirror_layer.setHidden(true);
         }
-
-        // Content area offset by the border inset within the frame
-        self.visible_content_bounds = Some([
-            (content_dim.x - placement.frame.x).logical(),
-            (content_dim.y - placement.frame.y).logical(),
-            content_dim.width.logical(),
-            content_dim.height.logical(),
-        ]);
 
         let config = &self.config;
         let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
         let theme = config.theme();
-        let mr = self.visible_content_bounds;
-        self.renderer.render(scale as f32, Vec::new(), mr, |ctx| {
+        self.renderer.render(scale as f32, Vec::new(), |ctx| {
             // layer_painter bypasses egui's Area sizing pass, avoiding
             // black/invisible borders on the first frame.
             let painter = ctx.layer_painter(egui::LayerId::new(
@@ -214,65 +226,46 @@ impl FloatOverlay {
             let config = &self.config;
             let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
             let theme = config.theme();
-            let mr = self.visible_content_bounds;
-            self.renderer
-                .render(self.scale as f32, Vec::new(), mr, |ctx| {
-                    let painter = ctx.layer_painter(egui::LayerId::new(
-                        egui::Order::Middle,
-                        egui::Id::new("border"),
-                    ));
-                    let clip = egui::Rect::from_min_size(
-                        egui::pos2(0.0, 0.0),
-                        egui::vec2(
-                            placement.visible_frame.width.logical(),
-                            placement.visible_frame.height.logical(),
-                        ),
-                    );
-                    overlay::paint_window_border(
-                        &painter.with_clip_rect(clip),
-                        placement.frame,
-                        placement.visible_frame,
-                        placement.is_highlighted,
-                        None,
-                        &theme,
-                        border,
-                        egui::Vec2::ZERO,
-                    );
-                });
+            self.renderer.render(self.scale as f32, Vec::new(), |ctx| {
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Middle,
+                    egui::Id::new("border"),
+                ));
+                let clip = egui::Rect::from_min_size(
+                    egui::pos2(0.0, 0.0),
+                    egui::vec2(
+                        placement.visible_frame.width.logical(),
+                        placement.visible_frame.height.logical(),
+                    ),
+                );
+                overlay::paint_window_border(
+                    &painter.with_clip_rect(clip),
+                    placement.frame,
+                    placement.visible_frame,
+                    placement.is_highlighted,
+                    None,
+                    &theme,
+                    border,
+                    egui::Vec2::ZERO,
+                );
+            });
         }
     }
 
     pub(super) fn apply_frame(&mut self, surface: &IOSurface) {
-        self.renderer.set_mirror_surface(surface);
-        if let Some(placement) = self.placement {
-            let config = &self.config;
-            let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
-            let theme = config.theme();
-            let mr = self.visible_content_bounds;
-            self.renderer
-                .render(self.scale as f32, Vec::new(), mr, |ctx| {
-                    let painter = ctx.layer_painter(egui::LayerId::new(
-                        egui::Order::Middle,
-                        egui::Id::new("border"),
-                    ));
-                    let clip = egui::Rect::from_min_size(
-                        egui::pos2(0.0, 0.0),
-                        egui::vec2(
-                            placement.visible_frame.width.logical(),
-                            placement.visible_frame.height.logical(),
-                        ),
-                    );
-                    overlay::paint_window_border(
-                        &painter.with_clip_rect(clip),
-                        placement.frame,
-                        placement.visible_frame,
-                        placement.is_highlighted,
-                        None,
-                        &theme,
-                        border,
-                        egui::Vec2::ZERO,
-                    );
-                });
+        if self.is_focused.get() {
+            return;
+        }
+        // Core Animation applies a 0.25s implicit crossfade when contents changes.
+        // Wrapping in a transaction with disabled actions swaps surfaces atomically.
+        unsafe {
+            CATransaction::begin();
+            CATransaction::setDisableActions(true);
+            // Explicit typed binding avoids deref-coercion ambiguity through the
+            // IOSurface -> NSObject -> AnyObject chain in argument position.
+            let obj: &AnyObject = surface;
+            self.mirror_layer.setContents(Some(obj));
+            CATransaction::commit();
         }
     }
 }
@@ -357,7 +350,7 @@ impl Drop for TilingOverlay {
 }
 
 pub(super) struct FloatOverlayViewIvars {
-    layer: Retained<CAMetalLayer>,
+    root_layer: Retained<CALayer>,
     hub_sender: CalloopSender<HubEvent>,
     cg_id: Cell<CGWindowID>,
 }
@@ -383,9 +376,7 @@ define_class!(
 
         #[unsafe(method(makeBackingLayer))]
         fn make_backing_layer(&self) -> *mut objc2_quartz_core::CALayer {
-            let layer: Retained<objc2_quartz_core::CALayer> =
-                unsafe { Retained::cast_unchecked(self.ivars().layer.clone()) };
-            Retained::into_raw(layer)
+            Retained::into_raw(self.ivars().root_layer.clone())
         }
 
         #[unsafe(method(mouseDown:))]
@@ -407,12 +398,12 @@ impl FloatOverlayView {
     fn new(
         mtm: MainThreadMarker,
         frame: NSRect,
-        layer: Retained<CAMetalLayer>,
+        root_layer: Retained<CALayer>,
         hub_sender: CalloopSender<HubEvent>,
         cg_id: CGWindowID,
     ) -> Retained<Self> {
         let ivars = FloatOverlayViewIvars {
-            layer,
+            root_layer,
             hub_sender,
             cg_id: Cell::new(cg_id),
         };
@@ -617,7 +608,7 @@ impl TilingOverlayView {
         let clicked_tabs = ivars
             .renderer
             .borrow_mut()
-            .render(scale as f32, events, None, |ctx| {
+            .render(scale as f32, events, |ctx| {
                 overlay::paint_tiling_overlay(
                     ctx,
                     monitor_logical,
