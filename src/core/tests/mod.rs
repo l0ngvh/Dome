@@ -230,13 +230,6 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     s
 }
 
-/// Formats the full Hub state using its Debug impl, for smoke test error diagnostics.
-/// Unlike snapshot_text (which only shows visible placements), this dumps everything
-/// including non-focused workspaces.
-pub(super) fn hub_debug_text(hub: &Hub) -> String {
-    format!("{:#?}", hub)
-}
-
 fn fmt_spawn(indicator: &SpawnIndicator) -> String {
     let dirs: Vec<&str> = [
         (indicator.top, "top"),
