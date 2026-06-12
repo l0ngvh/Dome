@@ -596,13 +596,7 @@ impl Dome {
         }
     }
 
-    /// Unminimize a window selected via the picker. Unlike the Win32-driven
-    /// taskbar path (where `EVENT_SYSTEM_MINIMIZEEND` triggers a placement
-    /// read whose result drives the unminimize fold inside `window_moved`),
-    /// the picker path must drive both the core
-    /// state and the OS state: tell the hub the window is back, ask Windows
-    /// to restore it, and clear the minimize flag so apply_layout dispatches
-    /// against the preserved WindowState.
+    /// Unminimize a window selected via the picker.
     pub(super) fn picker_unminimize_window(&mut self, id: WindowId) {
         self.hub.unminimize_window(id);
         let Some(entry) = self.registry.get_mut(id) else {
@@ -836,6 +830,20 @@ impl Dome {
                     scale,
                 );
         }
+    }
+
+    pub(super) fn handle_window_moved(
+        &mut self,
+        id_key: HwndId,
+        new_placement: Dimension<Physical>,
+        monitor_handle: isize,
+        observed_at: Instant,
+    ) {
+        let Some(id) = self.registry.get_id(id_key) else {
+            return;
+        };
+        self.window_moved(id, new_placement, monitor_handle, observed_at);
+        self.apply_layout();
     }
 
     pub(super) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {

@@ -7,7 +7,7 @@ use crate::core::{
     Dimension, FloatWindowPlacement, Length, MonitorId, Physical, TilingWindowPlacement, WindowId,
     WindowRestrictions, WorkspaceId,
 };
-use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
+use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
 
 /// Per-window metadata gathered by the inspection worker that travels
@@ -522,14 +522,11 @@ impl Dome {
     /// Apply a fresh visible-rect observation from the OS.
     pub(in crate::platform::windows) fn window_moved(
         &mut self,
-        id_key: HwndId,
+        id: WindowId,
         new_placement: Dimension<Physical>,
         monitor_handle: isize,
         observed_at: Instant,
     ) {
-        let Some(id) = self.registry.get_id(id_key) else {
-            return;
-        };
         let is_fullscreen = self
             .monitors
             .is_borderless_fullscreen_at(new_placement, monitor_handle);

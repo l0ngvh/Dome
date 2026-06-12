@@ -254,9 +254,6 @@ impl Runner {
     }
 
     fn dispatch_placement_read(&mut self, hwnd_id: HwndId, observed_at: Instant) {
-        let Some(id) = self.dome.registry_get_id(hwnd_id) else {
-            return;
-        };
         let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         self.dispatcher.dispatch(
             move || {
@@ -271,12 +268,9 @@ impl Runner {
                 let Some((rect, monitor)) = observation else {
                     return;
                 };
-                if runner.dome.registry_get_id(hwnd_id) != Some(id) {
-                    return;
-                }
                 runner
                     .dome
-                    .window_moved(hwnd_id, rect, monitor, observed_at);
+                    .handle_window_moved(hwnd_id, rect, monitor, observed_at);
             },
         );
     }

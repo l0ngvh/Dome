@@ -318,6 +318,26 @@ fn borderless_fullscreen_exit_unblocks_commands() {
 }
 
 #[test]
+fn borderless_fullscreen_exit_reflows_siblings() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "Game", "game.exe", fullscreen_dim());
+
+    assert!(env.is_offscreen(w1));
+
+    // w2 leaves borderless fullscreen by reporting a non-fullscreen rect.
+    // No manual apply_layout: the helper mirrors the production callback.
+    env.window_moved(w2, dim(100, 100, 800, 600), 1);
+
+    assert!(
+        !env.is_offscreen(w1),
+        "sibling should be on screen after FS exit"
+    );
+    let tile = env.dim(w1);
+    assert!(tile.width.value() > 0.0 && tile.height.value() > 0.0);
+}
+
+#[test]
 fn float_overlay_updates_on_focus_away() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
