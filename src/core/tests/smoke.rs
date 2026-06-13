@@ -383,6 +383,14 @@ fn run_smoke_iteration(
     }
 }
 
+fn pick_non_minimized(rng: &mut ChaCha8Rng, minimized: &[bool]) -> Option<usize> {
+    let eligible: Vec<usize> = (0..minimized.len()).filter(|&i| !minimized[i]).collect();
+    if eligible.is_empty() {
+        return None;
+    }
+    Some(eligible[rng.random_range(0..eligible.len())])
+}
+
 fn run_iteration<F>(
     seed: u64,
     ops_per_run: usize,
@@ -395,6 +403,7 @@ fn run_iteration<F>(
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut windows: Vec<WindowId> = Vec::new();
     let mut window_origin: Vec<usize> = Vec::new();
+    let mut window_minimized: Vec<bool> = Vec::new();
     let mut monitors: Vec<MonitorId> = vec![hub.focused_monitor()];
     let mut monitor_origin: Vec<usize> = vec![usize::MAX];
     let mut next_op_index: usize = 0;
@@ -409,6 +418,7 @@ fn run_iteration<F>(
             &mut rng,
             &windows,
             &window_origin,
+            &window_minimized,
             &monitors,
             &monitor_origin,
             next_op_index,
@@ -421,6 +431,7 @@ fn run_iteration<F>(
             &op,
             &mut windows,
             &mut window_origin,
+            &mut window_minimized,
             &mut monitors,
             &mut monitor_origin,
         );
@@ -443,11 +454,16 @@ fn run_iteration<F>(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "single-call-site test helper threading full smoke state"
+)]
 fn build_op(
     kind: OpKind,
     rng: &mut ChaCha8Rng,
     windows: &[WindowId],
     window_origin: &[usize],
+    window_minimized: &[bool],
     monitors: &[MonitorId],
     monitor_origin: &[usize],
     next_op_index: usize,
@@ -505,10 +521,7 @@ fn build_op(
         OpKind::ToggleFloat => Some(RecordedOp::ToggleFloat),
         OpKind::ToggleFullscreen => Some(RecordedOp::ToggleFullscreen),
         OpKind::SetFullscreen => {
-            if windows.is_empty() {
-                return None;
-            }
-            let idx = rng.random_range(0..windows.len());
+            let idx = pick_non_minimized(rng, window_minimized)?;
             let restrictions = match rng.random_range(0..3u8) {
                 0 => WindowRestrictions::None,
                 1 => WindowRestrictions::BlockAll,
@@ -520,10 +533,7 @@ fn build_op(
             })
         }
         OpKind::UnsetFullscreen => {
-            if windows.is_empty() {
-                return None;
-            }
-            let idx = rng.random_range(0..windows.len());
+            let idx = pick_non_minimized(rng, window_minimized)?;
             Some(RecordedOp::UnsetFullscreen {
                 window: RecordedWindow(window_origin[idx]),
             })
@@ -588,10 +598,7 @@ fn build_op(
             Some(RecordedOp::MoveToMonitor { target })
         }
         OpKind::SetFocus => {
-            if windows.is_empty() {
-                return None;
-            }
-            let idx = rng.random_range(0..windows.len());
+            let idx = pick_non_minimized(rng, window_minimized)?;
             Some(RecordedOp::SetFocus {
                 window: RecordedWindow(window_origin[idx]),
             })
@@ -671,6 +678,7 @@ fn apply_op(
     op: &RecordedOp,
     windows: &mut Vec<WindowId>,
     window_origin: &mut Vec<usize>,
+    window_minimized: &mut Vec<bool>,
     monitors: &mut Vec<MonitorId>,
     monitor_origin: &mut Vec<usize>,
 ) {
@@ -679,11 +687,13 @@ fn apply_op(
             let id = hub.insert_tiling(hub.current_workspace());
             windows.push(id);
             window_origin.push(*producer_id);
+            window_minimized.push(false);
         }
         RecordedOp::InsertFloat { producer_id, dim } => {
             let id = hub.insert_float(hub.current_workspace(), *dim);
             windows.push(id);
             window_origin.push(*producer_id);
+            window_minimized.push(false);
         }
         RecordedOp::InsertFullscreen {
             producer_id,
@@ -692,6 +702,7 @@ fn apply_op(
             let id = hub.insert_fullscreen(hub.current_workspace(), *restrictions);
             windows.push(id);
             window_origin.push(*producer_id);
+            window_minimized.push(false);
         }
         RecordedOp::AddMonitor {
             producer_id,
@@ -710,6 +721,7 @@ fn apply_op(
                 .expect("apply_op: window producer_id not found");
             let id = windows.remove(pos);
             window_origin.remove(pos);
+            window_minimized.remove(pos);
             hub.delete_window(id);
         }
         RecordedOp::RemoveMonitor { monitor, fallback } => {
@@ -775,6 +787,7 @@ fn apply_op(
                 .iter()
                 .position(|&o| o == window.0)
                 .expect("apply_op: window producer_id not found");
+            window_minimized[pos] = true;
             hub.minimize_window(windows[pos]);
         }
         RecordedOp::UnminimizeWindow { window } => {
@@ -782,6 +795,7 @@ fn apply_op(
                 .iter()
                 .position(|&o| o == window.0)
                 .expect("apply_op: window producer_id not found");
+            window_minimized[pos] = false;
             hub.unminimize_window(windows[pos]);
         }
         RecordedOp::MoveToWorkspace { name } => {
