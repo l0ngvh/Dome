@@ -101,4 +101,6 @@ pub(crate) trait InspectExternalWindow: Send + Sync {
     fn get_app_display_name(&self) -> Option<String>;
     /// Native OS monitor ownership. Non-blocking; safe on external HWNDs.
     fn get_monitor(&self) -> isize;
+    fn get_class_name(&self) -> Option<String>;
+    fn get_aumid(&self) -> Option<String>;
 }

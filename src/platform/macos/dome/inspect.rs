@@ -5,7 +5,7 @@ use std::time::Instant;
 use objc2_core_graphics::CGWindowID;
 
 use crate::config::MacosWindow;
-use crate::platform::macos::accessibility::{AXApp, ExternalWindow};
+use crate::platform::macos::accessibility::{AXApp, ExternalWindow, RejectionReason};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::registry::ManagedWindow;
 use crate::platform::macos::dome::rejection_log_filter::RejectionLogFilter;
@@ -172,7 +172,7 @@ pub(in crate::platform::macos) fn compute_reconciliation(
             bundle_id,
             title,
         };
-        if should_ignore(&new, ignore_rules) {
+        if should_ignore(&new, ignore_rules, cg_id, pid, log_filter) {
             continue;
         }
         if new.ax.is_native_fullscreen(marker) {
@@ -306,7 +306,13 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
     }
 }
 
-fn should_ignore(new: &NewWindow, rules: &[MacosWindow]) -> bool {
+fn should_ignore(
+    new: &NewWindow,
+    rules: &[MacosWindow],
+    cg_id: CGWindowID,
+    pid: i32,
+    log_filter: &RejectionLogFilter,
+) -> bool {
     let matched = rules.iter().find(|r| {
         r.matches(
             new.app_name.as_deref(),
@@ -314,8 +320,15 @@ fn should_ignore(new: &NewWindow, rules: &[MacosWindow]) -> bool {
             new.title.as_deref(),
         )
     });
-    if let Some(rule) = matched {
-        tracing::debug!(%new, ?rule, "Window ignored by rule");
+    if matched.is_some() {
+        if log_filter.record_and_should_log(
+            cg_id,
+            pid,
+            RejectionReason::IgnoredByRule,
+            Instant::now(),
+        ) {
+            tracing::trace!(%cg_id, %pid, "not manageable");
+        }
         return true;
     }
     false

@@ -1,17 +1,15 @@
 # Configuration
 
-Dome is configured by editing a single TOML file. Changes take effect when you save.
+Dome reads a single TOML file and hot-reloads it on save.
 
-By default, Dome reads from:
+Default paths:
 
 - macOS: `~/.config/dome/config.toml` (or `$XDG_CONFIG_HOME/dome/config.toml`).
 - Windows: `%APPDATA%\dome\config.toml`.
 
-To use a different file, pass `dome launch -c <path>` (see [cli.md](cli.md)).
+Pass `dome launch -c <path>` to override (see [cli.md](cli.md)).
 
 ## General
-
-Top-level appearance and operational settings.
 
 ```toml
 border_size = 4.0
@@ -29,7 +27,7 @@ start_at_login = false
 
 ## Window size constraints
 
-Top-level minimum and maximum window dimensions, enforced by both the partition tree and master strategies. A size value is either a number (logical pixels) or a string ending in `%` (percentage of the screen dimension). Per-window constraints reported by the OS take precedence over these global values.
+Both the partition tree and master strategies enforce these global minimums and maximums. A size value is either a number (logical pixels) or a string ending in `%` (percentage of the screen dimension). Per-window constraints reported by the OS take precedence.
 
 ```toml
 min_width = "5%"
@@ -47,7 +45,7 @@ max_height = 0
 
 ## Font
 
-Font settings live under the `[font]` table. Dome ships with egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks). Set `family` to render glyphs that the built-in fonts do not cover (CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, etc.) using a font already installed on the system.
+Dome ships with egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks). Set `family` to render glyphs that the built-in fonts do not cover (CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, etc.) using a font already installed on the system.
 
 ```toml
 [font]
@@ -68,11 +66,15 @@ family = "PingFang SC"            # macOS: render Chinese tab text via PingFang 
 
 ### Caveats
 
-- Dome does not validate the family name. Windows in particular substitutes a lookalike silently on a miss, so a typo or uninstalled name can still render something, just not what you wanted. If the result looks off, double-check the name in Font Book on macOS or `Settings > Personalization > Fonts` on Windows.
-- English and localized names both work. `"Microsoft YaHei UI"` and `"微软雅黑"` resolve to the same font on Windows, and macOS behaves the same way.
-- For fonts that bundle multiple variants in one file (TrueType collections like `msyh.ttc`), Dome picks the regular weight. Selecting a specific weight or italic from a collection is a future enhancement.
-- A small number of third-party commercial fonts are marked non-embeddable in their license metadata, and the OS won't hand their bytes to applications. Dome logs a warning and falls back to its built-in fonts. System fonts (Microsoft, Apple) and Google Noto fonts are always embeddable.
-- Changing `family` to a different value takes effect on the next render. Removing the line entirely keeps the previously-loaded font active until you restart Dome.
+Dome does not validate the family name. Windows substitutes a lookalike silently on a miss, so a typo or uninstalled name can still render something other than what you intended. Double-check the name in Font Book on macOS or `Settings > Personalization > Fonts` on Windows.
+
+English and localized names both work. `"Microsoft YaHei UI"` and `"微软雅黑"` resolve to the same font on Windows, and macOS behaves the same way.
+
+For fonts that bundle multiple variants in one file (TrueType collections like `msyh.ttc`), Dome picks the regular weight. Selecting a specific weight or italic from a collection is not yet supported.
+
+A small number of third-party commercial fonts are marked non-embeddable in their license metadata, and the OS will not hand their bytes to applications. Dome logs a warning and falls back to its built-in fonts. System fonts (Microsoft, Apple) and Google Noto fonts are always embeddable.
+
+Changing `family` to a different value takes effect on the next render. Removing the line entirely keeps the previously-loaded font active until Dome restarts.
 
 ## Layout
 
@@ -101,28 +103,40 @@ master_count = 1
 
 ### Partition tree
 
-The default strategy. i3-style manual tiling with split containers (horizontal, vertical, tabbed), spawn-mode routing, and direction invariance. See [architecture.md](development/architecture.md#partitiontreestrategy) for the full model.
+The default strategy. i3-style manual tiling with split containers (horizontal, vertical, tabbed), spawn-mode routing, and direction invariance. See [architecture.md](architecture.md#tiling-strategies) for the full model.
 
 ### Master
 
-A two-area layout: the first `master_count` windows fill a master pane on the left, and the rest stack vertically in a pane on the right. Modeled on xmonad's `Tall` layout.
+A two-area layout. The first `master_count` windows fill a master pane on the left, and the rest stack vertically in a pane on the right. Modeled on xmonad's `Tall` layout.
 
-Both panes honor the global `min_width`, `min_height`, `max_width`, and `max_height` constraints above, and per-window constraints reported by the OS take precedence. Each pane scrolls vertically when per-window min heights push the pane's content past the screen height. Scroll is focus-driven, meaning that moving focus inside a pane brings the focused window into view. No new keybindings or actions are needed.
+Both panes honor the global `min_width`, `min_height`, `max_width`, and `max_height` constraints, and per-window constraints reported by the OS take precedence. Each pane scrolls vertically when per-window min heights push its content past the screen height. Scroll is focus-driven, meaning that moving focus inside a pane brings the focused window into view. No new keybindings or actions are needed.
 
 ## Window rules
 
-These hooks run once a window matching the criteria is identified. Each hook is one of two kinds:
+Window rules come in two kinds:
 
 - `ignore`: do not manage the window at all.
-- `on_open`: run a list of actions when the window first appears.
+- `on_open`: apply initial settings (mode and workspace) when a matching window first appears. Valid `mode` values: `tiling`, `float`, `fullscreen`.
 
 ### Matching
 
-All fields in a rule must match for the rule to apply (AND logic). Rules are evaluated in order, and the first matching rule wins. String values are matched exactly by default. To match a regular expression instead, wrap the pattern in forward slashes (`/pattern/`). The regex is matched against the full string. A rule must specify at least one matching field.
+All fields in a rule must match for the rule to apply. Rules are evaluated in order, and the first matching rule wins. A rule with no fields never matches.
+
+Wrap a value in forward slashes (`/pattern/`) for regex matching. Without slashes, strings match exactly.
+
+If a window attribute is unavailable, any rule that specifies that field does not match.
+
+Both platforms ship built-in `ignore` entries that are always active. User rules add to the defaults, never replace them.
 
 ### macOS
 
-macOS rules match on `app` (the application name, regex-capable), `bundle_id` (exact match only), and `title` (regex-capable).
+macOS rules match on three fields:
+
+- `app`: the application name.
+- `bundle_id`: the CFBundleIdentifier. Always matched by exact equality (no regex support).
+- `title`: the window title.
+
+The built-in macOS ignore list covers `com.apple.dock`, `com.apple.controlcenter`, `com.apple.notificationcenterui`, and `com.apple.loginwindow`.
 
 ```toml
 [macos]
@@ -132,14 +146,19 @@ ignore = [
   { bundle_id = "com.apple.finder", title = "Trash" },  # bundle and title (AND)
 ]
 on_open = [
-  { app = "Slack", run = ["move workspace 3"] },
-  { app = "Safari", run = ["toggle float"] },
+  { app = "Slack", workspace = "3" },
+  { app = "Safari", mode = "float" },
 ]
 ```
 
 ### Windows
 
-Windows rules match on `process` (the executable name, regex-capable) and `title` (regex-capable).
+Windows rules match on four fields:
+
+- `process`: the executable name.
+- `title`: the window title.
+- `class`: the Win32 window class name (from `GetClassNameW`).
+- `aumid`: the AppUserModelID, useful for distinguishing UWP apps that share `ApplicationFrameHost.exe` as their host process.
 
 ```toml
 [windows]
@@ -147,15 +166,18 @@ ignore = [
   { process = "SystemSettings.exe" },
   { process = "/.*Settings.*/" },
   { title = "Task Manager" },
+  { class = "Shell_TrayWnd" },                                     # taskbar
+  { aumid = "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App" },     # by AUMID
 ]
 on_open = [
-  { process = "slack.exe", run = ["move workspace 3"] },
+  { process = "slack.exe", workspace = "3" },
+  { class = "Chrome_WidgetWin_1", mode = "float" },                # by class
 ]
 ```
 
 ## Keybindings
 
-Keybindings live in the `[keymaps]` table of the config file. The same file works on macOS and Windows without changes. Defining a `[keymaps]` table **replaces the defaults wholesale**. There is no merge. To keep any default binding and add to it, copy the defaults below and edit the copy.
+Keybindings live in the `[keymaps]` table. The same file works on macOS and Windows without changes. Defining a `[keymaps]` table **replaces the defaults wholesale**, with no merge. To keep any default binding while adding your own, copy the defaults and edit the copy.
 
 ### Syntax
 
@@ -169,8 +191,6 @@ Tokens are lowercase. Accepted modifier tokens: `meta`, `shift`, `alt`, `ctrl`. 
 
 Values are arrays of action strings. Single-element arrays are fine. Multi-action arrays fire in order.
 
-Examples:
-
 ```toml
 "meta+h" = ["focus left"]
 "meta+shift+1" = ["move workspace 1", "focus workspace 1"]
@@ -178,7 +198,7 @@ Examples:
 
 ### Modifier mapping
 
-The literal config token is `meta`. `cmd` and `win` are accepted as aliases and behave identically. It maps to the platform key shown in the table below.
+The literal config token is `meta`. `cmd` and `win` are accepted as aliases and behave identically.
 
 | Token | macOS | Windows |
 |-------|-------|---------|
@@ -222,7 +242,7 @@ Dome ships 44 default bindings.
 
 ### Customising
 
-Define a `[keymaps]` section to replace the defaults with your own bindings. The entire default set is discarded when you do this, so copy any defaults you want to keep.
+Define a `[keymaps]` section to replace the defaults with your own bindings. The entire default set is discarded, so copy any defaults you want to keep.
 
 ```toml
 [keymaps]
@@ -254,7 +274,7 @@ Dome supports modal keybindings. The `[keymaps]` section defines the **default**
 "escape" = ["mode default"]
 ```
 
-In this example, `meta+r` enters resize mode. Inside resize mode, `h` and `l` adjust the master area without modifiers, and `escape` returns to the default keybindings. The special name `"default"` always refers to the top-level `[keymaps]` table.
+Here `meta+r` enters resize mode. Inside resize mode, `h` and `l` adjust the master area without modifiers, and `escape` returns to the default keybindings. The special name `"default"` always refers to the top-level `[keymaps]` table.
 
 Mode switching is instant. When a binding contains `mode <name>`, the switch takes effect before the next keypress. A binding can combine a mode switch with other actions:
 
@@ -266,8 +286,7 @@ This focuses left and enters resize mode in one keypress. If a binding lists mul
 
 #### Reserved names
 
-- `"default"` refers to the top-level `[keymaps]` section. A `[keymaps.mode.default]` section is dropped with a warning in `dome.log`.
-- Empty string `""` is dropped as a mode name with a warning.
+`"default"` refers to the top-level `[keymaps]` section. A `[keymaps.mode.default]` section is dropped with a warning in `dome.log`. Empty string `""` is also dropped with a warning.
 
 #### Gotchas
 
@@ -281,19 +300,11 @@ This focuses left and enters resize mode in one keypress. If a binding lists mul
 
 ## Error handling
 
-Dome recovers from config errors at field granularity. A wrong type, out-of-range value, or unknown field does not invalidate the rest of your config. Each broken field falls back to its default, and Dome logs a warning to `dome.log` with the dotted field path (for example, `field=layout.master.master_ratio`) and the reason for the fallback. The rest of your settings load normally.
+Dome recovers from config errors at field granularity. A wrong type, out-of-range value, or unknown field does not invalidate the rest of the config. Each broken field falls back to its default, and Dome logs a warning to `dome.log` with the dotted field path (for example, `field=layout.master.master_ratio`) and the reason for the fallback.
 
-Per-field recovery applies to:
+Per-field recovery covers unknown fields at any nesting level, wrong types or shapes, out-of-range values (`master_ratio`, `master_count`, `text_size`, `subtext_size`, blank `font.family`), bad keybindings (unparseable key or invalid action), bad entries in window-rule arrays, and reserved or empty mode names. In each case the offending item is dropped and the surrounding config survives.
 
-- Unknown fields at any nesting level, including inside window-rule entries.
-- Wrong types or shapes on any field.
-- Out-of-range values (`master_ratio`, `master_count`, `text_size`, `subtext_size`, blank `font.family`).
-- Bad keybindings in `[keymaps]`. A binding with an unparseable key or invalid action is dropped, but the remaining bindings in that mode survive.
-- Bad entries in window-rule arrays (`ignore`, `on_open`). A malformed rule is dropped, but surrounding rules survive.
-- Reserved (`default`) or empty mode names. The offending mode is dropped, but the rest of `[keymaps]` survives.
-
-Two conditions still cause the entire config to fall back to defaults:
+Two conditions cause the entire config to fall back to defaults:
 
 - TOML syntax errors (missing quotes, unmatched brackets, etc.).
 - Cross-field constraint violations where `min_width > max_width` or `min_height > max_height` (both in pixels, with max > 0).
-

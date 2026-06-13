@@ -418,12 +418,43 @@ impl RawConfig {
             layout: w.nested_or("layout", default_layout()),
             theme: w.field("theme", Flavor::default()),
             font: w.nested_or("font", FontConfig::default()),
-            macos: w.nested_or("macos", MacosConfig::default()),
+            macos: w.nested_or("macos", default_macos()),
             windows: w.nested_or("windows", default_windows()),
             log_level: w.field("log_level", LogLevel::default()),
             start_at_login: w.field("start_at_login", false),
         }
     }
+}
+
+fn default_macos_ignore() -> Vec<MacosWindow> {
+    vec![
+        MacosWindow {
+            app: None,
+            bundle_id: Some("com.apple.dock".into()),
+            title: None,
+        },
+        MacosWindow {
+            app: None,
+            bundle_id: Some("com.apple.controlcenter".into()),
+            title: None,
+        },
+        MacosWindow {
+            app: None,
+            bundle_id: Some("com.apple.notificationcenterui".into()),
+            title: None,
+        },
+        MacosWindow {
+            app: None,
+            bundle_id: Some("com.apple.loginwindow".into()),
+            title: None,
+        },
+    ]
+}
+
+fn default_macos() -> MacosConfig {
+    let mut config = MacosConfig::default();
+    config.ignore.extend(default_macos_ignore());
+    config
 }
 
 fn default_windows() -> WindowsConfig {
@@ -530,8 +561,10 @@ impl WalkRecover for FontConfig {
 
 impl WalkRecover for MacosConfig {
     fn walk(w: &mut Walker) -> Self {
+        let mut ignore = w.rule_vec::<MacosWindow>("ignore");
+        ignore.extend(default_macos_ignore());
         MacosConfig {
-            ignore: w.rule_vec::<MacosWindow>("ignore"),
+            ignore,
             on_open: w.rule_vec::<MacosOnOpenRule>("on_open"),
         }
     }
@@ -828,22 +861,36 @@ pub(crate) struct WindowsWindow {
     pub(crate) process: Option<String>,
     #[serde(default)]
     pub(crate) title: Option<String>,
+    #[serde(default)]
+    pub(crate) class: Option<String>,
+    #[serde(default)]
+    pub(crate) aumid: Option<String>,
 }
 
 #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
 impl WindowsWindow {
-    pub(crate) fn matches(&self, process: &str, title: Option<&str>) -> bool {
+    pub(crate) fn matches(
+        &self,
+        process: &str,
+        title: Option<&str>,
+        class: Option<&str>,
+        aumid: Option<&str>,
+    ) -> bool {
         windows_predicate_matches(
             self.process.as_deref(),
             self.title.as_deref(),
+            self.class.as_deref(),
+            self.aumid.as_deref(),
             process,
             title,
+            class,
+            aumid,
         )
     }
 }
 
 impl WalkRule for WindowsWindow {
-    const KNOWN: &'static [&'static str] = &["process", "title"];
+    const KNOWN: &'static [&'static str] = &["process", "title", "class", "aumid"];
 }
 
 fn pattern_matches(pattern: &str, text: &str) -> bool {
@@ -919,6 +966,10 @@ pub(crate) struct WindowsOnOpenRule {
     #[serde(default)]
     pub(crate) title: Option<String>,
     #[serde(default)]
+    pub(crate) class: Option<String>,
+    #[serde(default)]
+    pub(crate) aumid: Option<String>,
+    #[serde(default)]
     pub(crate) mode: Option<WindowMode>,
     #[serde(default)]
     pub(crate) workspace: Option<String>,
@@ -929,18 +980,29 @@ pub(crate) struct WindowsOnOpenRule {
     expect(dead_code, reason = "Windows-only schema")
 )]
 impl WindowsOnOpenRule {
-    pub(crate) fn matches(&self, process: &str, title: Option<&str>) -> bool {
+    pub(crate) fn matches(
+        &self,
+        process: &str,
+        title: Option<&str>,
+        class: Option<&str>,
+        aumid: Option<&str>,
+    ) -> bool {
         windows_predicate_matches(
             self.process.as_deref(),
             self.title.as_deref(),
+            self.class.as_deref(),
+            self.aumid.as_deref(),
             process,
             title,
+            class,
+            aumid,
         )
     }
 }
 
 impl WalkRule for WindowsOnOpenRule {
-    const KNOWN: &'static [&'static str] = &["process", "title", "mode", "workspace"];
+    const KNOWN: &'static [&'static str] =
+        &["process", "title", "class", "aumid", "mode", "workspace"];
 }
 
 #[cfg_attr(not(target_os = "macos"), expect(dead_code))]
@@ -957,22 +1019,89 @@ fn default_windows_ignore() -> Vec<WindowsWindow> {
         WindowsWindow {
             process: Some("LockApp.exe".into()),
             title: None,
+            class: None,
+            aumid: None,
         },
         WindowsWindow {
             process: Some("SearchHost.exe".into()),
             title: None,
+            class: None,
+            aumid: None,
         },
         WindowsWindow {
             process: Some("StartMenuExperienceHost.exe".into()),
             title: None,
+            class: None,
+            aumid: None,
         },
         WindowsWindow {
             process: None,
             title: Some("MSCTFIME UI".into()),
+            class: None,
+            aumid: None,
         },
         WindowsWindow {
             process: None,
             title: Some("OLEChannelWnd".into()),
+            class: None,
+            aumid: None,
+        },
+        WindowsWindow {
+            process: None,
+            title: None,
+            class: Some("Shell_TrayWnd".into()),
+            aumid: None,
+        },
+        WindowsWindow {
+            process: None,
+            title: None,
+            class: Some("Shell_SecondaryTrayWnd".into()),
+            aumid: None,
+        },
+        WindowsWindow {
+            process: None,
+            title: None,
+            class: Some("Progman".into()),
+            aumid: None,
+        },
+        WindowsWindow {
+            process: None,
+            title: None,
+            class: Some("WorkerW".into()),
+            aumid: None,
+        },
+        WindowsWindow {
+            process: None,
+            title: None,
+            class: Some("TaskListThumbnailWnd".into()),
+            aumid: None,
+        },
+        WindowsWindow {
+            process: None,
+            title: None,
+            class: Some("MultitaskingViewFrame".into()),
+            aumid: None,
+        },
+        WindowsWindow {
+            process: None,
+            title: None,
+            class: Some("Xaml_WindowedPopupClass".into()),
+            aumid: None,
+        },
+        WindowsWindow {
+            process: None,
+            title: None,
+            class: Some("TaskManagerWindow".into()),
+            aumid: None,
+        },
+        // Top-level CoreWindow HWNDs are exclusively shell surfaces on modern
+        // Windows (lock screen, sign-in UI, Start, Search/Cortana flyout,
+        // Action Center). UWP apps surface as ApplicationFrameWindow.
+        WindowsWindow {
+            process: None,
+            title: None,
+            class: Some("Windows.UI.Core.CoreWindow".into()),
+            aumid: None,
         },
     ]
 }
@@ -1007,7 +1136,10 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) font: FontConfig,
     #[serde(default)]
-    #[cfg_attr(not(target_os = "macos"), expect(dead_code))]
+    #[cfg_attr(
+        not(target_os = "macos"),
+        expect(dead_code, reason = "only read by macOS platform code")
+    )]
     pub(crate) macos: MacosConfig,
     #[serde(default)]
     #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
@@ -1232,11 +1364,19 @@ fn macos_predicate_matches(
     rule_app.is_some() || rule_bundle_id.is_some() || rule_title.is_some()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "predicate fields are individually named for clarity at call sites"
+)]
 fn windows_predicate_matches(
     rule_process: Option<&str>,
     rule_title: Option<&str>,
+    rule_class: Option<&str>,
+    rule_aumid: Option<&str>,
     process: &str,
     title: Option<&str>,
+    class: Option<&str>,
+    aumid: Option<&str>,
 ) -> bool {
     if let Some(p) = rule_process
         && !pattern_matches(p, process)
@@ -1248,7 +1388,17 @@ fn windows_predicate_matches(
     {
         return false;
     }
-    rule_process.is_some() || rule_title.is_some()
+    if let Some(p) = rule_class
+        && !class.is_some_and(|c| pattern_matches(p, c))
+    {
+        return false;
+    }
+    if let Some(p) = rule_aumid
+        && !aumid.is_some_and(|a| pattern_matches(p, a))
+    {
+        return false;
+    }
+    rule_process.is_some() || rule_title.is_some() || rule_class.is_some() || rule_aumid.is_some()
 }
 
 #[cfg(test)]
@@ -1948,5 +2098,245 @@ mod tests {
         let config = Config::load_or_default(path.to_str().unwrap());
         assert_eq!(config.macos.on_open.len(), 1);
         assert_eq!(config.macos.on_open[0].app.as_deref(), Some("Finder"));
+    }
+
+    #[test]
+    fn windows_rule_parses_class_and_aumid() {
+        let config: Config = toml::from_str(concat!(
+            "[[windows.ignore]]\n",
+            "class = \"Foo\"\n",
+            "aumid = \"Some.App.Id\"\n",
+            "\n",
+            "[[windows.on_open]]\n",
+            "class = \"Bar\"\n",
+            "aumid = \"Other.App\"\n",
+            "mode = \"float\"\n",
+        ))
+        .unwrap();
+        let ignore = &config.windows.ignore;
+        let user_rule = ignore.iter().find(|r| r.class.as_deref() == Some("Foo"));
+        assert!(user_rule.is_some());
+        assert_eq!(user_rule.unwrap().aumid.as_deref(), Some("Some.App.Id"));
+
+        let on_open = &config.windows.on_open;
+        assert_eq!(on_open[0].class.as_deref(), Some("Bar"));
+        assert_eq!(on_open[0].aumid.as_deref(), Some("Other.App"));
+    }
+
+    #[test]
+    fn windows_predicate_matches_class_only() {
+        assert!(windows_predicate_matches(
+            None,
+            None,
+            Some("Foo"),
+            None,
+            "any.exe",
+            Some("title"),
+            Some("Foo"),
+            None,
+        ));
+        assert!(!windows_predicate_matches(
+            None,
+            None,
+            Some("Foo"),
+            None,
+            "any.exe",
+            Some("title"),
+            Some("Bar"),
+            None,
+        ));
+    }
+
+    #[test]
+    fn windows_predicate_matches_class_regex() {
+        assert!(windows_predicate_matches(
+            None,
+            None,
+            Some("/^Shell_/"),
+            None,
+            "explorer.exe",
+            None,
+            Some("Shell_TrayWnd"),
+            None,
+        ));
+        assert!(!windows_predicate_matches(
+            None,
+            None,
+            Some("/^Shell_/"),
+            None,
+            "explorer.exe",
+            None,
+            Some("NotShell"),
+            None,
+        ));
+    }
+
+    #[test]
+    fn windows_predicate_matches_aumid_literal_and_regex() {
+        assert!(windows_predicate_matches(
+            None,
+            None,
+            None,
+            Some("MyApp_8wekyb3d8bbwe"),
+            "app.exe",
+            None,
+            None,
+            Some("MyApp_8wekyb3d8bbwe"),
+        ));
+        assert!(windows_predicate_matches(
+            None,
+            None,
+            None,
+            Some("/^Microsoft\\./"),
+            "app.exe",
+            None,
+            None,
+            Some("Microsoft.WindowsCalculator"),
+        ));
+        assert!(!windows_predicate_matches(
+            None,
+            None,
+            None,
+            Some("/^Microsoft\\./"),
+            "app.exe",
+            None,
+            None,
+            Some("NotMicrosoft.App"),
+        ));
+    }
+
+    #[test]
+    fn windows_predicate_matches_combined_process_and_class() {
+        assert!(windows_predicate_matches(
+            Some("explorer.exe"),
+            None,
+            Some("Shell_TrayWnd"),
+            None,
+            "explorer.exe",
+            None,
+            Some("Shell_TrayWnd"),
+            None,
+        ));
+        assert!(!windows_predicate_matches(
+            Some("explorer.exe"),
+            None,
+            Some("Shell_TrayWnd"),
+            None,
+            "other.exe",
+            None,
+            Some("Shell_TrayWnd"),
+            None,
+        ));
+    }
+
+    #[test]
+    fn windows_predicate_matches_combined_process_and_aumid() {
+        assert!(windows_predicate_matches(
+            Some("app.exe"),
+            None,
+            None,
+            Some("MyApp_id"),
+            "app.exe",
+            None,
+            None,
+            Some("MyApp_id"),
+        ));
+        assert!(!windows_predicate_matches(
+            Some("app.exe"),
+            None,
+            None,
+            Some("MyApp_id"),
+            "app.exe",
+            None,
+            None,
+            Some("WrongApp_id"),
+        ));
+    }
+
+    #[test]
+    fn windows_predicate_fail_open_on_none_class() {
+        assert!(!windows_predicate_matches(
+            None,
+            None,
+            Some("Foo"),
+            None,
+            "any.exe",
+            None,
+            None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn windows_predicate_fail_open_on_none_aumid() {
+        assert!(!windows_predicate_matches(
+            None,
+            None,
+            None,
+            Some("Some.Id"),
+            "any.exe",
+            None,
+            None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn default_windows_ignore_contains_shell_tray() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_win_defaults_{nanos}.toml"));
+        std::fs::write(&path, "[windows]\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert!(
+            config
+                .windows
+                .ignore
+                .iter()
+                .any(|r| r.class.as_deref() == Some("Shell_TrayWnd"))
+        );
+    }
+
+    #[test]
+    fn default_windows_ignore_contains_core_window() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_win_core_window_{nanos}.toml"));
+        std::fs::write(&path, "[windows]\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        let entry = config
+            .windows
+            .ignore
+            .iter()
+            .find(|r| r.class.as_deref() == Some("Windows.UI.Core.CoreWindow"));
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert!(entry.title.is_none());
+        assert!(entry.aumid.is_none());
+    }
+
+    #[test]
+    fn default_macos_ignore_contains_dock() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_macos_defaults_{nanos}.toml"));
+        std::fs::write(&path, "[macos]\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load_or_default(path.to_str().unwrap());
+        assert!(
+            config
+                .macos
+                .ignore
+                .iter()
+                .any(|r| r.bundle_id.as_deref() == Some("com.apple.dock"))
+        );
     }
 }

@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use crate::action::Query;
 use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, WindowMode, WindowsWindow};
+use crate::config::{Config, WindowMode};
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, MonitorId,
     MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
@@ -316,13 +316,14 @@ impl Dome {
         self.registry.get_id(id)
     }
 
+    pub(super) fn ignore_rules(&self) -> &[crate::config::WindowsWindow] {
+        &self.config.windows.ignore
+    }
+
     /// Adding a manageable window.
     #[tracing::instrument(skip_all, fields(window = %new))]
     pub(super) fn add_window(&mut self, new: NewWindow, rect: Dimension<Physical>, monitor: isize) {
         if self.registry.contains_hwnd(new.ext.id()) {
-            return;
-        }
-        if should_ignore(&new, &self.config.windows.ignore) {
             return;
         }
         let (target_ws, mode_override) = self.resolve_on_open(&new);
@@ -902,29 +903,20 @@ impl Dome {
     }
 
     fn resolve_on_open(&mut self, new: &NewWindow) -> (WorkspaceId, Option<WindowMode>) {
-        let rule = self
-            .config
-            .windows
-            .on_open
-            .iter()
-            .find(|r| r.matches(&new.process, new.title.as_deref()));
+        let rule = self.config.windows.on_open.iter().find(|r| {
+            r.matches(
+                &new.process,
+                new.title.as_deref(),
+                new.class.as_deref(),
+                new.aumid.as_deref(),
+            )
+        });
         let target_ws = self
             .hub
             .resolve_workspace(rule.and_then(|r| r.workspace.as_deref()));
         let mode_override = rule.and_then(|r| r.mode);
         (target_ws, mode_override)
     }
-}
-
-pub(super) fn should_ignore(new: &NewWindow, rules: &[WindowsWindow]) -> bool {
-    if let Some(rule) = rules
-        .iter()
-        .find(|r| r.matches(&new.process, new.title.as_deref()))
-    {
-        tracing::debug!(%new, ?rule, "Window ignored by rule");
-        return true;
-    }
-    false
 }
 
 // Fallback display string derived from the executable name. Prefer

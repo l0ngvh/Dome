@@ -18,7 +18,7 @@ Stops Dome and restores all windows.
 ## Actions
 
 Every action listed in [commands.md](commands.md) is also a CLI subcommand. The
-syntax matches what you write in the config or `on_open` rules: `dome focus right`,
+syntax matches what you write in `[keymaps]` bindings: `dome focus right`,
 `dome move workspace 2`, `dome toggle minimized`, `dome exec "open -a Terminal"`.
 
 ## `dome query workspaces`

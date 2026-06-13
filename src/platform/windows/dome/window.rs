@@ -18,6 +18,8 @@ pub(in crate::platform::windows) struct NewWindow {
     pub(in crate::platform::windows) ext: Arc<dyn ManageExternalWindow>,
     pub(in crate::platform::windows) title: Option<String>,
     pub(in crate::platform::windows) process: String,
+    pub(in crate::platform::windows) class: Option<String>,
+    pub(in crate::platform::windows) aumid: Option<String>,
     pub(in crate::platform::windows) constraints: (f32, f32, f32, f32),
     pub(in crate::platform::windows) app_name: Option<String>,
 }
@@ -202,6 +204,8 @@ impl Dome {
             ext,
             title,
             process,
+            class: _,
+            aumid: _,
             constraints,
             app_name,
         } = new;

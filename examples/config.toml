@@ -130,7 +130,9 @@ ignore = [
   # { process = "SystemSettings.exe" },
   # { process = "/.*Settings.*/" },
   # { title = "Task Manager" },
+  # { class = "Chrome_WidgetWin_1" },
 ]
 # on_open = [
 #   { process = "slack.exe", mode = "float", workspace = "3" },
+#   { aumid = "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", mode = "float" },
 # ]

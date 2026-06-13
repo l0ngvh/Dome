@@ -66,6 +66,8 @@ fn on_open_moves_window_to_workspace() {
     config.windows.on_open.push(WindowsOnOpenRule {
         process: Some("slack.exe".to_string()),
         title: None,
+        class: None,
+        aumid: None,
         mode: None,
         workspace: Some("3".to_string()),
     });
@@ -166,10 +168,40 @@ fn ignored_window_rule_prevents_insertion() {
     config.windows.ignore.push(WindowsWindow {
         process: Some("bloat.exe".to_string()),
         title: None,
+        class: None,
+        aumid: None,
     });
     let mut env = TestEnv::new_with_config(config);
 
     let w1 = env.open(1, "Bloat", "bloat.exe", SPAWN_DIM);
+
+    assert_eq!(env.dim(w1), SPAWN_DIM);
+}
+
+#[test]
+fn ignored_window_rule_by_class_prevents_insertion() {
+    let mut config = Config::default();
+    config.windows.ignore.push(WindowsWindow {
+        process: None,
+        title: None,
+        class: Some("Shell_TrayWnd".to_string()),
+        aumid: None,
+    });
+    let mut env = TestEnv::new_with_config(config);
+
+    let ext = Arc::new(
+        MockExternalHwnd::with_title(
+            1,
+            "Taskbar",
+            "explorer.exe",
+            env.moves.clone(),
+            env.z_stack.clone(),
+            env.focus_target.clone(),
+        )
+        .with_class("Shell_TrayWnd")
+        .with_dimension(SPAWN_DIM),
+    );
+    let w1 = env.open_with(ext);
 
     assert_eq!(env.dim(w1), SPAWN_DIM);
 }

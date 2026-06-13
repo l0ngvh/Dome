@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessage
 use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
-use crate::platform::windows::dome::rejection_log_filter::RejectionLogFilter;
+use crate::platform::windows::dome::rejection_log_filter::{RejectionLogFilter, RejectionReason};
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
@@ -218,6 +218,7 @@ impl Runner {
         let inspect: Arc<dyn InspectExternalWindow> = ext.clone();
         let manage: Arc<dyn ManageExternalWindow> = ext;
         let log_filter = Arc::clone(&self.rejection_log_filter);
+        let ignore_rules = self.dome.ignore_rules().to_vec();
         self.dispatcher.dispatch(
             move || {
                 if let Some(reason) = inspect.check_unmanageable() {
@@ -232,11 +233,36 @@ impl Runner {
                     }
                     return None;
                 }
+                let class = inspect.get_class_name();
+                let aumid = inspect.get_aumid();
+                let process = inspect.get_process_name().unwrap_or_default();
+                let title = inspect.get_window_title();
+                let matched = ignore_rules.iter().find(|r| {
+                    r.matches(
+                        &process,
+                        title.as_deref(),
+                        class.as_deref(),
+                        aumid.as_deref(),
+                    )
+                });
+                if let Some(_rule) = matched {
+                    let pid = manage.pid();
+                    let reason = RejectionReason::IgnoredByRule;
+                    if pid == 0 {
+                        tracing::trace!(?hwnd_id, ?reason, "not manageable");
+                    } else if log_filter.record_and_should_log(hwnd_id, pid, reason, Instant::now())
+                    {
+                        tracing::trace!(?hwnd_id, ?reason, "not manageable");
+                    }
+                    return None;
+                }
                 Some((
                     NewWindow {
                         ext: manage,
-                        title: inspect.get_window_title(),
-                        process: inspect.get_process_name().unwrap_or_default(),
+                        title,
+                        process,
+                        class,
+                        aumid,
                         constraints: inspect.get_size_constraints(),
                         app_name: inspect.get_app_display_name(),
                     },
@@ -343,6 +369,16 @@ impl ReadDispatcher {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(50)
             .thread_name(|i| format!("dome-read-{i}"))
+            .start_handler(|_| {
+                // AUMID lookup via SHGetPropertyStoreForWindow requires COM.
+                // MTA is correct here: read-pool workers do not pump messages.
+                use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+                let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+                debug_assert!(
+                    hr.is_ok(),
+                    "CoInitializeEx failed on read pool worker: {hr:?}"
+                );
+            })
             .build()
             .expect("Failed to create read dispatcher thread pool");
         Self { pool, thread_id }

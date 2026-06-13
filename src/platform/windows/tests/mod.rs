@@ -244,24 +244,33 @@ impl TestEnv {
         if !ext.manageable {
             return hwnd_id;
         }
+        let new = NewWindow {
+            ext: ext.clone(),
+            title: ext.title.clone(),
+            process: ext.process.clone(),
+            class: ext.class.clone(),
+            aumid: None,
+            constraints: (
+                ext.min_size.0,
+                ext.min_size.1,
+                ext.max_size.0,
+                ext.max_size.1,
+            ),
+            app_name: ext.app_name.clone(),
+        };
+        let ignored = self.dome.ignore_rules().iter().any(|r| {
+            r.matches(
+                &new.process,
+                new.title.as_deref(),
+                new.class.as_deref(),
+                new.aumid.as_deref(),
+            )
+        });
+        if ignored {
+            return hwnd_id;
+        }
         let dim = ext.get_dim();
-        let constraints = (
-            ext.min_size.0,
-            ext.min_size.1,
-            ext.max_size.0,
-            ext.max_size.1,
-        );
-        self.dome.add_window(
-            NewWindow {
-                ext: ext.clone(),
-                title: ext.title.clone(),
-                process: ext.process.clone(),
-                constraints,
-                app_name: ext.app_name.clone(),
-            },
-            dim,
-            1,
-        );
+        self.dome.add_window(new, dim, 1);
         hwnd_id
     }
 
@@ -687,6 +696,7 @@ struct MockExternalHwnd {
     manageable: bool,
     title: Option<String>,
     process: String,
+    class: Option<String>,
     app_name: Option<String>,
     dimension: Mutex<Dimension>,
     override_position: Mutex<Option<(i32, i32, i32, i32)>>,
@@ -714,6 +724,7 @@ impl MockExternalHwnd {
             manageable: true,
             title: Some(title.to_string()),
             process: process.to_string(),
+            class: None,
             app_name: None,
             dimension: Mutex::new(Dimension::new(
                 Length::ZERO,
@@ -733,6 +744,11 @@ impl MockExternalHwnd {
 
     fn with_manageable(mut self, manageable: bool) -> Self {
         self.manageable = manageable;
+        self
+    }
+
+    fn with_class(mut self, class: &str) -> Self {
+        self.class = Some(class.to_string());
         self
     }
 

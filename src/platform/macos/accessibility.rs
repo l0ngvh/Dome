@@ -33,6 +33,7 @@ pub(super) enum RejectionReason {
     Size,
     Main,
     Minimized,
+    IgnoredByRule,
 }
 
 /// Per-app accessibility state shared across all windows of the same application.

@@ -1,6 +1,6 @@
 # Commands
 
-An action is a single instruction that mutates Dome's window state, like `focus right` or `toggle float`. The action surface is identical on macOS and Windows, and the same syntax appears everywhere actions are used: the `[keymaps]` table in the config file (see [configuration.md](configuration.md#keybindings)), the `on_open` field on a window rule (see [configuration.md](configuration.md#window-rules)), and the `dome` CLI (see [cli.md](cli.md)).
+An action is a single instruction that mutates Dome's window state, like `focus right` or `toggle float`. The action surface is identical on macOS and Windows, and the same syntax appears everywhere actions are used: the `[keymaps]` table in the config file (see [configuration.md](configuration.md#keybindings)) and the `dome` CLI (see [cli.md](cli.md)).
 
 ## Focus
 

@@ -21,8 +21,11 @@ pub(crate) enum RejectionReason {
     Toolwindow,
     Noactivate,
     Transparent,
+    DlgModalFrame,
+    PopupNoFrame,
     OwnedNoAppWindow,
     ZeroDim,
+    IgnoredByRule,
 }
 
 pub(crate) struct RejectionLogFilter {

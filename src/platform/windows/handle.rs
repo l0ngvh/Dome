@@ -18,12 +18,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE,
-    GetAncestor, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowRect,
+    GetAncestor, GetClassNameW, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowRect,
     GetWindowThreadProcessId, HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO,
     SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
     SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow, SetWindowPos, ShowWindow,
     ShowWindowAsync, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_APPWINDOW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX,
+    WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -459,6 +460,14 @@ impl InspectExternalWindow for ExternalHwnd {
         if ex_style & WS_EX_TRANSPARENT.0 != 0 {
             return Some(RejectionReason::Transparent);
         }
+        if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
+            return Some(RejectionReason::DlgModalFrame);
+        }
+        if style & WS_POPUP.0 != 0
+            && style & (WS_THICKFRAME.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0) == 0
+        {
+            return Some(RejectionReason::PopupNoFrame);
+        }
         // Mirror the Windows Shell's taskbar/Alt-Tab rule: a top-level app window
         // is either ownerless or sets WS_EX_APPWINDOW. Owned windows without that
         // flag are transients (dialogs, tool palettes, custom popups). Steam's main
@@ -655,6 +664,32 @@ impl InspectExternalWindow for ExternalHwnd {
     // `MonitorFromWindow` is non-blocking and safe to call on external HWNDs.
     fn get_monitor(&self) -> isize {
         unsafe { MonitorFromWindow(self.0, MONITOR_DEFAULTTONEAREST) }.0 as isize
+    }
+
+    fn get_class_name(&self) -> Option<String> {
+        let mut buf = [0u16; 256];
+        let len = unsafe { GetClassNameW(self.0, &mut buf) };
+        if len <= 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buf[..len as usize]))
+    }
+
+    fn get_aumid(&self) -> Option<String> {
+        use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
+        use windows::Win32::System::Com::CoTaskMemFree;
+        use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
+        use windows::Win32::UI::Shell::PropertiesSystem::{
+            IPropertyStore, SHGetPropertyStoreForWindow,
+        };
+        unsafe {
+            let store: IPropertyStore = SHGetPropertyStoreForWindow(self.0).ok()?;
+            let pv = store.GetValue(&PKEY_AppUserModel_ID).ok()?;
+            let pwstr = PropVariantToStringAlloc(&pv).ok()?;
+            let result = pwstr.to_string().ok();
+            CoTaskMemFree(Some(pwstr.as_ptr() as *const _));
+            result
+        }
     }
 }
 
