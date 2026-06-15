@@ -228,7 +228,7 @@ impl PartitionTreeStrategy {
                     .monitors
                     .get(hub.workspaces.get(container.workspace).monitor)
                     .scale;
-                let expected_height = dim.height - super::layout::tab_bar_length(hub, scale);
+                let expected_height = dim.height - self.tab_bar_length(scale);
                 for (i, (child_dim, c)) in constraints.iter().enumerate() {
                     let allows_smaller_w =
                         c.max_width.value() > 0.0 && c.max_width.value() < dim.width.value();

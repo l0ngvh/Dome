@@ -70,16 +70,17 @@ launch to `~/Library/Logs/dome/dome.log` on macOS, or
 
 ## Configuring Dome
 
-Dome is configured by editing a single TOML file. The default location is:
+Dome is configured by editing two TOML files. The default locations are:
 
-- macOS: `~/.config/dome/config.toml` (or `$XDG_CONFIG_HOME/dome/config.toml`).
-- Windows: `%APPDATA%\dome\config.toml`.
+- macOS: `~/.config/dome/config.toml` and `~/.config/dome/layout.toml` (or under `$XDG_CONFIG_HOME/dome/`).
+- Windows: `%APPDATA%\dome\config.toml` and `%APPDATA%\dome\layout.toml`.
 
-Changes take effect when you save.
+`config.toml` covers general settings, keybindings, and window rules. `layout.toml` covers tiling strategy, window-size constraints, and per-strategy parameters. Changes take effect when you save.
 
 ## Documentation
 
 - [Configuration](docs/configuration.md): config file reference, window rules, and keybindings
+- [Layout](docs/layout.md): layout strategy, window-size constraints, and per-strategy parameters
 - [Commands](docs/commands.md): full command reference
 - [CLI](docs/cli.md): command-line interface usage
 - [FQG](docs/faq.md): command-line interface usage

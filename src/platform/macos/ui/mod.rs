@@ -241,11 +241,13 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                             mtm,
                             backend.clone(),
                             config.clone(),
+                            frame.tab_bar_height,
                             data.cocoa_frame,
                             data.scale,
                             hub_sender.clone(),
                         )
                     });
+                    overlay.set_tab_bar_height(frame.tab_bar_height);
                     if data.windows.is_empty() && data.containers.is_empty() {
                         overlay.clear();
                     } else {

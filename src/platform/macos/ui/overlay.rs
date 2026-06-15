@@ -286,6 +286,7 @@ impl TilingOverlay {
         mtm: MainThreadMarker,
         backend: Rc<MetalBackend>,
         config: Config,
+        tab_bar_height: Length<Logical>,
         cocoa_frame: NSRect,
         scale: f64,
         hub_sender: CalloopSender<HubEvent>,
@@ -306,7 +307,16 @@ impl TilingOverlay {
         window.setIgnoresMouseEvents(false);
         window.setAcceptsMouseMovedEvents(true);
 
-        let view = TilingOverlayView::new(mtm, backend, config, scale, hub_sender, flavor, &font);
+        let view = TilingOverlayView::new(
+            mtm,
+            backend,
+            config,
+            tab_bar_height,
+            scale,
+            hub_sender,
+            flavor,
+            &font,
+        );
         window.setContentView(Some(&view));
         window.setFrame_display(cocoa_frame, false);
         window.orderFront(None);
@@ -324,6 +334,10 @@ impl TilingOverlay {
     ) {
         self.window.setFrame_display(cocoa_frame, false);
         self.view.update(monitor, windows, containers, scale);
+    }
+
+    pub(super) fn set_tab_bar_height(&self, h: Length<Logical>) {
+        self.view.ivars().tab_bar_height.set(h);
     }
 
     pub(super) fn clear(&self) {
@@ -421,6 +435,7 @@ pub(super) struct TilingOverlayViewIvars {
     windows: RefCell<Vec<TilingWindowPlacement>>,
     containers: RefCell<Vec<(ContainerPlacement, Vec<String>)>>,
     config: RefCell<Config>,
+    tab_bar_height: Cell<Length<Logical>>,
     scale: Cell<f64>,
     hub_sender: CalloopSender<HubEvent>,
 }
@@ -491,10 +506,15 @@ define_class!(
 );
 
 impl TilingOverlayView {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "all parameters are needed for overlay initialization"
+    )]
     fn new(
         mtm: MainThreadMarker,
         backend: Rc<MetalBackend>,
         config: Config,
+        tab_bar_height: Length<Logical>,
         scale: f64,
         hub_sender: CalloopSender<HubEvent>,
         flavor: Flavor,
@@ -510,6 +530,7 @@ impl TilingOverlayView {
             windows: RefCell::new(Vec::new()),
             containers: RefCell::new(Vec::new()),
             config: RefCell::new(config),
+            tab_bar_height: Cell::new(tab_bar_height),
             scale: Cell::new(scale),
             hub_sender,
         };
@@ -601,7 +622,7 @@ impl TilingOverlayView {
         let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
         let metrics = OverlayMetrics {
             border,
-            tab_bar_height: config.layout.partition_tree.tab_bar_height,
+            tab_bar_height: ivars.tab_bar_height.get(),
         };
         let theme = config.theme();
 

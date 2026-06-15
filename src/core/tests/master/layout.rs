@@ -1,9 +1,9 @@
 use super::setup_master;
 use crate::config::{LayoutConfig, MasterConfig, Strategy};
 use crate::core::allocator::NodeId;
-use crate::core::hub::HubConfig;
 use crate::core::node::WindowId;
 use crate::core::strategy::TilingAction;
+use crate::core::tests::default_layout_for_tests;
 use crate::core::tests::default_partition_tree_config_for_tests;
 use crate::core::tests::{snapshot, validate_hub};
 use insta::assert_snapshot;
@@ -985,16 +985,14 @@ fn sync_config_increments_master_count() {
     let ws = hub.current_workspace();
     let focus_before = hub.focused_tiling_window(ws);
 
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 2,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.5,
+            master_count: 2,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     // Window ordering and focus preserved (no rebuild, apply_config path).
@@ -1053,16 +1051,14 @@ fn sync_config_decrease_master_ratio() {
     let ws = hub.current_workspace();
     let focus_before = hub.focused_tiling_window(ws);
 
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.3,
-                master_count: 1,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.3,
+            master_count: 1,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     // Window ordering and focus preserved (no rebuild, apply_config path).
@@ -1134,16 +1130,14 @@ fn sync_config_applies_master_params_without_rebuilding() {
     hub.focus_workspace("0");
 
     // Change master_ratio from 0.5 to 0.4 via hot-reload.
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.4,
-                master_count: 1,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.4,
+            master_count: 1,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     // Both workspaces: ordering and focus preserved.
@@ -1205,16 +1199,14 @@ fn sync_config_overrides_runtime_tuned_master_ratio() {
     hub.handle_tiling_action(TilingAction::GrowMaster);
 
     // Hot-reload resets to file value 0.5.
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.4,
-                master_count: 1,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.4,
+            master_count: 1,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     // Layout output shows ratio back to 0.5 (75px master on 150px screen).

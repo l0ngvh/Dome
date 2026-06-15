@@ -17,6 +17,8 @@ enum CliCommand {
     Launch {
         #[arg(short, long)]
         config: Option<String>,
+        #[arg(short, long)]
+        layout: Option<String>,
     },
     Focus {
         #[command(subcommand)]
@@ -113,7 +115,10 @@ enum CliQuery {
 
 #[derive(Debug)]
 enum Dispatch {
-    Launch(Option<String>),
+    Launch {
+        config: Option<String>,
+        layout: Option<String>,
+    },
     Action(Action),
     Query(Query),
 }
@@ -190,7 +195,7 @@ fn cli_toggle_to_action(t: CliToggle) -> Action {
 impl From<CliCommand> for Dispatch {
     fn from(cmd: CliCommand) -> Self {
         match cmd {
-            CliCommand::Launch { config } => Dispatch::Launch(config),
+            CliCommand::Launch { config, layout } => Dispatch::Launch { config, layout },
             CliCommand::Focus { target } => Dispatch::Action(Action::Focus(target.into())),
             CliCommand::Move { target } => Dispatch::Action(Action::Move(target.into())),
             CliCommand::Toggle { target } => Dispatch::Action(cli_toggle_to_action(target)),
@@ -206,12 +211,15 @@ impl From<CliCommand> for Dispatch {
 pub fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let dispatch = match cli.command {
-        None => Dispatch::Launch(None),
+        None => Dispatch::Launch {
+            config: None,
+            layout: None,
+        },
         Some(cmd) => Dispatch::from(cmd),
     };
 
     match dispatch {
-        Dispatch::Launch(config) => crate::run_app(config)?,
+        Dispatch::Launch { config, layout } => crate::run_app(config, layout)?,
         Dispatch::Action(action) => {
             crate::DomeClient.send_action(&action)?;
         }
@@ -230,7 +238,10 @@ mod tests {
     fn dispatch_from_argv(argv: &[&str]) -> Dispatch {
         let cli = Cli::try_parse_from(argv).expect("parse");
         match cli.command {
-            None => Dispatch::Launch(None),
+            None => Dispatch::Launch {
+                config: None,
+                layout: None,
+            },
             Some(cmd) => Dispatch::from(cmd),
         }
     }
@@ -321,8 +332,11 @@ mod tests {
     fn cli_launch_default() {
         let d = dispatch_from_argv(&["dome"]);
         match d {
-            Dispatch::Launch(None) => {}
-            other => panic!("expected Launch(None), got {other:?}"),
+            Dispatch::Launch {
+                config: None,
+                layout: None,
+            } => {}
+            other => panic!("expected Launch {{ None, None }}, got {other:?}"),
         }
     }
 
@@ -330,8 +344,37 @@ mod tests {
     fn cli_launch_with_config() {
         let d = dispatch_from_argv(&["dome", "launch", "--config", "/tmp/c"]);
         match d {
-            Dispatch::Launch(Some(ref s)) if s == "/tmp/c" => {}
-            other => panic!("expected Launch(Some(\"/tmp/c\")), got {other:?}"),
+            Dispatch::Launch {
+                config: Some(ref s),
+                layout: None,
+            } if s == "/tmp/c" => {}
+            other => panic!("expected Launch {{ Some(\"/tmp/c\"), None }}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_launch_with_layout() {
+        let d = dispatch_from_argv(&["dome", "launch", "--layout", "/tmp/l"]);
+        match d {
+            Dispatch::Launch {
+                config: None,
+                layout: Some(ref s),
+            } if s == "/tmp/l" => {}
+            other => panic!("expected Launch {{ None, Some(\"/tmp/l\") }}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_launch_with_config_and_layout() {
+        let d = dispatch_from_argv(&["dome", "launch", "--config", "/tmp/c", "--layout", "/tmp/l"]);
+        match d {
+            Dispatch::Launch {
+                config: Some(ref c),
+                layout: Some(ref l),
+            } if c == "/tmp/c" && l == "/tmp/l" => {}
+            other => {
+                panic!("expected Launch {{ Some(\"/tmp/c\"), Some(\"/tmp/l\") }}, got {other:?}")
+            }
         }
     }
 }

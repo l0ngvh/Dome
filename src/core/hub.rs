@@ -1,14 +1,14 @@
 use crate::action::MonitorTarget;
-use crate::config::{LayoutConfig, SizeConstraint, Strategy};
+use crate::config::{LayoutConfig, Strategy};
+
+use std::collections::HashSet;
 
 use super::allocator::{Allocator, NodeId};
-use super::master::MasterStrategy;
 use super::node::{
     ContainerId, Dimension, DisplayMode, Length, Monitor, MonitorId, Window, WindowId,
     WindowRestrictions, Workspace, WorkspaceId,
 };
-use super::partition_tree::PartitionTreeStrategy;
-use super::strategy::{TilingAction, TilingStrategy, clip};
+use super::strategy::{StrategySet, TilingAction, clip};
 
 pub(crate) struct VisiblePlacements {
     /// Window that should receive keyboard focus
@@ -100,7 +100,7 @@ pub(super) enum RestrictedAction {
 pub(crate) struct HubAccess {
     pub(super) monitors: Allocator<Monitor>,
     pub(super) focused_monitor: MonitorId,
-    pub(super) config: HubConfig,
+    pub(super) config: LayoutConfig,
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
 }
@@ -108,12 +108,12 @@ pub(crate) struct HubAccess {
 #[derive(Debug)]
 pub(crate) struct Hub {
     pub(super) access: HubAccess,
-    pub(super) strategy: Box<dyn TilingStrategy>,
+    pub(super) strategies: StrategySet,
     pub(super) minimized_windows: Vec<WindowId>,
 }
 
 impl Hub {
-    pub(crate) fn new(primary_screen: Dimension, primary_scale: f32, config: HubConfig) -> Self {
+    pub(crate) fn new(primary_screen: Dimension, primary_scale: f32, config: LayoutConfig) -> Self {
         let mut monitors: Allocator<Monitor> = Allocator::new();
         let mut workspaces: Allocator<Workspace> = Allocator::new();
 
@@ -124,10 +124,25 @@ impl Hub {
             active_workspace: WorkspaceId::new(0),
         });
 
-        let ws_id = workspaces.allocate(Workspace::new("0".to_string(), primary_id));
-        monitors.get_mut(primary_id).active_workspace = ws_id;
+        let primary_ws_name = "0".to_string();
+        let primary_ws_id =
+            workspaces.allocate(Workspace::new(primary_ws_name.clone(), primary_id));
+        monitors.get_mut(primary_id).active_workspace = primary_ws_id;
 
-        let strategy = build_strategy(&config.layout);
+        let mut strategies = StrategySet::new(&config);
+        strategies.register(primary_ws_id, &primary_ws_name, &config);
+
+        // Pre-allocate every workspace name listed in [[layout.workspace]]
+        // (skipping any that collide with the primary workspace's name) so
+        // that named workspaces have stable IDs from boot. They live on the
+        // primary monitor and are pinned: prune_workspace leaves them alone.
+        for entry in &config.workspace {
+            if entry.name == primary_ws_name {
+                continue;
+            }
+            let ws_id = workspaces.allocate(Workspace::new(entry.name.clone(), primary_id));
+            strategies.register(ws_id, &entry.name, &config);
+        }
 
         Self {
             access: HubAccess {
@@ -137,7 +152,7 @@ impl Hub {
                 workspaces,
                 windows: Allocator::new(),
             },
-            strategy,
+            strategies,
             minimized_windows: Vec::new(),
         }
     }
@@ -165,7 +180,9 @@ impl Hub {
         {
             return Some(id);
         }
-        self.strategy.focused_tiling_window(&self.access, ws_id)
+        self.strategies
+            .for_workspace(ws_id)
+            .focused_tiling_window(&self.access, ws_id)
     }
 
     pub(super) fn is_restricted(&self, action: RestrictedAction) -> bool {
@@ -191,7 +208,10 @@ impl Hub {
         if self.is_restricted(RestrictedAction::TilingNavigation) {
             return;
         }
-        self.strategy.handle_action(&mut self.access, action);
+        let ws_id = self.current_workspace();
+        self.strategies
+            .for_workspace_mut(ws_id)
+            .handle_action(&mut self.access, action);
     }
 
     pub(crate) fn focus_tab_index(&mut self, container_id: ContainerId, index: usize) {
@@ -233,11 +253,15 @@ impl Hub {
         let current_ws = self.current_workspace();
         if let Some(window_id) = self.focused_window(current_ws) {
             self.move_child_to_workspace_with_id(window_id, target_ws);
-        } else if self.strategy.has_tiling_windows(&self.access, current_ws) {
-            // Container highlighted: bypass focused_window() and move directly.
-            tracing::debug!(?current_ws, ?target_ws, "Moving container to monitor");
-            self.strategy
-                .move_focused_to_workspace(&mut self.access, current_ws, target_ws);
+        } else {
+            let has_tiling = self
+                .strategies
+                .for_workspace(current_ws)
+                .has_tiling_windows(&self.access, current_ws);
+            if has_tiling {
+                tracing::debug!(?current_ws, ?target_ws, "Moving container to monitor");
+                self.move_focused_across_workspaces(current_ws, target_ws);
+            }
         }
     }
 
@@ -261,7 +285,9 @@ impl Hub {
                 self.focus_float(ws, window_id);
             }
             DisplayMode::Tiling => {
-                self.strategy.set_focus(&mut self.access, window_id);
+                self.strategies
+                    .for_workspace_mut(ws)
+                    .set_focus(&mut self.access, window_id);
             }
         }
         self.focus_workspace_with_id(ws);
@@ -300,9 +326,11 @@ impl Hub {
     }
 
     fn count_workspace_windows(&self, ws_id: WorkspaceId, ws: &Workspace) -> usize {
-        self.strategy.tiling_window_count(&self.access, ws_id)
-            + ws.float_windows.len()
-            + ws.fullscreen_windows.len()
+        let tiling_count = self
+            .strategies
+            .for_workspace(ws_id)
+            .tiling_window_count(&self.access, ws_id);
+        tiling_count + ws.float_windows.len() + ws.fullscreen_windows.len()
     }
 
     #[cfg(test)]
@@ -325,8 +353,9 @@ impl Hub {
         let ws_id = self
             .access
             .workspaces
-            .allocate(Workspace::new(name, monitor_id));
+            .allocate(Workspace::new(name.clone(), monitor_id));
         self.access.monitors.get_mut(monitor_id).active_workspace = ws_id;
+        self.strategies.register(ws_id, &name, &self.access.config);
         monitor_id
     }
 
@@ -347,7 +376,9 @@ impl Hub {
 
         for ws_id in workspaces_to_migrate {
             self.access.workspaces.get_mut(ws_id).monitor = fallback_id;
-            self.strategy.layout_workspace(&mut self.access, ws_id);
+            self.strategies
+                .for_workspace_mut(ws_id)
+                .layout_workspace(&mut self.access, ws_id);
         }
 
         if self.access.focused_monitor == monitor_id {
@@ -376,90 +407,47 @@ impl Hub {
             .map(|(id, _)| *id)
             .collect();
         for ws_id in ws_ids {
-            self.strategy.layout_workspace(&mut self.access, ws_id);
+            self.strategies
+                .for_workspace_mut(ws_id)
+                .layout_workspace(&mut self.access, ws_id);
         }
     }
 
-    pub(crate) fn sync_config(&mut self, config: HubConfig) {
-        // A full strategy rebuild is needed only when the active layout kind
-        // changes (partition-tree <-> master-stack). Scalar param changes
-        // (master_ratio, master_count) are pushed into the running strategy
-        // via apply_config, preserving per-workspace window ordering and focus.
-        let rebuild = self.access.config.layout.strategy != config.layout.strategy;
+    pub(crate) fn sync_config(&mut self, config: LayoutConfig) {
         self.access.config = config;
+        let changes = self
+            .strategies
+            .resync(&self.access.workspaces, &self.access.config);
+        let changed_ids: HashSet<WorkspaceId> = changes.iter().map(|c| c.ws_id).collect();
 
-        if !rebuild {
-            self.strategy.apply_config(&mut self.access);
-            return;
-        }
-
-        // Collect IDs first to avoid borrowing self.access.workspaces while
-        // passing &mut self.access to the strategy.
-        let ws_ids: Vec<WorkspaceId> = self
+        let unchanged_ids: Vec<WorkspaceId> = self
             .access
             .workspaces
             .all_active()
             .iter()
             .map(|(id, _)| *id)
+            .filter(|id| !changed_ids.contains(id))
             .collect();
-
-        // Rebuild path. Entered only when `layout.strategy` changed (e.g.
-        // partition-tree <-> master-stack). Strategies differ in tree topology
-        // (partition-tree uses containers and tabs; master-stack uses a flat
-        // ordered list), so there is no meaningful cross-strategy migration.
-        // Consequences:
-        //   - Container groupings, tabbed containers, and split directions
-        //     from partition-tree are lost.
-        //   - Master-stack window order within master/stack areas is reset.
-        //   - Runtime-tuned master-stack params (GrowMaster / ShrinkMaster /
-        //     MoreMaster / FewerMaster actions) are wiped because the new
-        //     strategy is built fresh from config.
-        // Focus is preserved per workspace: the previously-focused tiling
-        // window is restored via set_focus, and `is_float_focused` is
-        // restored inline after the strategy calls that would otherwise clear
-        // it. Fullscreen, float, and minimized windows are untouched: their
-        // placement is managed by Hub, not the strategy.
-
-        // Snapshot each workspace's tiling windows, previous tiling focus,
-        // and float-focus flag before the old strategy is dropped.
-        let mut snapshots: Vec<(WorkspaceId, Vec<WindowId>, Option<WindowId>, bool)> = Vec::new();
-        for ws_id in &ws_ids {
-            let tiling_windows: Vec<WindowId> = self
-                .access
-                .windows
-                .all_active()
-                .iter()
-                .filter(|(_, w)| w.mode == DisplayMode::Tiling && w.workspace() == Some(*ws_id))
-                .map(|(id, _)| *id)
-                .collect();
-            let prev_focus = self.strategy.focused_tiling_window(&self.access, *ws_id);
-            let was_float_focused = self.access.workspaces.get(*ws_id).is_float_focused;
-            snapshots.push((*ws_id, tiling_windows, prev_focus, was_float_focused));
+        for ws_id in unchanged_ids {
+            self.strategies
+                .for_workspace_mut(ws_id)
+                .apply_config(&mut self.access, ws_id);
         }
 
-        // Replace the strategy. The old Box<dyn TilingStrategy> is dropped,
-        // deallocating all per-workspace state (both PartitionTreeStrategy
-        // and MasterStrategy are pure owned-data structs).
-        self.strategy = build_strategy(&self.access.config.layout);
-
-        // Re-attach tiling windows in WindowId-ascending order (creation
-        // order, the canonical deterministic ordering).
-        for (ws_id, wids, prev_focus, was_float_focused) in snapshots {
-            for wid in &wids {
-                self.strategy.attach_window(&mut self.access, *wid, ws_id);
-            }
-            if let Some(f) = prev_focus {
-                self.strategy.set_focus(&mut self.access, f);
-            }
-            // Restore is_float_focused after all strategy calls that clear it.
-            // The Workspace invariant (flag=true => float_windows non-empty)
-            // holds because the rebuild never mutates float_windows.
-            if was_float_focused {
-                self.access.workspaces.get_mut(ws_id).is_float_focused = true;
-            }
+        for change in changes {
+            tracing::debug!(
+                ws_id = %change.ws_id,
+                old = ?change.old,
+                new = ?change.new,
+                "Per-workspace strategy changed, rebuilding",
+            );
+            let snapshot = self.snapshot_workspace_for_rebuild(change.ws_id, change.old);
+            self.strategies
+                .get_mut(change.old)
+                .prune_workspace(change.ws_id);
+            self.reattach_workspace_after_rebuild(change.ws_id, snapshot);
         }
     }
-
     #[cfg(test)]
     pub(super) fn all_workspaces(&self) -> Vec<(WorkspaceId, Workspace)> {
         self.access.workspaces.all_active()
@@ -467,7 +455,7 @@ impl Hub {
 
     #[cfg(test)]
     pub(crate) fn validate_tree(&self) {
-        self.strategy.validate_tree(&self.access);
+        self.strategies.validate_tree(&self.access);
     }
 
     #[cfg(test)]
@@ -477,7 +465,9 @@ impl Hub {
 
     #[cfg(test)]
     pub(crate) fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
-        self.strategy.focused_tiling_window(&self.access, ws_id)
+        self.strategies
+            .for_workspace(ws_id)
+            .focused_tiling_window(&self.access, ws_id)
     }
 
     #[cfg_attr(not(test), expect(dead_code, reason = "used in test validators"))]
@@ -507,11 +497,10 @@ impl Hub {
                     };
                 }
 
-                let tiling = self.strategy.collect_tiling_placements(
-                    &self.access,
-                    ws_id,
-                    ws_id == current_ws,
-                );
+                let tiling = self
+                    .strategies
+                    .for_workspace(ws_id)
+                    .collect_tiling_placements(&self.access, ws_id, ws_id == current_ws);
                 let tiling_windows = tiling.windows;
                 let containers = tiling.containers;
 
@@ -562,8 +551,11 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn insert_tiling(&mut self, target_ws: WorkspaceId) -> WindowId {
         let window_id = self.access.windows.allocate(Window::tiling(target_ws));
-        self.strategy
-            .attach_window(&mut self.access, window_id, target_ws);
+        self.strategies.for_workspace_mut(target_ws).attach_window(
+            &mut self.access,
+            window_id,
+            target_ws,
+        );
         window_id
     }
 
@@ -615,7 +607,9 @@ impl Hub {
                 }
                 DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
                 DisplayMode::Tiling => {
-                    self.strategy.detach_window(&mut self.access, id);
+                    self.strategies
+                        .for_workspace_mut(ws)
+                        .detach_window(&mut self.access, id);
                 }
             }
             self.prune_workspace(ws);
@@ -689,12 +683,14 @@ impl Hub {
         tracing::debug!("Window constraint set");
 
         if let Some(ws) = window.workspace() {
-            self.strategy.layout_workspace(&mut self.access, ws);
+            self.strategies
+                .for_workspace_mut(ws)
+                .layout_workspace(&mut self.access, ws);
         }
     }
 
     /// Move a window to a target workspace. For tiling windows, delegates to
-    /// strategy.move_focused_to_workspace which handles both window and container
+    /// `Hub::move_focused_across_workspaces` which handles both window and container
     /// moves. For fullscreen/float, moves the specific window.
     #[tracing::instrument(skip(self))]
     pub(super) fn move_child_to_workspace_with_id(
@@ -722,8 +718,7 @@ impl Hub {
                 self.attach_float_to_workspace(target_ws, window_id, dim);
             }
             DisplayMode::Tiling => {
-                self.strategy
-                    .move_focused_to_workspace(&mut self.access, current_ws, target_ws);
+                self.move_focused_across_workspaces(current_ws, target_ws);
             }
         }
 
@@ -738,13 +733,15 @@ impl Hub {
     }
 
     pub(super) fn get_or_create_workspace(&mut self, name: &str) -> WorkspaceId {
-        match self.access.workspaces.find(|w| w.name == name) {
-            Some(id) => id,
-            None => self.access.workspaces.allocate(Workspace::new(
-                name.to_string(),
-                self.access.focused_monitor,
-            )),
+        if let Some(id) = self.access.workspaces.find(|w| w.name == name) {
+            return id;
         }
+        let ws_id = self.access.workspaces.allocate(Workspace::new(
+            name.to_string(),
+            self.access.focused_monitor,
+        ));
+        self.strategies.register(ws_id, name, &self.access.config);
+        ws_id
     }
 
     pub(super) fn find_monitor_by_target(&self, target: &MonitorTarget) -> Option<MonitorId> {
@@ -788,35 +785,77 @@ impl Hub {
             }
         }
     }
-}
 
-#[derive(Debug, Clone)]
-pub(crate) struct HubConfig {
-    pub(super) layout: LayoutConfig,
-    pub(super) min_width: SizeConstraint,
-    pub(super) min_height: SizeConstraint,
-    pub(super) max_width: SizeConstraint,
-    pub(super) max_height: SizeConstraint,
-}
+    pub(super) fn move_focused_across_workspaces(&mut self, from: WorkspaceId, to: WorkspaceId) {
+        let from_kind = self.strategies.kind_of(from);
+        let to_kind = self.strategies.kind_of(to);
 
-impl From<crate::config::Config> for HubConfig {
-    fn from(config: crate::config::Config) -> Self {
-        Self {
-            layout: config.layout,
-            min_width: config.min_width,
-            min_height: config.min_height,
-            max_width: config.max_width,
-            max_height: config.max_height,
+        if from_kind == to_kind {
+            self.strategies
+                .get_mut(from_kind)
+                .move_focused_to_workspace(&mut self.access, from, to);
+        } else {
+            let detached = self
+                .strategies
+                .get_mut(from_kind)
+                .detach_focused(&mut self.access, from);
+            self.strategies
+                .get_mut(to_kind)
+                .attach_detached(&mut self.access, to, &detached);
+        }
+    }
+
+    fn snapshot_workspace_for_rebuild(
+        &self,
+        ws_id: WorkspaceId,
+        old_kind: Strategy,
+    ) -> WorkspaceRebuildSnapshot {
+        let tiling_windows: Vec<WindowId> = self
+            .access
+            .windows
+            .all_active()
+            .iter()
+            .filter(|(_, w)| w.mode == DisplayMode::Tiling && w.workspace() == Some(ws_id))
+            .map(|(id, _)| *id)
+            .collect();
+        // Dispatch on the passed-in old_kind because StrategySet::resync has
+        // already updated the kind map to the NEW kind, but the OLD strategy
+        // still owns this workspace's tiling state.
+        let focused = self
+            .strategies
+            .get(old_kind)
+            .focused_tiling_window(&self.access, ws_id);
+        let was_float_focused = self.access.workspaces.get(ws_id).is_float_focused;
+        WorkspaceRebuildSnapshot {
+            tiling_windows,
+            focused,
+            was_float_focused,
+        }
+    }
+
+    fn reattach_workspace_after_rebuild(
+        &mut self,
+        ws_id: WorkspaceId,
+        snapshot: WorkspaceRebuildSnapshot,
+    ) {
+        for wid in &snapshot.tiling_windows {
+            self.strategies
+                .for_workspace_mut(ws_id)
+                .attach_window(&mut self.access, *wid, ws_id);
+        }
+        if let Some(f) = snapshot.focused {
+            self.strategies
+                .for_workspace_mut(ws_id)
+                .set_focus(&mut self.access, f);
+        }
+        if snapshot.was_float_focused {
+            self.access.workspaces.get_mut(ws_id).is_float_focused = true;
         }
     }
 }
 
-fn build_strategy(layout: &LayoutConfig) -> Box<dyn TilingStrategy> {
-    match layout.strategy {
-        Strategy::PartitionTree => Box::new(PartitionTreeStrategy::new()),
-        Strategy::Master => Box::new(MasterStrategy::new(
-            layout.master.master_ratio,
-            layout.master.master_count,
-        )),
-    }
+struct WorkspaceRebuildSnapshot {
+    tiling_windows: Vec<WindowId>,
+    focused: Option<WindowId>,
+    was_float_focused: bool,
 }

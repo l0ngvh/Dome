@@ -83,6 +83,9 @@ impl Runner {
             HubEvent::ConfigChanged(c) => {
                 self.dome.config_changed(*c);
             }
+            HubEvent::LayoutConfigChanged(c) => {
+                self.dome.layout_changed(*c);
+            }
             HubEvent::WindowCreated(hwnd_id) => {
                 self.dispatch_window_created(hwnd_id);
             }

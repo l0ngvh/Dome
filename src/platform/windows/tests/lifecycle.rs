@@ -505,7 +505,11 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
 fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     let mut second = second_monitor();
     second.scale = 1.0;
-    let mut env = TestEnv::new_with_monitors(Config::default(), vec![default_monitor(), second]);
+    let mut env = TestEnv::new_with_monitors(
+        Config::default(),
+        LayoutConfig::default(),
+        vec![default_monitor(), second],
+    );
 
     // Add one window on primary.
     let w_a = env.open(1, "WinA", "a.exe", SPAWN_DIM);

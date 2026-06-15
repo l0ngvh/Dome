@@ -100,6 +100,7 @@ impl Dome {
             float_shows,
             focused_window,
             focused_monitor_id: focused_monitor,
+            tab_bar_height: self.layout.partition_tree.tab_bar_height,
         }));
     }
 

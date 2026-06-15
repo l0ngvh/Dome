@@ -43,7 +43,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR};
 
-use crate::config::{Config, start_config_watcher};
+use crate::config::{
+    Config, LayoutConfig, layout_default_path, load_or_default, start_config_watcher,
+};
 use crate::ipc;
 use crate::keymap::KeymapState;
 use dome::overlay::{
@@ -166,7 +168,7 @@ unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
     }
 }
 
-pub fn run_app(config_path: Option<String>) -> Result<()> {
+pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Result<()> {
     ensure_per_monitor_v2_awareness()?;
 
     // COM needed for shell APIs on main thread
@@ -175,9 +177,17 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     let logger = Logger::init();
 
     let config_path = config_path.unwrap_or_else(Config::default_path);
-    let config = Config::load_or_default(&config_path);
+    let config = load_or_default(&config_path, Config::load);
     logger.set_level(config.log_level);
     tracing::info!(%config_path, "Loaded config");
+
+    let layout_path = layout_path.unwrap_or_else(|| {
+        layout_default_path(std::path::Path::new(&config_path))
+            .to_string_lossy()
+            .into_owned()
+    });
+    let layout = load_or_default(&layout_path, LayoutConfig::load);
+    tracing::info!(path = %layout_path, "Loaded layout");
 
     login_item::sync_login_item(config.start_at_login);
 
@@ -198,6 +208,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
     let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
 
     let config_clone = config.clone();
+    let layout_clone = layout.clone();
     let tid = Arc::clone(&dome_thread_id);
     let bar = Arc::clone(&barrier);
     let keymap_clone = Arc::clone(&keymap_state);
@@ -211,7 +222,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
                 std::sync::atomic::Ordering::Release,
             );
             bar.wait();
-            run_dome(config_clone, main_thread_id, keymap_clone);
+            run_dome(config_clone, layout_clone, main_thread_id, keymap_clone);
         }));
         if result.is_err() {
             tracing::error!("Dome thread panicked");
@@ -251,7 +262,7 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
         }
     })?;
 
-    let _config_watcher = start_config_watcher(&config_path, {
+    let _config_watcher = start_config_watcher(&config_path, Config::load, {
         let sender = hub_sender.clone();
         let keymap_state = Arc::clone(&keymap_state);
         move |cfg| {
@@ -266,6 +277,15 @@ pub fn run_app(config_path: Option<String>) -> Result<()> {
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
+    .ok();
+
+    let _layout_watcher = start_config_watcher(&layout_path, LayoutConfig::load, {
+        let sender = hub_sender.clone();
+        move |new_layout| {
+            sender.send(HubEvent::LayoutConfigChanged(Box::new(new_layout)));
+        }
+    })
+    .inspect_err(|e| tracing::warn!("Failed to setup layout watcher: {e:#}"))
     .ok();
 
     // Main thread: bare message pump for hooks only
@@ -404,7 +424,12 @@ unsafe extern "system" fn float_overlay_wnd_proc(
     }
 }
 
-fn run_dome(config: Config, main_thread_id: u32, keymap_state: Arc<RwLock<KeymapState>>) {
+fn run_dome(
+    config: Config,
+    layout: LayoutConfig,
+    main_thread_id: u32,
+    keymap_state: Arc<RwLock<KeymapState>>,
+) {
     let hinstance = unsafe { GetModuleHandleW(None) }.expect("GetModuleHandleW failed");
     // https://devblogs.microsoft.com/oldnewthing/20250424-00/?p=111114
     let arrow = unsafe { LoadCursorW(None, IDC_ARROW) }.expect("LoadCursorW failed");
@@ -513,6 +538,7 @@ fn run_dome(config: Config, main_thread_id: u32, keymap_state: Arc<RwLock<Keymap
 
     let dome = Dome::new(
         config.clone(),
+        layout,
         Rc::new(taskbar),
         Box::new(overlays),
         Box::new(dome::Win32Display),

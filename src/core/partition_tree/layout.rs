@@ -87,7 +87,7 @@ impl PartitionTreeStrategy {
                 scale,
                 viewport_rect,
             )) {
-                self.set_child_dimension(hub, *child, child_dim);
+                self.set_child_dimension(*child, child_dim);
             }
         }
     }
@@ -120,7 +120,7 @@ impl PartitionTreeStrategy {
         if let Some(focused) = ws_state.focused_tiling {
             let focused_dim = self.child_dimension(focused);
             let scale = hub.monitors.get(monitor_id).scale;
-            let reserved_top = self.enclosing_tabbed_strip_total(hub, focused, scale);
+            let reserved_top = self.enclosing_tabbed_strip_total(focused, scale);
 
             offset_x =
                 nudge_offset_into_view(offset_x, focused_dim.x, focused_dim.width, screen.width);
@@ -142,8 +142,8 @@ impl PartitionTreeStrategy {
     /// Sum of `tab_bar_length` over each strict ancestor of `focused` that is
     /// tabbed. Used by `scroll_into_view` to reserve space for tab strips when
     /// clamping the viewport offset.
-    fn enclosing_tabbed_strip_total(&self, hub: &HubAccess, focused: Child, scale: f32) -> Length {
-        let tb = tab_bar_length(hub, scale);
+    fn enclosing_tabbed_strip_total(&self, focused: Child, scale: f32) -> Length {
+        let tb = self.tab_bar_length(scale);
         let mut total = Length::ZERO;
         for (_, parent_id) in self.ancestors_of(focused) {
             if self.containers.get(parent_id).is_tabbed() {
@@ -232,7 +232,7 @@ impl PartitionTreeStrategy {
             .iter()
             .map(|&c| self.get_effective_constraints(hub, c))
             .collect();
-        let tab_bar = tab_bar_length(hub, scale);
+        let tab_bar = self.tab_bar_length(scale);
         let content = Dimension::new(dim.x, dim.y + tab_bar, dim.width, dim.height - tab_bar);
 
         let outer_visible = clip(dim, viewport_rect).unwrap_or(dim);
@@ -300,7 +300,7 @@ impl PartitionTreeStrategy {
         let visible = clip(base_dim, viewport_rect).unwrap_or(base_dim);
         let dim = place_in_visible(base_dim, (c.max_width, c.max_height), visible);
 
-        self.set_child_dimension(hub, root, dim);
+        self.set_child_dimension(root, dim);
     }
 
     /// Bottom-up minimum size for one container. For split containers, sums
@@ -348,7 +348,7 @@ impl PartitionTreeStrategy {
                     .iter()
                     .map(|c| c.min_height)
                     .fold(Length::ZERO, Length::max);
-                (max_w, max_h + tab_bar_length(hub, scale))
+                (max_w, max_h + self.tab_bar_length(scale))
             }
         };
 
@@ -368,24 +368,25 @@ impl PartitionTreeStrategy {
     /// child's `spawn_mode` to match the new aspect ratio (Horizontal if wider
     /// than tall, otherwise Vertical). The `!is_tab()` guard keeps tabbed
     /// children from being demoted to a split mode by a layout pass.
-    fn set_child_dimension(&mut self, hub: &mut HubAccess, child: Child, dim: Dimension) {
+    fn set_child_dimension(&mut self, child: Child, dim: Dimension) {
         let spawn_mode = if dim.width >= dim.height {
             SpawnMode::horizontal()
         } else {
             SpawnMode::vertical()
         };
+        let automatic_tiling = self.automatic_tiling;
         match child {
             Child::Window(wid) => {
                 let td = self.tiling_data_mut(wid);
                 td.dimension = dim;
-                if hub.config.layout.partition_tree.automatic_tiling && !td.spawn_mode.is_tab() {
+                if automatic_tiling && !td.spawn_mode.is_tab() {
                     td.spawn_mode = SpawnMode::without_history(spawn_mode);
                 }
             }
             Child::Container(cid) => {
                 let c = self.containers.get_mut(cid);
                 c.dimension = dim;
-                if hub.config.layout.partition_tree.automatic_tiling && !c.spawn_mode().is_tab() {
+                if automatic_tiling && !c.spawn_mode().is_tab() {
                     c.set_spawn_mode_reset(spawn_mode);
                 }
             }
@@ -464,14 +465,10 @@ impl PartitionTreeStrategy {
             }
         }
     }
-}
 
-pub(super) fn tab_bar_length(hub: &HubAccess, scale: f32) -> Length {
-    hub.config
-        .layout
-        .partition_tree
-        .tab_bar_height
-        .to_unit(scale)
+    pub(super) fn tab_bar_length(&self, scale: f32) -> Length {
+        self.tab_bar_height.to_unit(scale)
+    }
 }
 
 /// Returns (size, offset) for a max-constrained child.

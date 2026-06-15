@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use crate::action::{
@@ -246,7 +246,7 @@ fn field_path(prefix: &str, key: &str) -> String {
     }
 }
 
-trait WalkRecover: Sized {
+pub(crate) trait WalkRecover: Sized {
     fn walk(w: &mut Walker) -> Self;
 }
 
@@ -254,7 +254,7 @@ trait WalkRule: serde::de::DeserializeOwned {
     const KNOWN: &'static [&'static str];
 }
 
-struct Walker<'a> {
+pub(crate) struct Walker<'a> {
     table: &'a mut toml::Table,
     prefix: String,
 }
@@ -411,11 +411,6 @@ impl RawConfig {
         Config {
             keymaps: walk_keymaps(&mut w),
             border_size: w.field("border_size", default_border_size()),
-            min_width: w.field("min_width", SizeConstraint::default_min()),
-            min_height: w.field("min_height", SizeConstraint::default_min()),
-            max_width: w.field("max_width", SizeConstraint::default()),
-            max_height: w.field("max_height", SizeConstraint::default()),
-            layout: w.nested_or("layout", default_layout()),
             theme: w.field("theme", Flavor::default()),
             font: w.nested_or("font", FontConfig::default()),
             macos: w.nested_or("macos", default_macos()),
@@ -468,10 +463,21 @@ impl WalkRecover for LayoutConfig {
         let strategy = w.field("strategy", default_strategy());
         let partition_tree = w.nested::<PartitionTreeConfig>("partition_tree");
         let master = w.nested::<MasterConfig>("master");
+        let min_width = w.field("min_width", SizeConstraint::default_min());
+        let min_height = w.field("min_height", SizeConstraint::default_min());
+        let max_width = w.field("max_width", SizeConstraint::default());
+        let max_height = w.field("max_height", SizeConstraint::default());
+        let raw = w.rule_vec::<LayoutWorkspaceConfig>("workspace");
+        let workspace = dedup_workspace_overrides(raw, &w.prefix);
         LayoutConfig {
             strategy,
             partition_tree,
             master,
+            min_width,
+            min_height,
+            max_width,
+            max_height,
+            workspace,
         }
     }
 }
@@ -788,6 +794,16 @@ pub(crate) struct LayoutConfig {
     pub(crate) partition_tree: PartitionTreeConfig,
     #[serde(default = "default_master_config")]
     pub(crate) master: MasterConfig,
+    #[serde(default = "SizeConstraint::default_min")]
+    pub(crate) min_width: SizeConstraint,
+    #[serde(default = "SizeConstraint::default_min")]
+    pub(crate) min_height: SizeConstraint,
+    #[serde(default)]
+    pub(crate) max_width: SizeConstraint,
+    #[serde(default)]
+    pub(crate) max_height: SizeConstraint,
+    #[serde(default)]
+    pub(crate) workspace: Vec<LayoutWorkspaceConfig>,
 }
 
 fn default_strategy() -> Strategy {
@@ -814,12 +830,88 @@ fn default_master_config() -> MasterConfig {
         master_count: default_master_count(),
     }
 }
-fn default_layout() -> LayoutConfig {
-    LayoutConfig {
-        strategy: default_strategy(),
-        partition_tree: default_partition_tree_config(),
-        master: default_master_config(),
+
+fn dedup_workspace_overrides(
+    entries: Vec<LayoutWorkspaceConfig>,
+    prefix: &str,
+) -> Vec<LayoutWorkspaceConfig> {
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<LayoutWorkspaceConfig> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if entry.name.is_empty() {
+            tracing::warn!(
+                field = %field_path(prefix, "workspace"),
+                "Empty workspace name in override, dropping",
+            );
+            continue;
+        }
+        if let Some(&idx) = seen.get(&entry.name) {
+            tracing::warn!(
+                field = %field_path(prefix, "workspace"),
+                name = %entry.name,
+                "Duplicate workspace override, replacing earlier entry",
+            );
+            out[idx] = entry;
+        } else {
+            seen.insert(entry.name.clone(), out.len());
+            out.push(entry);
+        }
     }
+    out
+}
+
+impl Default for LayoutConfig {
+    fn default() -> Self {
+        Self {
+            strategy: default_strategy(),
+            partition_tree: default_partition_tree_config(),
+            master: default_master_config(),
+            min_width: SizeConstraint::default_min(),
+            min_height: SizeConstraint::default_min(),
+            max_width: SizeConstraint::default(),
+            max_height: SizeConstraint::default(),
+            workspace: Vec::new(),
+        }
+    }
+}
+
+impl LayoutConfig {
+    pub(crate) fn load(path: &str) -> anyhow::Result<Self> {
+        let layout = load_toml::<LayoutConfig>(path)?;
+        layout.validate()?;
+        Ok(layout)
+    }
+
+    fn validate(&self) -> anyhow::Result<()> {
+        // Validation compares config values in logical space directly. No scale
+        // factor exists at validation time, so `.logical()` is the correct escape
+        // hatch here (not `to_unit`).
+        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
+            (self.min_width, self.max_width)
+            && max.logical() > 0.0
+            && min > max
+        {
+            anyhow::bail!("min_width ({min}) cannot be greater than max_width ({max})");
+        }
+        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
+            (self.min_height, self.max_height)
+            && max.logical() > 0.0
+            && min > max
+        {
+            anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub(crate) struct LayoutWorkspaceConfig {
+    pub(crate) name: String,
+    pub(crate) strategy: Strategy,
+}
+
+impl WalkRule for LayoutWorkspaceConfig {
+    const KNOWN: &'static [&'static str] = &["name", "strategy"];
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1121,16 +1213,6 @@ pub(crate) struct Config {
     pub(crate) keymaps: ModalKeymaps,
     #[serde(default = "default_border_size")]
     pub(crate) border_size: f32,
-    #[serde(default = "SizeConstraint::default_min")]
-    pub(crate) min_width: SizeConstraint,
-    #[serde(default = "SizeConstraint::default_min")]
-    pub(crate) min_height: SizeConstraint,
-    #[serde(default)]
-    pub(crate) max_width: SizeConstraint,
-    #[serde(default)]
-    pub(crate) max_height: SizeConstraint,
-    #[serde(default = "default_layout")]
-    pub(crate) layout: LayoutConfig,
     #[serde(default)]
     pub(crate) theme: Flavor,
     #[serde(default)]
@@ -1186,11 +1268,6 @@ impl Default for Config {
         Config {
             keymaps: default_keymaps(),
             border_size: default_border_size(),
-            min_width: SizeConstraint::default_min(),
-            min_height: SizeConstraint::default_min(),
-            max_width: SizeConstraint::default(),
-            max_height: SizeConstraint::default(),
-            layout: default_layout(),
             // Mocha is the darkest flavour and matches Dome's pre-theme default palette.
             theme: Flavor::default(),
             font: FontConfig::default(),
@@ -1255,75 +1332,75 @@ impl Config {
         format!("{data_dir}/dome")
     }
 
-    /// Loads config from `path`, falling back to defaults on any error.
-    /// The error is logged via `tracing::warn!` so it reaches `dome.log` and
-    /// stdout (see docs/configuration.md "Log File").
-    pub(crate) fn load_or_default(path: &str) -> Config {
-        match Self::load(path) {
-            Ok(config) => config,
-            Err(e) => {
-                tracing::warn!(%path, error = %e, "Failed to load config, using defaults");
-                Config::default()
-            }
-        }
-    }
-
     pub(crate) fn load(path: &str) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let table: toml::Table = toml::from_str(&content)?;
         let config = RawConfig::into_config(table);
-        config.validate()?;
         Ok(config)
-    }
-
-    fn validate(&self) -> Result<()> {
-        // Validation compares config values in logical space directly -- no scale
-        // factor exists at validation time, so `.logical()` is the correct escape
-        // hatch here (not `to_unit`).
-        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
-            (self.min_width, self.max_width)
-            && max.logical() > 0.0
-            && min > max
-        {
-            anyhow::bail!("min_width ({min}) cannot be greater than max_width ({max})");
-        }
-        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
-            (self.min_height, self.max_height)
-            && max.logical() > 0.0
-            && min > max
-        {
-            anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
-        }
-        Ok(())
     }
 }
 
-pub(crate) fn start_config_watcher(
-    config_path: &str,
-    on_change: impl Fn(Config) + Send + 'static,
-) -> anyhow::Result<RecommendedWatcher> {
-    let path = Path::new(config_path).canonicalize()?;
-    let Some(watch_dir) = path.parent().map(|p| p.to_owned()) else {
-        anyhow::bail!("no parent dir");
-    };
+fn load_toml<T: WalkRecover>(path: &str) -> anyhow::Result<T> {
+    let content = std::fs::read_to_string(path)?;
+    let mut table: toml::Table = toml::from_str(&content)?;
+    let mut w = Walker::new(&mut table, "");
+    Ok(T::walk(&mut w))
+}
 
+pub(crate) fn load_or_default<T: Default>(
+    path: &str,
+    load: impl Fn(&str) -> anyhow::Result<T>,
+) -> T {
+    match load(path) {
+        Ok(v) => v,
+        Err(e)
+            if e.downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            tracing::info!(%path, "File not found, using defaults");
+            T::default()
+        }
+        Err(e) => {
+            tracing::warn!(%path, error = %format!("{e:#}"), "Failed to load, using defaults");
+            T::default()
+        }
+    }
+}
+
+pub(crate) fn layout_default_path(config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .expect("config path must have a parent directory")
+        .join("layout.toml")
+}
+
+pub(crate) fn start_config_watcher<T: Send + 'static>(
+    path: &str,
+    load_fn: impl Fn(&str) -> anyhow::Result<T> + Send + 'static,
+    on_change: impl Fn(T) + Send + 'static,
+) -> anyhow::Result<RecommendedWatcher> {
+    let path_buf = Path::new(path).canonicalize()?;
+    let watch_dir = path_buf
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("no parent dir"))?
+        .to_owned();
+    let target = path_buf.clone();
     let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
         if let Ok(event) = res
             && matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_))
-            && event.paths.iter().any(|p| p == &path)
+            && event.paths.iter().any(|p| p == &target)
         {
-            match Config::load(path.to_str().unwrap()) {
-                Ok(new_config) => {
-                    tracing::info!("Config reloaded");
-                    on_change(new_config);
+            match load_fn(target.to_str().unwrap()) {
+                Ok(v) => {
+                    tracing::info!(path = %target.display(), "File reloaded");
+                    on_change(v);
                 }
-                Err(e) => tracing::warn!("Failed to reload config: {e}"),
+                Err(e) => tracing::warn!(path = %target.display(), error = %e, "Failed to reload"),
             }
         }
     })?;
-
     watcher.watch(&watch_dir, RecursiveMode::NonRecursive)?;
-    tracing::info!(path = config_path, "Config watcher started");
+    tracing::info!(%path, "File watcher started");
     Ok(watcher)
 }
 
@@ -1407,50 +1484,50 @@ mod tests {
 
     #[test]
     fn min_size_default() {
-        let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Percent(5.0));
-        assert_eq!(config.min_height, SizeConstraint::Percent(5.0));
+        let layout: LayoutConfig = toml::from_str("").unwrap();
+        assert_eq!(layout.min_width, SizeConstraint::Percent(5.0));
+        assert_eq!(layout.min_height, SizeConstraint::Percent(5.0));
     }
 
     #[test]
     fn max_size_default() {
-        let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.max_width, SizeConstraint::Pixels(Length::new(0.0)));
-        assert_eq!(config.max_height, SizeConstraint::Pixels(Length::new(0.0)));
+        let layout: LayoutConfig = toml::from_str("").unwrap();
+        assert_eq!(layout.max_width, SizeConstraint::Pixels(Length::new(0.0)));
+        assert_eq!(layout.max_height, SizeConstraint::Pixels(Length::new(0.0)));
     }
 
     #[test]
     fn size_constraint_parses_float_as_pixels() {
-        let config: Config = toml::from_str("min_width = 200.0").unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Pixels(Length::new(200.0)));
+        let layout: LayoutConfig = toml::from_str("min_width = 200.0").unwrap();
+        assert_eq!(layout.min_width, SizeConstraint::Pixels(Length::new(200.0)));
     }
 
     #[test]
     fn size_constraint_parses_int_as_pixels() {
-        let config: Config = toml::from_str("min_width = 200").unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Pixels(Length::new(200.0)));
+        let layout: LayoutConfig = toml::from_str("min_width = 200").unwrap();
+        assert_eq!(layout.min_width, SizeConstraint::Pixels(Length::new(200.0)));
     }
 
     #[test]
     fn size_constraint_parses_string_percent() {
-        let config: Config = toml::from_str(r#"min_width = "10%""#).unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Percent(10.0));
+        let layout: LayoutConfig = toml::from_str(r#"min_width = "10%""#).unwrap();
+        assert_eq!(layout.min_width, SizeConstraint::Percent(10.0));
     }
 
     #[test]
     fn size_constraint_rejects_invalid_percent() {
-        assert!(toml::from_str::<Config>(r#"min_width = "101%""#).is_err());
-        assert!(toml::from_str::<Config>(r#"min_width = "-5%""#).is_err());
+        assert!(toml::from_str::<LayoutConfig>(r#"min_width = "101%""#).is_err());
+        assert!(toml::from_str::<LayoutConfig>(r#"min_width = "-5%""#).is_err());
     }
 
     #[test]
     fn size_constraint_rejects_negative_pixels() {
-        assert!(toml::from_str::<Config>("min_width = -100").is_err());
+        assert!(toml::from_str::<LayoutConfig>("min_width = -100").is_err());
     }
 
     #[test]
     fn size_constraint_rejects_string_without_percent() {
-        assert!(toml::from_str::<Config>(r#"min_width = "200""#).is_err());
+        assert!(toml::from_str::<LayoutConfig>(r#"min_width = "200""#).is_err());
     }
 
     #[test]
@@ -1499,21 +1576,15 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_min_greater_than_max_width() {
-        let config: Config = toml::from_str("min_width = 200\nmax_width = 100").unwrap();
-        assert!(config.validate().is_err());
-    }
+    fn layout_validates_min_le_max() {
+        let layout: LayoutConfig = toml::from_str("min_width = 200\nmax_width = 100").unwrap();
+        assert!(layout.validate().is_err());
 
-    #[test]
-    fn validation_rejects_min_greater_than_max_height() {
-        let config: Config = toml::from_str("min_height = 200\nmax_height = 100").unwrap();
-        assert!(config.validate().is_err());
-    }
+        let layout: LayoutConfig = toml::from_str("min_height = 200\nmax_height = 100").unwrap();
+        assert!(layout.validate().is_err());
 
-    #[test]
-    fn validation_allows_zero_max() {
-        let config: Config = toml::from_str("min_width = 200\nmax_width = 0").unwrap();
-        assert!(config.validate().is_ok());
+        let layout: LayoutConfig = toml::from_str("min_width = 200\nmax_width = 0").unwrap();
+        assert!(layout.validate().is_ok());
     }
 
     #[test]
@@ -1570,7 +1641,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_color_field_{nanos}.toml"));
         std::fs::write(&path, "focused_color = \"#ff0000\"\ntheme = \"latte\"\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.theme, Flavor::Latte);
     }
 
@@ -1583,7 +1654,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_border_radius_{nanos}.toml"));
         std::fs::write(&path, "border_radius = 4\nborder_size = 5.0\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.border_size, 5.0);
     }
 
@@ -1596,12 +1667,12 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_top_layout_{nanos}.toml"));
         std::fs::write(
             &path,
-            "tab_bar_height = 30\nautomatic_tiling = true\n[layout]\nstrategy = \"master\"\n",
+            "tab_bar_height = 30\nautomatic_tiling = true\nborder_size = 5.0\n",
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
-        assert_eq!(config.layout.strategy, Strategy::Master);
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
+        assert_eq!(config.border_size, 5.0);
     }
 
     #[test]
@@ -1611,7 +1682,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!("dome_config_does_not_exist_{nanos}.toml"));
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.log_level.as_str(), "info");
         assert!(!config.start_at_login);
     }
@@ -1625,7 +1696,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_valid_{nanos}.toml"));
         std::fs::write(&path, "log_level = \"debug\"\nstart_at_login = true\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.log_level.as_str(), "debug");
         assert!(config.start_at_login);
     }
@@ -1639,7 +1710,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_malformed_{nanos}.toml"));
         std::fs::write(&path, "this is = = not valid toml\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.log_level.as_str(), "info");
     }
 
@@ -1652,7 +1723,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_keymaps_empty_{nanos}.toml"));
         std::fs::write(&path, "[keymaps]\n\"meta+h\" = [\"focus left\"]\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert!(config.keymaps.modes.is_empty());
         let keymap = "meta+h".parse::<Keymap>().unwrap();
         assert!(config.keymaps.default.contains_key(&keymap));
@@ -1696,7 +1767,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         let meta_h = "meta+h".parse::<Keymap>().unwrap();
         assert!(config.keymaps.default.contains_key(&meta_h));
         let resize = config
@@ -1729,7 +1800,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         let meta_h = "meta+h".parse::<Keymap>().unwrap();
         assert!(config.keymaps.default.contains_key(&meta_h));
         assert!(!config.keymaps.modes.contains_key("default"));
@@ -1755,7 +1826,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         let meta_h = "meta+h".parse::<Keymap>().unwrap();
         assert!(config.keymaps.default.contains_key(&meta_h));
         assert!(!config.keymaps.modes.contains_key(""));
@@ -1765,6 +1836,12 @@ mod tests {
     fn example_config_parses() {
         let path = format!("{}/examples/config.toml", env!("CARGO_MANIFEST_DIR"));
         Config::load(&path).expect("example config failed to load");
+    }
+
+    #[test]
+    fn example_layout_parses() {
+        let path = format!("{}/examples/layout.toml", env!("CARGO_MANIFEST_DIR"));
+        LayoutConfig::load(&path).expect("example layout failed to load");
     }
 
     /// RAII guard that removes a temp file on drop, even if the test panics.
@@ -1778,50 +1855,48 @@ mod tests {
 
     #[test]
     fn partition_tree_config_parses_fields() {
-        let config: Config = toml::from_str(
-            "[layout.partition_tree]\ntab_bar_height = 30.0\nautomatic_tiling = false",
-        )
-        .unwrap();
-        assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 30.0);
-        assert!(!config.layout.partition_tree.automatic_tiling);
-        assert!(config.validate().is_ok());
+        let layout: LayoutConfig =
+            toml::from_str("[partition_tree]\ntab_bar_height = 30.0\nautomatic_tiling = false")
+                .unwrap();
+        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 30.0);
+        assert!(!layout.partition_tree.automatic_tiling);
     }
 
     #[test]
     fn partition_tree_config_defaults() {
-        let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 24.0);
-        assert!(config.layout.partition_tree.automatic_tiling);
+        let layout: LayoutConfig = toml::from_str("").unwrap();
+        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 24.0);
+        assert!(layout.partition_tree.automatic_tiling);
     }
 
     #[test]
     fn layout_defaults_to_partition_tree() {
-        let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.layout.strategy, Strategy::PartitionTree);
-        assert_eq!(config.layout.master.master_ratio, 0.5);
-        assert_eq!(config.layout.master.master_count, 1);
+        let layout: LayoutConfig = toml::from_str("").unwrap();
+        assert_eq!(layout.strategy, Strategy::PartitionTree);
+        assert_eq!(layout.master.master_ratio, 0.5);
+        assert_eq!(layout.master.master_count, 1);
     }
 
     #[test]
     fn layout_parses_master_strategy() {
-        let config: Config = toml::from_str("[layout]\nstrategy = \"master\"\n").unwrap();
-        assert_eq!(config.layout.strategy, Strategy::Master);
+        let layout: LayoutConfig = toml::from_str("strategy = \"master\"\n").unwrap();
+        assert_eq!(layout.strategy, Strategy::Master);
         // Sub-tables still get their defaults
-        assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 24.0);
-        assert_eq!(config.layout.master.master_ratio, 0.5);
+        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 24.0);
+        assert_eq!(layout.master.master_ratio, 0.5);
     }
 
     #[test]
     fn layout_parses_master_params() {
-        let config: Config =
-            toml::from_str("[layout.master]\nmaster_ratio = 0.3\nmaster_count = 2").unwrap();
-        assert_eq!(config.layout.master.master_ratio, 0.3);
-        assert_eq!(config.layout.master.master_count, 2);
+        let layout: LayoutConfig =
+            toml::from_str("[master]\nmaster_ratio = 0.3\nmaster_count = 2").unwrap();
+        assert_eq!(layout.master.master_ratio, 0.3);
+        assert_eq!(layout.master.master_count, 2);
     }
 
     #[test]
     fn layout_rejects_unknown_strategy() {
-        assert!(toml::from_str::<Config>("[layout]\nstrategy = \"floating\"").is_err());
+        assert!(toml::from_str::<LayoutConfig>("strategy = \"floating\"").is_err());
     }
 
     #[test]
@@ -1831,10 +1906,10 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!("dome_config_unknown_master_{nanos}.toml"));
-        std::fs::write(&path, "[layout.master]\nfoo = 1\nmaster_ratio = 0.6\n").unwrap();
+        std::fs::write(&path, "[master]\nfoo = 1\nmaster_ratio = 0.6\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
-        assert_eq!(config.layout.master.master_ratio, 0.6);
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.master.master_ratio, 0.6);
     }
 
     #[test]
@@ -1844,14 +1919,10 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!("dome_config_unknown_pt_{nanos}.toml"));
-        std::fs::write(
-            &path,
-            "[layout.partition_tree]\nfoo = 1\ntab_bar_height = 30.0\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "[partition_tree]\nfoo = 1\ntab_bar_height = 30.0\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
-        assert_eq!(config.layout.partition_tree.tab_bar_height.logical(), 30.0);
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 30.0);
     }
 
     #[test]
@@ -1863,7 +1934,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_scalar_wrong_{nanos}.toml"));
         std::fs::write(&path, "border_size = \"abc\"\ntheme = \"latte\"\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.border_size, default_border_size());
         assert_eq!(config.theme, Flavor::Latte);
     }
@@ -1877,16 +1948,16 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_nested_field_{nanos}.toml"));
         std::fs::write(
             &path,
-            "[layout.master]\nmaster_ratio = \"abc\"\nmaster_count = 3\n",
+            "[master]\nmaster_ratio = \"abc\"\nmaster_count = 3\n",
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
-        assert_eq!(config.layout.master.master_ratio, default_master_ratio());
-        assert_eq!(config.layout.master.master_count, 3);
-        assert_eq!(config.layout.strategy, default_strategy());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.master.master_ratio, default_master_ratio());
+        assert_eq!(layout.master.master_count, 3);
+        assert_eq!(layout.strategy, default_strategy());
         assert_eq!(
-            config.layout.partition_tree.tab_bar_height,
+            layout.partition_tree.tab_bar_height,
             default_tab_bar_height()
         );
     }
@@ -1901,20 +1972,19 @@ mod tests {
         std::fs::write(
             &path,
             concat!(
-                "[layout]\n",
                 "strategy = \"banana\"\n",
                 "\n",
-                "[layout.master]\n",
+                "[master]\n",
                 "master_ratio = 0.6\n",
                 "master_count = \"oops\"\n",
             ),
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
-        assert_eq!(config.layout.strategy, default_strategy());
-        assert_eq!(config.layout.master.master_ratio, 0.6);
-        assert_eq!(config.layout.master.master_count, default_master_count());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.strategy, default_strategy());
+        assert_eq!(layout.master.master_ratio, 0.6);
+        assert_eq!(layout.master.master_count, default_master_count());
     }
 
     #[test]
@@ -1926,7 +1996,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_unknown_top_{nanos}.toml"));
         std::fs::write(&path, "unknown_field = 1\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.border_size, default_border_size());
         assert_eq!(config.theme, Flavor::default());
     }
@@ -1938,28 +2008,24 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!("dome_config_unknown_nested_{nanos}.toml"));
-        std::fs::write(
-            &path,
-            "[layout]\nunknown = 1\n\n[layout.master]\nmaster_ratio = 0.7\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "[master]\nunknown = 1\nmaster_ratio = 0.7\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
-        assert_eq!(config.layout.master.master_ratio, 0.7);
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.master.master_ratio, 0.7);
     }
 
     #[test]
-    fn load_falls_back_to_defaults_when_validate_fails() {
+    fn layout_load_or_default_falls_back_when_validate_fails() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("dome_config_validate_fail_{nanos}.toml"));
+        let path = std::env::temp_dir().join(format!("dome_layout_validate_fail_{nanos}.toml"));
         std::fs::write(&path, "min_width = 100\nmax_width = 50\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        assert!(Config::load(path.to_str().unwrap()).is_err());
-        let config = Config::load_or_default(path.to_str().unwrap());
-        assert_eq!(config.border_size, default_border_size());
+        assert!(LayoutConfig::load(path.to_str().unwrap()).is_err());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout, LayoutConfig::default());
     }
 
     #[test]
@@ -1969,15 +2035,11 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!("dome_config_ratio_range_{nanos}.toml"));
-        std::fs::write(
-            &path,
-            "[layout.master]\nmaster_ratio = 1.5\nmaster_count = 3\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "[master]\nmaster_ratio = 1.5\nmaster_count = 3\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
-        assert_eq!(config.layout.master.master_ratio, default_master_ratio());
-        assert_eq!(config.layout.master.master_count, 3);
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.master.master_ratio, default_master_ratio());
+        assert_eq!(layout.master.master_count, 3);
     }
 
     #[test]
@@ -1989,7 +2051,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_font_blank_{nanos}.toml"));
         std::fs::write(&path, "[font]\nfamily = \"   \"\ntext_size = 18.0\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.font.family, None);
         assert_eq!(config.font.text_size, 18.0);
     }
@@ -2011,7 +2073,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         let good = "meta+a".parse::<Keymap>().unwrap();
         assert!(config.keymaps.default.contains_key(&good));
         assert_eq!(config.keymaps.default.len(), 1);
@@ -2034,7 +2096,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         let b = "meta+b".parse::<Keymap>().unwrap();
         assert!(config.keymaps.default.contains_key(&b));
         let a = "meta+a".parse::<Keymap>().unwrap();
@@ -2067,7 +2129,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.macos.on_open.len(), 2);
         assert_eq!(config.macos.on_open[0].app.as_deref(), Some("Finder"));
         assert_eq!(
@@ -2095,7 +2157,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(config.macos.on_open.len(), 1);
         assert_eq!(config.macos.on_open[0].app.as_deref(), Some("Finder"));
     }
@@ -2290,7 +2352,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_win_defaults_{nanos}.toml"));
         std::fs::write(&path, "[windows]\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert!(
             config
                 .windows
@@ -2309,7 +2371,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_win_core_window_{nanos}.toml"));
         std::fs::write(&path, "[windows]\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         let entry = config
             .windows
             .ignore
@@ -2322,6 +2384,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn default_macos_ignore_contains_dock() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2330,7 +2393,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_macos_defaults_{nanos}.toml"));
         std::fs::write(&path, "[macos]\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let config = Config::load_or_default(path.to_str().unwrap());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert!(
             config
                 .macos
@@ -2338,5 +2401,311 @@ mod tests {
                 .iter()
                 .any(|r| r.bundle_id.as_deref() == Some("com.apple.dock"))
         );
+    }
+
+    #[test]
+    fn layout_load_or_default_returns_defaults_when_missing() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_layout_does_not_exist_{nanos}.toml"));
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.strategy, default_strategy());
+        assert_eq!(layout.partition_tree, default_partition_tree_config());
+        assert_eq!(layout.master, default_master_config());
+    }
+
+    #[test]
+    fn layout_load_or_default_returns_defaults_on_malformed() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_layout_malformed_{nanos}.toml"));
+        std::fs::write(&path, "this is = = not valid toml\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.strategy, default_strategy());
+        assert_eq!(layout.partition_tree, default_partition_tree_config());
+        assert_eq!(layout.master, default_master_config());
+    }
+
+    #[test]
+    fn layout_load_parses_root_schema() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_layout_root_schema_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "strategy = \"master\"\n",
+                "\n",
+                "[partition_tree]\n",
+                "tab_bar_height = 32.0\n",
+                "\n",
+                "[master]\n",
+                "master_ratio = 0.6\n",
+                "master_count = 2\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = LayoutConfig::load(path.to_str().unwrap()).unwrap();
+        assert_eq!(layout.strategy, Strategy::Master);
+        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 32.0);
+        assert_eq!(layout.master.master_ratio, 0.6);
+        assert_eq!(layout.master.master_count, 2);
+    }
+
+    #[test]
+    fn layout_load_or_default_parses_size_constraints() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_layout_size_constraints_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            "min_width = 200\nmax_width = \"50%\"\nmin_height = 100\nmax_height = 0\n",
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = LayoutConfig::load(path.to_str().unwrap()).unwrap();
+        assert_eq!(layout.min_width, SizeConstraint::Pixels(Length::new(200.0)));
+        assert_eq!(layout.max_width, SizeConstraint::Percent(50.0));
+        assert_eq!(
+            layout.min_height,
+            SizeConstraint::Pixels(Length::new(100.0))
+        );
+        assert_eq!(layout.max_height, SizeConstraint::Pixels(Length::new(0.0)));
+    }
+
+    #[test]
+    fn config_load_warns_on_legacy_layout_block() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_legacy_layout_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "border_size = 5.0\n",
+                "min_width = 100\n",
+                "[layout]\n",
+                "strategy = \"master\"\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = Config::load(path.to_str().unwrap()).unwrap();
+        assert_eq!(config.border_size, 5.0);
+    }
+
+    #[test]
+    fn workspace_overrides_default_empty() {
+        let layout: LayoutConfig = toml::from_str("").unwrap();
+        assert!(layout.workspace.is_empty());
+    }
+
+    #[test]
+    fn workspace_overrides_parse_single_entry() {
+        let layout: LayoutConfig =
+            toml::from_str("[[workspace]]\nname = \"1\"\nstrategy = \"master\"\n").unwrap();
+        assert_eq!(layout.workspace.len(), 1);
+        assert_eq!(layout.workspace[0].name, "1");
+        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
+    }
+
+    #[test]
+    fn workspace_overrides_parse_multiple_distinct() {
+        let layout: LayoutConfig = toml::from_str(concat!(
+            "[[workspace]]\n",
+            "name = \"1\"\n",
+            "strategy = \"master\"\n",
+            "\n",
+            "[[workspace]]\n",
+            "name = \"scratch\"\n",
+            "strategy = \"partition_tree\"\n",
+        ))
+        .unwrap();
+        assert_eq!(layout.workspace.len(), 2);
+        assert_eq!(layout.workspace[0].name, "1");
+        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
+        assert_eq!(layout.workspace[1].name, "scratch");
+        assert_eq!(layout.workspace[1].strategy, Strategy::PartitionTree);
+    }
+
+    #[test]
+    fn workspace_overrides_drop_unknown_strategy() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_ws_unknown_strategy_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[[workspace]]\n",
+                "name = \"good\"\n",
+                "strategy = \"master\"\n",
+                "\n",
+                "[[workspace]]\n",
+                "name = \"bad\"\n",
+                "strategy = \"floating\"\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.workspace.len(), 1);
+        assert_eq!(layout.workspace[0].name, "good");
+        assert_eq!(layout.strategy, default_strategy());
+    }
+
+    #[test]
+    fn workspace_overrides_drop_missing_name() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_ws_missing_name_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[[workspace]]\n",
+                "strategy = \"master\"\n",
+                "\n",
+                "[[workspace]]\n",
+                "name = \"valid\"\n",
+                "strategy = \"master\"\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.workspace.len(), 1);
+        assert_eq!(layout.workspace[0].name, "valid");
+    }
+
+    #[test]
+    fn workspace_overrides_drop_empty_name() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_ws_empty_name_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[[workspace]]\n",
+                "name = \"\"\n",
+                "strategy = \"master\"\n",
+                "\n",
+                "[[workspace]]\n",
+                "name = \"valid\"\n",
+                "strategy = \"partition_tree\"\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.workspace.len(), 1);
+        assert_eq!(layout.workspace[0].name, "valid");
+    }
+
+    #[test]
+    fn workspace_overrides_drop_unknown_field() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_ws_unknown_field_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[[workspace]]\n",
+                "name = \"1\"\n",
+                "strategy = \"master\"\n",
+                "foo = 1\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.workspace.len(), 1);
+        assert_eq!(layout.workspace[0].name, "1");
+        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
+    }
+
+    #[test]
+    fn workspace_overrides_dedup_last_wins() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_ws_dedup_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[[workspace]]\n",
+                "name = \"1\"\n",
+                "strategy = \"partition_tree\"\n",
+                "\n",
+                "[[workspace]]\n",
+                "name = \"1\"\n",
+                "strategy = \"master\"\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.workspace.len(), 1);
+        assert_eq!(layout.workspace[0].name, "1");
+        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
+    }
+
+    #[test]
+    fn workspace_overrides_drop_non_table_element() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_ws_non_table_{nanos}.toml"));
+        // TOML inline arrays can hold non-table elements. Write raw to test recovery.
+        std::fs::write(&path, "workspace = [\"not_a_table\"]\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert!(layout.workspace.is_empty());
+    }
+
+    #[test]
+    fn workspace_overrides_survive_other_field_failure() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_ws_cross_recovery_{nanos}.toml"));
+        std::fs::write(
+            &path,
+            concat!(
+                "[master]\n",
+                "master_ratio = \"abc\"\n",
+                "\n",
+                "[[workspace]]\n",
+                "name = \"1\"\n",
+                "strategy = \"master\"\n",
+            ),
+        )
+        .unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        assert_eq!(layout.master.master_ratio, default_master_ratio());
+        assert_eq!(layout.workspace.len(), 1);
+        assert_eq!(layout.workspace[0].name, "1");
+        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
     }
 }

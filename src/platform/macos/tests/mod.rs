@@ -13,7 +13,7 @@ use anyhow::Result;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::Action;
-use crate::config::Config;
+use crate::config::{Config, LayoutConfig};
 use crate::core::{Dimension, Length, Logical, MonitorId, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -434,7 +434,12 @@ impl MacOS {
         let sender = TestSender {
             frame_state: self.frame_state.clone(),
         };
-        Dome::new(&[default_monitor()], config, Box::new(sender))
+        Dome::new(
+            &[default_monitor()],
+            config.clone(),
+            LayoutConfig::default(),
+            Box::new(sender),
+        )
     }
 
     fn last_frame_state(&self) -> FrameState {

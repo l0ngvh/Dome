@@ -1,7 +1,7 @@
 use super::setup_master;
 use crate::config::{LayoutConfig, MasterConfig, Strategy};
-use crate::core::hub::HubConfig;
 use crate::core::strategy::TilingAction;
+use crate::core::tests::default_layout_for_tests;
 use crate::core::tests::default_partition_tree_config_for_tests;
 use crate::core::tests::snapshot;
 use insta::assert_snapshot;
@@ -9,16 +9,14 @@ use insta::assert_snapshot;
 #[test]
 fn min_height_master_pane_overflows_and_scrolls_to_focus() {
     let mut hub = setup_master();
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 4,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.5,
+            master_count: 4,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
     let w0 = hub.insert_tiling(hub.current_workspace());
     let w1 = hub.insert_tiling(hub.current_workspace());
@@ -72,16 +70,14 @@ fn min_height_master_pane_overflows_and_scrolls_to_focus() {
 #[test]
 fn min_height_stack_pane_overflows_independently_of_master() {
     let mut hub = setup_master();
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 2,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.5,
+            master_count: 2,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
     let _w0 = hub.insert_tiling(hub.current_workspace());
     let _w1 = hub.insert_tiling(hub.current_workspace());
@@ -139,16 +135,14 @@ fn min_height_stack_pane_overflows_independently_of_master() {
 #[test]
 fn both_panes_scroll_independently() {
     let mut hub = setup_master();
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 4,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.5,
+            master_count: 4,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
     let w0 = hub.insert_tiling(hub.current_workspace());
     let w1 = hub.insert_tiling(hub.current_workspace());
@@ -551,16 +545,14 @@ fn master_count_increment_clamps_stack_scroll() {
 #[test]
 fn master_count_decrement_clamps_master_scroll() {
     let mut hub = setup_master();
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 4,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.5,
+            master_count: 4,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
     let w0 = hub.insert_tiling(hub.current_workspace());
     let w1 = hub.insert_tiling(hub.current_workspace());
@@ -623,16 +615,14 @@ fn master_count_decrement_clamps_master_scroll() {
 #[test]
 fn detach_clamps_scroll() {
     let mut hub = setup_master();
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 4,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.5,
+            master_count: 4,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
     let w0 = hub.insert_tiling(hub.current_workspace());
     let w1 = hub.insert_tiling(hub.current_workspace());
@@ -756,16 +746,14 @@ fn apply_config_relayouts_and_clamps_scroll() {
     hub.set_window_constraint(w4, None, Some(20.0), None, None);
     // w4 is already focused (last stack window). Stack scrolled to show it.
     // Apply same config (relayout, clamp is idempotent)
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            strategy: Strategy::Master,
-            partition_tree: default_partition_tree_config_for_tests(),
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 1,
-            },
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.5,
+            master_count: 1,
         },
-        ..Default::default()
+        ..default_layout_for_tests()
     });
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))

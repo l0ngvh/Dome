@@ -24,7 +24,9 @@ use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckO
 use objc2_core_foundation::{CFDictionary, kCFBooleanTrue};
 use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
-use crate::config::{Config, start_config_watcher};
+use crate::config::{
+    Config, LayoutConfig, layout_default_path, load_or_default, start_config_watcher,
+};
 use crate::ipc;
 use crate::keymap::KeymapState;
 use crate::logging::Logger;
@@ -36,13 +38,21 @@ use ui::Ui;
 
 const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
-pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
+pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyhow::Result<()> {
     let logger = Logger::init();
 
     let config_path = config_path.unwrap_or_else(Config::default_path);
-    let config = Config::load_or_default(&config_path);
+    let config = load_or_default(&config_path, Config::load);
     logger.set_level(config.log_level);
     tracing::info!(%config_path, "Loaded config");
+
+    let layout_path = layout_path.unwrap_or_else(|| {
+        layout_default_path(std::path::Path::new(&config_path))
+            .to_string_lossy()
+            .into_owned()
+    });
+    let layout = load_or_default(&layout_path, LayoutConfig::load);
+    tracing::info!(path = %layout_path, "Loaded layout");
 
     let bundle_path = login_item::detect_bundle_path();
     login_item::sync_login_item(config.start_at_login, bundle_path.as_deref());
@@ -73,9 +83,10 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
     let (event_tx, event_rx) = calloop::channel::channel();
 
     let hub_config = config.clone();
+    let hub_layout = layout.clone();
     let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
 
-    let _config_watcher = start_config_watcher(&config_path, {
+    let _config_watcher = start_config_watcher(&config_path, Config::load, {
         let keymap_state = keymap_state.clone();
         let tx = event_tx.clone();
         let bundle_path_for_watcher = bundle_path.clone();
@@ -91,6 +102,16 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
         }
     })
     .inspect_err(|e| tracing::warn!("Failed to setup config watcher: {e:#}"))
+    .ok();
+
+    let _layout_watcher = start_config_watcher(&layout_path, LayoutConfig::load, {
+        let tx = event_tx.clone();
+        move |new_layout| {
+            tx.send(HubEvent::LayoutConfigChanged(Box::new(new_layout)))
+                .ok();
+        }
+    })
+    .inspect_err(|e| tracing::warn!("Failed to setup layout watcher: {e:#}"))
     .ok();
 
     ipc::start_server({
@@ -133,7 +154,7 @@ pub fn run_app(config_path: Option<String>) -> anyhow::Result<()> {
 
     let hub_thread = thread::spawn(move || {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let dome = Dome::new(&monitors, hub_config, Box::new(sender));
+            let dome = Dome::new(&monitors, hub_config, hub_layout, Box::new(sender));
             event_loop::run_dome(dome, event_rx, keymap_state);
         }))
         .ok();

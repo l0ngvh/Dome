@@ -1,8 +1,8 @@
 # Configuration
 
-Dome reads a single TOML file and hot-reloads it on save.
+Dome reads `config.toml` for general settings (theme, borders, font, keybindings, window rules) and hot-reloads it on save. Layout settings (strategy, window-size constraints, per-strategy parameters) live in a separate file. See [layout.md](layout.md) for the layout reference.
 
-Default paths:
+Default path:
 
 - macOS: `~/.config/dome/config.toml` (or `$XDG_CONFIG_HOME/dome/config.toml`).
 - Windows: `%APPDATA%\dome\config.toml`.
@@ -25,24 +25,6 @@ start_at_login = false
 | `log_level` | string | `"info"` | Log verbosity. One of `trace`, `debug`, `info`, `warn`, `error`. |
 | `start_at_login` | boolean | `false` | Launch Dome at user login. |
 
-## Window size constraints
-
-Both the partition tree and master strategies enforce these global minimums and maximums. A size value is either a number (logical pixels) or a string ending in `%` (percentage of the screen dimension). Per-window constraints reported by the OS take precedence.
-
-```toml
-min_width = "5%"
-min_height = "5%"
-max_width = 0       # 0 means no limit
-max_height = 0
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `min_width` | float or string | `"5%"` | Minimum window width. |
-| `min_height` | float or string | `"5%"` | Minimum window height. |
-| `max_width` | float or string | `0` | Maximum window width. `0` means no limit. |
-| `max_height` | float or string | `0` | Maximum window height. `0` means no limit. |
-
 ## Font
 
 Dome ships with egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks). Set `family` to render glyphs that the built-in fonts do not cover (CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, etc.) using a font already installed on the system.
@@ -62,7 +44,7 @@ family = "PingFang SC"            # macOS: render Chinese tab text via PingFang 
 | `font.subtext_size` | float | `12.0` | Secondary text size in points. Must be in `[4.0, 128.0]`. |
 | `font.family` | string (optional) | unset | Optional system-installed proportional font, used as a fallback after egui's built-in Ubuntu-Light. When unset, non-Latin glyphs render as tofu. |
 
-`tab_bar_height` (under `[layout.partition_tree]`) does not auto-scale with `text_size`, so long tab titles may truncate earlier as the body size grows.
+`tab_bar_height` (under `[partition_tree]` in [layout.md](layout.md)) does not auto-scale with `text_size`, so long tab titles may truncate earlier as the body size grows.
 
 ### Caveats
 
@@ -75,41 +57,6 @@ For fonts that bundle multiple variants in one file (TrueType collections like `
 A small number of third-party commercial fonts are marked non-embeddable in their license metadata, and the OS will not hand their bytes to applications. Dome logs a warning and falls back to its built-in fonts. System fonts (Microsoft, Apple) and Google Noto fonts are always embeddable.
 
 Changing `family` to a different value takes effect on the next render. Removing the line entirely keeps the previously-loaded font active until Dome restarts.
-
-## Layout
-
-The `[layout]` table selects the tiling strategy and holds per-strategy parameters. Both sub-tables (`[layout.partition_tree]` and `[layout.master]`) are always parsed and validated regardless of which strategy is active, so a typo in the inactive block surfaces immediately rather than hiding until `strategy` is flipped.
-
-```toml
-[layout]
-strategy = "partition_tree"   # or "master"
-
-[layout.partition_tree]
-tab_bar_height = 24.0
-automatic_tiling = true
-
-[layout.master]
-master_ratio = 0.5
-master_count = 1
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `layout.strategy` | string | `"partition_tree"` | Active layout strategy. One of `partition_tree` or `master`. |
-| `layout.partition_tree.automatic_tiling` | boolean | `true` | When true, Dome picks horizontal or vertical split based on the focused window's dimensions. When false, new windows split in the current container's direction. |
-| `layout.partition_tree.tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, in logical pixels. |
-| `layout.master.master_ratio` | float | `0.5` | Width of the master area as a fraction of the workspace width. Must be in `[0.1, 0.9]`. |
-| `layout.master.master_count` | integer | `1` | Number of windows in the master area. Must be `>= 1`. |
-
-### Partition tree
-
-The default strategy. i3-style manual tiling with split containers (horizontal, vertical, tabbed), spawn-mode routing, and direction invariance. See [architecture.md](architecture.md#tiling-strategies) for the full model.
-
-### Master
-
-A two-area layout. The first `master_count` windows fill a master pane on the left, and the rest stack vertically in a pane on the right. Modeled on xmonad's `Tall` layout.
-
-Both panes honor the global `min_width`, `min_height`, `max_width`, and `max_height` constraints, and per-window constraints reported by the OS take precedence. Each pane scrolls vertically when per-window min heights push its content past the screen height. Scroll is focus-driven, meaning that moving focus inside a pane brings the focused window into view. No new keybindings or actions are needed.
 
 ## Window rules
 
@@ -300,11 +247,10 @@ This focuses left and enters resize mode in one keypress. If a binding lists mul
 
 ## Error handling
 
-Dome recovers from config errors at field granularity. A wrong type, out-of-range value, or unknown field does not invalidate the rest of the config. Each broken field falls back to its default, and Dome logs a warning to `dome.log` with the dotted field path (for example, `field=layout.master.master_ratio`) and the reason for the fallback.
+Dome recovers from config errors at field granularity. A wrong type, out-of-range value, or unknown field does not invalidate the rest of the config. Each broken field falls back to its default, and Dome logs a warning to `dome.log` with the dotted field path (for example, `field=master.master_ratio`) and the reason for the fallback.
 
 Per-field recovery covers unknown fields at any nesting level, wrong types or shapes, out-of-range values (`master_ratio`, `master_count`, `text_size`, `subtext_size`, blank `font.family`), bad keybindings (unparseable key or invalid action), bad entries in window-rule arrays, and reserved or empty mode names. In each case the offending item is dropped and the surrounding config survives.
 
-Two conditions cause the entire config to fall back to defaults:
+One condition causes the entire config to fall back to defaults:
 
 - TOML syntax errors (missing quotes, unmatched brackets, etc.).
-- Cross-field constraint violations where `min_width > max_width` or `min_height > max_height` (both in pixels, with max > 0).

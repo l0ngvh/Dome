@@ -13,9 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::action::{Action, Actions};
-use crate::config::Config;
+use crate::config::{Config, LayoutConfig};
 use crate::core::{
-    ContainerPlacement, Dimension, Length, Physical, TilingWindowPlacement, WindowId,
+    ContainerPlacement, Dimension, Length, Logical, Physical, TilingWindowPlacement, WindowId,
 };
 use crate::font::FontConfig;
 use crate::picker::PickerEntry;
@@ -149,10 +149,14 @@ impl TestEnv {
     }
 
     fn new_with_config(config: Config) -> Self {
-        Self::new_with_monitors(config, vec![default_monitor()])
+        Self::new_with_monitors(config, LayoutConfig::default(), vec![default_monitor()])
     }
 
-    fn new_with_monitors(config: Config, monitors: Vec<MonitorInfo>) -> Self {
+    fn new_with_layout(config: Config, layout: LayoutConfig) -> Self {
+        Self::new_with_monitors(config, layout, vec![default_monitor()])
+    }
+
+    fn new_with_monitors(config: Config, layout: LayoutConfig, monitors: Vec<MonitorInfo>) -> Self {
         let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
         let display = MockDisplay {
             monitors,
@@ -183,6 +187,7 @@ impl TestEnv {
 
         let dome = Dome::new(
             config.clone(),
+            layout,
             Rc::new(NoopTaskbar),
             Box::new(MockOverlays {
                 tiling_overlay: tiling_overlay.clone(),
@@ -1057,6 +1062,7 @@ impl TilingOverlayApi for MockTilingOverlay {
         }
         *self.config.borrow_mut() = config.clone();
     }
+    fn set_tab_bar_height(&mut self, _height: Length<Logical>) {}
     fn window_above(&self) -> Option<HwndId> {
         self.z_stack.window_above(self.overlay_id)
     }
@@ -1147,6 +1153,7 @@ impl CreateOverlay for MockOverlays {
     fn create_tiling_overlay(
         &self,
         _: Config,
+        _tab_bar_height: Length<Logical>,
         _monitor: Dimension,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {

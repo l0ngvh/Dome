@@ -2,12 +2,13 @@ mod layout;
 mod scroll;
 
 use crate::config::Strategy;
-use crate::core::hub::{Hub, HubConfig};
+use crate::core::hub::Hub;
 use crate::core::node::{Dimension, Length};
+use crate::core::tests::default_layout_for_tests;
 
 pub(super) fn setup_master() -> Hub {
-    let mut config = HubConfig::default();
-    config.layout.strategy = Strategy::Master;
+    let mut config = default_layout_for_tests();
+    config.strategy = Strategy::Master;
     Hub::new(
         Dimension::new(
             Length::new(0.0),

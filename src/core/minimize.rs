@@ -35,7 +35,9 @@ impl Hub {
 
         match prior_mode {
             DisplayMode::Tiling => {
-                self.strategy.detach_window(&mut self.access, window_id);
+                self.strategies
+                    .for_workspace_mut(prior_workspace)
+                    .detach_window(&mut self.access, window_id);
             }
             // Float dim rides along on the variant; nothing to stash.
             DisplayMode::Float { .. } => {
@@ -72,7 +74,8 @@ impl Hub {
 
         match prior_mode {
             DisplayMode::Tiling => {
-                self.strategy
+                self.strategies
+                    .for_workspace_mut(target_workspace)
                     .attach_window(&mut self.access, window_id, target_workspace);
             }
             DisplayMode::Float { dim } => {

@@ -1,11 +1,10 @@
 use insta::assert_snapshot;
 
 use crate::{
-    config::SizeConstraint,
+    config::{LayoutConfig, SizeConstraint},
     core::{
         Length,
-        hub::HubConfig,
-        tests::{setup, snapshot},
+        tests::{default_layout_for_tests, setup, snapshot},
     },
 };
 
@@ -287,10 +286,10 @@ fn scroll_window_into_view_in_vertical_child_container() {
 fn scroll_view_port_also_scroll_max_constrained_window() {
     let mut hub = setup();
 
-    hub.sync_config(HubConfig {
+    hub.sync_config(LayoutConfig {
         max_height: SizeConstraint::Pixels(Length::new(10.0)),
         min_height: SizeConstraint::Pixels(Length::new(7.0)),
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     let w0 = hub.insert_tiling(hub.current_workspace());
@@ -358,11 +357,11 @@ fn scroll_view_port_also_scroll_max_constrained_window() {
 fn laying_out_max_constrained_windows_leaves_no_hole() {
     let mut hub = setup();
 
-    hub.sync_config(HubConfig {
+    hub.sync_config(LayoutConfig {
         max_height: SizeConstraint::Pixels(Length::new(30.0)),
         min_height: SizeConstraint::Pixels(Length::new(7.0)),
         min_width: SizeConstraint::Pixels(Length::new(30.0)),
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     let w0 = hub.insert_tiling(hub.current_workspace());

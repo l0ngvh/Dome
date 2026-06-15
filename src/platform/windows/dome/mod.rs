@@ -16,11 +16,11 @@ use std::time::Instant;
 
 use crate::action::Query;
 use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, WindowMode};
+use crate::config::{Config, LayoutConfig, WindowMode};
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, MonitorId,
-    MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId, WindowRestrictions,
-    WorkspaceId,
+    ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
+    Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId,
+    WindowRestrictions, WorkspaceId,
 };
 use crate::picker::{PickerEntry, build_picker_entries};
 
@@ -61,6 +61,7 @@ pub(super) enum HubEvent {
         sender: std::sync::mpsc::SyncSender<String>,
     },
     ConfigChanged(Box<Config>),
+    LayoutConfigChanged(Box<LayoutConfig>),
     TabClicked(ContainerId, usize),
     Shutdown,
 }
@@ -77,6 +78,7 @@ pub(super) trait CreateOverlay {
     fn create_tiling_overlay(
         &self,
         config: Config,
+        tab_bar_height: Length<Logical>,
         monitor: Dimension,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>>;
@@ -111,6 +113,7 @@ pub(super) struct Dome {
     registry: WindowRegistry,
     monitors: MonitorRegistry,
     config: Config,
+    layout: LayoutConfig,
     taskbar: Rc<dyn ManageTaskbar>,
     overlay_factory: Box<dyn CreateOverlay>,
     display: Box<dyn QueryDisplay>,
@@ -134,6 +137,7 @@ impl Drop for Dome {
 impl Dome {
     pub(super) fn new(
         config: Config,
+        layout: LayoutConfig,
         taskbar: Rc<dyn ManageTaskbar>,
         overlay_factory: Box<dyn CreateOverlay>,
         display: Box<dyn QueryDisplay>,
@@ -145,7 +149,7 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.dimension, primary.scale, config.clone().into());
+        let mut hub = Hub::new(primary.dimension, primary.scale, layout.clone());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
@@ -155,9 +159,12 @@ impl Dome {
             primary.dimension,
             primary.scale,
         );
-        if let Ok(overlay) =
-            overlay_factory.create_tiling_overlay(config.clone(), primary.dimension, primary.scale)
-        {
+        if let Ok(overlay) = overlay_factory.create_tiling_overlay(
+            config.clone(),
+            layout.partition_tree.tab_bar_height,
+            primary.dimension,
+            primary.scale,
+        ) {
             tiling_overlays.insert(primary_monitor_id, overlay);
         }
         tracing::info!(
@@ -173,6 +180,7 @@ impl Dome {
                 monitors_reg.insert(monitor.handle, id, monitor.dimension, monitor.scale);
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
+                    layout.partition_tree.tab_bar_height,
                     monitor.dimension,
                     monitor.scale,
                 ) {
@@ -192,6 +200,7 @@ impl Dome {
             registry: WindowRegistry::new(),
             monitors: monitors_reg,
             config,
+            layout,
             taskbar: taskbar.clone(),
             overlay_factory,
             display,
@@ -208,7 +217,7 @@ impl Dome {
     }
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
-        self.hub.sync_config(new_config.clone().into());
+        self.hub.sync_config(self.layout.clone());
         self.config = new_config;
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_config(&self.config);
@@ -220,6 +229,16 @@ impl Dome {
             picker.set_config(&self.config);
         }
         tracing::info!("Config reloaded");
+        self.apply_layout();
+    }
+
+    pub(super) fn layout_changed(&mut self, new_layout: LayoutConfig) {
+        self.layout = new_layout;
+        self.hub.sync_config(self.layout.clone());
+        for overlay in self.tiling_overlays.values_mut() {
+            overlay.set_tab_bar_height(self.layout.partition_tree.tab_bar_height);
+        }
+        tracing::info!("Layout reloaded");
         self.apply_layout();
     }
 
@@ -870,6 +889,7 @@ impl Dome {
             let m = self.monitors.monitor(id);
             if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
                 self.config.clone(),
+                self.layout.partition_tree.tab_bar_height,
                 m.dimension(),
                 m.scale(),
             ) {

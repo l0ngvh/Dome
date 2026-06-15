@@ -15,7 +15,7 @@ use std::collections::HashSet;
 
 use crate::config::{LayoutConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, Strategy};
 use crate::core::allocator::NodeId;
-use crate::core::hub::{Hub, HubConfig, MonitorLayout, SpawnIndicator};
+use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Dimension, Direction, Length, Logical, WindowId, Workspace, WorkspaceId};
 use crate::core::strategy::TilingAction;
 
@@ -786,18 +786,11 @@ pub(super) fn default_layout_for_tests() -> LayoutConfig {
         strategy: Strategy::PartitionTree,
         partition_tree: default_partition_tree_config_for_tests(),
         master: default_master_config_for_tests(),
-    }
-}
-
-impl Default for HubConfig {
-    fn default() -> Self {
-        Self {
-            layout: default_layout_for_tests(),
-            min_width: SizeConstraint::Pixels(Length::new(0.0)),
-            min_height: SizeConstraint::Pixels(Length::new(0.0)),
-            max_width: SizeConstraint::Pixels(Length::new(0.0)),
-            max_height: SizeConstraint::Pixels(Length::new(0.0)),
-        }
+        min_width: SizeConstraint::Pixels(Length::new(0.0)),
+        min_height: SizeConstraint::Pixels(Length::new(0.0)),
+        max_width: SizeConstraint::Pixels(Length::new(0.0)),
+        max_height: SizeConstraint::Pixels(Length::new(0.0)),
+        workspace: vec![],
     }
 }
 
@@ -810,7 +803,7 @@ pub(super) fn setup_hub() -> Hub {
             Length::new(ASCII_HEIGHT as f32),
         ),
         1.0,
-        HubConfig::default(),
+        default_layout_for_tests(),
     )
 }
 
@@ -829,15 +822,12 @@ pub(super) fn setup_with_automatic_tiling() -> Hub {
             Length::new(ASCII_HEIGHT as f32),
         ),
         1.0,
-        HubConfig {
-            layout: crate::config::LayoutConfig {
-                partition_tree: crate::config::PartitionTreeConfig {
-                    automatic_tiling: true,
-                    ..default_partition_tree_config_for_tests()
-                },
-                ..default_layout_for_tests()
+        crate::config::LayoutConfig {
+            partition_tree: crate::config::PartitionTreeConfig {
+                automatic_tiling: true,
+                ..default_partition_tree_config_for_tests()
             },
-            ..Default::default()
+            ..default_layout_for_tests()
         },
     )
 }

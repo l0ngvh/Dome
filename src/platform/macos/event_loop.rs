@@ -110,6 +110,9 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         HubEvent::ConfigChanged(new_config) => {
             runner.dome.config_changed(*new_config);
         }
+        HubEvent::LayoutConfigChanged(new_layout) => {
+            runner.dome.layout_changed(*new_layout);
+        }
         HubEvent::SyncFocus { pid } => {
             dispatch_sync_focus(runner, pid);
         }

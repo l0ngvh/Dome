@@ -182,10 +182,11 @@ pub(crate) fn paint_picker(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use crate::config::LayoutConfig;
     use crate::core::{Dimension, Hub, Length};
 
     fn test_hub() -> Hub {
+        let layout = LayoutConfig::default();
         Hub::new(
             Dimension::new(
                 Length::new(0.0),
@@ -194,7 +195,7 @@ mod tests {
                 Length::new(100.0),
             ),
             1.0,
-            Config::default().into(),
+            layout,
         )
     }
 

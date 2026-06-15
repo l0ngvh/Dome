@@ -7,9 +7,9 @@ use objc2_foundation::NSRect;
 
 use crate::action::Actions;
 use crate::action::Query;
-use crate::config::Config;
+use crate::config::{Config, LayoutConfig};
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, MonitorId,
+    ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId,
     TilingWindowPlacement, WindowId,
 };
 use crate::picker::PickerEntry;
@@ -46,6 +46,7 @@ pub(in crate::platform::macos) enum HubEvent {
         sender: std::sync::mpsc::SyncSender<String>,
     },
     ConfigChanged(Box<Config>),
+    LayoutConfigChanged(Box<LayoutConfig>),
     /// Periodic sync to catch missed AX notifications, as AX notifications are unreliable. Only
     /// syncs window state, not focus, as focus changes should come from user interactions. Beside
     /// we receive plenty of focus events, so missing them isn't a concern.
@@ -79,6 +80,7 @@ impl fmt::Display for HubEvent {
             Self::Action(actions) => write!(f, "Action({actions})"),
             Self::Query { query, .. } => write!(f, "Query({query:?})"),
             Self::ConfigChanged(_) => write!(f, "ConfigChanged"),
+            Self::LayoutConfigChanged(_) => write!(f, "LayoutConfigChanged"),
             Self::Sync => write!(f, "Sync"),
             Self::MonitorsChanged(monitors) => {
                 write!(f, "MonitorsChanged(count={})", monitors.len())
@@ -125,6 +127,7 @@ pub(in crate::platform::macos) struct RenderFrame {
     pub(in crate::platform::macos) float_shows: Vec<FloatShow>,
     pub(in crate::platform::macos) focused_window: Option<WindowId>,
     pub(in crate::platform::macos) focused_monitor_id: MonitorId,
+    pub(in crate::platform::macos) tab_bar_height: Length<Logical>,
 }
 
 pub(in crate::platform::macos) struct MonitorTilingData {

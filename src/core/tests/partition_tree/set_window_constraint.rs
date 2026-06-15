@@ -2,7 +2,6 @@ use insta::assert_snapshot;
 
 use crate::config::{LayoutConfig, PartitionTreeConfig, SizeConstraint};
 
-use crate::core::hub::HubConfig;
 use crate::core::node::Length;
 use crate::core::tests::{
     default_layout_for_tests, default_partition_tree_config_for_tests, setup, snapshot,
@@ -865,16 +864,13 @@ fn global_max_applies_to_all_windows() {
     hub.insert_tiling(hub.current_workspace());
     hub.insert_tiling(hub.current_workspace());
 
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            partition_tree: PartitionTreeConfig {
-                automatic_tiling: true,
-                ..default_partition_tree_config_for_tests()
-            },
-            ..default_layout_for_tests()
+    hub.sync_config(LayoutConfig {
+        partition_tree: PartitionTreeConfig {
+            automatic_tiling: true,
+            ..default_partition_tree_config_for_tests()
         },
         max_width: SizeConstraint::Pixels(Length::new(60.0)),
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     assert_snapshot!(snapshot(&hub), @"
@@ -924,16 +920,13 @@ fn per_window_max_overrides_global() {
     let w0 = hub.insert_tiling(hub.current_workspace());
     hub.insert_tiling(hub.current_workspace());
 
-    hub.sync_config(HubConfig {
-        layout: LayoutConfig {
-            partition_tree: PartitionTreeConfig {
-                automatic_tiling: true,
-                ..default_partition_tree_config_for_tests()
-            },
-            ..default_layout_for_tests()
+    hub.sync_config(LayoutConfig {
+        partition_tree: PartitionTreeConfig {
+            automatic_tiling: true,
+            ..default_partition_tree_config_for_tests()
         },
         max_width: SizeConstraint::Pixels(Length::new(60.0)),
-        ..Default::default()
+        ..default_layout_for_tests()
     });
     hub.set_window_constraint(w0, None, None, Some(30.0), None);
 
@@ -1455,9 +1448,9 @@ fn window_max_smaller_than_global_min_width() {
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace());
 
-    hub.sync_config(HubConfig {
+    hub.sync_config(LayoutConfig {
         min_width: SizeConstraint::Pixels(Length::new(300.0)),
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     // Window max (50) < global min (300) - should not panic, window max takes precedence
@@ -1507,9 +1500,9 @@ fn window_max_height_smaller_than_global_min_height() {
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace());
 
-    hub.sync_config(HubConfig {
+    hub.sync_config(LayoutConfig {
         min_height: SizeConstraint::Pixels(Length::new(300.0)),
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     // Window max (10) < global min (300) - should not panic
@@ -1550,9 +1543,9 @@ fn window_max_width_smaller_than_global_min_width() {
     let w0 = hub.insert_tiling(hub.current_workspace());
     hub.insert_tiling(hub.current_workspace());
 
-    hub.sync_config(HubConfig {
+    hub.sync_config(LayoutConfig {
         min_width: SizeConstraint::Pixels(Length::new(100.0)),
-        ..Default::default()
+        ..default_layout_for_tests()
     });
 
     // Window max (50) < global min (100) - should not panic

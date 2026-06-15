@@ -27,7 +27,7 @@ fullscreen, and the keybindings will work again.
 
 Your setting probably had an error and Dome silently replaced it with the
 default. Check `dome.log` for warning lines containing the dotted field path
-(for example, `field=layout.master.master_ratio`). These tell you exactly which
+(for example, `field=master.master_ratio`). These tell you exactly which
 fields failed and why.
 
 Dome recovers from most config errors per field. If a field has the wrong type,

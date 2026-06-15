@@ -4,7 +4,8 @@ use super::*;
 fn picker_scale_reflects_focused_monitor() {
     let mut monitor = default_monitor();
     monitor.scale = 1.75;
-    let mut env = TestEnv::new_with_monitors(Config::default(), vec![monitor]);
+    let mut env =
+        TestEnv::new_with_monitors(Config::default(), LayoutConfig::default(), vec![monitor]);
     let w = env.open(1, "App", "app.exe", SPAWN_DIM);
     env.minimize_window(w);
     env.run_actions("toggle minimized");

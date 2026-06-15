@@ -421,7 +421,7 @@ mod tests {
 
     /// Build: workspace -> container A (H) -> container B (V) -> window W
     fn fixture_linear() -> PartitionTreeStrategy {
-        let mut s = PartitionTreeStrategy::new();
+        let mut s = PartitionTreeStrategy::new(Length::ZERO, false);
         let ws = ws_id();
 
         let wid = WindowId::new(0);
@@ -468,7 +468,7 @@ mod tests {
     ///   workspace -> root(H) -> [mid(V) -> [W0, W1], W2, leaf(H) -> [W3]]
     /// 3 containers (root, mid, leaf), 4 windows (W0..W3)
     fn fixture_wide() -> (PartitionTreeStrategy, ContainerId, ContainerId, ContainerId) {
-        let mut s = PartitionTreeStrategy::new();
+        let mut s = PartitionTreeStrategy::new(Length::ZERO, false);
         let ws = ws_id();
         let dim = Dimension::default();
 

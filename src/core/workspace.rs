@@ -14,18 +14,26 @@ impl Hub {
         self.prune_workspace(current_ws);
     }
 
-    /// Deletes workspace if empty and not active on its monitor
+    /// Deletes workspace if empty, not active on its monitor, and not pinned
+    /// by a config-named override.
     #[tracing::instrument(skip(self))]
     pub(super) fn prune_workspace(&mut self, ws_id: WorkspaceId) {
+        if self.strategies.is_pinned(ws_id) {
+            return;
+        }
         let ws = self.access.workspaces.get(ws_id);
-        if self.strategy.has_tiling_windows(&self.access, ws_id)
-            || !ws.float_windows.is_empty()
-            || !ws.fullscreen_windows.is_empty()
-        {
+        let has_tiling = self
+            .strategies
+            .for_workspace(ws_id)
+            .has_tiling_windows(&self.access, ws_id);
+        if has_tiling || !ws.float_windows.is_empty() || !ws.fullscreen_windows.is_empty() {
             return;
         }
         if self.access.monitors.get(ws.monitor).active_workspace != ws_id {
-            self.strategy.prune_workspace(ws_id);
+            self.strategies
+                .for_workspace_mut(ws_id)
+                .prune_workspace(ws_id);
+            self.strategies.unregister(ws_id);
             self.access.workspaces.delete(ws_id);
         }
     }
@@ -48,17 +56,19 @@ impl Hub {
         if let Some(window_id) = self.focused_window(current_ws) {
             let target_ws = self.get_or_create_workspace(target_workspace);
             self.move_child_to_workspace_with_id(window_id, target_ws);
-        } else if self.strategy.has_tiling_windows(&self.access, current_ws) {
-            // Container is highlighted (focused_tiling is Child::Container).
-            // Bypass focused_window() which returns None for containers,
-            // and call the strategy directly to move the whole container.
-            let target_ws = self.get_or_create_workspace(target_workspace);
-            if current_ws == target_ws {
-                return;
+        } else {
+            let has_tiling = self
+                .strategies
+                .for_workspace(current_ws)
+                .has_tiling_windows(&self.access, current_ws);
+            if has_tiling {
+                let target_ws = self.get_or_create_workspace(target_workspace);
+                if current_ws == target_ws {
+                    return;
+                }
+                tracing::debug!(?current_ws, ?target_ws, "Moving container to workspace");
+                self.move_focused_across_workspaces(current_ws, target_ws);
             }
-            tracing::debug!(?current_ws, ?target_ws, "Moving container to workspace");
-            self.strategy
-                .move_focused_to_workspace(&mut self.access, current_ws, target_ws);
         }
     }
 }

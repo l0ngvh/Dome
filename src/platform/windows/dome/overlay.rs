@@ -349,17 +349,23 @@ pub(in crate::platform::windows) struct TilingOverlay {
     windows: Vec<TilingWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
     config: Config,
+    tab_bar_height: Length<Logical>,
     hub_sender: HubSender,
     window: OwnedHwnd,
     scale: f32,
 }
 
 impl TilingOverlay {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "all parameters are needed for overlay initialization"
+    )]
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         config: Config,
+        tab_bar_height: Length<Logical>,
         hub_sender: HubSender,
         monitor: Dimension,
         scale: f32,
@@ -409,6 +415,7 @@ impl TilingOverlay {
             windows: Vec::new(),
             containers: Vec::new(),
             config,
+            tab_bar_height,
             hub_sender,
             window,
             scale,
@@ -451,7 +458,7 @@ impl TilingOverlay {
             border: overlay::BorderMetrics::from_thickness(Length::<Logical>::new(
                 config.border_size,
             )),
-            tab_bar_height: config.layout.partition_tree.tab_bar_height,
+            tab_bar_height: self.tab_bar_height,
         };
         let events = std::mem::take(&mut self.events);
         let w_phys = self.width_phys;
@@ -533,6 +540,10 @@ impl TilingOverlayApi for TilingOverlay {
             self.renderer.apply_font(&config.font);
         }
         self.config = config.clone();
+    }
+
+    fn set_tab_bar_height(&mut self, height: Length<Logical>) {
+        self.tab_bar_height = height;
     }
 
     fn window_above(&self) -> Option<HwndId> {
@@ -691,6 +702,7 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     );
     fn clear(&mut self);
     fn set_config(&mut self, config: &Config);
+    fn set_tab_bar_height(&mut self, height: Length<Logical>);
     /// Returns the HWND sitting directly above this overlay in z-order.
     /// Wraps `GetWindow(GW_HWNDPREV)` in production; used by `show_tiling`
     /// to slot tiling windows above the overlay on band transitions.
@@ -879,6 +891,7 @@ impl CreateOverlay for WgpuOverlayFactory {
     fn create_tiling_overlay(
         &self,
         config: Config,
+        tab_bar_height: Length<Logical>,
         monitor: Dimension,
         scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
@@ -887,6 +900,7 @@ impl CreateOverlay for WgpuOverlayFactory {
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
             config,
+            tab_bar_height,
             self.hub_sender.clone(),
             monitor,
             scale,

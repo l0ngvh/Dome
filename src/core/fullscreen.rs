@@ -14,7 +14,9 @@ impl Hub {
 
         match window.mode {
             DisplayMode::Tiling => {
-                self.strategy.detach_window(&mut self.access, window_id);
+                self.strategies
+                    .for_workspace_mut(ws)
+                    .detach_window(&mut self.access, window_id);
             }
             DisplayMode::Float { .. } => {
                 let _dim = self.detach_float_from_workspace(window_id);
@@ -48,7 +50,9 @@ impl Hub {
         self.detach_fullscreen_from_workspace(window_id);
 
         self.access.windows.get_mut(window_id).mode = DisplayMode::Tiling;
-        self.strategy.attach_window(&mut self.access, window_id, ws);
+        self.strategies
+            .for_workspace_mut(ws)
+            .attach_window(&mut self.access, window_id, ws);
 
         tracing::info!("Fullscreen unset");
     }

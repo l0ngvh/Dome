@@ -468,7 +468,7 @@ pub(in crate::platform::windows) unsafe extern "system" fn picker_wnd_proc(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use crate::config::LayoutConfig;
     use crate::core::{Dimension, Hub, Length, Physical};
     use crate::platform::windows::external::HwndId;
 
@@ -481,7 +481,7 @@ mod tests {
                 Length::new(100.0),
             ),
             1.0,
-            Config::default().into(),
+            LayoutConfig::default(),
         )
     }
 

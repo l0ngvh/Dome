@@ -5,8 +5,6 @@ use super::default_layout_for_tests;
 #[cfg(target_os = "windows")]
 use crate::config::SizeConstraint;
 #[cfg(target_os = "windows")]
-use crate::core::hub::HubConfig;
-#[cfg(target_os = "windows")]
 use crate::core::node::Logical;
 use crate::core::node::{Dimension, Length};
 
@@ -516,15 +514,12 @@ fn monitor_scale_multiplies_config_lengths() {
             Length::new(1000.0),
         ),
         2.0,
-        HubConfig {
-            layout: crate::config::LayoutConfig {
-                partition_tree: crate::config::PartitionTreeConfig {
-                    tab_bar_height: Length::<Logical>::new(20.0),
-                    automatic_tiling: true,
-                },
-                ..default_layout_for_tests()
+        crate::config::LayoutConfig {
+            partition_tree: crate::config::PartitionTreeConfig {
+                tab_bar_height: Length::<Logical>::new(20.0),
+                automatic_tiling: true,
             },
-            ..Default::default()
+            ..default_layout_for_tests()
         },
     );
     hub.insert_tiling(hub.current_workspace());
@@ -584,16 +579,13 @@ fn monitor_scale_multiplies_config_lengths() {
             Length::new(1000.0),
         ),
         2.0,
-        HubConfig {
-            layout: crate::config::LayoutConfig {
-                partition_tree: crate::config::PartitionTreeConfig {
-                    tab_bar_height: Length::<Logical>::new(20.0),
-                    automatic_tiling: true,
-                },
-                ..default_layout_for_tests()
+        crate::config::LayoutConfig {
+            partition_tree: crate::config::PartitionTreeConfig {
+                tab_bar_height: Length::<Logical>::new(20.0),
+                automatic_tiling: true,
             },
             min_width: SizeConstraint::Pixels(Length::new(100.0)),
-            ..Default::default()
+            ..default_layout_for_tests()
         },
     );
     for _ in 0..6 {

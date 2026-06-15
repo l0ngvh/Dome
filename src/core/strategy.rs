@@ -1,5 +1,13 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::config::{LayoutConfig, Strategy};
+use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
-use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
+use crate::core::master::MasterStrategy;
+use crate::core::node::{
+    ContainerId, Dimension, Direction, Length, WindowId, Workspace, WorkspaceId,
+};
+use crate::core::partition_tree::PartitionTreeStrategy;
 
 /// Actions that are specific to the tiling strategy.
 #[derive(Debug)]
@@ -81,15 +89,16 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// if the workspace is empty.
     fn focused_tiling_window(&self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WindowId>;
 
-    /// Move the focused tiling child (window or container) from one workspace
-    /// to another. The strategy reads its own focus state to determine what to
-    /// move. If no focused tiling child exists in `from_ws`, silently returns.
-    fn move_focused_to_workspace(
-        &mut self,
-        hub: &mut HubAccess,
-        from_ws: WorkspaceId,
-        to_ws: WorkspaceId,
-    );
+    /// Detach the focused tiling subtree from `ws_id`, returning leaf windows
+    /// in deterministic order (WindowId-ascending). Empty Vec when no tiling
+    /// focus exists. The strategy cleans up all internal state for those
+    /// windows (and any containers in the subtree).
+    fn detach_focused(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Vec<WindowId>;
+
+    /// Attach previously-detached windows into `ws_id`. Calls attach_window
+    /// for each id in order, then sets focus to the last attached. Empty
+    /// input is a no-op.
+    fn attach_detached(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, windows: &[WindowId]);
 
     /// Returns true if the workspace has any tiling windows (root is Some).
     fn has_tiling_windows(&self, hub: &HubAccess, ws_id: WorkspaceId) -> bool;
@@ -97,11 +106,21 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Returns the number of tiling windows in the workspace.
     fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize;
 
-    /// Remove per-workspace tiling state.
+    /// Move the focused tiling subtree from one workspace to another within the
+    /// same strategy instance. Preserves container structure because both
+    /// workspaces share the same allocator.
+    fn move_focused_to_workspace(
+        &mut self,
+        hub: &mut HubAccess,
+        from_ws: WorkspaceId,
+        to_ws: WorkspaceId,
+    );
+
+    /// Remove all per-workspace state for a workspace being deleted.
     fn prune_workspace(&mut self, ws_id: WorkspaceId);
 
-    /// Refresh config-derived internal state and relayout every workspace.
-    fn apply_config(&mut self, hub: &mut HubAccess);
+    /// Refresh config-derived internal state and relayout the given workspace.
+    fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId);
 
     /// Validate strategy-specific structural invariants (test-only).
     #[cfg(test)]
@@ -196,10 +215,161 @@ pub(crate) fn distribute_space(
         .collect()
 }
 
+/// Diff entry produced by `StrategySet::resync` for one workspace whose kind
+/// changed across a config reload. The caller drives the cross-kind rebuild.
+pub(super) struct WorkspaceKindChange {
+    pub(super) ws_id: WorkspaceId,
+    pub(super) old: Strategy,
+    pub(super) new: Strategy,
+}
+
+/// Owns one shared instance per tiling strategy and the per-workspace mapping
+/// from `WorkspaceId` to `Strategy`. Hub holds this as a single field disjoint
+/// from `HubAccess`, so dispatch (`for_workspace_mut`) borrows only this field
+/// and leaves `HubAccess` free for the strategy method to take by `&mut`.
+#[derive(Debug)]
+pub(super) struct StrategySet {
+    partition_tree: PartitionTreeStrategy,
+    master: MasterStrategy,
+    kinds: HashMap<WorkspaceId, Strategy>,
+    pinned: HashSet<WorkspaceId>,
+}
+
+impl StrategySet {
+    pub(super) fn new(config: &LayoutConfig) -> Self {
+        let partition_tree = PartitionTreeStrategy::new(
+            config.partition_tree.tab_bar_height,
+            config.partition_tree.automatic_tiling,
+        );
+        let master = MasterStrategy::new(config.master.master_ratio, config.master.master_count);
+        Self {
+            partition_tree,
+            master,
+            kinds: HashMap::new(),
+            pinned: HashSet::new(),
+        }
+    }
+
+    pub(super) fn register(&mut self, ws_id: WorkspaceId, name: &str, config: &LayoutConfig) {
+        self.kinds.insert(ws_id, kind_for(name, config));
+        if pinned_for(name, config) {
+            self.pinned.insert(ws_id);
+        } else {
+            self.pinned.remove(&ws_id);
+        }
+    }
+
+    pub(super) fn unregister(&mut self, ws_id: WorkspaceId) {
+        self.kinds.remove(&ws_id);
+        self.pinned.remove(&ws_id);
+    }
+
+    pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {
+        *self
+            .kinds
+            .get(&ws_id)
+            .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"))
+    }
+
+    pub(super) fn is_pinned(&self, ws_id: WorkspaceId) -> bool {
+        self.pinned.contains(&ws_id)
+    }
+
+    pub(super) fn get(&self, kind: Strategy) -> &dyn TilingStrategy {
+        match kind {
+            Strategy::PartitionTree => &self.partition_tree,
+            Strategy::Master => &self.master,
+        }
+    }
+
+    pub(super) fn get_mut(&mut self, kind: Strategy) -> &mut dyn TilingStrategy {
+        match kind {
+            Strategy::PartitionTree => &mut self.partition_tree,
+            Strategy::Master => &mut self.master,
+        }
+    }
+
+    pub(super) fn for_workspace(&self, ws_id: WorkspaceId) -> &dyn TilingStrategy {
+        self.get(self.kind_of(ws_id))
+    }
+
+    pub(super) fn for_workspace_mut(&mut self, ws_id: WorkspaceId) -> &mut dyn TilingStrategy {
+        let kind = self.kind_of(ws_id);
+        self.get_mut(kind)
+    }
+
+    /// Recompute kinds and pin set against `new_config`, returning entries
+    /// only for workspaces whose kind changed. The caller drives the cross-
+    /// kind rebuild; this method only updates the map.
+    pub(super) fn resync(
+        &mut self,
+        workspaces: &Allocator<Workspace>,
+        new_config: &LayoutConfig,
+    ) -> Vec<WorkspaceKindChange> {
+        let mut changes = Vec::new();
+        for (ws_id, ws) in workspaces.all_active() {
+            let old = *self
+                .kinds
+                .get(&ws_id)
+                .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"));
+            let new = kind_for(&ws.name, new_config);
+            self.kinds.insert(ws_id, new);
+            if pinned_for(&ws.name, new_config) {
+                self.pinned.insert(ws_id);
+            } else {
+                self.pinned.remove(&ws_id);
+            }
+            if old != new {
+                changes.push(WorkspaceKindChange { ws_id, old, new });
+            }
+        }
+        changes
+    }
+
+    #[cfg(test)]
+    pub(super) fn validate_tree(&self, hub: &HubAccess) {
+        self.partition_tree.validate_tree(hub);
+        self.master.validate_tree(hub);
+    }
+}
+
+fn kind_for(name: &str, config: &LayoutConfig) -> Strategy {
+    config
+        .workspace
+        .iter()
+        .find(|w| w.name == name)
+        .map(|w| w.strategy)
+        .unwrap_or(config.strategy)
+}
+
+fn pinned_for(name: &str, config: &LayoutConfig) -> bool {
+    config.workspace.iter().any(|w| w.name == name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint};
     use crate::core::node::Length;
+
+    fn config_with(strategy: Strategy, overrides: Vec<LayoutWorkspaceConfig>) -> LayoutConfig {
+        LayoutConfig {
+            strategy,
+            partition_tree: PartitionTreeConfig {
+                tab_bar_height: Length::ZERO,
+                automatic_tiling: false,
+            },
+            master: MasterConfig {
+                master_ratio: 0.5,
+                master_count: 1,
+            },
+            min_width: SizeConstraint::default(),
+            min_height: SizeConstraint::default(),
+            max_width: SizeConstraint::default(),
+            max_height: SizeConstraint::default(),
+            workspace: overrides,
+        }
+    }
 
     #[test]
     fn distribute_space_returns_mins_when_sum_exceeds_container() {
@@ -248,5 +418,48 @@ mod tests {
         assert!((result[0].value() - 50.0).abs() < 0.01);
         assert!((result[1].value() - 35.0).abs() < 0.01);
         assert!((result[2].value() - 35.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn kind_for_returns_override_when_name_matches() {
+        let config = config_with(
+            Strategy::PartitionTree,
+            vec![LayoutWorkspaceConfig {
+                name: "1".into(),
+                strategy: Strategy::Master,
+            }],
+        );
+        assert_eq!(kind_for("1", &config), Strategy::Master);
+    }
+
+    #[test]
+    fn kind_for_falls_back_to_global_when_no_match() {
+        let config = config_with(
+            Strategy::PartitionTree,
+            vec![LayoutWorkspaceConfig {
+                name: "1".into(),
+                strategy: Strategy::Master,
+            }],
+        );
+        assert_eq!(kind_for("2", &config), Strategy::PartitionTree);
+    }
+
+    #[test]
+    fn kind_for_falls_back_to_global_when_no_overrides() {
+        let config = config_with(Strategy::Master, vec![]);
+        assert_eq!(kind_for("anything", &config), Strategy::Master);
+    }
+
+    #[test]
+    fn pinned_for_marks_only_named_workspaces() {
+        let config = config_with(
+            Strategy::PartitionTree,
+            vec![LayoutWorkspaceConfig {
+                name: "work".into(),
+                strategy: Strategy::Master,
+            }],
+        );
+        assert!(pinned_for("work", &config));
+        assert!(!pinned_for("scratch", &config));
     }
 }

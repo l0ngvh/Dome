@@ -22,7 +22,7 @@ use std::time::Instant;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, MacosWindow, WindowMode};
+use crate::config::{Config, LayoutConfig, MacosWindow, WindowMode};
 use crate::core::{
     ContainerId, Direction, Hub, Length, Logical, TilingAction, WindowId, WindowRestrictions,
 };
@@ -105,6 +105,7 @@ pub(in crate::platform::macos) struct Dome {
     registry: WindowRegistry,
     monitor_registry: MonitorRegistry,
     config: Config,
+    layout: LayoutConfig,
     /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
@@ -121,13 +122,14 @@ impl Dome {
     pub(in crate::platform::macos) fn new(
         monitors: &[MonitorInfo],
         config: Config,
+        layout: LayoutConfig,
         sender: Box<dyn FrameSender>,
     ) -> Self {
         let primary = monitors
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.dimension, 1.0, config.clone().into());
+        let mut hub = Hub::new(primary.dimension, 1.0, layout.clone());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
@@ -141,6 +143,7 @@ impl Dome {
             registry: WindowRegistry::new(),
             monitor_registry,
             config,
+            layout,
             primary_full_height: primary.full_height,
             observed_pids: HashSet::new(),
             sender,
@@ -288,11 +291,18 @@ impl Dome {
     }
 
     pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
-        self.hub.sync_config(new_config.clone().into());
+        self.hub.sync_config(self.layout.clone());
         self.sender
             .send(HubMessage::ConfigChanged(Box::new(new_config.clone())));
         self.config = new_config;
         tracing::info!("Config reloaded");
+        self.flush_layout();
+    }
+
+    pub(in crate::platform::macos) fn layout_changed(&mut self, new_layout: LayoutConfig) {
+        self.layout = new_layout;
+        self.hub.sync_config(self.layout.clone());
+        tracing::info!("Layout reloaded");
         self.flush_layout();
     }
 

@@ -638,33 +638,6 @@ impl TilingStrategy for MasterStrategy {
         self.workspaces.get(&ws_id).map_or(0, |ws| ws.windows.len())
     }
 
-    fn prune_workspace(&mut self, ws_id: WorkspaceId) {
-        if let Some(state) = self.workspaces.remove(&ws_id) {
-            for wid in &state.windows {
-                self.window_dimensions.remove(wid);
-            }
-        }
-    }
-
-    fn apply_config(&mut self, hub: &mut HubAccess) {
-        // Hot-reload overrides any runtime tuning from GrowMaster / MoreMaster
-        // etc.: the TOML file is the source of truth, runtime commands are a
-        // transient override until the next config reload.
-        self.master_ratio = hub.config.layout.master.master_ratio;
-        self.master_count = hub.config.layout.master.master_count;
-
-        // Relayout every workspace so the new scalars take effect.
-        let ws_ids: Vec<WorkspaceId> = hub
-            .workspaces
-            .all_active()
-            .iter()
-            .map(|(id, _)| *id)
-            .collect();
-        for ws_id in ws_ids {
-            self.layout_workspace(hub, ws_id);
-        }
-    }
-
     fn move_focused_to_workspace(
         &mut self,
         hub: &mut HubAccess,
@@ -679,8 +652,6 @@ impl TilingStrategy for MasterStrategy {
         };
         let id = state.windows[focused];
 
-        // Inline removal from source (don't call detach_window because hub may
-        // have already updated window.workspace)
         let state = self.workspaces.get_mut(&from_ws).unwrap();
         state.windows.remove(focused);
         Self::adjust_focus_after_removal(state, focused);
@@ -694,6 +665,53 @@ impl TilingStrategy for MasterStrategy {
         self.layout_workspace(hub, from_ws);
 
         self.attach_window(hub, id, to_ws);
+    }
+
+    fn prune_workspace(&mut self, ws_id: WorkspaceId) {
+        if let Some(state) = self.workspaces.remove(&ws_id) {
+            for wid in &state.windows {
+                self.window_dimensions.remove(wid);
+            }
+        }
+    }
+
+    fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
+        self.master_ratio = hub.config.master.master_ratio;
+        self.master_count = hub.config.master.master_count;
+        self.layout_workspace(hub, ws_id);
+    }
+
+    fn detach_focused(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Vec<WindowId> {
+        let Some(state) = self.workspaces.get(&ws_id) else {
+            return Vec::new();
+        };
+        let Some(focused) = state.focused_index else {
+            return Vec::new();
+        };
+        let id = state.windows[focused];
+
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.windows.remove(focused);
+        Self::adjust_focus_after_removal(state, focused);
+
+        if state.windows.is_empty() {
+            let ws = hub.workspaces.get_mut(ws_id);
+            ws.is_float_focused = !ws.float_windows.is_empty();
+        }
+
+        self.window_dimensions.remove(&id);
+        self.layout_workspace(hub, ws_id);
+
+        vec![id]
+    }
+
+    fn attach_detached(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, windows: &[WindowId]) {
+        for &wid in windows {
+            self.attach_window(hub, wid, ws_id);
+        }
+        if let Some(&last) = windows.last() {
+            self.set_focus(hub, last);
+        }
     }
 
     #[cfg(test)]

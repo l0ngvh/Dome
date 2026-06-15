@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, SpawnIndicator, TilingWindowPlacement};
-use crate::core::node::{Dimension, Length, WindowId, WorkspaceId};
+use crate::core::node::{Dimension, Length, Logical, WindowId, WorkspaceId};
 use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, clip, translate};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
@@ -22,14 +22,18 @@ pub(crate) struct PartitionTreeStrategy {
     containers: Allocator<Container>,
     tiling_windows: HashMap<WindowId, TilingWindowData>,
     workspaces: HashMap<WorkspaceId, WorkspaceTilingState>,
+    tab_bar_height: Length<Logical>,
+    automatic_tiling: bool,
 }
 
 impl PartitionTreeStrategy {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(tab_bar_height: Length<Logical>, automatic_tiling: bool) -> Self {
         Self {
             containers: Allocator::new(),
             tiling_windows: HashMap::new(),
             workspaces: HashMap::new(),
+            tab_bar_height,
+            automatic_tiling,
         }
     }
 
@@ -352,17 +356,45 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn move_focused_to_workspace(
-        &mut self,
-        hub: &mut HubAccess,
-        from_ws: WorkspaceId,
-        to_ws: WorkspaceId,
-    ) {
-        let Some(focused) = self.workspaces.get(&from_ws).and_then(|s| s.focused_tiling) else {
-            return;
+    fn detach_focused(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Vec<WindowId> {
+        let Some(focused) = self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling) else {
+            return Vec::new();
         };
+
+        // Collect leaf WindowIds from the focused subtree before detach.
+        let mut window_ids: Vec<WindowId> = self
+            .children_dfs(focused)
+            .filter_map(|c| match c {
+                Child::Window(wid) => Some(wid),
+                Child::Container(_) => None,
+            })
+            .collect();
+        window_ids.sort_unstable();
+
         self.detach_child(hub, focused);
-        self.attach_child(hub, focused, to_ws);
+
+        // detach_child only removes tiling_windows for a Window child.
+        // For a Container child, explicitly clean up the orphaned subtree:
+        // remove tiling_windows entries and deallocate container nodes.
+        if let Child::Container(cid) = focused {
+            for &wid in &window_ids {
+                self.tiling_windows.remove(&wid);
+            }
+            for container_id in self.containers_preorder(cid).collect::<Vec<_>>() {
+                self.containers.delete(container_id);
+            }
+        }
+
+        window_ids
+    }
+
+    fn attach_detached(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, windows: &[WindowId]) {
+        for &wid in windows {
+            self.attach_window(hub, wid, ws_id);
+        }
+        if let Some(&last) = windows.last() {
+            self.set_focus(hub, last);
+        }
     }
 
     fn has_tiling_windows(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> bool {
@@ -383,20 +415,27 @@ impl TilingStrategy for PartitionTreeStrategy {
             .count()
     }
 
+    fn move_focused_to_workspace(
+        &mut self,
+        hub: &mut HubAccess,
+        from_ws: WorkspaceId,
+        to_ws: WorkspaceId,
+    ) {
+        let Some(focused) = self.workspaces.get(&from_ws).and_then(|s| s.focused_tiling) else {
+            return;
+        };
+        self.detach_child(hub, focused);
+        self.attach_child(hub, focused, to_ws);
+    }
+
     fn prune_workspace(&mut self, ws_id: WorkspaceId) {
         self.workspaces.remove(&ws_id);
     }
 
-    fn apply_config(&mut self, hub: &mut HubAccess) {
-        let ws_ids: Vec<WorkspaceId> = hub
-            .workspaces
-            .all_active()
-            .iter()
-            .map(|(id, _)| *id)
-            .collect();
-        for ws_id in ws_ids {
-            self.layout_workspace(hub, ws_id);
-        }
+    fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
+        self.tab_bar_height = hub.config.partition_tree.tab_bar_height;
+        self.automatic_tiling = hub.config.partition_tree.automatic_tiling;
+        self.layout_workspace(hub, ws_id);
     }
 
     #[cfg(test)]

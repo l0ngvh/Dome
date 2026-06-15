@@ -94,13 +94,19 @@ impl Hub {
             DisplayMode::Float { .. } => {
                 let _dim = self.detach_float_from_workspace(window_id);
                 self.access.windows.get_mut(window_id).mode = DisplayMode::Tiling;
-                self.strategy
-                    .attach_window(&mut self.access, window_id, current_ws);
+                self.strategies.for_workspace_mut(current_ws).attach_window(
+                    &mut self.access,
+                    window_id,
+                    current_ws,
+                );
 
                 tracing::debug!(%window_id, "Window is now tiling");
             }
             DisplayMode::Tiling => {
-                let dim = self.strategy.detach_window(&mut self.access, window_id);
+                let dim = self
+                    .strategies
+                    .for_workspace_mut(current_ws)
+                    .detach_window(&mut self.access, window_id);
                 self.attach_float_to_workspace(current_ws, window_id, dim);
                 tracing::debug!(%window_id, "Window is now floating");
             }
