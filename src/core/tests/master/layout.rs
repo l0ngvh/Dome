@@ -152,20 +152,20 @@ fn focus_direction_left_right() {
     // Focus is on W1 (stack). Move left to master.
     hub.focus_left();
     let ws = hub.current_workspace();
-    assert_eq!(hub.focused_tiling_window(ws), Some(WindowId::new(0)));
+    assert_eq!(hub.focused_window(ws), Some(WindowId::new(0)));
 
     // Move right back to stack.
     hub.focus_right();
-    assert_eq!(hub.focused_tiling_window(ws), Some(WindowId::new(1)));
+    assert_eq!(hub.focused_window(ws), Some(WindowId::new(1)));
 
     // Right from stack is no-op.
     hub.focus_right();
-    assert_eq!(hub.focused_tiling_window(ws), Some(WindowId::new(1)));
+    assert_eq!(hub.focused_window(ws), Some(WindowId::new(1)));
 
     // Focus master, then left from master is no-op.
     hub.focus_left();
     hub.focus_left();
-    assert_eq!(hub.focused_tiling_window(ws), Some(WindowId::new(0)));
+    assert_eq!(hub.focused_window(ws), Some(WindowId::new(0)));
 }
 
 #[test]
@@ -179,19 +179,19 @@ fn focus_direction_up_down() {
 
     // Focus is on W2 (stack index 2). Down wraps to W1 (stack index 1).
     hub.focus_down();
-    assert_eq!(hub.focused_tiling_window(ws), Some(WindowId::new(1)));
+    assert_eq!(hub.focused_window(ws), Some(WindowId::new(1)));
 
     // Down from W1 wraps to W2.
     hub.focus_down();
-    assert_eq!(hub.focused_tiling_window(ws), Some(WindowId::new(2)));
+    assert_eq!(hub.focused_window(ws), Some(WindowId::new(2)));
 
     // Up from W2 goes to W1.
     hub.focus_up();
-    assert_eq!(hub.focused_tiling_window(ws), Some(WindowId::new(1)));
+    assert_eq!(hub.focused_window(ws), Some(WindowId::new(1)));
 
     // Up from W1 wraps to W2.
     hub.focus_up();
-    assert_eq!(hub.focused_tiling_window(ws), Some(WindowId::new(2)));
+    assert_eq!(hub.focused_window(ws), Some(WindowId::new(2)));
 }
 
 #[test]
@@ -968,7 +968,7 @@ fn prune_workspace() {
     hub.focus_workspace("1");
 
     // ws "0" should have been pruned (empty and no longer active)
-    let workspaces = hub.all_workspaces();
+    let workspaces = hub.query_workspaces();
     assert_eq!(workspaces.len(), 1);
     validate_hub(&hub);
 }
@@ -983,7 +983,7 @@ fn sync_config_increments_master_count() {
     hub.insert_tiling(hub.current_workspace());
 
     let ws = hub.current_workspace();
-    let focus_before = hub.focused_tiling_window(ws);
+    let focus_before = hub.focused_window(ws);
 
     hub.sync_config(LayoutConfig {
         strategy: Strategy::Master,
@@ -996,7 +996,7 @@ fn sync_config_increments_master_count() {
     });
 
     // Window ordering and focus preserved (no rebuild, apply_config path).
-    assert_eq!(hub.focused_tiling_window(ws), focus_before);
+    assert_eq!(hub.focused_window(ws), focus_before);
     // Layout reflects new master_count=2.
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
@@ -1049,7 +1049,7 @@ fn sync_config_decrease_master_ratio() {
     hub.insert_tiling(hub.current_workspace());
 
     let ws = hub.current_workspace();
-    let focus_before = hub.focused_tiling_window(ws);
+    let focus_before = hub.focused_window(ws);
 
     hub.sync_config(LayoutConfig {
         strategy: Strategy::Master,
@@ -1062,7 +1062,7 @@ fn sync_config_decrease_master_ratio() {
     });
 
     // Window ordering and focus preserved (no rebuild, apply_config path).
-    assert_eq!(hub.focused_tiling_window(ws), focus_before);
+    assert_eq!(hub.focused_window(ws), focus_before);
     // Layout reflects new master_ratio=0.3.
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -1117,14 +1117,14 @@ fn sync_config_applies_master_params_without_rebuilding() {
     hub.insert_tiling(hub.current_workspace());
     hub.insert_tiling(hub.current_workspace());
     let ws0 = hub.current_workspace();
-    let focus_ws0 = hub.focused_tiling_window(ws0);
+    let focus_ws0 = hub.focused_window(ws0);
 
     // Switch to workspace "1" and insert 2 windows.
     hub.focus_workspace("1");
     hub.insert_tiling(hub.current_workspace());
     hub.insert_tiling(hub.current_workspace());
     let ws1 = hub.current_workspace();
-    let focus_ws1 = hub.focused_tiling_window(ws1);
+    let focus_ws1 = hub.focused_window(ws1);
 
     // Go back to workspace "0" for the snapshot.
     hub.focus_workspace("0");
@@ -1141,8 +1141,8 @@ fn sync_config_applies_master_params_without_rebuilding() {
     });
 
     // Both workspaces: ordering and focus preserved.
-    assert_eq!(hub.focused_tiling_window(ws0), focus_ws0);
-    assert_eq!(hub.focused_tiling_window(ws1), focus_ws1);
+    assert_eq!(hub.focused_window(ws0), focus_ws0);
+    assert_eq!(hub.focused_window(ws1), focus_ws1);
     // Layout output reflects new ratio.
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))

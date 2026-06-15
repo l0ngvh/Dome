@@ -78,7 +78,7 @@ fn strategy_smoke_test() {
     assert_eq!(wp.frame.height, Length::new(30.0));
 
     let ws = hub.current_workspace();
-    assert_eq!(hub.focused_tiling_window(ws), Some(id));
+    assert_eq!(hub.focused_window(ws), Some(id));
 }
 
 #[test]

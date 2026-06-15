@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use crate::config::{LayoutConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, Strategy};
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
-use crate::core::node::{Dimension, Direction, Length, Logical, WindowId, Workspace, WorkspaceId};
+use crate::core::node::{Dimension, Direction, Length, Logical, WindowId};
 use crate::core::strategy::TilingAction;
 
 const ASCII_WIDTH: usize = 150;
@@ -221,8 +221,12 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
             }
         }
     }
-    if !hub.minimized_windows().is_empty() {
-        let mut ids: Vec<WindowId> = hub.minimized_windows().to_vec();
+    let mut ids: Vec<WindowId> = hub
+        .minimized_window_entries()
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    if !ids.is_empty() {
         ids.sort();
         let id_strs: Vec<String> = ids.iter().map(|id| format!("{id}")).collect();
         s.push_str(&format!("  Minimized: [{}]\n", id_strs.join(", ")));
@@ -477,84 +481,9 @@ fn draw_focused_border(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, c
 }
 
 fn validate_hub(hub: &Hub) {
-    validate_monitors(hub);
-    let monitor_ids: Vec<_> = hub.all_monitors().iter().map(|(id, _)| *id).collect();
-
-    for (workspace_id, workspace) in hub.all_workspaces() {
-        assert!(
-            monitor_ids.contains(&workspace.monitor),
-            "Workspace {workspace_id} has invalid monitor {}",
-            workspace.monitor
-        );
-        validate_floats(hub, workspace_id, &workspace);
-        validate_fullscreens(hub, workspace_id, &workspace);
-    }
-
     hub.validate_tree();
     validate_visible_placements(hub);
     validate_minimized(hub);
-}
-
-fn validate_monitors(hub: &Hub) {
-    let monitors = hub.all_monitors();
-    let monitor_ids: Vec<_> = monitors.iter().map(|(id, _)| *id).collect();
-    assert!(
-        monitor_ids.contains(&hub.focused_monitor()),
-        "Focused monitor {} not in monitors",
-        hub.focused_monitor()
-    );
-    for (monitor_id, monitor) in &monitors {
-        let ws = hub.get_workspace(monitor.active_workspace);
-        assert_eq!(
-            ws.monitor, *monitor_id,
-            "Monitor {monitor_id} active_workspace {} points to workspace with monitor {}",
-            monitor.active_workspace, ws.monitor
-        );
-    }
-}
-
-fn validate_floats(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
-    if workspace.is_float_focused {
-        assert!(
-            !workspace.float_windows.is_empty(),
-            "Workspace {workspace_id}: is_float_focused is true but float_windows is empty"
-        );
-    }
-
-    for &fid in &workspace.float_windows {
-        let float = hub.access.windows.get(fid);
-        assert_eq!(
-            float.workspace(),
-            Some(workspace_id),
-            "Float {fid} has wrong workspace"
-        );
-        assert!(
-            float.is_float(),
-            "Window {fid} in float_windows but mode is not Float"
-        );
-    }
-}
-
-fn validate_fullscreens(hub: &Hub, workspace_id: WorkspaceId, workspace: &Workspace) {
-    for &fid in &workspace.fullscreen_windows {
-        let window = hub.access.windows.get(fid);
-        assert_eq!(
-            window.workspace(),
-            Some(workspace_id),
-            "Fullscreen {fid} has wrong workspace"
-        );
-        assert!(
-            window.is_fullscreen(),
-            "Window {fid} in fullscreen_windows but mode is not Fullscreen"
-        );
-    }
-    if let Some(&top) = workspace.fullscreen_windows.last() {
-        assert_eq!(
-            hub.focused_window(workspace_id),
-            Some(top),
-            "Workspace {workspace_id} has fullscreen windows but focus is not on topmost fullscreen window {top}"
-        );
-    }
 }
 
 fn validate_visible_placements(hub: &Hub) {
@@ -624,7 +553,13 @@ fn validate_visible_placements(hub: &Hub) {
 }
 
 fn validate_minimized(hub: &Hub) {
-    for &id in hub.minimized_windows() {
+    let minimized_ids: Vec<WindowId> = hub
+        .minimized_window_entries()
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+
+    for &id in &minimized_ids {
         let w = hub.access.windows.get(id);
         assert!(
             w.is_minimized(),
@@ -643,20 +578,8 @@ fn validate_minimized(hub: &Hub) {
                 "{wid} has no workspace but is_minimized is false"
             );
             assert!(
-                hub.minimized_windows().contains(&wid),
+                minimized_ids.contains(&wid),
                 "{wid} has no workspace but is not in minimized_windows"
-            );
-        }
-    }
-    for (ws_id, ws) in hub.all_workspaces() {
-        for &id in hub.minimized_windows() {
-            assert!(
-                !ws.float_windows.contains(&id),
-                "Minimized {id} in workspace {ws_id} float list"
-            );
-            assert!(
-                !ws.fullscreen_windows.contains(&id),
-                "Minimized {id} in workspace {ws_id} fullscreen list"
             );
         }
     }

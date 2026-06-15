@@ -155,7 +155,7 @@ fn minimize_already_minimized_noop() {
     let w0 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w0);
     hub.minimize_window(w0);
-    assert_eq!(hub.minimized_windows().len(), 1);
+    assert_eq!(hub.minimized_window_entries().len(), 1);
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn delete_minimized_window_after_workspace_pruned() {
     hub.minimize_window(w0);
     hub.focus_workspace("1");
     hub.delete_window(w0);
-    assert!(hub.minimized_windows().is_empty());
+    assert!(hub.minimized_window_entries().is_empty());
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn minimize_last_window_on_workspace() {
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w0);
-    assert_eq!(hub.minimized_windows().len(), 1);
+    assert_eq!(hub.minimized_window_entries().len(), 1);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
@@ -352,9 +352,7 @@ fn minimize_last_tiling_with_floats_present() {
         ),
     );
     hub.minimize_window(w0);
-    assert_eq!(hub.minimized_windows().len(), 1);
-    let ws_id = hub.current_workspace();
-    let _ws = hub.get_workspace(ws_id);
+    assert_eq!(hub.minimized_window_entries().len(), 1);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -386,7 +384,7 @@ fn set_window_constraint_on_minimized_no_panic() {
     let w0 = hub.insert_tiling(hub.current_workspace());
     hub.minimize_window(w0);
     hub.set_window_constraint(w0, Some(100.0), Some(50.0), None, None);
-    assert_eq!(hub.minimized_windows().len(), 1);
+    assert_eq!(hub.minimized_window_entries().len(), 1);
 }
 
 #[test]
@@ -419,8 +417,8 @@ fn set_window_title_on_minimized_no_panic() {
     hub.set_window_title(w0, "original".into());
     hub.minimize_window(w0);
     hub.set_window_title(w0, "updated".into());
-    assert_eq!(hub.minimized_windows().len(), 1);
     let entries = hub.minimized_window_entries();
+    assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].1, "updated");
 }
 
@@ -431,7 +429,7 @@ fn unminimize_after_workspace_pruned() {
     hub.minimize_window(w0);
     hub.focus_workspace("1");
     hub.unminimize_window(w0);
-    assert!(hub.minimized_windows().is_empty());
+    assert!(hub.minimized_window_entries().is_empty());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -503,7 +501,7 @@ fn unminimize_deleted_window_is_noop() {
     hub.minimize_window(w1);
     hub.delete_window(w1);
     hub.unminimize_window(w1);
-    assert!(hub.minimized_windows().is_empty());
+    assert!(hub.minimized_window_entries().is_empty());
 }
 
 #[test]
@@ -519,10 +517,10 @@ fn unminimize_float_window_restores_mode_and_dimension() {
     let w_float = hub.insert_float(hub.current_workspace(), float_dim);
 
     hub.minimize_window(w_float);
-    assert_eq!(hub.minimized_windows().len(), 1);
+    assert_eq!(hub.minimized_window_entries().len(), 1);
 
     hub.unminimize_window(w_float);
-    assert!(hub.minimized_windows().is_empty());
+    assert!(hub.minimized_window_entries().is_empty());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -571,10 +569,10 @@ fn unminimize_fullscreen_window_restores_mode_and_restrictions() {
     hub.set_fullscreen(w1, WindowRestrictions::BlockAll);
 
     hub.minimize_window(w1);
-    assert_eq!(hub.minimized_windows().len(), 1);
+    assert_eq!(hub.minimized_window_entries().len(), 1);
 
     hub.unminimize_window(w1);
-    assert!(hub.minimized_windows().is_empty());
+    assert!(hub.minimized_window_entries().is_empty());
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

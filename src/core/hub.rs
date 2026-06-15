@@ -333,11 +333,6 @@ impl Hub {
         tiling_count + ws.float_windows.len() + ws.fullscreen_windows.len()
     }
 
-    #[cfg(test)]
-    pub(super) fn all_monitors(&self) -> Vec<(MonitorId, Monitor)> {
-        self.access.monitors.all_active()
-    }
-
     pub(crate) fn add_monitor(
         &mut self,
         name: String,
@@ -449,30 +444,8 @@ impl Hub {
         }
     }
     #[cfg(test)]
-    pub(super) fn all_workspaces(&self) -> Vec<(WorkspaceId, Workspace)> {
-        self.access.workspaces.all_active()
-    }
-
-    #[cfg(test)]
     pub(crate) fn validate_tree(&self) {
         self.strategies.validate_tree(&self.access);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn minimized_windows(&self) -> &[WindowId] {
-        &self.minimized_windows
-    }
-
-    #[cfg(test)]
-    pub(crate) fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
-        self.strategies
-            .for_workspace(ws_id)
-            .focused_tiling_window(&self.access, ws_id)
-    }
-
-    #[cfg_attr(not(test), expect(dead_code, reason = "used in test validators"))]
-    pub(crate) fn get_workspace(&self, id: WorkspaceId) -> &Workspace {
-        self.access.workspaces.get(id)
     }
 
     pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) {

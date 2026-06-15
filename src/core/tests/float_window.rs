@@ -650,7 +650,7 @@ fn delete_float_workspace_pruning() {
         hub.delete_window(f0);
         assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
-            hub.all_workspaces().len(),
+            hub.query_workspaces().len(),
             2,
             "ws1 should still exist (has tiling window)"
         );
@@ -682,7 +682,7 @@ fn delete_float_workspace_pruning() {
         hub.delete_window(f0);
         assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
-            hub.all_workspaces().len(),
+            hub.query_workspaces().len(),
             2,
             "ws1 should still exist (has another float)"
         );
@@ -705,7 +705,7 @@ fn delete_float_workspace_pruning() {
         hub.delete_window(f0);
         assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
-            hub.all_workspaces().len(),
+            hub.query_workspaces().len(),
             1,
             "ws1 should be pruned (was empty)"
         );

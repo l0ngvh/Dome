@@ -38,10 +38,10 @@ fn sync_config_no_op_when_layout_unchanged() {
     hub.insert_tiling(hub.current_workspace());
     hub.insert_tiling(hub.current_workspace());
     let ws = hub.current_workspace();
-    let focus_before = hub.focused_tiling_window(ws);
+    let focus_before = hub.focused_window(ws);
     let snap_before = snapshot(&hub);
     hub.sync_config(default_layout_for_tests());
-    assert_eq!(hub.focused_tiling_window(ws), focus_before);
+    assert_eq!(hub.focused_window(ws), focus_before);
     assert_eq!(snapshot(&hub), snap_before);
 }
 
@@ -53,7 +53,7 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
     // Create a tabbed container to verify tree state survives.
     hub.toggle_container_layout();
     let ws = hub.current_workspace();
-    let focus_before = hub.focused_tiling_window(ws);
+    let focus_before = hub.focused_window(ws);
 
     // Change master-stack params while partition-tree is active.
     hub.sync_config(LayoutConfig {
@@ -65,7 +65,7 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
     });
 
     // Tree state (tabbed container) and focus preserved.
-    assert_eq!(hub.focused_tiling_window(ws), focus_before);
+    assert_eq!(hub.focused_window(ws), focus_before);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
