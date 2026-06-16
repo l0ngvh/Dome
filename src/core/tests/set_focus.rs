@@ -230,7 +230,7 @@ fn set_focus_switches_workspace() {
 }
 
 #[test]
-fn set_focus_to_a_different_workspace_prune_previous_workspace() {
+fn set_focus_in_other_workspace_keeps_origin_workspace() {
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace());
 
@@ -274,6 +274,7 @@ fn set_focus_to_a_different_workspace_prune_previous_workspace() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
+    assert_eq!(hub.query_workspaces().len(), 2);
 }
 
 #[test]

@@ -53,7 +53,6 @@ impl Hub {
         w.set_workspace(None);
         self.minimized_windows.push(window_id);
 
-        self.prune_workspace(prior_workspace);
         tracing::info!(?prior_mode, "Window minimized");
     }
 

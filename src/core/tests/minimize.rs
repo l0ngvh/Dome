@@ -296,16 +296,6 @@ fn delete_minimized_window() {
 }
 
 #[test]
-fn delete_minimized_window_after_workspace_pruned() {
-    let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    hub.minimize_window(w0);
-    hub.focus_workspace("1");
-    hub.delete_window(w0);
-    assert!(hub.minimized_window_entries().is_empty());
-}
-
-#[test]
 #[should_panic(expected = "non-minimized window has a workspace")]
 fn set_focus_on_minimized_panics() {
     let mut hub = setup();
@@ -420,53 +410,6 @@ fn set_window_title_on_minimized_no_panic() {
     let entries = hub.minimized_window_entries();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].1, "updated");
-}
-
-#[test]
-fn unminimize_after_workspace_pruned() {
-    let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    hub.minimize_window(w0);
-    hub.focus_workspace("1");
-    hub.unminimize_window(w0);
-    assert!(hub.minimized_window_entries().is_empty());
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right)
-      )
-
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
-    ");
 }
 
 #[test]

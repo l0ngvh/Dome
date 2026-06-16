@@ -954,7 +954,7 @@ fn move_only_window_to_workspace() {
 }
 
 #[test]
-fn prune_workspace() {
+fn empty_workspace_persists_after_switch() {
     let mut hub = setup_master();
     hub.insert_tiling(hub.current_workspace()); // W0
     hub.insert_tiling(hub.current_workspace()); // W1
@@ -964,12 +964,12 @@ fn prune_workspace() {
     hub.focus_left(); // focus W0 (now the only window on ws "0")
     hub.move_focused_to_workspace("1");
 
-    // ws "0" is empty but still active. Switch to "1" to trigger prune of "0".
+    // ws "0" is empty but still active. Switch to "1".
     hub.focus_workspace("1");
 
-    // ws "0" should have been pruned (empty and no longer active)
+    // Both workspaces remain because workspaces persist for the lifetime of the Hub.
     let workspaces = hub.query_workspaces();
-    assert_eq!(workspaces.len(), 1);
+    assert_eq!(workspaces.len(), 2);
     validate_hub(&hub);
 }
 

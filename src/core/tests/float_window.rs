@@ -610,7 +610,7 @@ fn delete_unfocused_float_window() {
 }
 
 #[test]
-fn delete_float_workspace_pruning() {
+fn delete_float_keeps_workspace_alive() {
     // Scenario 1: delete float on current workspace -- workspace kept
     let canonical = {
         let mut hub = setup();
@@ -688,7 +688,6 @@ fn delete_float_workspace_pruning() {
         );
     }
 
-    // Scenario 4: empty non-current workspace pruned
     {
         let mut hub = setup();
         hub.focus_workspace("1");
@@ -706,8 +705,8 @@ fn delete_float_workspace_pruning() {
         assert_eq!(snapshot(&hub), canonical);
         assert_eq!(
             hub.query_workspaces().len(),
-            1,
-            "ws1 should be pruned (was empty)"
+            2,
+            "ws1 should still exist (pruning disabled)"
         );
     }
 }

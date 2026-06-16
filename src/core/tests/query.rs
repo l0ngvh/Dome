@@ -100,14 +100,17 @@ fn focused_vs_visible_multi_monitor() {
 }
 
 #[test]
-fn pruned_workspace_not_in_results() {
+fn empty_non_active_workspace_persists() {
     let mut hub = setup();
     hub.insert_tiling(hub.current_workspace());
     hub.focus_workspace("empty");
     hub.focus_workspace("0");
     let ws = hub.query_workspaces();
-    assert_eq!(ws.len(), 1);
-    assert_eq!(ws[0].name, "0");
+    assert_eq!(ws.len(), 2);
+    let ws0 = ws.iter().find(|w| w.name == "0").unwrap();
+    assert_eq!(ws0.window_count, 1);
+    let empty = ws.iter().find(|w| w.name == "empty").unwrap();
+    assert_eq!(empty.window_count, 0);
 }
 
 #[test]

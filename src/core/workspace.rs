@@ -11,31 +11,6 @@ impl Hub {
         let monitor_id = self.access.workspaces.get(workspace_id).monitor;
         self.access.focused_monitor = monitor_id;
         self.access.monitors.get_mut(monitor_id).active_workspace = workspace_id;
-        self.prune_workspace(current_ws);
-    }
-
-    /// Deletes workspace if empty, not active on its monitor, and not pinned
-    /// by a config-named override.
-    #[tracing::instrument(skip(self))]
-    pub(super) fn prune_workspace(&mut self, ws_id: WorkspaceId) {
-        if self.strategies.is_pinned(ws_id) {
-            return;
-        }
-        let ws = self.access.workspaces.get(ws_id);
-        let has_tiling = self
-            .strategies
-            .for_workspace(ws_id)
-            .has_tiling_windows(&self.access, ws_id);
-        if has_tiling || !ws.float_windows.is_empty() || !ws.fullscreen_windows.is_empty() {
-            return;
-        }
-        if self.access.monitors.get(ws.monitor).active_workspace != ws_id {
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .prune_workspace(ws_id);
-            self.strategies.unregister(ws_id);
-            self.access.workspaces.delete(ws_id);
-        }
     }
 
     #[tracing::instrument(skip(self))]

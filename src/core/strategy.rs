@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::config::{LayoutConfig, Strategy};
 use crate::core::allocator::Allocator;
@@ -232,7 +232,6 @@ pub(super) struct StrategySet {
     partition_tree: PartitionTreeStrategy,
     master: MasterStrategy,
     kinds: HashMap<WorkspaceId, Strategy>,
-    pinned: HashSet<WorkspaceId>,
 }
 
 impl StrategySet {
@@ -246,22 +245,11 @@ impl StrategySet {
             partition_tree,
             master,
             kinds: HashMap::new(),
-            pinned: HashSet::new(),
         }
     }
 
     pub(super) fn register(&mut self, ws_id: WorkspaceId, name: &str, config: &LayoutConfig) {
         self.kinds.insert(ws_id, kind_for(name, config));
-        if pinned_for(name, config) {
-            self.pinned.insert(ws_id);
-        } else {
-            self.pinned.remove(&ws_id);
-        }
-    }
-
-    pub(super) fn unregister(&mut self, ws_id: WorkspaceId) {
-        self.kinds.remove(&ws_id);
-        self.pinned.remove(&ws_id);
     }
 
     pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {
@@ -269,10 +257,6 @@ impl StrategySet {
             .kinds
             .get(&ws_id)
             .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"))
-    }
-
-    pub(super) fn is_pinned(&self, ws_id: WorkspaceId) -> bool {
-        self.pinned.contains(&ws_id)
     }
 
     pub(super) fn get(&self, kind: Strategy) -> &dyn TilingStrategy {
@@ -298,9 +282,9 @@ impl StrategySet {
         self.get_mut(kind)
     }
 
-    /// Recompute kinds and pin set against `new_config`, returning entries
-    /// only for workspaces whose kind changed. The caller drives the cross-
-    /// kind rebuild; this method only updates the map.
+    /// Recompute kinds against `new_config`, returning entries only for
+    /// workspaces whose kind changed. The caller drives the cross-kind
+    /// rebuild. This method only updates the map.
     pub(super) fn resync(
         &mut self,
         workspaces: &Allocator<Workspace>,
@@ -314,11 +298,6 @@ impl StrategySet {
                 .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"));
             let new = kind_for(&ws.name, new_config);
             self.kinds.insert(ws_id, new);
-            if pinned_for(&ws.name, new_config) {
-                self.pinned.insert(ws_id);
-            } else {
-                self.pinned.remove(&ws_id);
-            }
             if old != new {
                 changes.push(WorkspaceKindChange { ws_id, old, new });
             }
@@ -340,10 +319,6 @@ fn kind_for(name: &str, config: &LayoutConfig) -> Strategy {
         .find(|w| w.name == name)
         .map(|w| w.strategy)
         .unwrap_or(config.strategy)
-}
-
-fn pinned_for(name: &str, config: &LayoutConfig) -> bool {
-    config.workspace.iter().any(|w| w.name == name)
 }
 
 #[cfg(test)]
@@ -448,18 +423,5 @@ mod tests {
     fn kind_for_falls_back_to_global_when_no_overrides() {
         let config = config_with(Strategy::Master, vec![]);
         assert_eq!(kind_for("anything", &config), Strategy::Master);
-    }
-
-    #[test]
-    fn pinned_for_marks_only_named_workspaces() {
-        let config = config_with(
-            Strategy::PartitionTree,
-            vec![LayoutWorkspaceConfig {
-                name: "work".into(),
-                strategy: Strategy::Master,
-            }],
-        );
-        assert!(pinned_for("work", &config));
-        assert!(!pinned_for("scratch", &config));
     }
 }

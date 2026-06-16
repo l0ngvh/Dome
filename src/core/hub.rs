@@ -135,7 +135,7 @@ impl Hub {
         // Pre-allocate every workspace name listed in [[layout.workspace]]
         // (skipping any that collide with the primary workspace's name) so
         // that named workspaces have stable IDs from boot. They live on the
-        // primary monitor and are pinned: prune_workspace leaves them alone.
+        // primary monitor.
         for entry in &config.workspace {
             if entry.name == primary_ws_name {
                 continue;
@@ -307,8 +307,8 @@ impl Hub {
     }
 
     /// Returns metadata for all active workspaces, ordered by WorkspaceId
-    /// (creation order). Pruned workspaces (empty and not active on any
-    /// monitor) never appear because `prune_workspace` deletes them.
+    /// (creation order). Workspaces persist for the lifetime of the Hub once
+    /// created, so emptied workspaces continue to appear with `window_count == 0`.
     pub(crate) fn query_workspaces(&self) -> Vec<super::WorkspaceInfo> {
         let focused_ws = self.current_workspace();
         let visible: Vec<WorkspaceId> = self.visible_workspaces();
@@ -585,7 +585,6 @@ impl Hub {
                         .detach_window(&mut self.access, id);
                 }
             }
-            self.prune_workspace(ws);
         }
 
         self.access.windows.delete(id);
