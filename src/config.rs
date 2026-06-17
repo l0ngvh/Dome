@@ -515,9 +515,34 @@ impl WalkRecover for MasterConfig {
             );
             default_master_count()
         };
+        let mut workspace = w.rule_vec::<MasterWorkspaceConfig>("workspace");
+        for ws in &mut workspace {
+            if let Some(r) = ws.master_ratio
+                && !(0.1..=0.9).contains(&r)
+            {
+                tracing::warn!(
+                    name = %ws.name,
+                    value = r,
+                    "master.workspace.master_ratio out of range, falling back to global"
+                );
+                ws.master_ratio = None;
+            }
+            if let Some(c) = ws.master_count
+                && c == 0
+            {
+                tracing::warn!(
+                    name = %ws.name,
+                    value = c,
+                    "master.workspace.master_count must be > 0, falling back to global"
+                );
+                ws.master_count = None;
+            }
+        }
+        let workspace = dedup_master_workspace_overrides(workspace);
         MasterConfig {
             master_ratio,
             master_count,
+            workspace,
         }
     }
 }
@@ -774,16 +799,37 @@ pub(crate) struct PartitionTreeConfig {
 
 /// Per-strategy config for the master-stack strategy.
 ///
-/// All fields flow into the running `MasterStrategy` via `apply_config`
-/// on hot-reload, overwriting any runtime-tuned values (e.g. from
-/// `master grow/shrink/more/fewer` commands). The TOML file is the source of
-/// truth; runtime commands are a transient override until the next reload.
+/// Global `master_ratio` and `master_count` seed new workspaces on their first
+/// `attach_window`. They do NOT flow into existing workspaces on hot-reload.
+/// Runtime tuning via `master grow/shrink/more/fewer` persists across reloads.
+///
+/// Per-workspace overrides (`[[master.workspace]]`) let config set different
+/// seed values by workspace name. Each field is optional and falls back to the
+/// global when absent or out of range. Unmatched names stay in config until a
+/// matching workspace materialises.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub(crate) struct MasterConfig {
     #[serde(default = "default_master_ratio")]
     pub(crate) master_ratio: f32,
     #[serde(default = "default_master_count")]
     pub(crate) master_count: usize,
+    #[serde(default)]
+    pub(crate) workspace: Vec<MasterWorkspaceConfig>,
+}
+
+/// Per-workspace seed override for master-stack layout. Keyed by workspace
+/// name. Option fields fall back to the global MasterConfig value.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub(crate) struct MasterWorkspaceConfig {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) master_ratio: Option<f32>,
+    #[serde(default)]
+    pub(crate) master_count: Option<usize>,
+}
+
+impl WalkRule for MasterWorkspaceConfig {
+    const KNOWN: &'static [&'static str] = &["name", "master_ratio", "master_count"];
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -828,6 +874,7 @@ fn default_master_config() -> MasterConfig {
     MasterConfig {
         master_ratio: default_master_ratio(),
         master_count: default_master_count(),
+        workspace: Vec::new(),
     }
 }
 
@@ -850,6 +897,30 @@ fn dedup_workspace_overrides(
                 field = %field_path(prefix, "workspace"),
                 name = %entry.name,
                 "Duplicate workspace override, replacing earlier entry",
+            );
+            out[idx] = entry;
+        } else {
+            seen.insert(entry.name.clone(), out.len());
+            out.push(entry);
+        }
+    }
+    out
+}
+
+fn dedup_master_workspace_overrides(
+    entries: Vec<MasterWorkspaceConfig>,
+) -> Vec<MasterWorkspaceConfig> {
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<MasterWorkspaceConfig> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if entry.name.is_empty() {
+            tracing::warn!("master.workspace: empty workspace name, dropping");
+            continue;
+        }
+        if let Some(&idx) = seen.get(&entry.name) {
+            tracing::warn!(
+                name = %entry.name,
+                "master.workspace: duplicate override, replacing earlier entry",
             );
             out[idx] = entry;
         } else {
@@ -2707,5 +2778,30 @@ mod tests {
         assert_eq!(layout.workspace.len(), 1);
         assert_eq!(layout.workspace[0].name, "1");
         assert_eq!(layout.workspace[0].strategy, Strategy::Master);
+    }
+
+    #[test]
+    fn master_workspace_overrides_parse() {
+        let toml = r#"
+[master]
+master_ratio = 0.5
+master_count = 1
+
+[[master.workspace]]
+name = "1"
+master_count = 3
+
+[[master.workspace]]
+name = "2"
+master_ratio = 0.7
+"#;
+        let layout: LayoutConfig = toml::from_str(toml).unwrap();
+        assert_eq!(layout.master.workspace.len(), 2);
+        assert_eq!(layout.master.workspace[0].name, "1");
+        assert_eq!(layout.master.workspace[0].master_count, Some(3));
+        assert_eq!(layout.master.workspace[0].master_ratio, None);
+        assert_eq!(layout.master.workspace[1].name, "2");
+        assert_eq!(layout.master.workspace[1].master_count, None);
+        assert_eq!(layout.master.workspace[1].master_ratio, Some(0.7));
     }
 }

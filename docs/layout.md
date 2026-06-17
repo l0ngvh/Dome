@@ -10,8 +10,9 @@ Default paths:
 
 The schema is flat. `strategy` and four window-size constraint fields sit at
 the file root, alongside `[partition_tree]` and `[master]` sub-tables for
-strategy-specific options. An optional `[[workspace]]` array overrides the
-strategy on a per-workspace basis.
+strategy-specific options. Within `[master]`, an optional `[[master.workspace]]`
+array sets per-workspace master defaults. A separate `[[workspace]]` array
+overrides the strategy on a per-workspace basis.
 
 ```toml
 strategy = "partition_tree"
@@ -28,6 +29,10 @@ automatic_tiling = true
 [master]
 master_ratio = 0.5
 master_count = 1
+
+[[master.workspace]]
+name = "1"
+master_count = 3
 
 [[workspace]]
 name = "3"
@@ -71,10 +76,51 @@ right.
 of the workspace width, constrained to `[0.1, 0.9]`. `master_count` (default
 `1`) sets how many windows go in the master pane and must be at least 1.
 
+Both values seed new workspaces on first attach. A reload does not push them
+into existing workspaces. Runtime tuning via `master grow/shrink/more/fewer`
+persists across reloads.
+
 Both panes honor the global window-size constraints, and per-window constraints
 reported by the OS take precedence. Each pane scrolls vertically when
 per-window min heights push its content past the screen height, with focus
 movement as the sole trigger.
+
+### Per-workspace master overrides
+
+The optional `[[master.workspace]]` array sets different seed values for
+individual workspaces by name.
+
+```toml
+[master]
+master_ratio = 0.5
+master_count = 1
+
+[[master.workspace]]
+name = "1"
+master_count = 3
+
+[[master.workspace]]
+name = "code"
+master_ratio = 0.7
+```
+
+Each entry requires a `name` matching a workspace identifier. `master_count`
+and `master_ratio` are both optional. Omitted fields fall back to the global
+`[master]` defaults.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Workspace name to match. |
+| `master_ratio` | float | no | Initial master-pane width fraction, in `[0.1, 0.9]`. |
+| `master_count` | integer | no | Initial master-pane window count, >= 1. |
+
+Overrides apply only on first attach. Config reloads do not push new values
+into workspaces that already have master state.
+
+An entry referencing a workspace name that never materializes is harmless and
+sits unused. Out-of-range values are dropped with a warning, falling back to
+the global default for that field. If the same name appears more than once,
+the last entry wins.
 
 ## Window size constraints
 

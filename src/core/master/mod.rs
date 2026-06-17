@@ -14,8 +14,6 @@ use crate::core::strategy::{
 pub(crate) struct MasterStrategy {
     workspaces: HashMap<WorkspaceId, MasterState>,
     window_dimensions: HashMap<WindowId, Dimension>,
-    master_ratio: f32,
-    master_count: usize,
 }
 
 /// Per-workspace state for master-stack layout. Windows are ordered: the first
@@ -26,15 +24,15 @@ struct MasterState {
     focused_index: Option<usize>,
     master_y_offset: Length,
     stack_y_offset: Length,
+    master_count: usize,
+    master_ratio: f32,
 }
 
 impl MasterStrategy {
-    pub(crate) fn new(master_ratio: f32, master_count: usize) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             workspaces: HashMap::new(),
             window_dimensions: HashMap::new(),
-            master_ratio,
-            master_count,
         }
     }
 
@@ -58,7 +56,7 @@ impl MasterStrategy {
             .get(hub.workspaces.get(ws_id).monitor)
             .dimension;
         let h = screen.height;
-        let mc = self.master_count;
+        let mc = state.master_count;
 
         let windows = state.windows.clone();
 
@@ -103,7 +101,7 @@ impl MasterStrategy {
                 .map(|&id| effective_constraints(hub, id).0)
                 .fold(Length::ZERO, Length::max);
 
-            let desired_master_w = Length::new((screen.width.value() * self.master_ratio).floor());
+            let desired_master_w = Length::new((screen.width.value() * state.master_ratio).floor());
             let total_min = master_pane_min_w + stack_pane_min_w;
 
             let (master_w, stack_w) = if total_min >= screen.width {
@@ -189,17 +187,16 @@ impl MasterStrategy {
         // If removed_idx > focused, no adjustment needed
     }
 
-    /// Returns true if `idx` is in the master area (index < master_count).
-    fn is_master(&self, idx: usize) -> bool {
-        idx < self.master_count
+    fn is_master(idx: usize, master_count: usize) -> bool {
+        idx < master_count
     }
 
     /// Returns the (start, end) range for the area containing `idx`.
-    fn area_range(&self, idx: usize, n: usize) -> (usize, usize) {
-        if self.is_master(idx) {
-            (0, self.master_count.min(n))
+    fn area_range(idx: usize, master_count: usize, n: usize) -> (usize, usize) {
+        if Self::is_master(idx, master_count) {
+            (0, master_count.min(n))
         } else {
-            (self.master_count, n)
+            (master_count, n)
         }
     }
 
@@ -212,7 +209,7 @@ impl MasterStrategy {
             .get(hub.workspaces.get(ws_id).monitor)
             .dimension
             .height;
-        let mc = self.master_count;
+        let mc = state.master_count;
         let n = state.windows.len();
 
         let master_content_h = self.pane_content_h(hub, &state.windows[..mc.min(n)], pane_height);
@@ -248,7 +245,7 @@ impl MasterStrategy {
             .get(hub.workspaces.get(ws_id).monitor)
             .dimension
             .height;
-        let mc = self.master_count;
+        let mc = state.master_count;
         let in_master = focused < mc;
 
         let (pane_windows, offset) = if in_master {
@@ -341,11 +338,26 @@ impl MasterStrategy {
 impl TilingStrategy for MasterStrategy {
     fn attach_window(&mut self, hub: &mut HubAccess, id: WindowId, ws_id: WorkspaceId) {
         hub.windows.get_mut(id).set_workspace(Some(ws_id));
+        let ws_name = hub.workspaces.get(ws_id).name.clone();
+        let override_block = hub
+            .config
+            .master
+            .workspace
+            .iter()
+            .find(|w| w.name == ws_name);
+        let initial_master_count = override_block
+            .and_then(|w| w.master_count)
+            .unwrap_or(hub.config.master.master_count);
+        let initial_master_ratio = override_block
+            .and_then(|w| w.master_ratio)
+            .unwrap_or(hub.config.master.master_ratio);
         let state = self.workspaces.entry(ws_id).or_insert_with(|| MasterState {
             windows: Vec::new(),
             focused_index: None,
             master_y_offset: Length::ZERO,
             stack_y_offset: Length::ZERO,
+            master_count: initial_master_count,
+            master_ratio: initial_master_ratio,
         });
         state.windows.push(id);
         state.focused_index = Some(state.windows.len() - 1);
@@ -382,7 +394,7 @@ impl TilingStrategy for MasterStrategy {
         // Capture the pane y offset BEFORE removal. The post-removal layout pass
         // can clamp the offset, so we need the pre-removal value for the returned
         // screen-absolute position.
-        let y_offset = if idx < self.master_count {
+        let y_offset = if idx < state.master_count {
             state.master_y_offset
         } else {
             state.stack_y_offset
@@ -454,7 +466,7 @@ impl TilingStrategy for MasterStrategy {
             None
         };
 
-        let mc = self.master_count;
+        let mc = state.master_count;
         let mut windows = Vec::with_capacity(state.windows.len());
         for (i, &wid) in state.windows.iter().enumerate() {
             let dim = *self.window_dimensions.get(&wid).expect(
@@ -501,23 +513,23 @@ impl TilingStrategy for MasterStrategy {
                 if n <= 1 {
                     return;
                 }
+                let mc = state.master_count;
                 match (direction, forward) {
                     // Left: from stack -> focus first master
                     (Direction::Horizontal, false) => {
-                        if !self.is_master(focused) {
+                        if !Self::is_master(focused, mc) {
                             self.workspaces.get_mut(&ws_id).unwrap().focused_index = Some(0);
                         }
                     }
                     // Right: from master -> focus first stack window
                     (Direction::Horizontal, true) => {
-                        if self.is_master(focused) && self.master_count < n {
-                            self.workspaces.get_mut(&ws_id).unwrap().focused_index =
-                                Some(self.master_count);
+                        if Self::is_master(focused, mc) && mc < n {
+                            self.workspaces.get_mut(&ws_id).unwrap().focused_index = Some(mc);
                         }
                     }
                     // Up: prev within area, wrapping
                     (Direction::Vertical, false) => {
-                        let (start, end) = self.area_range(focused, n);
+                        let (start, end) = Self::area_range(focused, mc, n);
                         if end - start <= 1 {
                             return;
                         }
@@ -530,7 +542,7 @@ impl TilingStrategy for MasterStrategy {
                     }
                     // Down: next within area, wrapping
                     (Direction::Vertical, true) => {
-                        let (start, end) = self.area_range(focused, n);
+                        let (start, end) = Self::area_range(focused, mc, n);
                         if end - start <= 1 {
                             return;
                         }
@@ -548,7 +560,7 @@ impl TilingStrategy for MasterStrategy {
                 if n <= 1 {
                     return;
                 }
-                let mc = self.master_count;
+                let mc = state.master_count;
                 let is_master = focused < mc;
                 let (area_start, area_end) = if is_master { (0, mc.min(n)) } else { (mc, n) };
                 let state = self.workspaces.get_mut(&ws_id).unwrap();
@@ -598,22 +610,27 @@ impl TilingStrategy for MasterStrategy {
                 self.layout_workspace(hub, ws_id);
             }
             TilingAction::GrowMaster => {
-                self.master_ratio = (self.master_ratio + 0.05).clamp(0.1, 0.9);
+                let state = self.workspaces.get_mut(&ws_id).unwrap();
+                state.master_ratio = (state.master_ratio + 0.05).clamp(0.1, 0.9);
                 self.layout_workspace(hub, ws_id);
             }
             TilingAction::ShrinkMaster => {
-                self.master_ratio = (self.master_ratio - 0.05).clamp(0.1, 0.9);
+                let state = self.workspaces.get_mut(&ws_id).unwrap();
+                state.master_ratio = (state.master_ratio - 0.05).clamp(0.1, 0.9);
                 self.layout_workspace(hub, ws_id);
             }
             TilingAction::MoreMaster => {
-                self.master_count += 1;
+                let state = self.workspaces.get_mut(&ws_id).unwrap();
+                state.master_count += 1;
                 self.layout_workspace(hub, ws_id);
             }
             TilingAction::FewerMaster => {
-                if self.master_count > 1 {
-                    self.master_count -= 1;
-                    self.layout_workspace(hub, ws_id);
+                let state = self.workspaces.get_mut(&ws_id).unwrap();
+                if state.master_count <= 1 {
+                    return;
                 }
+                state.master_count -= 1;
+                self.layout_workspace(hub, ws_id);
             }
             TilingAction::ToggleSpawnMode
             | TilingAction::ToggleDirection
@@ -676,8 +693,6 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        self.master_ratio = hub.config.master.master_ratio;
-        self.master_count = hub.config.master.master_count;
         self.layout_workspace(hub, ws_id);
     }
 
@@ -754,7 +769,7 @@ impl TilingStrategy for MasterStrategy {
                 .get(hub.workspaces.get(ws_id).monitor)
                 .dimension
                 .height;
-            let mc = self.master_count;
+            let mc = state.master_count;
             let n = state.windows.len();
 
             for &wid in &state.windows {

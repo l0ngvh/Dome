@@ -15,6 +15,7 @@ fn min_height_master_pane_overflows_and_scrolls_to_focus() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 4,
+            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -76,6 +77,7 @@ fn min_height_stack_pane_overflows_independently_of_master() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 2,
+            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -141,6 +143,7 @@ fn both_panes_scroll_independently() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 4,
+            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -551,6 +554,7 @@ fn master_count_decrement_clamps_master_scroll() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 4,
+            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -621,6 +625,7 @@ fn detach_clamps_scroll() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 4,
+            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -752,6 +757,7 @@ fn apply_config_relayouts_and_clamps_scroll() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 1,
+            workspace: vec![],
         },
         ..default_layout_for_tests()
     });

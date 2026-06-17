@@ -702,6 +702,7 @@ pub(super) fn default_master_config_for_tests() -> MasterConfig {
     MasterConfig {
         master_ratio: 0.5,
         master_count: 1,
+        workspace: vec![],
     }
 }
 pub(super) fn default_layout_for_tests() -> LayoutConfig {

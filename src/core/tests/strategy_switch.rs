@@ -14,6 +14,7 @@ fn layout(strategy: Strategy, ratio: f32, count: usize) -> LayoutConfig {
         master: MasterConfig {
             master_ratio: ratio,
             master_count: count,
+            workspace: vec![],
         },
         ..default_layout_for_tests()
     }
@@ -60,6 +61,7 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
         master: MasterConfig {
             master_ratio: 0.3,
             master_count: 2,
+            workspace: vec![],
         },
         ..default_layout_for_tests()
     });

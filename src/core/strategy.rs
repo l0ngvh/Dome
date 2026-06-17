@@ -240,7 +240,7 @@ impl StrategySet {
             config.partition_tree.tab_bar_height,
             config.partition_tree.automatic_tiling,
         );
-        let master = MasterStrategy::new(config.master.master_ratio, config.master.master_count);
+        let master = MasterStrategy::new();
         Self {
             partition_tree,
             master,
@@ -337,6 +337,7 @@ mod tests {
             master: MasterConfig {
                 master_ratio: 0.5,
                 master_count: 1,
+                workspace: vec![],
             },
             min_width: SizeConstraint::default(),
             min_height: SizeConstraint::default(),
