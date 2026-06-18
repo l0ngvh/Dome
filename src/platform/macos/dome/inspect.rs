@@ -220,28 +220,39 @@ pub(in crate::platform::macos) fn compute_window_positions(
         }
     };
     for ax in ax_windows {
-        let Some(window) = tracked.get(&ax.cg_id()) else {
-            continue;
-        };
-        // This window is minimized before the move/resize event is processed
-        if window.ext.is_minimized(marker) {
-            continue;
+        let cg_id = ax.cg_id();
+        if let Some(window) = tracked.get(&cg_id)
+            && let Some(observed) = read_existing_window(window, cg_id, marker)
+        {
+            existing.push(observed);
         }
-        let Ok((x, y)) = window.ext.get_position(marker) else {
-            continue;
-        };
-        let Ok((w, h)) = window.ext.get_size(marker) else {
-            continue;
-        };
-        existing.push(ExistingWindow {
-            cg_id: ax.cg_id(),
-            x: x.value() as i32,
-            y: y.value() as i32,
-            w: w.value() as i32,
-            h: h.value() as i32,
-        });
     }
     existing
+}
+
+fn read_existing_window(
+    window: &ManagedWindow,
+    cg_id: CGWindowID,
+    marker: &DispatcherMarker,
+) -> Option<ExistingWindow> {
+    // This window is minimized before the move/resize event is processed
+    if window.ext.is_minimized(marker) {
+        return None;
+    }
+    // Skip native fullscreen: window_moved's rect-shape heuristic misreads the
+    // macOS native-FS frame as non-fullscreen and would clear ProtectFullscreen.
+    if window.ext.is_native_fullscreen(marker) {
+        return None;
+    }
+    let (x, y) = window.ext.get_position(marker).ok()?;
+    let (w, h) = window.ext.get_size(marker).ok()?;
+    Some(ExistingWindow {
+        cg_id,
+        x: x.value() as i32,
+        y: y.value() as i32,
+        w: w.value() as i32,
+        h: h.value() as i32,
+    })
 }
 
 pub(in crate::platform::macos) fn compute_reconcile_all(
