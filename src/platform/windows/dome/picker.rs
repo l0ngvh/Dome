@@ -3,22 +3,19 @@ use std::sync::Arc;
 
 use egui::TextureHandle;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWM_WINDOW_CORNER_PREFERENCE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     DwmSetWindowAttribute,
 };
-use windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, MONITOR_DEFAULTTONEAREST, MonitorFromWindow, PAINTSTRUCT,
-};
-use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, PostThreadMessageW,
-    SWP_NOACTIVATE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_DPICHANGED, WM_ERASEBKGND,
-    WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
+    DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, SWP_NOACTIVATE, SWP_NOZORDER,
+    SetWindowLongPtrW, SetWindowPos, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_PAINT,
 };
 use windows::core::PCWSTR;
 
@@ -47,7 +44,6 @@ use crate::core::{Dimension, Physical, WindowId};
 use crate::picker::{PickerEntry, PickerResult};
 use crate::platform::windows::HubSender;
 use crate::platform::windows::external::HwndId;
-use crate::platform::windows::{WM_APP_DPI_CHANGE, WM_GETDPISCALEDSIZE};
 use crate::theme::Theme;
 
 const PICKER_WIDTH_LOGICAL: f32 = 400.0;
@@ -346,35 +342,8 @@ pub(in crate::platform::windows) unsafe extern "system" fn picker_wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if msg == WM_ERASEBKGND {
-        return LRESULT(1);
-    }
-    // WM_DPICHANGED is per-window. Duplicate posts from multiple Dome
-    // wnd-procs on the same monitor are absorbed by monitor_dpi_changed.
-    if msg == WM_DPICHANGED {
-        let dpi = (wparam.0 & 0xFFFF) as u32;
-        let handle = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) }.0 as isize;
-        unsafe {
-            PostThreadMessageW(
-                GetCurrentThreadId(),
-                WM_APP_DPI_CHANGE,
-                WPARAM(dpi as usize),
-                LPARAM(handle),
-            )
-            .ok()
-        };
-        return LRESULT(0);
-    }
-    if msg == WM_GETDPISCALEDSIZE {
-        let mut rect = RECT::default();
-        unsafe { GetClientRect(hwnd, &mut rect).ok() };
-        let size = SIZE {
-            cx: rect.right - rect.left,
-            cy: rect.bottom - rect.top,
-        };
-        let out = lparam.0 as *mut SIZE;
-        unsafe { *out = crate::platform::windows::wm_getdpiscaledsize_reply(size) };
-        return LRESULT(1);
+    if let Some(lr) = crate::platform::windows::dome_wnd_proc_common(hwnd, msg, wparam, lparam) {
+        return lr;
     }
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut PickerWindow;
     if ptr.is_null() {

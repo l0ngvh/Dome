@@ -9,30 +9,27 @@ use std::sync::Arc;
 
 use crate::config::Config;
 use crate::font::FontConfig;
-use crate::platform::windows::{HubSender, WM_APP_DPI_CHANGE, WM_GETDPISCALEDSIZE};
+use crate::platform::windows::{HubEvent, HubSender, WM_APP_DISPLAY_CHANGE};
 use crate::theme::Flavor;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
 };
-use windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, MONITOR_DEFAULTTONEAREST, MonitorFromWindow, PAINTSTRUCT,
-};
+use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GW_HWNDPREV, GWLP_USERDATA, GetClientRect,
-    GetWindow, GetWindowLongPtrW, HWND_BOTTOM, MA_NOACTIVATE, PostThreadMessageW, SW_HIDE,
-    SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE, SWP_NOZORDER,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_DPICHANGED, WM_ERASEBKGND,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_PAINT, WS_EX_NOACTIVATE,
-    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GW_HWNDPREV, GWLP_USERDATA, GetWindow,
+    GetWindowLongPtrW, HWND_BOTTOM, HWND_TOP, MA_NOACTIVATE, PostThreadMessageW, SW_HIDE,
+    SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_DISPLAYCHANGE, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_PAINT, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
 use windows::core::{Interface, PCWSTR};
 
-use super::HubEvent;
 use crate::core::{
-    ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
+    ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
     TilingWindowPlacement, WindowId,
 };
 use crate::overlay;
@@ -50,6 +47,12 @@ pub(super) struct OwnedHwnd {
 }
 
 impl OwnedHwnd {
+    /// `WS_EX_NOREDIRECTIONBITMAP` is force-OR'd in because every Dome overlay
+    /// uses DirectComposition and must suppress the GDI redirection bitmap.
+    /// Click-through (`WS_EX_LAYERED | WS_EX_TRANSPARENT`) is per-call: only
+    /// the tiling overlay opts in. Force-OR'ing it here would silently route
+    /// pointer events past the picker (which needs keyboard and mouse) and
+    /// the float overlay (which sits inside its window's pointer band).
     pub(super) fn new(
         class: PCWSTR,
         ex_style: WINDOW_EX_STYLE,
@@ -337,11 +340,13 @@ impl Renderer {
 pub(in crate::platform::windows) const TILING_OVERLAY_CLASS: PCWSTR =
     windows::core::w!("DomeTilingOverlay");
 
+pub(in crate::platform::windows) const TAB_BAR_OVERLAY_CLASS: PCWSTR =
+    windows::core::w!("DomeTabBarOverlay");
+
 /// Per-monitor overlay that draws all tiling window borders and container tab bars.
 /// `renderer` is declared before `window` so it drops first.
 pub(in crate::platform::windows) struct TilingOverlay {
     renderer: Renderer,
-    events: Vec<egui::Event>,
     monitor: Dimension,
     // Physical-pixel cache for the last `surface_size_from_physical` result.
     width_phys: u32,
@@ -350,23 +355,17 @@ pub(in crate::platform::windows) struct TilingOverlay {
     containers: Vec<(ContainerPlacement, Vec<String>)>,
     config: Config,
     tab_bar_height: Length<Logical>,
-    hub_sender: HubSender,
     window: OwnedHwnd,
     scale: f32,
 }
 
 impl TilingOverlay {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "all parameters are needed for overlay initialization"
-    )]
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         config: Config,
         tab_bar_height: Length<Logical>,
-        hub_sender: HubSender,
         monitor: Dimension,
         scale: f32,
     ) -> anyhow::Result<Box<Self>> {
@@ -379,9 +378,11 @@ impl TilingOverlay {
         let (x_phys, y_phys, init_w, init_h) = monitor.to_surface_size();
         // WS_EX_NOACTIVATE prevents DefWindowProcW from returning MA_ACTIVATE on clicks,
         // stopping the overlay from being raised above managed windows by user input.
+        // WS_EX_LAYERED | WS_EX_TRANSPARENT keeps the tiling overlay
+        // click-through so pointer events reach managed windows below.
         let mut window = OwnedHwnd::new(
             TILING_OVERLAY_CLASS,
-            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT,
             x_phys,
             y_phys,
             init_w,
@@ -408,7 +409,6 @@ impl TilingOverlay {
         }
         let mut boxed = Box::new(Self {
             renderer,
-            events: Vec::new(),
             monitor,
             width_phys: init_w,
             height_phys: init_h,
@@ -416,7 +416,6 @@ impl TilingOverlay {
             containers: Vec::new(),
             config,
             tab_bar_height,
-            hub_sender,
             window,
             scale,
         });
@@ -448,7 +447,6 @@ impl TilingOverlay {
                 is_highlighted: cp.is_highlighted,
                 spawn_indicator: cp.spawn_indicator,
                 is_tabbed: cp.is_tabbed,
-                active_tab_index: cp.active_tab_index,
                 titles: titles.clone(),
             })
             .collect();
@@ -460,10 +458,12 @@ impl TilingOverlay {
             )),
             tab_bar_height: self.tab_bar_height,
         };
-        let events = std::mem::take(&mut self.events);
         let w_phys = self.width_phys;
         let h_phys = self.height_phys;
-        let clicked_tabs = self.renderer.render(w_phys, h_phys, scale, events, |ctx| {
+        // Borders-only mode: tab bars live in dedicated per-container windows,
+        // so the per-monitor overlay never sees pointer events. The returned
+        // click vector is always empty.
+        let _ = self.renderer.render(w_phys, h_phys, scale, vec![], |ctx| {
             overlay::paint_tiling_overlay(
                 ctx,
                 monitor_logical,
@@ -473,10 +473,6 @@ impl TilingOverlay {
                 metrics,
             )
         });
-        for (container_id, tab_idx) in clicked_tabs {
-            self.hub_sender
-                .send(HubEvent::TabClicked(container_id, tab_idx));
-        }
     }
 }
 
@@ -566,6 +562,10 @@ impl TilingOverlayApi for TilingOverlay {
             .ok();
         }
     }
+
+    fn focus(&self) {
+        crate::platform::windows::handle::force_set_foreground(self.window.hwnd());
+    }
 }
 
 impl TilingOverlay {
@@ -595,95 +595,45 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if msg == WM_ERASEBKGND {
-        return LRESULT(1);
+    if let Some(lr) = crate::platform::windows::dome_wnd_proc_common(hwnd, msg, wparam, lparam) {
+        return lr;
     }
-    // WM_DPICHANGED is per-window. Duplicate posts from multiple Dome
-    // wnd-procs on the same monitor are absorbed by monitor_dpi_changed.
-    if msg == WM_DPICHANGED {
-        let dpi = (wparam.0 & 0xFFFF) as u32;
-        let handle = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) }.0 as isize;
+    // One tiling overlay per monitor, so a WM_DISPLAYCHANGE broadcast can
+    // produce multiple posts. The WM_APP_DISPLAY_CHANGE handler re-enumerates
+    // monitors and is idempotent, mirroring the duplicate-post note on the
+    // common helper's WM_DPICHANGED arm.
+    if msg == WM_DISPLAYCHANGE {
         unsafe {
             PostThreadMessageW(
                 GetCurrentThreadId(),
-                WM_APP_DPI_CHANGE,
-                WPARAM(dpi as usize),
-                LPARAM(handle),
+                WM_APP_DISPLAY_CHANGE,
+                WPARAM(0),
+                LPARAM(0),
             )
             .ok()
         };
         return LRESULT(0);
     }
-    if msg == WM_GETDPISCALEDSIZE {
-        let mut rect = RECT::default();
-        unsafe { GetClientRect(hwnd, &mut rect).ok() };
-        let size = SIZE {
-            cx: rect.right - rect.left,
-            cy: rect.bottom - rect.top,
-        };
-        let out = lparam.0 as *mut SIZE;
-        unsafe { *out = crate::platform::windows::wm_getdpiscaledsize_reply(size) };
-        return LRESULT(1);
-    }
-    // Explicit MA_NOACTIVATE closes the "active window tracking" (hover-to-activate)
-    // accessibility bypass: that path dispatches WM_MOUSEACTIVATE and honours the wnd-proc
-    // return regardless of WS_EX_NOACTIVATE. Placed before the USERDATA read because
-    // WM_MOUSEACTIVATE can arrive during window creation before USERDATA is written.
+    // Belt-and-braces guard: WS_EX_LAYERED + WS_EX_TRANSPARENT already routes
+    // pointer events past the overlay, but the active-window-tracking
+    // accessibility path can still dispatch WM_MOUSEACTIVATE. MA_NOACTIVATE
+    // here keeps that rare path from raising the overlay above managed
+    // windows. Placed before the USERDATA read because WM_MOUSEACTIVATE can
+    // arrive during window creation before USERDATA is written.
     if msg == WM_MOUSEACTIVATE {
         return LRESULT(MA_NOACTIVATE as isize);
     }
-    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut TilingOverlay;
-    if ptr.is_null() {
-        return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+    // No USERDATA deref here: rendering is driven by RedrawWindow from the
+    // dispatcher, so WM_PAINT only needs to satisfy the Begin/EndPaint contract.
+    if msg == WM_PAINT {
+        unsafe {
+            let mut ps = PAINTSTRUCT::default();
+            BeginPaint(hwnd, &mut ps);
+            EndPaint(hwnd, &ps).ok().ok();
+        }
+        return LRESULT(0);
     }
-    let overlay = unsafe { &mut *ptr };
-    match msg {
-        WM_MOUSEMOVE => {
-            let x = (lparam.0 & 0xFFFF) as i16 as f32;
-            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
-            overlay
-                .events
-                .push(egui::Event::PointerMoved(egui::pos2(x, y)));
-            LRESULT(0)
-        }
-        // Forward the click to egui so workspace-tab interactions register. The
-        // overlay's z-order is maintained by show_tiling's per-window lift on
-        // transitions into the visible band; the wnd-proc no longer self-heals
-        // z-order.
-        WM_LBUTTONDOWN => {
-            let x = (lparam.0 & 0xFFFF) as i16 as f32;
-            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
-            overlay.events.push(egui::Event::PointerButton {
-                pos: egui::pos2(x, y),
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            });
-            overlay.rerender();
-            LRESULT(0)
-        }
-        WM_LBUTTONUP => {
-            let x = (lparam.0 & 0xFFFF) as i16 as f32;
-            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
-            overlay.events.push(egui::Event::PointerButton {
-                pos: egui::pos2(x, y),
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            });
-            overlay.rerender();
-            LRESULT(0)
-        }
-        WM_PAINT => {
-            unsafe {
-                let mut ps = PAINTSTRUCT::default();
-                BeginPaint(hwnd, &mut ps);
-                EndPaint(hwnd, &ps).ok().ok();
-            }
-            LRESULT(0)
-        }
-        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
-    }
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
 pub(in crate::platform::windows) trait FloatOverlayApi {
@@ -703,6 +653,13 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     fn clear(&mut self);
     fn set_config(&mut self, config: &Config);
     fn set_tab_bar_height(&mut self, height: Length<Logical>);
+    /// Pulls keyboard focus to this monitor's overlay HWND. The Win32
+    /// close-time focus walk lands here when the user closes a managed
+    /// window with no obvious successor on the same monitor, replacing the
+    /// process-wide focus-sink window the platform shell used to keep below
+    /// every overlay. The overlay HWND is `WS_EX_TRANSPARENT`, so claiming
+    /// foreground does not take pointer events away from anything below.
+    fn focus(&self);
     /// Returns the HWND sitting directly above this overlay in z-order.
     /// Wraps `GetWindow(GW_HWNDPREV)` in production; used by `show_tiling`
     /// to slot tiling windows above the overlay on band transitions.
@@ -901,7 +858,6 @@ impl CreateOverlay for WgpuOverlayFactory {
             Arc::clone(&self.queue),
             config,
             tab_bar_height,
-            self.hub_sender.clone(),
             monitor,
             scale,
         )?)
@@ -942,6 +898,24 @@ impl CreateOverlay for WgpuOverlayFactory {
             scale,
         )?)
     }
+    fn create_tab_bar(
+        &self,
+        config: Config,
+        container_id: ContainerId,
+        rect: Dimension,
+        scale: f32,
+    ) -> anyhow::Result<Box<dyn TabBarOverlayApi>> {
+        Ok(TabBarOverlay::new(
+            &self.instance,
+            Arc::clone(&self.device),
+            Arc::clone(&self.queue),
+            config,
+            container_id,
+            rect,
+            scale,
+            self.hub_sender.clone(),
+        )?)
+    }
 }
 
 /// Windows-only conversions on physical-pixel dimensions for the wgpu/egui overlay pipeline.
@@ -974,5 +948,275 @@ impl PhysicalDimensionExt for Dimension<Physical> {
             w,
             h,
         )
+    }
+}
+
+pub(in crate::platform::windows) trait TabBarOverlayApi {
+    fn update(
+        &mut self,
+        rect: Dimension,
+        titles: Vec<String>,
+        active_index: usize,
+        is_highlighted: bool,
+        scale: f32,
+    );
+    #[expect(
+        dead_code,
+        reason = "hide() is invoked when a tabbed container's active window minimizes. Wired up in the follow-up minimize/restore pass."
+    )]
+    fn hide(&mut self);
+    fn set_config(&mut self, config: &Config);
+}
+
+/// Per-container window that owns its tab bar's pixels and pointer events.
+/// `renderer` is declared before `window` so it drops first while the HWND is
+/// still valid (mirrors `TilingOverlay` and `FloatOverlay`).
+pub(in crate::platform::windows) struct TabBarOverlay {
+    renderer: Renderer,
+    events: Vec<egui::Event>,
+    container_id: ContainerId,
+    width_phys: u32,
+    height_phys: u32,
+    titles: Vec<String>,
+    active_index: usize,
+    is_highlighted: bool,
+    config: Config,
+    hub_sender: HubSender,
+    window: OwnedHwnd,
+    scale: f32,
+    // First update positions and shows; later updates skip SWP_SHOWWINDOW so a
+    // hide() does not get clobbered by the next paint pass.
+    placed: bool,
+}
+
+impl TabBarOverlay {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wgpu handles, identity, geometry, and the hub sender all travel together at construction"
+    )]
+    pub(in crate::platform::windows) fn new(
+        instance: &wgpu::Instance,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        config: Config,
+        container_id: ContainerId,
+        rect: Dimension,
+        scale: f32,
+        hub_sender: HubSender,
+    ) -> anyhow::Result<Box<Self>> {
+        let (x_phys, y_phys, w_phys, h_phys) = rect.to_surface_size();
+        // WS_EX_NOACTIVATE prevents foreground theft on click. Tab clicks are
+        // dispatched as `HubEvent::TabClicked`, not by raising the window.
+        let window = OwnedHwnd::new(
+            TAB_BAR_OVERLAY_CLASS,
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            x_phys,
+            y_phys,
+            w_phys,
+            h_phys,
+        )?;
+        let hwnd = window.hwnd();
+        let renderer = Renderer::new(
+            instance,
+            device,
+            queue,
+            hwnd,
+            w_phys,
+            h_phys,
+            config.theme,
+            &config.font,
+        )?;
+        let mut boxed = Box::new(Self {
+            renderer,
+            events: Vec::new(),
+            container_id,
+            width_phys: w_phys,
+            height_phys: h_phys,
+            titles: Vec::new(),
+            active_index: 0,
+            is_highlighted: false,
+            config,
+            hub_sender,
+            window,
+            scale,
+            placed: false,
+        });
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
+        Ok(boxed)
+    }
+
+    /// Renders one frame and returns `Some((container_id, tab_index))` when a
+    /// click landed on a tab. Caller dispatches the click via the hub sender.
+    fn rerender(&mut self) -> Option<(ContainerId, usize)> {
+        let events = std::mem::take(&mut self.events);
+        let scale = self.scale;
+        let w_phys = self.width_phys;
+        let h_phys = self.height_phys;
+        let titles = self.titles.clone();
+        let active_index = self.active_index;
+        let is_highlighted = self.is_highlighted;
+        let container_id = self.container_id;
+        let config = &self.config;
+        let theme = config.theme();
+        // Canvas is the full bar, so paint_tab_bar's own height drives the
+        // metric; otherwise the highlight underline math would diverge from
+        // the bar's actual logical height.
+        let bar_h_logical = Length::<Logical>::new(h_phys as f32 / scale);
+        let bar_w_logical = Length::<Logical>::new(w_phys as f32 / scale);
+        let metrics = overlay::OverlayMetrics {
+            border: overlay::BorderMetrics::from_thickness(Length::<Logical>::new(
+                config.border_size,
+            )),
+            tab_bar_height: bar_h_logical,
+        };
+        let canvas_local =
+            Dimension::<Logical>::new(Length::ZERO, Length::ZERO, bar_w_logical, bar_h_logical);
+        self.renderer.render(w_phys, h_phys, scale, events, |ctx| {
+            overlay::paint_tab_bar(
+                ctx,
+                container_id,
+                canvas_local,
+                &titles,
+                active_index,
+                is_highlighted,
+                metrics,
+                &theme,
+            )
+        })
+    }
+}
+
+impl TabBarOverlayApi for TabBarOverlay {
+    fn update(
+        &mut self,
+        rect: Dimension,
+        titles: Vec<String>,
+        active_index: usize,
+        is_highlighted: bool,
+        scale: f32,
+    ) {
+        self.titles = titles;
+        self.active_index = active_index;
+        self.is_highlighted = is_highlighted;
+        self.scale = scale;
+        let (x_phys, y_phys, w_phys, h_phys) = rect.to_surface_size();
+        if w_phys != self.width_phys || h_phys != self.height_phys {
+            self.renderer.resize(w_phys, h_phys);
+            self.width_phys = w_phys;
+            self.height_phys = h_phys;
+        }
+        let mut flags = SWP_NOACTIVATE | SWP_SHOWWINDOW;
+        if self.placed {
+            // Z-order is owned by show_tiling's per-window lift on band
+            // transitions. Subsequent SetWindowPos calls must not perturb it.
+            flags |= SWP_NOZORDER;
+        }
+        unsafe {
+            SetWindowPos(
+                self.window.hwnd(),
+                Some(HWND_TOP),
+                x_phys,
+                y_phys,
+                w_phys as i32,
+                h_phys as i32,
+                flags,
+            )
+            .ok();
+        }
+        self.placed = true;
+        let _ = self.rerender();
+    }
+
+    fn hide(&mut self) {
+        self.window.hide();
+    }
+
+    fn set_config(&mut self, config: &Config) {
+        if self.config.theme != config.theme {
+            self.renderer.apply_theme(config.theme);
+        }
+        if self.config.font != config.font {
+            self.renderer.apply_font(&config.font);
+        }
+        self.config = config.clone();
+    }
+}
+
+impl Drop for TabBarOverlay {
+    fn drop(&mut self) {
+        unsafe { SetWindowLongPtrW(self.window.hwnd(), GWLP_USERDATA, 0) };
+    }
+}
+
+pub(in crate::platform::windows) unsafe extern "system" fn tab_bar_overlay_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if let Some(lr) = crate::platform::windows::dome_wnd_proc_common(hwnd, msg, wparam, lparam) {
+        return lr;
+    }
+    // The bar must not raise itself on click. Tab clicks dispatch a hub event;
+    // foreground stays with whatever managed window owned it.
+    if msg == WM_MOUSEACTIVATE {
+        return LRESULT(MA_NOACTIVATE as isize);
+    }
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut TabBarOverlay;
+    if ptr.is_null() {
+        return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+    }
+    let overlay = unsafe { &mut *ptr };
+    match msg {
+        WM_MOUSEMOVE => {
+            let x = (lparam.0 & 0xFFFF) as i16 as f32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            // Bar pixels are the canvas; coords in window-local physical pixels
+            // map directly to egui logical points after Renderer::render's
+            // pixels_per_point = scale rescale.
+            let scale = overlay.scale;
+            overlay
+                .events
+                .push(egui::Event::PointerMoved(egui::pos2(x / scale, y / scale)));
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            let x = (lparam.0 & 0xFFFF) as i16 as f32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            let scale = overlay.scale;
+            overlay.events.push(egui::Event::PointerButton {
+                pos: egui::pos2(x / scale, y / scale),
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            let x = (lparam.0 & 0xFFFF) as i16 as f32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            let scale = overlay.scale;
+            overlay.events.push(egui::Event::PointerButton {
+                pos: egui::pos2(x / scale, y / scale),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            // Button-up is the edge paint_tab_bar's Sense::click() observes.
+            // Both Down and Up must be present in the same render pass.
+            if let Some((cid, idx)) = overlay.rerender() {
+                overlay.hub_sender.send(HubEvent::TabClicked(cid, idx));
+            }
+            LRESULT(0)
+        }
+        WM_PAINT => {
+            unsafe {
+                let mut ps = PAINTSTRUCT::default();
+                BeginPaint(hwnd, &mut ps);
+                EndPaint(hwnd, &ps).ok().ok();
+            }
+            LRESULT(0)
+        }
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }

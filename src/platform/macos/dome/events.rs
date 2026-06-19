@@ -136,7 +136,21 @@ pub(in crate::platform::macos) struct MonitorTilingData {
     pub(in crate::platform::macos) cocoa_frame: NSRect,
     pub(in crate::platform::macos) scale: f64,
     pub(in crate::platform::macos) windows: Vec<TilingWindowPlacement>,
-    pub(in crate::platform::macos) containers: Vec<(ContainerPlacement, Vec<String>)>,
+    pub(in crate::platform::macos) containers: Vec<ContainerShow>,
+}
+
+/// Per-container render bundle. Mirrors `FloatShow` for tabbed containers:
+/// wraps the core `ContainerPlacement` with the dome thread's pre-flipped
+/// tab-bar geometry so the UI thread does no Cocoa Y-flip math.
+#[derive(Clone)]
+pub(in crate::platform::macos) struct ContainerShow {
+    pub(in crate::platform::macos) placement: ContainerPlacement,
+    /// Top `tab_bar_height` strip of `placement.frame` in logical points.
+    pub(in crate::platform::macos) tab_bar_dim: Dimension<Logical>,
+    /// Pre-flipped Cocoa frame for `tab_bar_dim`. Always populated, even when
+    /// `!placement.is_tabbed`. The UI loop filters before creating the overlay
+    /// window.
+    pub(in crate::platform::macos) tab_bar_cocoa_frame: NSRect,
 }
 
 pub(in crate::platform::macos) struct FloatShow {

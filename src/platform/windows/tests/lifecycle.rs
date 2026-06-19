@@ -249,7 +249,7 @@ fn destroy_last_window_focuses_overlay() {
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
     env.destroy_window(w1);
-    assert_eq!(env.focus_target(), FocusTarget::Sink);
+    assert_eq!(env.focus_target(), FocusTarget::Overlay);
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn workspace_switch_to_empty_focuses_overlay() {
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
     env.run_actions("focus workspace 1");
-    assert_eq!(env.focus_target(), FocusTarget::Sink);
+    assert_eq!(env.focus_target(), FocusTarget::Overlay);
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn focus_parent_focuses_overlay() {
     let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     env.run_actions("focus parent");
-    assert_eq!(env.focus_target(), FocusTarget::Sink);
+    assert_eq!(env.focus_target(), FocusTarget::Overlay);
 }
 
 #[test]
@@ -313,7 +313,7 @@ fn monitor_switch_empty_to_empty_focuses_overlay() {
     env.run_actions("focus workspace 1");
 
     env.run_actions("focus monitor right");
-    assert_eq!(env.focus_target(), FocusTarget::Sink);
+    assert_eq!(env.focus_target(), FocusTarget::Overlay);
 }
 
 #[test]
@@ -572,4 +572,57 @@ fn wm_getdpiscaledsize_reply_returns_current_size() {
     let out_zero = crate::platform::windows::wm_getdpiscaledsize_reply(zero);
     assert_eq!(out_zero.cx, 0);
     assert_eq!(out_zero.cy, 0);
+}
+
+#[test]
+fn tab_bar_lifecycle_per_container() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+
+    env.run_actions("toggle layout");
+
+    {
+        let tab_bars = env.tab_bars.borrow();
+        assert_eq!(tab_bars.len(), 1);
+        let mock = tab_bars.values().next().unwrap();
+        let upd = mock.last_update().expect("tab bar received an update");
+        assert_eq!(upd.titles.len(), 2);
+        assert!(upd.active_index < 2);
+    }
+
+    env.run_actions("toggle layout");
+    assert!(env.tab_bars.borrow().is_empty());
+}
+
+#[test]
+fn tab_click_focuses_tab_index() {
+    let mut env = TestEnv::new();
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+
+    env.run_actions("toggle layout");
+
+    let cid = *env.tab_bars.borrow().keys().next().unwrap();
+    let initial_active = env
+        .tab_bars
+        .borrow()
+        .get(&cid)
+        .unwrap()
+        .last_update()
+        .unwrap()
+        .active_index;
+    assert_eq!(initial_active, 1);
+
+    env.dome.tab_clicked(cid, 0);
+
+    let after_active = env
+        .tab_bars
+        .borrow()
+        .get(&cid)
+        .unwrap()
+        .last_update()
+        .unwrap()
+        .active_index;
+    assert_eq!(after_active, 0);
 }

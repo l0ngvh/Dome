@@ -28,10 +28,7 @@ fn single_window_above_overlay() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    assert_eq!(
-        env.tiling_z_order(),
-        vec![w1, FOCUS_SINK_ID, env.overlay_id()]
-    );
+    assert_eq!(env.tiling_z_order(), vec![w1, env.overlay_id()]);
 }
 
 #[test]
@@ -42,7 +39,7 @@ fn all_tiling_above_overlay() {
     }
 
     let stack = env.tiling_z_order();
-    assert_eq!(stack.len(), 7); // 5 windows + sink + overlay
+    assert_eq!(stack.len(), 6); // 5 windows + overlay
     assert_eq!(*stack.last().unwrap(), env.overlay_id());
 }
 
@@ -71,10 +68,7 @@ fn destroy_window_rebuilds_chain() {
 
     env.destroy_window(w2);
 
-    assert_eq!(
-        env.tiling_z_order(),
-        vec![w3, w1, FOCUS_SINK_ID, env.overlay_id()]
-    );
+    assert_eq!(env.tiling_z_order(), vec![w3, w1, env.overlay_id()]);
 }
 
 #[test]
@@ -279,12 +273,12 @@ fn lift_falls_back_when_overlay_at_top() {
     );
 }
 
-/// Parked-offscreen windows must sit strictly below the focus sink so that
+/// Parked-offscreen windows must sit strictly below the tiling overlay so that
 /// Win32's close-time focus walk lands on a Dome-owned window rather than
 /// reactivating an inactive workspace (see
 /// docs/architecture.md, "Virtual workspaces").
 #[test]
-fn focus_sink_stays_above_parked_windows() {
+fn tiling_overlay_stays_above_parked_windows() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
@@ -294,19 +288,19 @@ fn focus_sink_stays_above_parked_windows() {
     assert!(env.is_offscreen(w2));
 
     let stack = env.z_order();
-    let sink_idx = stack
+    let overlay_idx = stack
         .iter()
-        .position(|&h| h == FOCUS_SINK_ID)
-        .expect("focus sink must be in z-stack");
+        .position(|&h| h == env.overlay_id())
+        .expect("tiling overlay must be in z-stack");
     let w1_idx = stack.iter().position(|&h| h == w1).unwrap();
     let w2_idx = stack.iter().position(|&h| h == w2).unwrap();
     assert!(
-        sink_idx < w1_idx,
-        "sink at {sink_idx} must sit above parked w1 at {w1_idx}"
+        overlay_idx < w1_idx,
+        "overlay at {overlay_idx} must sit above parked w1 at {w1_idx}"
     );
     assert!(
-        sink_idx < w2_idx,
-        "sink at {sink_idx} must sit above parked w2 at {w2_idx}"
+        overlay_idx < w2_idx,
+        "overlay at {overlay_idx} must sit above parked w2 at {w2_idx}"
     );
 }
 

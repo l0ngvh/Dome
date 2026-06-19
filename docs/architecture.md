@@ -322,10 +322,11 @@ visual indicators](#windows-displaying-visual-indicators)).
 Switching to an empty workspace causes a similar problem from the opposite
 direction. Focus stays on whichever window held it before the switch, which
 after parking sits offscreen in another workspace, so a stray keystroke can
-land somewhere the user can no longer see. The shell handles this with a
-dedicated focus sink, a small offscreen window that absorbs Win32 foreground
-when no managed window is eligible (empty workspace, `focus_parent`
-container-highlight).
+land somewhere the user can no longer see. The shell handles this by
+routing Win32 foreground to the tiling overlay (see [Displaying visual
+indicators](#windows-displaying-visual-indicators)) whenever no managed
+window is eligible to receive it, on an empty workspace or while
+`focus_parent` highlights a container.
 
 ### Fullscreen windows {#windows-fullscreen-windows}
 
@@ -375,16 +376,25 @@ themselves, just below their float. Overlay rendering stays on the
 orchestration thread because Win32 has no AppKit-style main-thread rule, only a
 same-thread one.
 
-[Similar to macOS](#macos-displaying-visual-indicators), Windows doesn't have
-per-region click-through, so the tiling overlay window has to stay at the
-bottom of all managed windows. Unlike on macOS, however, even though we can
-place a window at the bottom of the z-order stack through `HWND_BOTTOM`,
-Windows doesn't guarantee that the window stays there, and it can gradually be
-raised up the z-order as other windows get pushed to the bottom (see [Virtual
-workspaces](#windows-virtual-workspaces)). To ensure that at least managed
-windows in the current workspace don't get occluded by the tiling overlay,
-whenever a managed window is displayed as part of the current workspace, the
-shell restacks it above the overlay before showing it. The overlay also
-shouldn't receive activation or absorb keyboard focus the way the macOS overlay
-does (see [Virtual workspaces](#windows-virtual-workspaces)). Instead, a
-separate focus sink window holds focus whenever no managed window is eligible.
+Tabbed containers add another overlay shape. A tab bar is drawn above the
+active child of each tabbed container, keyed by container ID and torn down
+when the container exits tabbed mode or empties out. The container's children
+are tiled with their frames starting strictly below the bar, so the two
+never share pixels. That rect mutual exclusion is what keeps the bar's
+z-order immaterial, so the overlay sits at the default non-topmost band with
+no per-frame restacking against its container.
+
+Every Dome-owned window class routes its wnd-proc through a shared prologue
+that handles erase-background and the two DPI messages (`WM_DPICHANGED` and
+`WM_GETDPISCALEDSIZE`). New classes inherit the right behavior on those arms
+by calling the prologue first, rather than each class reimplementing them.
+
+Unlike macOS, Windows lets a window pass mouse events through to whatever
+sits underneath, so the tiling overlay is click-through and clicks land on
+managed windows directly rather than being caught by the overlay. The
+overlay parks at `HWND_BOTTOM`, sitting behind every managed window, and
+renders only the container borders that show through the gaps the layout
+leaves between windows. It also holds Win32 foreground when no managed
+window is eligible to receive it (see [Virtual
+workspaces](#windows-virtual-workspaces)), so a stray keystroke after a
+workspace switch can't land on a parked window in another workspace.

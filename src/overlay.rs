@@ -65,14 +65,15 @@ pub(crate) struct LogicalTiledContainer {
     pub is_highlighted: bool,
     pub spawn_indicator: Option<SpawnIndicator>,
     pub is_tabbed: bool,
-    pub active_tab_index: usize,
     pub titles: Vec<String>,
 }
 
-/// Draws all tiling window borders and container overlays for a single monitor.
-/// All geometric inputs are in logical points; egui rescales to physical via
-/// `pixels_per_point` at tessellation.
-/// Returns `(ContainerId, tab_index)` for each tab that was clicked.
+/// Paints the per-monitor tiling overlay: window borders, highlighted-container
+/// body border. Tab bars are owned by per-`ContainerId` windows the platform
+/// shell hosts separately and reach the painter via `paint_tab_bar`, so this
+/// entry point does not paint or hit-test tab bars. The returned click vector
+/// is always empty and exists only to keep the renderer API uniform with
+/// per-window overlays that do collect clicks.
 pub(crate) fn paint_tiling_overlay(
     ctx: &egui::Context,
     monitor: Dimension<Logical>,
@@ -81,8 +82,6 @@ pub(crate) fn paint_tiling_overlay(
     theme: &Theme,
     metrics: OverlayMetrics,
 ) -> Vec<(ContainerId, usize)> {
-    let mut clicked = Vec::new();
-
     for wp in windows {
         let vf = wp.visible_frame;
         // .logical() crosses the type boundary into egui's f32 coordinate space.
@@ -133,13 +132,11 @@ pub(crate) fn paint_tiling_overlay(
                     origin.to_pos2(),
                     vec2(vf.width.logical(), vf.height.logical()),
                 ));
-                if let Some(tab) = show_container(ui, cp, theme, metrics, origin) {
-                    clicked.push((cp.id, tab));
-                }
+                show_container(ui, cp, theme, metrics, origin);
             });
     }
 
-    clicked
+    Vec::new()
 }
 
 /// Draws 4 border edges for a window overlay.
@@ -173,7 +170,67 @@ pub(crate) fn paint_window_border(
     );
 }
 
-/// Draws container borders and an inline tab bar. Returns `Some(tab_index)` if a tab was clicked.
+/// Draws a tab bar in its own egui context for a single `ContainerId`. Used
+/// by per-tabbed-container windows the platform shell hosts. The per-monitor
+/// tiling overlay never paints tab bars itself, so this is the only path that
+/// reaches the tab-bar painter.
+/// `tab_bar_frame` is the tab bar's rect in window-local logical points. The
+/// caller's egui context's `pixels_per_point` rescales to physical pixels at
+/// tessellation. `is_highlighted` is supplied by the caller because this
+/// function does not own a `LogicalTiledContainer` to read it from.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "drawing params that must travel together"
+)]
+pub(crate) fn paint_tab_bar(
+    ctx: &egui::Context,
+    container_id: ContainerId,
+    tab_bar_frame: Dimension<Logical>,
+    titles: &[String],
+    active_index: usize,
+    is_highlighted: bool,
+    metrics: OverlayMetrics,
+    theme: &Theme,
+) -> Option<(ContainerId, usize)> {
+    let origin = vec2(tab_bar_frame.x.logical(), tab_bar_frame.y.logical());
+    let mut clicked = None;
+    egui::Area::new(egui::Id::new(("tab_bar", container_id)))
+        .order(egui::Order::Foreground)
+        .fixed_pos(origin.to_pos2())
+        .fade_in(false)
+        .show(ctx, |ui| {
+            // Mirrors the sizing-pass discard in `paint_tiling_overlay`'s
+            // container loop: without it, the first frame paints Shape::Noop
+            // and the tab bar shows up blank on Windows.
+            if ui.is_sizing_pass() {
+                ctx.request_discard("tab bar first frame");
+                return;
+            }
+            let rect = Rect::from_min_size(
+                origin.to_pos2(),
+                vec2(
+                    tab_bar_frame.width.logical(),
+                    tab_bar_frame.height.logical(),
+                ),
+            );
+            ui.set_clip_rect(rect);
+            clicked = paint_tab_bar_into_ui(
+                ui,
+                container_id,
+                rect,
+                titles,
+                active_index,
+                is_highlighted,
+                metrics,
+                theme,
+            );
+        });
+    clicked.map(|tab_idx| (container_id, tab_idx))
+}
+
+/// Draws container borders for a tiled container. Tab bars (and their click
+/// hit-testing) live in per-`ContainerId` windows the platform shell hosts and
+/// do not paint from the per-monitor overlay.
 /// `origin` is the visible_frame's top-left in canvas coordinates (same as `paint_window_border`).
 fn show_container(
     ui: &mut egui::Ui,
@@ -181,7 +238,7 @@ fn show_container(
     theme: &Theme,
     metrics: OverlayMetrics,
     origin: egui::Vec2,
-) -> Option<usize> {
+) {
     let vf = placement.visible_frame;
     let f = placement.frame;
     let ox = origin.x + f.x.logical() - vf.x.logical();
@@ -192,13 +249,6 @@ fn show_container(
     let is_tabbed = placement.is_tabbed && !placement.titles.is_empty();
     let th = metrics.tab_bar_height.logical();
     let r = effective_radius(metrics.border.radius.logical(), w, h);
-
-    let border_c = if placement.is_highlighted {
-        theme.focused_border
-    } else {
-        theme.unfocused_border
-    };
-    let tab_titles = &placement.titles;
 
     if placement.is_highlighted {
         let colors = border_colors(true, placement.spawn_indicator, theme);
@@ -312,10 +362,36 @@ fn show_container(
             );
         }
     }
+}
 
-    if !is_tabbed {
-        return None;
-    }
+/// Paints the tab-bar background, per-tab fills, separators, labels, and
+/// collects a click into the returned `Option<usize>`. Single source of truth
+/// for tab-bar visuals and hit-testing, called from `paint_tab_bar`'s
+/// per-`ContainerId` egui Area.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "drawing params that must travel together"
+)]
+fn paint_tab_bar_into_ui(
+    ui: &mut egui::Ui,
+    container_id: ContainerId,
+    tab_bar_rect: Rect,
+    titles: &[String],
+    active_index: usize,
+    is_highlighted: bool,
+    metrics: OverlayMetrics,
+    theme: &Theme,
+) -> Option<usize> {
+    let ox = tab_bar_rect.min.x;
+    let oy = tab_bar_rect.min.y;
+    let w = tab_bar_rect.width();
+    let th = tab_bar_rect.height();
+    let b = metrics.border.thickness.logical();
+    let border_c = if is_highlighted {
+        theme.focused_border
+    } else {
+        theme.unfocused_border
+    };
 
     let bg = theme.tab_bar_bg;
     let active_bg = theme.active_tab_bg;
@@ -323,7 +399,6 @@ fn show_container(
     let tab_bar_cr = CornerRadius::same(cr_u8(tab_cr));
 
     // Tab bar background
-    let tab_bar_rect = Rect::from_min_size(pos2(ox, oy), vec2(w, th));
     ui.painter().rect_filled(tab_bar_rect, tab_bar_cr, bg);
 
     // Tab bar border
@@ -331,26 +406,26 @@ fn show_container(
         .rect_stroke(tab_bar_rect, tab_bar_cr, (b, border_c), StrokeKind::Inside);
 
     // Tabs
-    let tab_width = w / tab_titles.len() as f32;
+    let tab_width = w / titles.len() as f32;
     let mut clicked = None;
     let focused_c = theme.focused_border;
 
-    for (i, title) in tab_titles.iter().enumerate() {
+    for (i, title) in titles.iter().enumerate() {
         let tab_x = ox + i as f32 * tab_width;
         let tab_rect = Rect::from_min_size(pos2(tab_x, oy), vec2(tab_width, th));
-        let is_active = i == placement.active_tab_index;
+        let is_active = i == active_index;
 
         if is_active {
-            let active_cr = active_tab_corner_radius(i, tab_titles.len(), tab_cr);
+            let active_cr = active_tab_corner_radius(i, titles.len(), tab_cr);
             ui.painter().rect_filled(tab_rect, active_cr, active_bg);
 
-            if placement.is_highlighted {
+            if is_highlighted {
                 ui.painter()
                     .rect_stroke(tab_rect, active_cr, (b, focused_c), StrokeKind::Inside);
             }
         }
 
-        if i > 0 && !is_active && i != placement.active_tab_index + 1 {
+        if i > 0 && !is_active && i != active_index + 1 {
             ui.painter().rect_filled(
                 Rect::from_min_size(pos2(tab_rect.min.x - b / 2.0, oy), vec2(b, th)),
                 CornerRadius::ZERO,
@@ -360,7 +435,7 @@ fn show_container(
 
         let response = ui.interact(
             tab_rect,
-            egui::Id::new(("tab", placement.id, i)),
+            egui::Id::new(("tab", container_id, i)),
             Sense::click(),
         );
         if response.clicked() {

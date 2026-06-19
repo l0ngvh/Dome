@@ -27,9 +27,9 @@ use super::dome::{FrameSender, HubEvent, HubMessage};
 use super::listeners::EventListener;
 use super::objc2_wrapper::{kAXFrontmostAttribute, set_attribute_value};
 use crate::config::Config;
-use crate::core::{MonitorId, WindowId};
+use crate::core::{ContainerId, MonitorId, WindowId};
 use mirror::{WindowCapture, create_captures_async};
-use overlay::{FloatOverlay, TilingOverlay};
+use overlay::{FloatOverlay, TabBarOverlay, TilingOverlay};
 use picker::PickerPopup;
 use renderer::MetalBackend;
 
@@ -160,6 +160,7 @@ struct AppDelegateIvars {
     // off the main thread while preserving frame ordering
     capture_queue: DispatchRetained<DispatchQueue>,
     tiling_overlays: RefCell<HashMap<MonitorId, TilingOverlay>>,
+    tab_bar_overlays: RefCell<HashMap<ContainerId, TabBarOverlay>>,
     float_overlays: RefCell<HashMap<CGWindowID, FloatOverlay>>,
     captures: RefCell<HashMap<CGWindowID, WindowCapture>>,
     event_listener: EventListener,
@@ -205,6 +206,7 @@ impl AppDelegate {
             frame_rx,
             capture_queue: DispatchQueue::new("dome.capture", None),
             tiling_overlays: RefCell::new(HashMap::new()),
+            tab_bar_overlays: RefCell::new(HashMap::new()),
             float_overlays: RefCell::new(HashMap::new()),
             captures: RefCell::new(HashMap::new()),
             event_listener,
@@ -244,7 +246,6 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                             frame.tab_bar_height,
                             data.cocoa_frame,
                             data.scale,
-                            hub_sender.clone(),
                         )
                     });
                     overlay.set_tab_bar_height(frame.tab_bar_height);
@@ -261,6 +262,42 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     }
                 }
                 tiling_overlays.retain(|id, _| active_monitors.contains(id));
+
+                // Tab-bar overlays: one click-receiving window per tabbed
+                // container. The per-monitor tiling overlay is now
+                // mouse-transparent, so tab clicks must land on a window
+                // that owns just the bar strip.
+                let mut tab_bar_overlays = delegate.ivars().tab_bar_overlays.borrow_mut();
+                let mut active_tab_bars: HashSet<ContainerId> = HashSet::new();
+                for data in &frame.tiling {
+                    for cs in &data.containers {
+                        if !cs.placement.is_tabbed || cs.placement.titles.is_empty() {
+                            continue;
+                        }
+                        let entry = tab_bar_overlays.entry(cs.placement.id).or_insert_with(|| {
+                            TabBarOverlay::new(
+                                mtm,
+                                backend.clone(),
+                                config.clone(),
+                                cs.placement.id,
+                                cs.tab_bar_cocoa_frame,
+                                data.scale,
+                                hub_sender.clone(),
+                            )
+                        });
+                        entry.render(
+                            cs.tab_bar_cocoa_frame,
+                            data.scale,
+                            cs.tab_bar_dim,
+                            cs.placement.titles.clone(),
+                            cs.placement.active_tab_index,
+                            cs.placement.is_highlighted,
+                        );
+                        active_tab_bars.insert(cs.placement.id);
+                    }
+                }
+                tab_bar_overlays.retain(|id, _| active_tab_bars.contains(id));
+                drop(tab_bar_overlays);
 
                 // Float overlays: create on first show
                 let mut capture_pairs = Vec::new();
@@ -345,6 +382,9 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     overlay.set_config(&new_config);
                 }
                 for overlay in delegate.ivars().tiling_overlays.borrow().values() {
+                    overlay.set_config(&new_config);
+                }
+                for overlay in delegate.ivars().tab_bar_overlays.borrow().values() {
                     overlay.set_config(&new_config);
                 }
                 if let Some(picker) = delegate.ivars().picker_window.borrow().as_ref() {

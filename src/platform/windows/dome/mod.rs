@@ -24,7 +24,7 @@ use crate::core::{
 };
 use crate::picker::{PickerEntry, build_picker_entries};
 
-use self::overlay::{FloatOverlayApi, TilingOverlayApi};
+use self::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
 use self::registry::WindowRegistry;
@@ -95,12 +95,13 @@ pub(super) trait CreateOverlay {
         config: Config,
         scale: f32,
     ) -> anyhow::Result<Box<dyn overlay::PickerApi>>;
-}
-
-/// Holds Win32 foreground when Dome has no managed window to focus
-/// (empty workspace, `focus_parent` container-highlight).
-pub(super) trait FocusSinkApi {
-    fn focus(&self);
+    fn create_tab_bar(
+        &self,
+        config: Config,
+        container_id: ContainerId,
+        rect: Dimension,
+        scale: f32,
+    ) -> anyhow::Result<Box<dyn TabBarOverlayApi>>;
 }
 
 /// Platform-specific state machine that bridges Win32 window events with the core tree
@@ -118,8 +119,8 @@ pub(super) struct Dome {
     overlay_factory: Box<dyn CreateOverlay>,
     display: Box<dyn QueryDisplay>,
     tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>>,
+    tab_bars: HashMap<ContainerId, Box<dyn TabBarOverlayApi>>,
     float_overlays: HashMap<WindowId, Box<dyn FloatOverlayApi>>,
-    focus_sink: Box<dyn FocusSinkApi>,
     last_focused: Option<WindowId>,
     last_focused_monitor: Option<MonitorId>,
     pending_created: Vec<WindowId>,
@@ -141,7 +142,6 @@ impl Dome {
         taskbar: Rc<dyn ManageTaskbar>,
         overlay_factory: Box<dyn CreateOverlay>,
         display: Box<dyn QueryDisplay>,
-        focus_sink: Box<dyn FocusSinkApi>,
     ) -> anyhow::Result<Self> {
         let monitors = display.get_all_monitors()?;
         anyhow::ensure!(!monitors.is_empty(), "No monitors detected");
@@ -205,8 +205,8 @@ impl Dome {
             overlay_factory,
             display,
             tiling_overlays,
+            tab_bars: HashMap::new(),
             float_overlays: HashMap::new(),
-            focus_sink,
             last_focused: None,
             last_focused_monitor: None,
             pending_created: Vec::new(),
@@ -223,6 +223,9 @@ impl Dome {
             overlay.set_config(&self.config);
         }
         for overlay in self.float_overlays.values_mut() {
+            overlay.set_config(&self.config);
+        }
+        for overlay in self.tab_bars.values_mut() {
             overlay.set_config(&self.config);
         }
         if let Some(picker) = self.picker.as_mut() {
@@ -772,8 +775,8 @@ impl Dome {
                 {
                     entry.ext.set_foreground_window();
                 }
-            } else {
-                self.focus_sink.focus();
+            } else if let Some(overlay) = self.tiling_overlays.get(&focused_monitor) {
+                overlay.focus();
             }
         }
         self.last_focused_monitor = Some(current_monitor);
@@ -849,7 +852,45 @@ impl Dome {
                     &data.containers,
                     scale,
                 );
+            let tab_bar_h_logical = self.layout.partition_tree.tab_bar_height;
+            for (placement, titles) in data.containers.iter().filter(|(p, _)| p.is_tabbed) {
+                let rect = compute_tab_bar_rect(placement.frame, tab_bar_h_logical, scale);
+                let tab_bar = match self.tab_bars.entry(placement.id) {
+                    std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        match self.overlay_factory.create_tab_bar(
+                            self.config.clone(),
+                            placement.id,
+                            rect,
+                            scale,
+                        ) {
+                            Ok(o) => e.insert(o),
+                            Err(err) => {
+                                tracing::warn!(?err, "failed to create tab bar");
+                                continue;
+                            }
+                        }
+                    }
+                };
+                tab_bar.update(
+                    rect,
+                    titles.clone(),
+                    placement.active_tab_index,
+                    placement.is_highlighted,
+                    scale,
+                );
+            }
         }
+        let active: HashSet<ContainerId> = per_monitor
+            .iter()
+            .flat_map(|d| {
+                d.containers
+                    .iter()
+                    .filter(|(p, _)| p.is_tabbed)
+                    .map(|(p, _)| p.id)
+            })
+            .collect();
+        self.tab_bars.retain(|id, _| active.contains(id));
     }
 
     pub(super) fn handle_window_moved(
@@ -943,6 +984,18 @@ impl Dome {
 // FileDescription from version info when available (see get_app_display_name).
 fn display_from_process(process: &str) -> String {
     process.strip_suffix(".exe").unwrap_or(process).to_string()
+}
+
+// Tab bar rect from a tabbed container's physical-pixel `frame`. The bar
+// hugs the container's top edge with the configured logical height
+// rounded into the platform's `Unit` (physical pixels on Windows).
+fn compute_tab_bar_rect(
+    frame: Dimension,
+    tab_bar_h_logical: Length<Logical>,
+    scale: f32,
+) -> Dimension {
+    let h_phys = tab_bar_h_logical.to_unit(scale).round();
+    Dimension::new(frame.x, frame.y, frame.width, h_phys)
 }
 
 #[cfg(test)]

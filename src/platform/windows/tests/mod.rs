@@ -15,13 +15,16 @@ use std::time::Instant;
 use crate::action::{Action, Actions};
 use crate::config::{Config, LayoutConfig};
 use crate::core::{
-    ContainerPlacement, Dimension, Length, Logical, Physical, TilingWindowPlacement, WindowId,
+    ContainerId, ContainerPlacement, Dimension, Length, Logical, Physical, TilingWindowPlacement,
+    WindowId,
 };
 use crate::font::FontConfig;
 use crate::picker::PickerEntry;
 use crate::platform::windows::dome::MonitorInfo;
-use crate::platform::windows::dome::overlay::{FloatOverlayApi, PickerApi, TilingOverlayApi};
-use crate::platform::windows::dome::{CreateOverlay, Dome, FocusSinkApi, NewWindow, QueryDisplay};
+use crate::platform::windows::dome::overlay::{
+    FloatOverlayApi, PickerApi, TabBarOverlayApi, TilingOverlayApi,
+};
+use crate::platform::windows::dome::{CreateOverlay, Dome, NewWindow, QueryDisplay};
 use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
 use crate::theme::Flavor;
@@ -53,7 +56,7 @@ enum FloatOverlayState {
 enum FocusTarget {
     /// Before any focus directive has fired.
     Initial,
-    Sink,
+    Overlay,
     Window(HwndId),
 }
 
@@ -139,6 +142,7 @@ struct TestEnv {
     picker_flavor: Rc<Cell<Flavor>>,
     picker_font: Rc<RefCell<FontConfig>>,
     picker_last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
+    tab_bars: Rc<RefCell<HashMap<ContainerId, MockTabBarOverlay>>>,
     z_stack: ZOrderStack,
     focus_target: Arc<Mutex<FocusTarget>>,
 }
@@ -163,25 +167,22 @@ impl TestEnv {
             exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
         };
         let focus_target = Arc::new(Mutex::new(FocusTarget::Initial));
-        let focus_sink = MockFocusSink::new(focus_target.clone());
         let picker_entries = Rc::new(RefCell::new(Vec::new()));
         let picker_loaded_icons = Rc::new(RefCell::new(HashSet::new()));
         let picker_flavor = Rc::new(Cell::new(config.theme));
         let picker_font = Rc::new(RefCell::new(config.font.clone()));
         let picker_last_reinstall_family = Rc::new(RefCell::new(None));
         let z_stack = ZOrderStack::new();
-        // Mirror production startup: the focus-sink HWND is created and
-        // parked at HWND_BOTTOM so Win32's close-time focus walk lands on a
-        // Dome-owned window. Any subsequent move_offscreen call by a managed
-        // window must drop that window strictly below the sink (encoded in
-        // `is_bottom`).
-        z_stack.simulate_create(FOCUS_SINK_ID);
-        z_stack.move_to_bottom(FOCUS_SINK_ID);
         let next_float_overlay_id = Rc::new(Cell::new(9000_isize));
+        let tab_bars = Rc::new(RefCell::new(HashMap::new()));
         // Seed flavor/font from the config to mirror production's overlay
         // constructors.
-        let tiling_overlay =
-            MockTilingOverlay::new(TILING_OVERLAY_ID, z_stack.clone(), config.clone());
+        let tiling_overlay = MockTilingOverlay::new(
+            TILING_OVERLAY_ID,
+            z_stack.clone(),
+            config.clone(),
+            focus_target.clone(),
+        );
         let float_overlay =
             MockFloatOverlay::new(FLOAT_OVERLAY_ID, z_stack.clone(), config.clone());
 
@@ -200,9 +201,9 @@ impl TestEnv {
                 picker_config: Rc::new(RefCell::new(config.clone())),
                 z_stack: z_stack.clone(),
                 next_float_overlay_id: next_float_overlay_id.clone(),
+                tab_bars: tab_bars.clone(),
             }),
             Box::new(display),
-            Box::new(focus_sink),
         )
         .unwrap();
         Self {
@@ -218,6 +219,7 @@ impl TestEnv {
             picker_flavor,
             picker_font,
             picker_last_reinstall_family,
+            tab_bars,
             z_stack,
             focus_target,
         }
@@ -411,11 +413,11 @@ impl TestEnv {
     }
 
     /// A window is "at the bottom" iff it sits in the combined z-order below
-    /// every other displayed (non-offscreen) managed mock AND below the focus
-    /// sink. The sink-above invariant matters because Win32's close-time focus
-    /// walk descends the z-order; if a parked window from another workspace
-    /// sat above the sink, that workspace would activate on close (see
-    /// docs/architecture.md, "Virtual workspaces"). Vacuously true on the
+    /// every other displayed (non-offscreen) managed mock AND below the tiling
+    /// overlay. The overlay-above invariant matters because Win32's close-time
+    /// focus walk descends the z-order. If a parked window from another
+    /// workspace sat above the overlay, that workspace would activate on close
+    /// (see docs/architecture.md, "Virtual workspaces"). Vacuously true on the
     /// displayed-peers leg when no displayed peer exists.
     fn is_bottom(&self, hwnd: HwndId) -> bool {
         let stack = self.z_stack.stack();
@@ -433,8 +435,8 @@ impl TestEnv {
         if !displayed_above {
             return false;
         }
-        match stack.iter().position(|&h| h == FOCUS_SINK_ID) {
-            Some(sink_idx) => sink_idx < idx,
+        match stack.iter().position(|&h| h == TILING_OVERLAY_ID) {
+            Some(overlay_idx) => overlay_idx < idx,
             None => false,
         }
     }
@@ -555,7 +557,6 @@ impl TestEnv {
 }
 
 const TILING_OVERLAY_ID: HwndId = HwndId::test(9999);
-const FOCUS_SINK_ID: HwndId = HwndId::test(9998);
 const FLOAT_OVERLAY_ID: HwndId = HwndId::test(9000);
 
 fn fullscreen_dim() -> Dimension {
@@ -904,22 +905,6 @@ impl ManageTaskbar for NoopTaskbar {
     fn delete_tab(&self, _: HwndId) {}
 }
 
-struct MockFocusSink {
-    focus_target: Arc<Mutex<FocusTarget>>,
-}
-
-impl MockFocusSink {
-    fn new(focus_target: Arc<Mutex<FocusTarget>>) -> Self {
-        Self { focus_target }
-    }
-}
-
-impl FocusSinkApi for MockFocusSink {
-    fn focus(&self) {
-        *self.focus_target.lock().unwrap() = FocusTarget::Sink;
-    }
-}
-
 #[derive(Clone)]
 struct MockFloatOverlay {
     hwnd_id: HwndId,
@@ -1001,10 +986,16 @@ struct MockTilingOverlay {
     monitor: Rc<Cell<Dimension>>,
     last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
     config: Rc<RefCell<Config>>,
+    focus_target: Arc<Mutex<FocusTarget>>,
 }
 
 impl MockTilingOverlay {
-    fn new(overlay_id: HwndId, z_stack: ZOrderStack, config: Config) -> Self {
+    fn new(
+        overlay_id: HwndId,
+        z_stack: ZOrderStack,
+        config: Config,
+        focus_target: Arc<Mutex<FocusTarget>>,
+    ) -> Self {
         Self {
             overlay_id,
             z_stack,
@@ -1014,6 +1005,7 @@ impl MockTilingOverlay {
             monitor: Rc::new(Cell::new(Dimension::default())),
             last_reinstall_family: Rc::new(RefCell::new(None)),
             config: Rc::new(RefCell::new(config)),
+            focus_target,
         }
     }
 
@@ -1068,6 +1060,9 @@ impl TilingOverlayApi for MockTilingOverlay {
     }
     fn demote_below(&mut self, managed: HwndId) {
         self.z_stack.apply(self.overlay_id, ZOrder::After(managed));
+    }
+    fn focus(&self) {
+        *self.focus_target.lock().unwrap() = FocusTarget::Overlay;
     }
 }
 
@@ -1136,6 +1131,69 @@ impl PickerApi for MockPicker {
     }
 }
 
+#[derive(Clone, Debug)]
+struct TabBarUpdate {
+    titles: Vec<String>,
+    active_index: usize,
+}
+
+/// Test mirror of a per-`ContainerId` tab bar. The Rcs are shared with the
+/// `MockTabBarHandle` clone that production wraps in a `Box<dyn TabBarOverlayApi>`,
+/// so updates from production are observable here.
+#[derive(Clone)]
+struct MockTabBarOverlay {
+    container_id: ContainerId,
+    last_update: Rc<RefCell<Option<TabBarUpdate>>>,
+}
+
+impl MockTabBarOverlay {
+    fn new(container_id: ContainerId) -> Self {
+        Self {
+            container_id,
+            last_update: Rc::new(RefCell::new(None)),
+        }
+    }
+
+    fn last_update(&self) -> Option<TabBarUpdate> {
+        self.last_update.borrow().clone()
+    }
+}
+
+/// Wrapper boxed as `Box<dyn TabBarOverlayApi>` and handed to `Dome`. Holding
+/// the wrapper rather than `MockTabBarOverlay` directly lets us mirror
+/// production's `position_windows` retain pass: when `Dome` drops the box,
+/// the entry vanishes from the test mirror map. Putting `Drop` on
+/// `MockTabBarOverlay` would re-enter `borrow_mut` on the same RefMut held
+/// open by `HashMap::remove` and panic.
+struct MockTabBarHandle {
+    inner: MockTabBarOverlay,
+    map: Rc<RefCell<HashMap<ContainerId, MockTabBarOverlay>>>,
+}
+
+impl TabBarOverlayApi for MockTabBarHandle {
+    fn update(
+        &mut self,
+        _rect: Dimension,
+        titles: Vec<String>,
+        active_index: usize,
+        _is_highlighted: bool,
+        _scale: f32,
+    ) {
+        *self.inner.last_update.borrow_mut() = Some(TabBarUpdate {
+            titles,
+            active_index,
+        });
+    }
+    fn hide(&mut self) {}
+    fn set_config(&mut self, _config: &Config) {}
+}
+
+impl Drop for MockTabBarHandle {
+    fn drop(&mut self) {
+        self.map.borrow_mut().remove(&self.inner.container_id);
+    }
+}
+
 struct MockOverlays {
     tiling_overlay: MockTilingOverlay,
     float_overlay: MockFloatOverlay,
@@ -1147,6 +1205,7 @@ struct MockOverlays {
     picker_config: Rc<RefCell<Config>>,
     z_stack: ZOrderStack,
     next_float_overlay_id: Rc<Cell<isize>>,
+    tab_bars: Rc<RefCell<HashMap<ContainerId, MockTabBarOverlay>>>,
 }
 
 impl CreateOverlay for MockOverlays {
@@ -1205,5 +1264,21 @@ impl CreateOverlay for MockOverlays {
         };
         picker.show(entries, monitor_dim, scale);
         Ok(Box::new(picker))
+    }
+    fn create_tab_bar(
+        &self,
+        _config: Config,
+        container_id: ContainerId,
+        _rect: Dimension,
+        _scale: f32,
+    ) -> anyhow::Result<Box<dyn TabBarOverlayApi>> {
+        let inner = MockTabBarOverlay::new(container_id);
+        self.tab_bars
+            .borrow_mut()
+            .insert(container_id, inner.clone());
+        Ok(Box::new(MockTabBarHandle {
+            inner,
+            map: self.tab_bars.clone(),
+        }))
     }
 }

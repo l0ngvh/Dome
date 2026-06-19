@@ -36,12 +36,11 @@ use windows::Win32::UI::HiDpi::{
     GetDpiAwarenessContextForProcess, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, IDC_ARROW,
-    LoadCursorW, MSG, PostThreadMessageW, RegisterClassW, SW_SHOWNA, ShowWindow, TranslateMessage,
-    WM_APP, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW,
-    WS_EX_TOOLWINDOW, WS_POPUP,
+    DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, IDC_ARROW, LoadCursorW, MSG,
+    PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW,
 };
-use windows::core::{BOOL, PCWSTR};
+use windows::core::BOOL;
 
 use crate::config::{
     Config, LayoutConfig, layout_default_path, load_or_default, start_config_watcher,
@@ -49,10 +48,11 @@ use crate::config::{
 use crate::ipc;
 use crate::keymap::KeymapState;
 use dome::overlay::{
-    FLOAT_OVERLAY_CLASS, TILING_OVERLAY_CLASS, WgpuOverlayFactory, tiling_overlay_wnd_proc,
+    FLOAT_OVERLAY_CLASS, TAB_BAR_OVERLAY_CLASS, TILING_OVERLAY_CLASS, WgpuOverlayFactory,
+    tab_bar_overlay_wnd_proc, tiling_overlay_wnd_proc,
 };
 use dome::picker::{PICKER_OVERLAY_CLASS, picker_wnd_proc};
-use dome::{Dome, FocusSinkApi, HubEvent};
+use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
 use external::HwndId;
 
@@ -131,16 +131,6 @@ impl HubSender {
         unsafe {
             PostThreadMessageW(self.thread_id, WM_APP_HUBEVENT, WPARAM(ptr), LPARAM(0)).ok();
         }
-    }
-}
-
-pub(super) struct AppWindowSink {
-    hwnd: HWND,
-}
-
-impl FocusSinkApi for AppWindowSink {
-    fn focus(&self) {
-        crate::platform::windows::handle::force_set_foreground(self.hwnd);
     }
 }
 
@@ -318,30 +308,28 @@ pub(super) fn wm_getdpiscaledsize_reply(
     current
 }
 
-unsafe extern "system" fn app_wnd_proc(
+/// Universal prologue for every Dome-owned wnd-proc.
+///
+/// Returns `Some(LRESULT)` when the message was handled and the per-class
+/// proc should return that value immediately. Returns `None` when the
+/// per-class proc should continue processing.
+///
+/// Centralising these arms turns AGENTS.md's wnd-proc maintenance rule
+/// (every Dome class must handle WM_DPICHANGED + WM_GETDPISCALEDSIZE) into a
+/// structural invariant: any class whose proc calls this helper as its
+/// prologue automatically satisfies the rule.
+///
+/// WM_DPICHANGED is per-window. Duplicate posts from multiple Dome wnd-procs
+/// on the same monitor are absorbed by monitor_dpi_changed.
+pub(super) fn dome_wnd_proc_common(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
     lparam: LPARAM,
-) -> LRESULT {
+) -> Option<LRESULT> {
     match msg {
-        WM_DISPLAYCHANGE => {
-            unsafe {
-                PostThreadMessageW(
-                    GetCurrentThreadId(),
-                    WM_APP_DISPLAY_CHANGE,
-                    WPARAM(0),
-                    LPARAM(0),
-                )
-                .ok()
-            };
-            LRESULT(0)
-        }
-        // WM_DPICHANGED is per-window (not broadcast). Duplicate posts from
-        // multiple Dome wnd-procs on the same monitor are absorbed by
-        // monitor_dpi_changed's same-scale early return.
+        WM_ERASEBKGND => Some(LRESULT(1)),
         WM_DPICHANGED => {
-            // X and Y DPI are equal on conforming displays; HIWORD discarded.
             let dpi = (wparam.0 & 0xFFFF) as u32;
             let handle = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) }.0 as isize;
             unsafe {
@@ -353,13 +341,8 @@ unsafe extern "system" fn app_wnd_proc(
                 )
                 .ok()
             };
-            // Return 0 to suppress DefWindowProcW's auto-resize to the suggested RECT.
-            LRESULT(0)
+            Some(LRESULT(0))
         }
-        // Suppresses Windows 11's automatic DPI resize by reporting current size as the desired
-        // scaled size. See wm_getdpiscaledsize_reply.
-        // Windows 10 also delivers `WM_GETDPISCALEDSIZE` (introduced in 1703) but does not
-        // auto-resize on `WM_DPICHANGED`, so the reply has no visible effect there.
         WM_GETDPISCALEDSIZE => {
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect).ok() };
@@ -369,12 +352,9 @@ unsafe extern "system" fn app_wnd_proc(
             };
             let out = lparam.0 as *mut SIZE;
             unsafe { *out = wm_getdpiscaledsize_reply(size) };
-            LRESULT(1)
+            Some(LRESULT(1))
         }
-        // App window is 1x1 offscreen; these arms are defensive only.
-        WM_ERASEBKGND => LRESULT(1),
-        WM_PAINT => LRESULT(0),
-        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+        _ => None,
     }
 }
 
@@ -384,35 +364,10 @@ unsafe extern "system" fn float_overlay_wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if let Some(lr) = dome_wnd_proc_common(hwnd, msg, wparam, lparam) {
+        return lr;
+    }
     match msg {
-        // WM_DPICHANGED is per-window. Duplicate posts from multiple Dome
-        // wnd-procs on the same monitor are absorbed by monitor_dpi_changed.
-        WM_DPICHANGED => {
-            let dpi = (wparam.0 & 0xFFFF) as u32;
-            let handle = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) }.0 as isize;
-            unsafe {
-                PostThreadMessageW(
-                    GetCurrentThreadId(),
-                    WM_APP_DPI_CHANGE,
-                    WPARAM(dpi as usize),
-                    LPARAM(handle),
-                )
-                .ok()
-            };
-            LRESULT(0)
-        }
-        WM_GETDPISCALEDSIZE => {
-            let mut rect = RECT::default();
-            unsafe { GetClientRect(hwnd, &mut rect).ok() };
-            let size = SIZE {
-                cx: rect.right - rect.left,
-                cy: rect.bottom - rect.top,
-            };
-            let out = lparam.0 as *mut SIZE;
-            unsafe { *out = wm_getdpiscaledsize_reply(size) };
-            LRESULT(1)
-        }
-        WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
             unsafe { BeginPaint(hwnd, &mut ps) };
@@ -434,17 +389,6 @@ fn run_dome(
     // https://devblogs.microsoft.com/oldnewthing/20250424-00/?p=111114
     let arrow = unsafe { LoadCursorW(None, IDC_ARROW) }.expect("LoadCursorW failed");
 
-    const APP_CLASS: PCWSTR = windows::core::w!("DomeApp");
-
-    let wc = WNDCLASSW {
-        lpfnWndProc: Some(app_wnd_proc),
-        hInstance: hinstance.into(),
-        lpszClassName: APP_CLASS,
-        hCursor: arrow,
-        ..Default::default()
-    };
-    unsafe { RegisterClassW(&wc) };
-
     let wc_window = WNDCLASSW {
         lpfnWndProc: Some(float_overlay_wnd_proc),
         hInstance: hinstance.into(),
@@ -463,6 +407,15 @@ fn run_dome(
     };
     unsafe { RegisterClassW(&wc_tiling) };
 
+    let wc_tab_bar = WNDCLASSW {
+        lpfnWndProc: Some(tab_bar_overlay_wnd_proc),
+        hInstance: hinstance.into(),
+        lpszClassName: TAB_BAR_OVERLAY_CLASS,
+        hCursor: arrow,
+        ..Default::default()
+    };
+    unsafe { RegisterClassW(&wc_tab_bar) };
+
     let wc_picker = WNDCLASSW {
         lpfnWndProc: Some(picker_wnd_proc),
         hInstance: hinstance.into(),
@@ -471,37 +424,6 @@ fn run_dome(
         ..Default::default()
     };
     unsafe { RegisterClassW(&wc_picker) };
-
-    // The HWND serves as a focus sink (holds foreground when no managed window
-    // is focused) and a WndProc host (handles WM_DISPLAYCHANGE). With the tiling
-    // overlay parked at HWND_BOTTOM, this sink is the only fallback foreground target.
-    let app_hwnd = unsafe {
-        CreateWindowExW(
-            WS_EX_TOOLWINDOW,
-            APP_CLASS,
-            windows::core::w!(""),
-            WS_POPUP,
-            0,
-            0,
-            1,
-            1,
-            None,
-            None,
-            Some(hinstance.into()),
-            None,
-        )
-    }
-    .expect("Failed to create app window");
-
-    // Park the app-sink window offscreen via the unified helper. The prior code used
-    // HWND_TOP | SWP_NOZORDER | explicit 1x1 size; the helper instead drops to
-    // HWND_BOTTOM (offscreen windows must not occlude visible windows), omits the
-    // explicit 1x1 (unnecessary once out of the viewport), and adds SWP_NOACTIVATE
-    // to prevent a foreground-activation event on the hidden window.
-    handle::move_window_offscreen(app_hwnd);
-    // Show without activating. Hidden windows are flaky SetForegroundWindow targets;
-    // a 1x1 offscreen window makes activation reliable with no visible effect.
-    unsafe { ShowWindow(app_hwnd, SW_SHOWNA).ok().ok() };
 
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::DX12,
@@ -542,7 +464,6 @@ fn run_dome(
         Rc::new(taskbar),
         Box::new(overlays),
         Box::new(dome::Win32Display),
-        Box::new(AppWindowSink { hwnd: app_hwnd }),
     )
     .expect("Failed to initialize Dome");
 

@@ -21,11 +21,11 @@ use objc2_quartz_core::{
     CAAutoresizingMask, CALayer, CAMetalLayer, CATransaction, kCAGravityResize,
 };
 
-use super::super::dome::HubEvent;
+use super::super::dome::{ContainerShow, HubEvent};
 use super::renderer::{MetalBackend, Renderer};
 use crate::config::Config;
 use crate::core::{
-    ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, TilingWindowPlacement,
+    ContainerId, Dimension, FloatWindowPlacement, Length, Logical, TilingWindowPlacement,
 };
 use crate::font::FontConfig;
 use crate::overlay::{
@@ -289,7 +289,6 @@ impl TilingOverlay {
         tab_bar_height: Length<Logical>,
         cocoa_frame: NSRect,
         scale: f64,
-        hub_sender: CalloopSender<HubEvent>,
     ) -> Self {
         let flavor = config.theme;
         let font = config.font.clone();
@@ -304,19 +303,13 @@ impl TilingOverlay {
                 | NSWindowCollectionBehavior::IgnoresCycle,
         );
         unsafe { window.setReleasedWhenClosed(false) };
-        window.setIgnoresMouseEvents(false);
-        window.setAcceptsMouseMovedEvents(true);
+        // Click-through so mouse events fall through to the application
+        // window beneath. Tab clicks land on the per-container TabBarOverlay,
+        // which is hosted as a sibling NSWindow at the same level.
+        window.setIgnoresMouseEvents(true);
 
-        let view = TilingOverlayView::new(
-            mtm,
-            backend,
-            config,
-            tab_bar_height,
-            scale,
-            hub_sender,
-            flavor,
-            &font,
-        );
+        let view =
+            TilingOverlayView::new(mtm, backend, config, tab_bar_height, scale, flavor, &font);
         window.setContentView(Some(&view));
         window.setFrame_display(cocoa_frame, false);
         window.orderFront(None);
@@ -330,7 +323,7 @@ impl TilingOverlay {
         scale: f64,
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
-        containers: &[(ContainerPlacement, Vec<String>)],
+        containers: &[ContainerShow],
     ) {
         self.window.setFrame_display(cocoa_frame, false);
         self.view.update(monitor, windows, containers, scale);
@@ -429,15 +422,13 @@ impl FloatOverlayView {
 pub(super) struct TilingOverlayViewIvars {
     #[expect(dead_code, reason = "retains CAMetalLayer to prevent deallocation")]
     layer: Retained<CAMetalLayer>,
-    events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<Renderer>,
     monitor: Cell<Dimension>,
     windows: RefCell<Vec<TilingWindowPlacement>>,
-    containers: RefCell<Vec<(ContainerPlacement, Vec<String>)>>,
+    containers: RefCell<Vec<ContainerShow>>,
     config: RefCell<Config>,
     tab_bar_height: Cell<Length<Logical>>,
     scale: Cell<f64>,
-    hub_sender: CalloopSender<HubEvent>,
 }
 
 define_class!(
@@ -453,70 +444,16 @@ define_class!(
         fn is_flipped(&self) -> bool {
             true
         }
-
-        #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, event: &NSEvent) {
-            let pos = self.event_pos(event);
-            self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            });
-            self.render_now();
-        }
-
-        #[unsafe(method(mouseUp:))]
-        fn mouse_up(&self, event: &NSEvent) {
-            let pos = self.event_pos(event);
-            self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            });
-            self.render_now();
-        }
-
-        #[unsafe(method(mouseMoved:))]
-        fn mouse_moved(&self, event: &NSEvent) {
-            let pos = self.event_pos(event);
-            self.ivars()
-                .events
-                .borrow_mut()
-                .push(egui::Event::PointerMoved(pos));
-            self.render_now();
-        }
-
-        #[unsafe(method(mouseDragged:))]
-        fn mouse_dragged(&self, event: &NSEvent) {
-            let pos = self.event_pos(event);
-            self.ivars()
-                .events
-                .borrow_mut()
-                .push(egui::Event::PointerMoved(pos));
-            self.render_now();
-        }
-
-        #[unsafe(method(acceptsFirstMouse:))]
-        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
-            true
-        }
     }
 );
 
 impl TilingOverlayView {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "all parameters are needed for overlay initialization"
-    )]
     fn new(
         mtm: MainThreadMarker,
         backend: Rc<MetalBackend>,
         config: Config,
         tab_bar_height: Length<Logical>,
         scale: f64,
-        hub_sender: CalloopSender<HubEvent>,
         flavor: Flavor,
         font: &FontConfig,
     ) -> Retained<Self> {
@@ -524,7 +461,6 @@ impl TilingOverlayView {
         let layer = renderer.layer();
         let ivars = TilingOverlayViewIvars {
             layer: layer.clone(),
-            events: RefCell::new(Vec::new()),
             renderer: RefCell::new(renderer),
             monitor: Cell::new(Dimension::default()),
             windows: RefCell::new(Vec::new()),
@@ -532,7 +468,6 @@ impl TilingOverlayView {
             config: RefCell::new(config),
             tab_bar_height: Cell::new(tab_bar_height),
             scale: Cell::new(scale),
-            hub_sender,
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
@@ -546,7 +481,7 @@ impl TilingOverlayView {
         &self,
         monitor: Dimension,
         windows: &[TilingWindowPlacement],
-        containers: &[(ContainerPlacement, Vec<String>)],
+        containers: &[ContainerShow],
         scale: f64,
     ) {
         let ivars = self.ivars();
@@ -592,7 +527,6 @@ impl TilingOverlayView {
         let containers = ivars.containers.borrow();
         let monitor = ivars.monitor.get();
         let config = ivars.config.borrow();
-        let events = std::mem::take(&mut *ivars.events.borrow_mut());
         let scale = ivars.scale.get();
 
         let monitor_logical = monitor;
@@ -608,15 +542,14 @@ impl TilingOverlayView {
             .collect();
         let containers_logical: Vec<LogicalTiledContainer> = containers
             .iter()
-            .map(|(cp, titles)| LogicalTiledContainer {
-                id: cp.id,
-                frame: cp.frame,
-                visible_frame: cp.visible_frame,
-                is_highlighted: cp.is_highlighted,
-                spawn_indicator: cp.spawn_indicator,
-                is_tabbed: cp.is_tabbed,
-                active_tab_index: cp.active_tab_index,
-                titles: titles.clone(),
+            .map(|cs| LogicalTiledContainer {
+                id: cs.placement.id,
+                frame: cs.placement.frame,
+                visible_frame: cs.placement.visible_frame,
+                is_highlighted: cs.placement.is_highlighted,
+                spawn_indicator: cs.placement.spawn_indicator,
+                is_tabbed: cs.placement.is_tabbed,
+                titles: cs.placement.titles.clone(),
             })
             .collect();
         let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
@@ -626,10 +559,13 @@ impl TilingOverlayView {
         };
         let theme = config.theme();
 
-        let clicked_tabs = ivars
+        // Tab-bar painting and click collection live in per-container
+        // TabBarOverlay windows. The per-monitor overlay paints only window
+        // borders and container highlights.
+        ivars
             .renderer
             .borrow_mut()
-            .render(scale as f32, events, |ctx| {
+            .render(scale as f32, Vec::new(), |ctx| {
                 overlay::paint_tiling_overlay(
                     ctx,
                     monitor_logical,
@@ -639,10 +575,287 @@ impl TilingOverlayView {
                     metrics,
                 )
             });
-        for (container_id, tab_idx) in clicked_tabs {
+    }
+}
+
+/// Per-tabbed-container overlay window. One instance per `ContainerId` while
+/// the container is tabbed and on the active workspace, reconciled per-frame
+/// in the UI thread's frame callback. Owns its own borderless window and
+/// receives mouse events directly so a tab click never has to traverse the
+/// per-monitor `TilingOverlay` (which is now click-through).
+pub(super) struct TabBarOverlay {
+    window: Retained<NSWindow>,
+    view: Retained<TabBarOverlayView>,
+}
+
+impl TabBarOverlay {
+    pub(super) fn new(
+        mtm: MainThreadMarker,
+        backend: Rc<MetalBackend>,
+        config: Config,
+        container_id: ContainerId,
+        cocoa_frame: NSRect,
+        scale: f64,
+        hub_sender: CalloopSender<HubEvent>,
+    ) -> Self {
+        let flavor = config.theme;
+        let font = config.font.clone();
+        let window = unsafe {
+            NSWindow::initWithContentRect_styleMask_backing_defer(
+                NSWindow::alloc(mtm),
+                cocoa_frame,
+                NSWindowStyleMask::Borderless,
+                NSBackingStoreType::Buffered,
+                false,
+            )
+        };
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
+        window.setOpaque(false);
+        // Same level as the per-monitor tiling overlay. Stacking against
+        // sibling same-level windows is fine because the tiling overlay is
+        // mouse-transparent and visually empty in the strip the tab bar
+        // covers.
+        window.setLevel(NSNormalWindowLevel - 1);
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::Auxiliary
+                | NSWindowCollectionBehavior::Default
+                | NSWindowCollectionBehavior::Transient
+                | NSWindowCollectionBehavior::FullScreenNone
+                | NSWindowCollectionBehavior::FullScreenDisallowsTiling
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        unsafe { window.setReleasedWhenClosed(false) };
+        // Inverse of the tiling overlay's setting: this window exists to
+        // receive tab clicks.
+        window.setIgnoresMouseEvents(false);
+
+        let view = TabBarOverlayView::new(
+            mtm,
+            backend,
+            config,
+            container_id,
+            scale,
+            hub_sender,
+            flavor,
+            &font,
+        );
+        window.setContentView(Some(&view));
+        window.setFrame_display(cocoa_frame, false);
+        window.orderFront(None);
+
+        Self { window, view }
+    }
+
+    pub(super) fn render(
+        &self,
+        cocoa_frame: NSRect,
+        scale: f64,
+        bar: Dimension<Logical>,
+        titles: Vec<String>,
+        active_tab_index: usize,
+        is_highlighted: bool,
+    ) {
+        self.window.setFrame_display(cocoa_frame, false);
+        self.view
+            .update(scale, bar, titles, active_tab_index, is_highlighted);
+        self.window.setIsVisible(true);
+    }
+
+    pub(super) fn set_config(&self, config: &Config) {
+        self.view.set_config(config);
+    }
+}
+
+impl Drop for TabBarOverlay {
+    fn drop(&mut self) {
+        self.window.close();
+    }
+}
+
+pub(super) struct TabBarOverlayViewIvars {
+    #[expect(dead_code, reason = "retains CAMetalLayer to prevent deallocation")]
+    layer: Retained<CAMetalLayer>,
+    events: RefCell<Vec<egui::Event>>,
+    renderer: RefCell<Renderer>,
+    bar: Cell<Dimension<Logical>>,
+    titles: RefCell<Vec<String>>,
+    active_tab_index: Cell<usize>,
+    is_highlighted: Cell<bool>,
+    scale: Cell<f64>,
+    container_id: ContainerId,
+    hub_sender: CalloopSender<HubEvent>,
+    config: RefCell<Config>,
+}
+
+define_class!(
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = TabBarOverlayViewIvars]
+    pub(super) struct TabBarOverlayView;
+
+    unsafe impl NSObjectProtocol for TabBarOverlayView {}
+
+    impl TabBarOverlayView {
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+
+        // Both mouseDown: and mouseUp: are required: paint_tab_bar's
+        // Sense::click() fires response.clicked() only on press-then-release,
+        // so render_now must run on both edges to observe the second event.
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            let pos = self.event_pos(event);
+            self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            });
+            self.render_now();
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            let pos = self.event_pos(event);
+            self.ivars().events.borrow_mut().push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            self.render_now();
+        }
+
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+            true
+        }
+    }
+);
+
+impl TabBarOverlayView {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "all parameters are needed for overlay initialization"
+    )]
+    fn new(
+        mtm: MainThreadMarker,
+        backend: Rc<MetalBackend>,
+        config: Config,
+        container_id: ContainerId,
+        scale: f64,
+        hub_sender: CalloopSender<HubEvent>,
+        flavor: Flavor,
+        font: &FontConfig,
+    ) -> Retained<Self> {
+        let renderer = Renderer::new(backend, scale, 0.0, 0.0, false, flavor, font);
+        let layer = renderer.layer();
+        let ivars = TabBarOverlayViewIvars {
+            layer: layer.clone(),
+            events: RefCell::new(Vec::new()),
+            renderer: RefCell::new(renderer),
+            bar: Cell::new(Dimension::default()),
+            titles: RefCell::new(Vec::new()),
+            active_tab_index: Cell::new(0),
+            is_highlighted: Cell::new(false),
+            scale: Cell::new(scale),
+            container_id,
+            hub_sender,
+            config: RefCell::new(config),
+        };
+        let this = Self::alloc(mtm).set_ivars(ivars);
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0));
+        let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        view.setLayer(Some(&layer));
+        view.setWantsLayer(true);
+        view
+    }
+
+    fn update(
+        &self,
+        scale: f64,
+        bar: Dimension<Logical>,
+        titles: Vec<String>,
+        active_tab_index: usize,
+        is_highlighted: bool,
+    ) {
+        let ivars = self.ivars();
+        ivars.bar.set(bar);
+        ivars.scale.set(scale);
+        *ivars.titles.borrow_mut() = titles;
+        ivars.active_tab_index.set(active_tab_index);
+        ivars.is_highlighted.set(is_highlighted);
+        ivars.renderer.borrow().resize(
+            bar.width.logical() as f64,
+            bar.height.logical() as f64,
+            scale,
+        );
+        self.render_now();
+    }
+
+    fn set_config(&self, config: &Config) {
+        let prev = self.ivars().config.borrow().clone();
+        if prev.theme != config.theme {
+            self.ivars().renderer.borrow().apply_theme(config.theme);
+        }
+        if prev.font != config.font {
+            if prev.font.family != config.font.family {
+                self.ivars()
+                    .renderer
+                    .borrow()
+                    .reinstall_fonts(config.font.family.as_deref());
+            }
+            self.ivars().renderer.borrow().apply_font(&config.font);
+        }
+        *self.ivars().config.borrow_mut() = config.clone();
+        self.render_now();
+    }
+
+    fn render_now(&self) {
+        let ivars = self.ivars();
+        let bar = ivars.bar.get();
+        let titles = ivars.titles.borrow().clone();
+        let active_tab_index = ivars.active_tab_index.get();
+        let is_highlighted = ivars.is_highlighted.get();
+        let config = ivars.config.borrow();
+        let events = std::mem::take(&mut *ivars.events.borrow_mut());
+        let scale = ivars.scale.get();
+        let container_id = ivars.container_id;
+
+        let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let metrics = OverlayMetrics {
+            border,
+            tab_bar_height: bar.height,
+        };
+        let theme = config.theme();
+
+        // The tab-bar window's canvas is exactly the bar, so paint at the
+        // canvas-local origin (0, 0) and let `paint_tab_bar` size its egui
+        // Area to the bar's width and height.
+        let canvas_local =
+            Dimension::<Logical>::new(Length::ZERO, Length::ZERO, bar.width, bar.height);
+
+        let clicked = ivars
+            .renderer
+            .borrow_mut()
+            .render(scale as f32, events, |ctx| {
+                overlay::paint_tab_bar(
+                    ctx,
+                    container_id,
+                    canvas_local,
+                    &titles,
+                    active_tab_index,
+                    is_highlighted,
+                    metrics,
+                    &theme,
+                )
+            });
+        if let Some((cid, tab_idx)) = clicked {
             ivars
                 .hub_sender
-                .send(HubEvent::TabClicked(container_id, tab_idx))
+                .send(HubEvent::TabClicked(cid, tab_idx))
                 .ok();
         }
     }

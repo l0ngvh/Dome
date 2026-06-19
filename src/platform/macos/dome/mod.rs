@@ -7,7 +7,7 @@ mod registry;
 pub(super) mod rejection_log_filter;
 mod window;
 
-pub(super) use events::{HubEvent, HubMessage};
+pub(super) use events::{ContainerShow, HubEvent, HubMessage};
 pub(super) use inspect::{
     ExitNativeFullscreen, ExtRefresh, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,

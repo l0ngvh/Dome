@@ -435,7 +435,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     let mut env = TestEnv::new_with_monitors(config, layout, vec![monitor]);
     let win = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     // Put into a tabbed container so tab_bar_height participates in layout
-    env.run_actions("toggle stacking");
+    env.run_actions("toggle layout");
     env.settle(10);
 
     let d_before = env.dim(win);
