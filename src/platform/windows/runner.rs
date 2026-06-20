@@ -54,7 +54,6 @@ impl Runner {
 
     pub(super) fn handle_timer(&mut self, timer_id: usize) {
         let Some(kind) = self.timers.dispatch(timer_id) else {
-            tracing::trace!(timer_id, "WM_TIMER for unknown id");
             return;
         };
         match kind {
