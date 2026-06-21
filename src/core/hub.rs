@@ -448,8 +448,13 @@ impl Hub {
         self.strategies.validate_tree(&self.access);
     }
 
-    pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) {
-        self.access.windows.get_mut(window_id).title = title;
+    pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) -> bool {
+        let window = self.access.windows.get_mut(window_id);
+        if window.title == title {
+            return false;
+        }
+        window.title = title;
+        true
     }
 
     pub(crate) fn get_visible_placements(&self) -> VisiblePlacements {

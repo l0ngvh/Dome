@@ -910,8 +910,9 @@ impl Dome {
     pub(super) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
         for (hwnd_id, title) in &titles {
             self.registry.set_title(*hwnd_id, title.clone());
-            if let (Some(window_id), Some(title)) = (self.registry.get_id(*hwnd_id), title) {
-                self.hub.set_window_title(window_id, title.clone());
+            if let (Some(window_id), Some(title)) = (self.registry.get_id(*hwnd_id), title)
+                && self.hub.set_window_title(window_id, title.clone())
+            {
                 tracing::trace!(%window_id, ?hwnd_id, title = %title, "Title changed");
             }
         }

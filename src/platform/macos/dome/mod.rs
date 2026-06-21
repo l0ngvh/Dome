@@ -340,8 +340,9 @@ impl Dome {
             entry.title = Some(title.clone());
             tracing::Span::current().record("window", entry.to_string());
 
-            self.hub.set_window_title(entry.window_id, title);
-            tracing::trace!("Title changed");
+            if self.hub.set_window_title(entry.window_id, title) {
+                tracing::trace!("Title changed");
+            }
             self.flush_layout();
         }
     }
