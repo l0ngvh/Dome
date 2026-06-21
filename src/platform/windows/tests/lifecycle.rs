@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::config::{Config, WindowsOnOpenRule, WindowsWindow};
+use crate::config::{Config, PartitionTreeConfig, WindowsOnOpenRule, WindowsWindow};
 
 #[test]
 fn window_destroyed_fills_screen() {
@@ -293,15 +293,27 @@ fn focus_parent_focuses_overlay() {
 
 #[test]
 fn focus_child_after_parent_does_not_focus_overlay() {
-    let mut env = TestEnv::new();
+    let mut env = TestEnv::new_with_layout(
+        Config::default(),
+        LayoutConfig {
+            partition_tree: PartitionTreeConfig {
+                automatic_tiling: false,
+                tab_bar_height: Length::new(24.0),
+            },
+            ..Default::default()
+        },
+    );
+
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.run_actions("toggle spawn");
+    let _w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
 
     env.run_actions("focus parent");
-    env.run_actions("focus down");
+    env.run_actions("focus left");
     assert!(
         matches!(env.focus_target(), FocusTarget::Window(_)),
-        "after focus down from container, a window must be the focus target, got {:?}",
+        "after focus left from container, a window must be the focus target, got {:?}",
         env.focus_target()
     );
 }
@@ -471,13 +483,14 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
     env.dome.apply_layout();
 
     let after = env.dim(w);
-    // At 1.5x, physical pixels = logical * 1.5. The window's logical rect
-    // stays the same (the Hub layout is logical), but set_position receives
-    // physical coords: each edge should be 1.5x the logical value.
+    // Hub delivers frames in physical pixels. DPI change scales border but
+    // not the physical monitor dimension, so the content rect shrinks by
+    // 2 * border * (scale - 1) per axis.
+    let border = Length::new(env.config.border_size);
     let expected_x = (before.x * 1.5).round();
     let expected_y = (before.y * 1.5).round();
-    let expected_w = (before.width * 1.5).round();
-    let expected_h = (before.height * 1.5).round();
+    let expected_w = (before.width - border).round();
+    let expected_h = (before.height - border).round();
 
     assert!(
         (after.x - expected_x).abs() < Length::new(2.0),
@@ -516,7 +529,7 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     let before_a = env.dim(w_a);
 
     // Add one window on secondary.
-    env.run_actions("focus workspace 1");
+    env.run_actions("focus monitor right");
     let w_b = env.open(2, "WinB", "b.exe", SPAWN_DIM);
     let before_b = env.dim(w_b);
 
@@ -532,29 +545,33 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     assert_eq!(after_a.height, before_a.height);
 
     // Secondary window placement must reflect the 2.0x scale change.
+    // Hub delivers frames in physical pixels. DPI change scales border but
+    // not the physical monitor dimension, so the content rect shifts by
+    // border * (new_scale - old_scale) per axis and shrinks by 2 * that.
     let after_b = env.dim(w_b);
+    let border = Length::new(env.config.border_size);
+    let expected_x = before_b.x + border;
+    let expected_y = before_b.y + border;
+    let expected_w = before_b.width - border * 2.0;
+    let expected_h = before_b.height - border * 2.0;
     assert!(
-        (after_b.x - before_b.x * 2.0).abs() < Length::new(2.0),
-        "x: expected ~{}, got {}",
-        before_b.x * 2.0,
+        (after_b.x - expected_x).abs() < Length::new(2.0),
+        "x: expected ~{expected_x}, got {}",
         after_b.x
     );
     assert!(
-        (after_b.y - before_b.y * 2.0).abs() < Length::new(2.0),
-        "y: expected ~{}, got {}",
-        before_b.y * 2.0,
+        (after_b.y - expected_y).abs() < Length::new(2.0),
+        "y: expected ~{expected_y}, got {}",
         after_b.y
     );
     assert!(
-        (after_b.width - before_b.width * 2.0).abs() < Length::new(2.0),
-        "w: expected ~{}, got {}",
-        before_b.width * 2.0,
+        (after_b.width - expected_w).abs() < Length::new(2.0),
+        "w: expected ~{expected_w}, got {}",
         after_b.width
     );
     assert!(
-        (after_b.height - before_b.height * 2.0).abs() < Length::new(2.0),
-        "h: expected ~{}, got {}",
-        before_b.height * 2.0,
+        (after_b.height - expected_h).abs() < Length::new(2.0),
+        "h: expected ~{expected_h}, got {}",
         after_b.height
     );
 }
