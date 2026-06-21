@@ -759,22 +759,16 @@ impl Hub {
     }
 
     pub(super) fn move_focused_across_workspaces(&mut self, from: WorkspaceId, to: WorkspaceId) {
-        let from_kind = self.strategies.kind_of(from);
-        let to_kind = self.strategies.kind_of(to);
-
-        if from_kind == to_kind {
-            self.strategies
-                .get_mut(from_kind)
-                .move_focused_to_workspace(&mut self.access, from, to);
-        } else {
-            let detached = self
-                .strategies
-                .get_mut(from_kind)
-                .detach_focused(&mut self.access, from);
-            self.strategies
-                .get_mut(to_kind)
-                .attach_detached(&mut self.access, to, &detached);
-        }
+        let child = self
+            .strategies
+            .for_workspace_mut(from)
+            .detach_focused_child(&mut self.access, from);
+        let Some(child) = child else {
+            return;
+        };
+        self.strategies
+            .for_workspace_mut(to)
+            .reattach_child(&mut self.access, child, to);
     }
 
     fn snapshot_workspace_for_rebuild(

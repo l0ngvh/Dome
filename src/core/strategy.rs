@@ -5,7 +5,7 @@ use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
-    ContainerId, Dimension, Direction, Length, WindowId, Workspace, WorkspaceId,
+    Child, ContainerId, Dimension, Direction, Length, WindowId, Workspace, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
 
@@ -89,16 +89,15 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// if the workspace is empty.
     fn focused_tiling_window(&self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WindowId>;
 
-    /// Detach the focused tiling subtree from `ws_id`, returning leaf windows
-    /// in deterministic order (WindowId-ascending). Empty Vec when no tiling
-    /// focus exists. The strategy cleans up all internal state for those
-    /// windows (and any containers in the subtree).
-    fn detach_focused(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Vec<WindowId>;
+    fn detach_focused_child(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) -> Option<Child>;
 
-    /// Attach previously-detached windows into `ws_id`. Calls attach_window
-    /// for each id in order, then sets focus to the last attached. Empty
-    /// input is a no-op.
-    fn attach_detached(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, windows: &[WindowId]);
+    /// Re-attach a previously-detached `Child` into `ws_id`. Sets focus
+    /// to the attached child. No-op when `child` is not applicable to
+    /// this strategy (e.g. `Child::Container` for MasterStrategy).
 
     /// Returns true if the workspace has any tiling windows (root is Some).
     fn has_tiling_windows(&self, hub: &HubAccess, ws_id: WorkspaceId) -> bool;
@@ -106,15 +105,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Returns the number of tiling windows in the workspace.
     fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize;
 
-    /// Move the focused tiling subtree from one workspace to another within the
-    /// same strategy instance. Preserves container structure because both
-    /// workspaces share the same allocator.
-    fn move_focused_to_workspace(
-        &mut self,
-        hub: &mut HubAccess,
-        from_ws: WorkspaceId,
-        to_ws: WorkspaceId,
-    );
+    fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId);
 
     /// Remove all per-workspace state for a workspace being deleted.
     fn prune_workspace(&mut self, ws_id: WorkspaceId);

@@ -356,45 +356,18 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn detach_focused(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Vec<WindowId> {
-        let Some(focused) = self.workspaces.get(&ws_id).and_then(|s| s.focused_tiling) else {
-            return Vec::new();
-        };
-
-        // Collect leaf WindowIds from the focused subtree before detach.
-        let mut window_ids: Vec<WindowId> = self
-            .children_dfs(focused)
-            .filter_map(|c| match c {
-                Child::Window(wid) => Some(wid),
-                Child::Container(_) => None,
-            })
-            .collect();
-        window_ids.sort_unstable();
-
+    fn detach_focused_child(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+    ) -> Option<Child> {
+        let focused = self.workspaces.get(&ws_id)?.focused_tiling?;
         self.detach_child(hub, focused);
-
-        // detach_child only removes tiling_windows for a Window child.
-        // For a Container child, explicitly clean up the orphaned subtree:
-        // remove tiling_windows entries and deallocate container nodes.
-        if let Child::Container(cid) = focused {
-            for &wid in &window_ids {
-                self.tiling_windows.remove(&wid);
-            }
-            for container_id in self.containers_preorder(cid).collect::<Vec<_>>() {
-                self.containers.delete(container_id);
-            }
-        }
-
-        window_ids
+        Some(focused)
     }
 
-    fn attach_detached(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, windows: &[WindowId]) {
-        for &wid in windows {
-            self.attach_window(hub, wid, ws_id);
-        }
-        if let Some(&last) = windows.last() {
-            self.set_focus(hub, last);
-        }
+    fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
+        self.attach_child(hub, child, ws_id);
     }
 
     fn has_tiling_windows(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> bool {
@@ -413,19 +386,6 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.children_dfs(root)
             .filter(|c| matches!(c, Child::Window(_)))
             .count()
-    }
-
-    fn move_focused_to_workspace(
-        &mut self,
-        hub: &mut HubAccess,
-        from_ws: WorkspaceId,
-        to_ws: WorkspaceId,
-    ) {
-        let Some(focused) = self.workspaces.get(&from_ws).and_then(|s| s.focused_tiling) else {
-            return;
-        };
-        self.detach_child(hub, focused);
-        self.attach_child(hub, focused, to_ws);
     }
 
     fn prune_workspace(&mut self, ws_id: WorkspaceId) {

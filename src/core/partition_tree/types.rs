@@ -1,5 +1,5 @@
 use crate::core::allocator::Node;
-use crate::core::node::{ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
+use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 
 /// Effective per-child layout constraints in the tree's `Length` unit.
 ///
@@ -384,20 +384,5 @@ impl std::fmt::Display for Parent {
     }
 }
 
-/// Child role in the partition tree. A `Window` is always a leaf. A
-/// `Container` is a child of either another container or the workspace.
-/// Workspaces are never children.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Child {
-    Window(WindowId),
-    Container(ContainerId),
-}
-
-impl std::fmt::Display for Child {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Child::Window(id) => write!(f, "{}", id),
-            Child::Container(id) => write!(f, "{}", id),
-        }
-    }
-}
+/// Re-export shared `Child` enum from `core::node`.
+pub(crate) use crate::core::node::Child;

@@ -569,6 +569,41 @@ impl std::fmt::Display for WorkspaceId {
     }
 }
 
+/// Parent role in a tiling tree. A `Container` can be parent of other nodes.
+/// A `Workspace` is parent only of the root node. Windows are never parents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Parent {
+    Container(ContainerId),
+    Workspace(WorkspaceId),
+}
+
+impl std::fmt::Display for Parent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Parent::Container(id) => write!(f, "{}", id),
+            Parent::Workspace(id) => write!(f, "{}", id),
+        }
+    }
+}
+
+/// Child role in a tiling tree. A `Window` is always a leaf. A `Container`
+/// is child of either another container or the workspace. Workspaces are
+/// never children.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Child {
+    Window(WindowId),
+    Container(ContainerId),
+}
+
+impl std::fmt::Display for Child {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Child::Window(id) => write!(f, "{}", id),
+            Child::Container(id) => write!(f, "{}", id),
+        }
+    }
+}
+
 impl NodeId for WindowId {
     fn new(id: usize) -> Self {
         Self(id)

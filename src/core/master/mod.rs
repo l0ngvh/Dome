@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::core::hub::{HubAccess, TilingWindowPlacement};
-use crate::core::node::{Dimension, Direction, Length, WindowId, WorkspaceId};
+use crate::core::node::{Child, Dimension, Direction, Length, WindowId, WorkspaceId};
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, clip, distribute_space, translate,
 };
@@ -655,53 +655,16 @@ impl TilingStrategy for MasterStrategy {
         self.workspaces.get(&ws_id).map_or(0, |ws| ws.windows.len())
     }
 
-    fn move_focused_to_workspace(
+    fn detach_focused_child(
         &mut self,
         hub: &mut HubAccess,
-        from_ws: WorkspaceId,
-        to_ws: WorkspaceId,
-    ) {
-        let Some(state) = self.workspaces.get(&from_ws) else {
-            return;
-        };
-        let Some(focused) = state.focused_index else {
-            return;
-        };
-        let id = state.windows[focused];
-
-        let state = self.workspaces.get_mut(&from_ws).unwrap();
-        state.windows.remove(focused);
-        Self::adjust_focus_after_removal(state, focused);
-
-        if state.windows.is_empty() {
-            let ws = hub.workspaces.get_mut(from_ws);
-            ws.is_float_focused = !ws.float_windows.is_empty();
-        }
-
-        self.window_dimensions.remove(&id);
-        self.layout_workspace(hub, from_ws);
-
-        self.attach_window(hub, id, to_ws);
-    }
-
-    fn prune_workspace(&mut self, ws_id: WorkspaceId) {
-        if let Some(state) = self.workspaces.remove(&ws_id) {
-            for wid in &state.windows {
-                self.window_dimensions.remove(wid);
-            }
-        }
-    }
-
-    fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        self.layout_workspace(hub, ws_id);
-    }
-
-    fn detach_focused(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Vec<WindowId> {
+        ws_id: WorkspaceId,
+    ) -> Option<Child> {
         let Some(state) = self.workspaces.get(&ws_id) else {
-            return Vec::new();
+            return None;
         };
         let Some(focused) = state.focused_index else {
-            return Vec::new();
+            return None;
         };
         let id = state.windows[focused];
 
@@ -717,17 +680,30 @@ impl TilingStrategy for MasterStrategy {
         self.window_dimensions.remove(&id);
         self.layout_workspace(hub, ws_id);
 
-        vec![id]
+        Some(Child::Window(id))
     }
 
-    fn attach_detached(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId, windows: &[WindowId]) {
-        for &wid in windows {
-            self.attach_window(hub, wid, ws_id);
-        }
-        if let Some(&last) = windows.last() {
-            self.set_focus(hub, last);
+    fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId) {
+        let Child::Window(id) = child else {
+            panic!("MasterStrategy does not support Container children");
+        };
+        self.attach_window(hub, id, ws_id);
+        self.set_focus(hub, id);
+    }
+
+    fn prune_workspace(&mut self, ws_id: WorkspaceId) {
+        if let Some(state) = self.workspaces.remove(&ws_id) {
+            for wid in &state.windows {
+                self.window_dimensions.remove(wid);
+            }
         }
     }
+
+    fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
+        self.layout_workspace(hub, ws_id);
+    }
+
+
 
     #[cfg(test)]
     fn validate_tree(&self, hub: &HubAccess) {
