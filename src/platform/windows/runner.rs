@@ -224,14 +224,15 @@ impl Runner {
         self.dispatcher.dispatch(
             move || {
                 if let Some(reason) = inspect.check_unmanageable() {
+                    let title = inspect.get_window_title();
                     let pid = manage.pid();
                     if pid == 0 {
                         // Zombie HWND: GetWindowThreadProcessId returned 0. No
                         // stable key for dedup, log unconditionally.
-                        tracing::trace!(?hwnd_id, ?reason, "not manageable");
+                        tracing::trace!(?hwnd_id, ?title, ?reason, "not manageable");
                     } else if log_filter.record_and_should_log(hwnd_id, pid, reason, Instant::now())
                     {
-                        tracing::trace!(?hwnd_id, ?reason, "not manageable");
+                        tracing::trace!(?hwnd_id, ?title, ?reason, "not manageable");
                     }
                     return None;
                 }
