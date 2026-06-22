@@ -139,7 +139,7 @@ unsafe extern "system" fn event_hook_proc(
                 });
             }
             _ => {
-                tracing::trace!(event, "unexpected WinEvent");
+                tracing::trace!(event, ?hwnd_id, "unexpected WinEvent");
             }
         }
     });
