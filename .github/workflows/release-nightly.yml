@@ -1,0 +1,102 @@
+name: release-nightly
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build-${{matrix.target}}
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: dome-nightly-x86_64-pc-windows-msvc.zip
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: dome-nightly-aarch64-apple-darwin.dmg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: ${{matrix.target}}
+
+      - name: install cargo-make
+        run: cargo install cargo-make --locked
+
+      - name: build-windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cargo build --release --target ${{matrix.target}}
+          Compress-Archive -Force "target/${{matrix.target}}/release/dome.exe" ${{matrix.artifact}}
+
+      - name: build-macos
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        env:
+          BUNDLE_TARGET: ${{matrix.target}}
+        run: |
+          cargo build --release --target ${{matrix.target}}
+          cargo make bundle
+          mv target/Dome-0.1.0.dmg ${{matrix.artifact}}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dome-nightly-${{matrix.target}}
+          path: ${{matrix.artifact}}
+
+  publish:
+    name: publish-nightly
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: compute-sha
+        id: sha
+        run: |
+          echo "sha_aarch64_dmg=$(sha256sum dist/dome-nightly-aarch64-apple-darwin/dome-nightly-aarch64-apple-darwin.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha_zip=$(sha256sum dist/dome-nightly-x86_64-pc-windows-msvc/dome-nightly-x86_64-pc-windows-msvc.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: create-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete nightly --yes || true
+          gh release create nightly \
+            --title "Dome Nightly" \
+            --prerelease \
+            dist/dome-nightly-aarch64-apple-darwin/dome-nightly-aarch64-apple-darwin.dmg \
+            dist/dome-nightly-x86_64-pc-windows-msvc/dome-nightly-x86_64-pc-windows-msvc.zip
+
+      - name: dispatch-homebrew
+        continue-on-error: true
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        with:
+          token: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+          repository: l0ngvh/homebrew-dome
+          event-type: new-release
+          client-payload: '{"version": "nightly", "sha_aarch64_dmg": "${{ steps.sha.outputs.sha_aarch64_dmg }}"}'
+
+      - name: dispatch-scoop
+        continue-on-error: true
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        with:
+          token: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+          repository: l0ngvh/scoop-dome
+          event-type: new-release
+          client-payload: '{"version": "nightly", "sha_zip": "${{ steps.sha.outputs.sha_zip }}"}'

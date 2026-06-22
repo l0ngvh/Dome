@@ -147,7 +147,7 @@ mdbook serve docs/
 '''
 
 [tasks.bundle]
-description = "Build release binary and create platform package. Set BUNDLE_TARGET to cross-compile (e.g. x86_64-apple-darwin)."
+description = "Build release binary and create platform package. Set BUNDLE_TARGET to cross-compile (e.g. aarch64-apple-darwin)."
 run_task = [
     { name = "bundle-macos-impl", condition = { platforms = ["mac"] } },
     { name = "bundle-windows-impl", condition = { platforms = ["windows"] } },
