@@ -112,6 +112,7 @@ script = '''
 cargo install cargo-audit --locked
 cargo install cargo-deny --locked
 cargo install cargo-llvm-cov --locked
+cargo install cargo-wix --locked
 cargo install cargo-insta --locked
 '''
 
@@ -168,12 +169,14 @@ fi
 VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
 BUNDLE_DIR="target/bundle/Dome.app/Contents"
 rm -rf target/bundle/Dome.app
-mkdir -p "$BUNDLE_DIR/MacOS"
+mkdir -p "$BUNDLE_DIR/MacOS" "$BUNDLE_DIR/Resources"
 cp resources/macos/Info.plist "$BUNDLE_DIR/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$BUNDLE_DIR/Info.plist"
 plutil -replace CFBundleVersion -string "$VERSION" "$BUNDLE_DIR/Info.plist"
 cp "$BIN_SRC" "$BUNDLE_DIR/MacOS/dome"
-echo "Created target/bundle/Dome.app (v$VERSION)"
+cp resources/macos/icon/AppIcon.icns "$BUNDLE_DIR/Resources/AppIcon.icns"
+hdiutil create -volname "Dome" -srcfolder target/bundle/Dome.app -ov -format UDZO "target/Dome-${VERSION}.dmg"
+echo "Created target/bundle/Dome.app and target/Dome-${VERSION}.dmg (v$VERSION)"
 '''
 
 [tasks.bundle-windows-impl]
