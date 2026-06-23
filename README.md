@@ -3,6 +3,8 @@
 **Dome** is a constraint-aware scrollable tiling window manager that works on
 Windows and macOS.
 
+![Dome screenshot](resources/DomeScreenshot.png)
+
 ## Background
 
 Before Dome, there were already plenty of excellent window managers for macOS
