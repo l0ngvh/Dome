@@ -13,8 +13,18 @@ takes a lot of work. So I just decided to put in even more work and build Dome.
 
 ## Install
 
-Currently, to install Dome, you have to build from source, which requires a
-[Rust toolchain](https://rustup.rs/).
+**Windows (Scoop)**
+```bash
+scoop bucket add dome https://github.com/l0ngvh/scoop-dome
+scoop install dome-nightly
+```
+
+**macOS (Homebrew)**
+```bash
+brew install --cask l0ngvh/homebrew-dome/dome-nightly
+```
+
+Or build from source with a [Rust toolchain](https://rustup.rs/):
 
 ```bash
 git clone https://github.com/l0ngvh/Dome
@@ -22,8 +32,6 @@ cd Dome
 cargo install --path .
 dome
 ```
-
-We'll have proper one-click installers once the project reaches a stable point.
 
 On macOS, Dome needs Accessibility permissions to manage windows, and Screen
 Capture permissions to render float windows. macOS will prompt you for both on
