@@ -78,6 +78,21 @@ To check why Dome did what it did, look at `dome.log`. It's written fresh on eac
 launch to `~/Library/Logs/dome/dome.log` on macOS, or
 `%APPDATA%\dome\logs\dome.log` on Windows.
 
+## Status bar
+
+Dome doesn't ship with a status bar by default. Here's how you can configure
+SketchyBar to display Dome's status.
+
+```bash
+sketchybar --add item dome_focused left \
+  --set dome_focused label="--" \
+  --subscribe dome_focused dome_update
+
+sketchybar --add event dome_poll "1s" \
+  "dome query workspaces | jq -r '.[] | select(.is_focused) | .name' \
+   | xargs -I{} sketchybar --set dome_focused label={}"
+```
+
 ## Configuring Dome
 
 Dome is configured by editing two TOML files. The default locations are:
