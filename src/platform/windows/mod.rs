@@ -51,7 +51,7 @@ use dome::overlay::{
     FLOAT_OVERLAY_CLASS, TAB_BAR_OVERLAY_CLASS, TILING_OVERLAY_CLASS, WgpuOverlayFactory,
     tab_bar_overlay_wnd_proc, tiling_overlay_wnd_proc,
 };
-use dome::picker::{PICKER_OVERLAY_CLASS, picker_wnd_proc};
+use dome::picker::{PICKER_OVERLAY_CLASS, PickerWindow, picker_wnd_proc};
 use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
 use external::HwndId;
@@ -451,6 +451,16 @@ fn run_dome(
     let hub_sender = HubSender {
         thread_id: unsafe { GetCurrentThreadId() },
     };
+
+    let picker = PickerWindow::new(
+        &instance,
+        Arc::clone(&device),
+        Arc::clone(&queue),
+        hub_sender.clone(),
+        config.clone(),
+    )
+    .expect("Failed to create picker window");
+
     let overlays = WgpuOverlayFactory {
         instance,
         device,
@@ -464,6 +474,7 @@ fn run_dome(
         Rc::new(taskbar),
         Box::new(overlays),
         Box::new(dome::Win32Display),
+        picker,
     )
     .expect("Failed to initialize Dome");
 

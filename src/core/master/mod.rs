@@ -655,11 +655,7 @@ impl TilingStrategy for MasterStrategy {
         self.workspaces.get(&ws_id).map_or(0, |ws| ws.windows.len())
     }
 
-    fn detach_focused_child(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-    ) -> Option<Child> {
+    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child> {
         let Some(state) = self.workspaces.get(&ws_id) else {
             return None;
         };
@@ -702,8 +698,6 @@ impl TilingStrategy for MasterStrategy {
     fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
         self.layout_workspace(hub, ws_id);
     }
-
-
 
     #[cfg(test)]
     fn validate_tree(&self, hub: &HubAccess) {

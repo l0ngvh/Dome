@@ -774,8 +774,7 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
         .map(|f| f.state)
         .unwrap_or(FloatOverlayState::Hidden);
     assert_eq!(
-        after_settle,
-        after_drift,
+        after_settle, after_drift,
         "apply_layout after drift must not re-update the overlay (settled short-circuit)"
     );
 }

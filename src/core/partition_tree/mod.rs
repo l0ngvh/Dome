@@ -356,11 +356,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn detach_focused_child(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-    ) -> Option<Child> {
+    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child> {
         let focused = self.workspaces.get(&ws_id)?.focused_tiling?;
         self.detach_child(hub, focused);
         Some(focused)

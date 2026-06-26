@@ -114,28 +114,26 @@ pub(in crate::platform::windows) struct PickerWindow {
 }
 
 impl PickerWindow {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "font added for font config plumbing; restructuring PickerWindow::new is out of scope"
-    )]
+    /// Creates the picker window hidden. Call [`show`](PickerWindow::show) to
+    /// position, size, and reveal it with entries.
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
-        entries: Vec<PickerEntry>,
-        monitor_dim: Dimension,
         hub_sender: HubSender,
         config: Config,
-        scale: f32,
     ) -> anyhow::Result<Box<Self>> {
-        let (x, y, w_phys, h_phys) = picker_physical_rect(scale, monitor_dim);
+        // Placeholder size; show() repositions and resizes to the correct
+        // monitor-relative rect on first reveal.
+        let w_phys: u32 = 400;
+        let h_phys: u32 = 300;
 
         let window = OwnedHwnd::new(
             PICKER_OVERLAY_CLASS,
             windows::Win32::UI::WindowsAndMessaging::WS_EX_TOOLWINDOW
                 | windows::Win32::UI::WindowsAndMessaging::WS_EX_TOPMOST,
-            x,
-            y,
+            0,
+            0,
             w_phys,
             h_phys,
         )?;
@@ -155,24 +153,25 @@ impl PickerWindow {
         let mut boxed = Box::new(Self {
             renderer,
             events: Vec::new(),
-            entries,
+            entries: Vec::new(),
             selected_index: 0,
             hub_sender,
             window,
             width_phys: w_phys,
             height_phys: h_phys,
-            pixels_per_point: scale,
+            pixels_per_point: 1.0,
             icon_textures: HashMap::new(),
             pending_icons: Vec::new(),
             config,
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut *boxed as *mut Self as isize) };
-        boxed.window.show();
-        crate::platform::windows::handle::force_set_foreground(hwnd);
-        boxed.rerender();
         Ok(boxed)
     }
+}
 
+/// Delegates to inherent methods via fully-qualified syntax (`PickerWindow::show`)
+/// to avoid infinite recursion, since the trait methods have the same names.
+impl PickerApi for PickerWindow {
     fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension, scale: f32) {
         let (x, y, w_phys, h_phys) = picker_physical_rect(scale, monitor_dim);
         if let Err(e) = unsafe {
@@ -213,22 +212,6 @@ impl PickerWindow {
 
     fn is_visible(&self) -> bool {
         self.window.is_visible()
-    }
-}
-
-/// Delegates to inherent methods via fully-qualified syntax (`PickerWindow::show`)
-/// to avoid infinite recursion, since the trait methods have the same names.
-impl PickerApi for PickerWindow {
-    fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension, scale: f32) {
-        PickerWindow::show(self, entries, monitor_dim, scale);
-    }
-
-    fn hide(&mut self) {
-        PickerWindow::hide(self);
-    }
-
-    fn is_visible(&self) -> bool {
-        PickerWindow::is_visible(self)
     }
 
     fn icons_to_load(

@@ -35,7 +35,6 @@ use crate::core::{
 use crate::overlay;
 use crate::picker::PickerEntry;
 use crate::platform::windows::dome::CreateOverlay;
-use crate::platform::windows::dome::picker;
 use crate::platform::windows::external::{HwndId, ZOrder};
 
 /// Owns an HWND and calls `DestroyWindow` on drop.
@@ -878,24 +877,6 @@ impl CreateOverlay for WgpuOverlayFactory {
             y_phys,
             w_phys,
             h_phys,
-        )?)
-    }
-    fn create_picker(
-        &self,
-        entries: Vec<PickerEntry>,
-        monitor_dim: Dimension,
-        config: Config,
-        scale: f32,
-    ) -> anyhow::Result<Box<dyn PickerApi>> {
-        Ok(picker::PickerWindow::new(
-            &self.instance,
-            Arc::clone(&self.device),
-            Arc::clone(&self.queue),
-            entries,
-            monitor_dim,
-            self.hub_sender.clone(),
-            config,
-            scale,
         )?)
     }
     fn create_tab_bar(

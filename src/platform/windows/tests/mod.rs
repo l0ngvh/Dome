@@ -192,10 +192,7 @@ struct TestEnv {
     exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
     config: Config,
     overlays: Rc<RefCell<MockOverlays>>,
-    picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
-    picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
-    picker_flavor: Rc<Cell<Flavor>>,
-    picker_font: Rc<RefCell<FontConfig>>,
+    picker: Rc<RefCell<MockPicker>>,
     tab_bars: Rc<RefCell<HashMap<ContainerId, MockTabBarOverlay>>>,
     z_stack: ZOrderStack,
     focus_target: Arc<Mutex<FocusTarget>>,
@@ -223,11 +220,14 @@ impl TestEnv {
             exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
         };
         let focus_target = Arc::new(Mutex::new(FocusTarget::Initial));
-        let picker_entries = Rc::new(RefCell::new(Vec::new()));
-        let picker_loaded_icons = Rc::new(RefCell::new(HashSet::new()));
-        let picker_flavor = Rc::new(Cell::new(config.theme));
-        let picker_font = Rc::new(RefCell::new(config.font.clone()));
-        let picker_visible = Rc::new(Cell::new(false));
+        let picker = Rc::new(RefCell::new(MockPicker {
+            visible: Cell::new(false),
+            entries: RefCell::new(Vec::new()),
+            loaded_icons: RefCell::new(HashSet::new()),
+            flavor: Cell::new(config.theme),
+            font: RefCell::new(config.font.clone()),
+            config: config.clone(),
+        }));
         let z_stack = ZOrderStack::new();
         let next_float_overlay_id = Rc::new(Cell::new(9000_isize));
         let next_tiling_overlay_id = Rc::new(Cell::new(9900_isize));
@@ -241,12 +241,6 @@ impl TestEnv {
             tiling_focus_target: tiling_focus_target.clone(),
             tiling_overlay_ids: tiling_overlay_ids.clone(),
             float_overlays: HashMap::new(),
-            picker_entries: picker_entries.clone(),
-            picker_loaded_icons: picker_loaded_icons.clone(),
-            picker_flavor: picker_flavor.clone(),
-            picker_font: picker_font.clone(),
-            picker_visible: picker_visible.clone(),
-            picker_config: Rc::new(RefCell::new(config.clone())),
             z_stack: z_stack.clone(),
             next_float_overlay_id: next_float_overlay_id.clone(),
             tab_bars: tab_bars.clone(),
@@ -258,6 +252,7 @@ impl TestEnv {
             Rc::new(NoopTaskbar),
             Box::new(overlays.clone()),
             Box::new(display),
+            Box::new(picker.clone()),
         )
         .unwrap();
         Self {
@@ -267,10 +262,7 @@ impl TestEnv {
             exclusive_fullscreen_hwnd,
             config,
             overlays,
-            picker_entries,
-            picker_loaded_icons,
-            picker_flavor,
-            picker_font,
+            picker,
             tab_bars,
             z_stack,
             focus_target,
@@ -488,12 +480,12 @@ impl TestEnv {
             return false;
         }
         let overlay_ids = self.overlays.borrow().tiling_overlay_ids.borrow().clone();
-        overlay_ids
-            .iter()
-            .all(|&overlay_id| match stack.iter().position(|&h| h == overlay_id) {
+        overlay_ids.iter().all(
+            |&overlay_id| match stack.iter().position(|&h| h == overlay_id) {
                 Some(overlay_idx) => overlay_idx < idx,
                 None => true,
-            })
+            },
+        )
     }
 
     fn clear_override_position(&self, hwnd: HwndId) {
@@ -558,21 +550,21 @@ impl TestEnv {
             .tab_bars
             .borrow()
             .iter()
-            .filter_map(|(cid, tb)| {
-                tb.last_update()
-                    .map(|update| (*cid, update))
-            })
+            .filter_map(|(cid, tb)| tb.last_update().map(|update| (*cid, update)))
             .collect();
-        let picker = if o.picker_visible.get() {
-            Some(PickerSnapshot {
-                visible: true,
-                entries: o.picker_entries.borrow().clone(),
-                flavor: o.picker_flavor.get(),
-                font: o.picker_font.borrow().clone(),
-                loaded_icons: o.picker_loaded_icons.borrow().clone(),
-            })
-        } else {
-            None
+        let picker = {
+            let p = self.picker.borrow();
+            if p.visible.get() {
+                Some(PickerSnapshot {
+                    visible: true,
+                    entries: p.entries.borrow().clone(),
+                    flavor: p.flavor.get(),
+                    font: p.font.borrow().clone(),
+                    loaded_icons: p.loaded_icons.borrow().clone(),
+                })
+            } else {
+                None
+            }
         };
         OverlaySnapshot {
             tiling,
@@ -583,15 +575,15 @@ impl TestEnv {
     }
 
     fn picker_flavor(&self) -> Flavor {
-        self.picker_flavor.get()
+        self.picker.borrow().flavor.get()
     }
 
     fn picker_font(&self) -> FontConfig {
-        self.picker_font.borrow().clone()
+        self.picker.borrow().font.borrow().clone()
     }
 
     fn picker_loaded_icons(&self) -> HashSet<String> {
-        self.picker_loaded_icons.borrow().clone()
+        self.picker.borrow().loaded_icons.borrow().clone()
     }
 
     fn picker_icons_to_load(&mut self) -> Vec<(String, HwndId)> {
@@ -1125,34 +1117,36 @@ impl TilingOverlayApi for MockTilingOverlay {
 }
 
 struct MockPicker {
-    visible: Rc<Cell<bool>>,
-    entries: Rc<RefCell<Vec<PickerEntry>>>,
-    loaded_icons: Rc<RefCell<HashSet<String>>>,
-    flavor: Rc<Cell<Flavor>>,
-    font: Rc<RefCell<FontConfig>>,
-    config: Rc<RefCell<Config>>,
+    visible: Cell<bool>,
+    entries: RefCell<Vec<PickerEntry>>,
+    loaded_icons: RefCell<HashSet<String>>,
+    flavor: Cell<Flavor>,
+    font: RefCell<FontConfig>,
+    config: Config,
 }
 
-impl PickerApi for MockPicker {
+impl PickerApi for Rc<RefCell<MockPicker>> {
     fn show(&mut self, entries: Vec<PickerEntry>, _monitor_dim: Dimension, _scale: f32) {
-        *self.entries.borrow_mut() = entries;
-        self.visible.set(true);
+        let this = self.borrow_mut();
+        *this.entries.borrow_mut() = entries;
+        this.visible.set(true);
     }
 
     fn hide(&mut self) {
-        self.visible.set(false);
+        self.borrow().visible.set(false);
     }
 
     fn is_visible(&self) -> bool {
-        self.visible.get()
+        self.borrow().visible.get()
     }
 
     fn icons_to_load(
         &mut self,
         lookup_hwnd: &dyn Fn(crate::core::WindowId) -> Option<HwndId>,
     ) -> Vec<(String, HwndId)> {
-        let entries = self.entries.borrow();
-        let mut loaded = self.loaded_icons.borrow_mut();
+        let this = self.borrow_mut();
+        let entries = this.entries.borrow();
+        let mut loaded = this.loaded_icons.borrow_mut();
         let mut result = Vec::new();
         for entry in entries.iter() {
             let Some(app_id) = entry.app_id.as_ref() else {
@@ -1171,15 +1165,16 @@ impl PickerApi for MockPicker {
     }
 
     fn receive_icon(&mut self, app_id: String, _image: egui::ColorImage) {
-        self.loaded_icons.borrow_mut().insert(app_id);
+        self.borrow_mut().loaded_icons.borrow_mut().insert(app_id);
     }
 
     fn rerender(&mut self) {}
 
     fn set_config(&mut self, config: &Config) {
-        self.flavor.set(config.theme);
-        *self.font.borrow_mut() = config.font.clone();
-        *self.config.borrow_mut() = config.clone();
+        let mut this = self.borrow_mut();
+        this.flavor.set(config.theme);
+        *this.font.borrow_mut() = config.font.clone();
+        this.config = config.clone();
     }
 }
 
@@ -1252,12 +1247,6 @@ struct MockOverlays {
     tiling_focus_target: Arc<Mutex<FocusTarget>>,
     tiling_overlay_ids: Rc<RefCell<HashSet<HwndId>>>,
     float_overlays: HashMap<WindowId, Rc<FloatOverlayShared>>,
-    picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
-    picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
-    picker_flavor: Rc<Cell<Flavor>>,
-    picker_font: Rc<RefCell<FontConfig>>,
-    picker_visible: Rc<Cell<bool>>,
-    picker_config: Rc<RefCell<Config>>,
     z_stack: ZOrderStack,
     next_float_overlay_id: Rc<Cell<isize>>,
     tab_bars: Rc<RefCell<HashMap<ContainerId, MockTabBarOverlay>>>,
@@ -1289,9 +1278,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
         // then explicitly drop to HWND_BOTTOM.
         this.z_stack.simulate_create(id);
         this.z_stack.move_to_bottom(id);
-        this.tiling_overlay_ids
-            .borrow_mut()
-            .insert(id);
+        this.tiling_overlay_ids.borrow_mut().insert(id);
         drop(this);
         self.borrow_mut()
             .tiling_overlays
@@ -1318,28 +1305,6 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
         // `update()` call will reposition (typically `ZOrder::After(float_window)`).
         self.borrow().z_stack.simulate_create(id);
         Ok(Box::new(overlay))
-    }
-    fn create_picker(
-        &self,
-        entries: Vec<PickerEntry>,
-        monitor_dim: Dimension,
-        config: Config,
-        scale: f32,
-    ) -> anyhow::Result<Box<dyn PickerApi>> {
-        let this = self.borrow();
-        this.picker_flavor.set(config.theme);
-        *this.picker_font.borrow_mut() = config.font.clone();
-        *this.picker_config.borrow_mut() = config.clone();
-        let mut picker = MockPicker {
-            visible: this.picker_visible.clone(),
-            entries: this.picker_entries.clone(),
-            loaded_icons: this.picker_loaded_icons.clone(),
-            flavor: this.picker_flavor.clone(),
-            font: this.picker_font.clone(),
-            config: this.picker_config.clone(),
-        };
-        picker.show(entries, monitor_dim, scale);
-        Ok(Box::new(picker))
     }
     fn create_tab_bar(
         &self,

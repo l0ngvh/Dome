@@ -89,11 +89,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// if the workspace is empty.
     fn focused_tiling_window(&self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WindowId>;
 
-    fn detach_focused_child(
-        &mut self,
-        hub: &mut HubAccess,
-        ws_id: WorkspaceId,
-    ) -> Option<Child>;
+    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child>;
 
     /// Re-attach a previously-detached `Child` into `ws_id`. Sets focus
     /// to the attached child. No-op when `child` is not applicable to

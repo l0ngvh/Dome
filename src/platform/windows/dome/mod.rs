@@ -22,7 +22,7 @@ use crate::core::{
     Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId,
     WindowRestrictions, WorkspaceId,
 };
-use crate::picker::{PickerEntry, build_picker_entries};
+use crate::picker::build_picker_entries;
 
 use self::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
@@ -88,13 +88,6 @@ pub(super) trait CreateOverlay {
         scale: f32,
         visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
-    fn create_picker(
-        &self,
-        entries: Vec<PickerEntry>,
-        monitor_dim: Dimension,
-        config: Config,
-        scale: f32,
-    ) -> anyhow::Result<Box<dyn overlay::PickerApi>>;
     fn create_tab_bar(
         &self,
         config: Config,
@@ -126,7 +119,7 @@ pub(super) struct Dome {
     pending_created: Vec<WindowId>,
     placement_tracker: PlacementTracker,
     recovery: Recovery,
-    picker: Option<Box<dyn overlay::PickerApi>>,
+    picker: Box<dyn overlay::PickerApi>,
 }
 
 impl Drop for Dome {
@@ -142,6 +135,7 @@ impl Dome {
         taskbar: Rc<dyn ManageTaskbar>,
         overlay_factory: Box<dyn CreateOverlay>,
         display: Box<dyn QueryDisplay>,
+        picker: Box<dyn overlay::PickerApi>,
     ) -> anyhow::Result<Self> {
         let monitors = display.get_all_monitors()?;
         anyhow::ensure!(!monitors.is_empty(), "No monitors detected");
@@ -212,7 +206,7 @@ impl Dome {
             pending_created: Vec::new(),
             placement_tracker: PlacementTracker::new(),
             recovery: Recovery::new(taskbar),
-            picker: None,
+            picker,
         })
     }
 
@@ -228,9 +222,7 @@ impl Dome {
         for overlay in self.tab_bars.values_mut() {
             overlay.set_config(&self.config);
         }
-        if let Some(picker) = self.picker.as_mut() {
-            picker.set_config(&self.config);
-        }
+        self.picker.set_config(&self.config);
         tracing::info!("Config reloaded");
         self.apply_layout();
     }
@@ -531,82 +523,45 @@ impl Dome {
     }
 
     pub(super) fn toggle_picker(&mut self) {
-        match &mut self.picker {
-            Some(pw) if pw.is_visible() => {
-                pw.hide();
-            }
-            Some(pw) => {
-                let minimized = self.hub.minimized_window_entries();
-                let entries = build_picker_entries(&minimized, |wid| {
-                    let Some(e) = self.registry.get(wid) else {
-                        return (None, None);
-                    };
-                    let display = e
-                        .app_name
-                        .clone()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| display_from_process(&e.process));
-                    (Some(e.process.clone()), Some(display))
-                });
-                let focused_monitor = self.hub.focused_monitor();
-                let m = self.monitors.monitor(focused_monitor);
-                let monitor_dim = m.dimension();
-                let scale = m.scale();
-                pw.show(entries, monitor_dim, scale);
-            }
-            None => {
-                let minimized = self.hub.minimized_window_entries();
-                let entries = build_picker_entries(&minimized, |wid| {
-                    let Some(e) = self.registry.get(wid) else {
-                        return (None, None);
-                    };
-                    let display = e
-                        .app_name
-                        .clone()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| display_from_process(&e.process));
-                    (Some(e.process.clone()), Some(display))
-                });
-                let focused_monitor = self.hub.focused_monitor();
-                let monitor_dim = self.monitors.monitor(focused_monitor).dimension();
-                match self.overlay_factory.create_picker(
-                    entries,
-                    monitor_dim,
-                    self.config.clone(),
-                    self.monitors.monitor(focused_monitor).scale(),
-                ) {
-                    Ok(pw) => {
-                        self.picker = Some(pw);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to create picker window: {e:#}");
-                    }
-                }
-            }
+        if self.picker.is_visible() {
+            self.picker.hide();
+        } else {
+            let minimized = self.hub.minimized_window_entries();
+            let entries = build_picker_entries(&minimized, |wid| {
+                let Some(e) = self.registry.get(wid) else {
+                    return (None, None);
+                };
+                let display = e
+                    .app_name
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| display_from_process(&e.process));
+                (Some(e.process.clone()), Some(display))
+            });
+            let focused_monitor = self.hub.focused_monitor();
+            let m = self.monitors.monitor(focused_monitor);
+            let monitor_dim = m.dimension();
+            let scale = m.scale();
+            self.picker.show(entries, monitor_dim, scale);
         }
     }
 
     pub(super) fn picker_icons_to_load(&mut self) -> Vec<(String, super::external::HwndId)> {
-        let Some(picker) = &mut self.picker else {
-            return Vec::new();
-        };
         let registry = &self.registry;
-        picker.icons_to_load(&|wid| registry.get(wid).map(|e| e.ext.id()))
+        self.picker
+            .icons_to_load(&|wid| registry.get(wid).map(|e| e.ext.id()))
     }
 
     pub(super) fn picker_receive_icon(&mut self, app_id: String, image: egui::ColorImage) {
-        if let Some(picker) = &mut self.picker {
-            picker.receive_icon(app_id, image);
-        }
+        self.picker.receive_icon(app_id, image);
     }
 
     pub(super) fn picker_visible(&self) -> bool {
-        self.picker.as_ref().is_some_and(|p| p.is_visible())
+        self.picker.is_visible()
     }
 
     pub(super) fn picker_scale(&self) -> Option<f32> {
-        let picker = self.picker.as_ref()?;
-        if !picker.is_visible() {
+        if !self.picker.is_visible() {
             return None;
         }
         let focused = self.hub.focused_monitor();
@@ -614,9 +569,7 @@ impl Dome {
     }
 
     pub(super) fn picker_rerender(&mut self) {
-        if let Some(picker) = &mut self.picker {
-            picker.rerender();
-        }
+        self.picker.rerender();
     }
 
     /// Unminimize a window selected via the picker.
