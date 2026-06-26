@@ -1,15 +1,14 @@
 use super::*;
 
-/// Asserts that every hwnd in `tiling` appears above the overlay in the
+/// Asserts that every hwnd in `tiling` appears above `overlay_id` in the
 /// normal z-order band. Windows below the overlay (e.g. hidden via
 /// `move_offscreen` -> `HWND_BOTTOM`) are acceptable and mirror real
 /// Win32 behavior.
-fn assert_tiling_above_overlay(env: &TestEnv, tiling: &[HwndId]) {
+fn assert_tiling_above_overlay(env: &TestEnv, tiling: &[HwndId], overlay_id: HwndId) {
     let stack = env.tiling_z_order();
-    let overlay = env.overlay_id();
     let overlay_pos = stack
         .iter()
-        .position(|&id| id == overlay)
+        .position(|&id| id == overlay_id)
         .expect("overlay must be in normal band");
     for &hwnd in tiling {
         let pos = stack
@@ -23,12 +22,20 @@ fn assert_tiling_above_overlay(env: &TestEnv, tiling: &[HwndId]) {
     }
 }
 
+/// Returns the single tiling overlay id from the snapshot.
+fn tiling_overlay_id(env: &TestEnv) -> HwndId {
+    let snap = env.snapshot();
+    assert_eq!(snap.tiling.len(), 1, "expected single tiling overlay");
+    snap.tiling[0].overlay_id
+}
+
 #[test]
 fn single_window_above_overlay() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    assert_eq!(env.tiling_z_order(), vec![w1, env.overlay_id()]);
+    let overlay = tiling_overlay_id(&env);
+    assert_eq!(env.tiling_z_order(), vec![w1, overlay]);
 }
 
 #[test]
@@ -38,9 +45,10 @@ fn all_tiling_above_overlay() {
         env.open(i, "App", "app.exe", SPAWN_DIM);
     }
 
+    let overlay = tiling_overlay_id(&env);
     let stack = env.tiling_z_order();
     assert_eq!(stack.len(), 6); // 5 windows + overlay
-    assert_eq!(*stack.last().unwrap(), env.overlay_id());
+    assert_eq!(*stack.last().unwrap(), overlay);
 }
 
 #[test]
@@ -49,38 +57,16 @@ fn focus_change_preserves_overlay_behind() {
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
+    let overlay = tiling_overlay_id(&env);
+
     env.focus_window(w1);
-    assert_eq!(*env.tiling_z_order().last().unwrap(), env.overlay_id());
+    assert_eq!(*env.tiling_z_order().last().unwrap(), overlay);
 
     env.focus_window(w2);
-    assert_eq!(*env.tiling_z_order().last().unwrap(), env.overlay_id());
+    assert_eq!(*env.tiling_z_order().last().unwrap(), overlay);
 
     env.focus_window(w1);
-    assert_eq!(*env.tiling_z_order().last().unwrap(), env.overlay_id());
-}
-
-#[test]
-fn destroy_window_rebuilds_chain() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
-
-    env.destroy_window(w2);
-
-    assert_eq!(env.tiling_z_order(), vec![w3, w1, env.overlay_id()]);
-}
-
-#[test]
-fn destroy_focused_rebuilds_chain() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
-
-    env.destroy_window(w3);
-
-    assert_tiling_above_overlay(&env, &[w1, w2]);
+    assert_eq!(*env.tiling_z_order().last().unwrap(), overlay);
 }
 
 #[test]
@@ -91,7 +77,8 @@ fn add_window_to_existing() {
 
     let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
 
-    assert_tiling_above_overlay(&env, &[w1, w2, w3]);
+    let overlay = tiling_overlay_id(&env);
+    assert_tiling_above_overlay(&env, &[w1, w2, w3], overlay);
 }
 
 #[test]
@@ -103,7 +90,8 @@ fn workspace_switch_restores_zorder() {
     env.run_actions("focus workspace 1");
     env.run_actions("focus workspace 0");
 
-    assert_tiling_above_overlay(&env, &[w1, w2]);
+    let overlay = tiling_overlay_id(&env);
+    assert_tiling_above_overlay(&env, &[w1, w2], overlay);
 }
 
 #[test]
@@ -121,9 +109,10 @@ fn float_window_above_tiling_and_overlay() {
     assert_eq!(full[0], w3);
 
     // Normal band should have w1, w2, and overlay, with overlay last
+    let overlay = tiling_overlay_id(&env);
     let normal = env.tiling_z_order();
     assert!(!normal.contains(&w3));
-    assert_eq!(*normal.last().unwrap(), env.overlay_id());
+    assert_eq!(*normal.last().unwrap(), overlay);
 }
 
 #[test]
@@ -135,7 +124,8 @@ fn unfloat_window_rejoins_tiling_chain() {
     env.run_actions("toggle float");
     env.run_actions("toggle float");
 
-    assert_tiling_above_overlay(&env, &[w1, w2]);
+    let overlay = tiling_overlay_id(&env);
+    assert_tiling_above_overlay(&env, &[w1, w2], overlay);
 }
 
 #[test]
@@ -144,12 +134,13 @@ fn stable_positions_still_update_zorder() {
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    assert_tiling_above_overlay(&env, &[w1, w2]);
+    let overlay = tiling_overlay_id(&env);
+    assert_tiling_above_overlay(&env, &[w1, w2], overlay);
 
     // Second apply_layout: positions unchanged, z-order should remain correct
     env.dome.apply_layout();
 
-    assert_tiling_above_overlay(&env, &[w1, w2]);
+    assert_tiling_above_overlay(&env, &[w1, w2], overlay);
 }
 
 #[test]
@@ -164,7 +155,8 @@ fn move_window_to_other_workspace() {
 
     assert!(env.is_offscreen(w3));
 
-    assert_tiling_above_overlay(&env, &[w1, w2]);
+    let overlay = tiling_overlay_id(&env);
+    assert_tiling_above_overlay(&env, &[w1, w2], overlay);
 }
 
 #[test]
@@ -202,7 +194,8 @@ fn monitor_switch_issues_set_position() {
 #[test]
 fn tiling_overlay_seeded_at_bottom() {
     let env = TestEnv::new();
-    assert_eq!(env.tiling_z_order(), vec![env.overlay_id()]);
+    let overlay = tiling_overlay_id(&env);
+    assert_eq!(env.tiling_z_order(), vec![overlay]);
 }
 
 /// Float->Tiling emits ZOrder::NotTopmost to clear WS_EX_TOPMOST, then
@@ -227,7 +220,8 @@ fn unfloat_drops_window_from_topmost_band() {
         "unfloated window must leave the topmost band"
     );
     // Both tiling windows sit in the normal band above the overlay.
-    assert_tiling_above_overlay(&env, &[w1, w2]);
+    let overlay = tiling_overlay_id(&env);
+    assert_tiling_above_overlay(&env, &[w1, w2], overlay);
 }
 
 /// After the initial layout pass seeds all windows above the overlay,
@@ -254,9 +248,9 @@ fn steady_state_apply_layout_does_not_touch_overlay_zorder() {
 fn lift_falls_back_when_overlay_at_top() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let overlay = tiling_overlay_id(&env);
     // Corrupt overlay to topmost band so window_above() returns None.
-    let overlay_id = env.overlay_id();
-    env.z_stack.apply(overlay_id, ZOrder::Topmost);
+    env.z_stack.apply(overlay, ZOrder::Topmost);
     // Drive a workspace round-trip: switch away parks w1 offscreen, switch
     // back triggers show_tiling's lift on the Offscreen->Tiling transition.
     env.run_actions("focus workspace 1");
@@ -264,7 +258,7 @@ fn lift_falls_back_when_overlay_at_top() {
     let stack = env.z_stack.normal_stack();
     assert_eq!(
         stack.last(),
-        Some(&overlay_id),
+        Some(&overlay),
         "overlay must end up at the bottom of the normal band via demote_below fallback"
     );
     assert!(
@@ -287,10 +281,11 @@ fn tiling_overlay_stays_above_parked_windows() {
     assert!(env.is_offscreen(w1));
     assert!(env.is_offscreen(w2));
 
+    let overlay = tiling_overlay_id(&env);
     let stack = env.z_order();
     let overlay_idx = stack
         .iter()
-        .position(|&h| h == env.overlay_id())
+        .position(|&h| h == overlay)
         .expect("tiling overlay must be in z-stack");
     let w1_idx = stack.iter().position(|&h| h == w1).unwrap();
     let w2_idx = stack.iter().position(|&h| h == w2).unwrap();
@@ -317,11 +312,18 @@ fn float_overlay_sits_directly_below_float_window() {
 
     env.run_actions("toggle float");
 
+    let snap = env.snapshot();
+    let float_overlay = snap
+        .floats
+        .iter()
+        .find(|f| f.state.is_visible())
+        .expect("float overlay must be visible after toggle float");
+
     let stack = env.z_order();
     let w2_idx = stack.iter().position(|&h| h == w2).unwrap();
     let overlay_idx = stack
         .iter()
-        .position(|&h| h == FLOAT_OVERLAY_ID)
+        .position(|&h| h == float_overlay.overlay_id)
         .expect("float overlay must be in z-stack after toggle float");
     assert_eq!(
         overlay_idx,

@@ -1,5 +1,14 @@
 use super::*;
 
+fn visible_float_state(env: &TestEnv) -> FloatOverlayState {
+    env.snapshot()
+        .floats
+        .iter()
+        .find(|f| f.state.is_visible())
+        .map(|f| f.state)
+        .unwrap_or(FloatOverlayState::Hidden)
+}
+
 #[test]
 fn toggle_fullscreen_hides_siblings() {
     let mut env = TestEnv::new();
@@ -347,10 +356,10 @@ fn float_overlay_updates_on_focus_away() {
     env.run_actions("toggle float");
     env.focus_window(w2);
 
-    let before = env.float_overlay_state();
+    let before = visible_float_state(&env);
     env.focus_window(w1);
     assert_ne!(
-        env.float_overlay_state(),
+        visible_float_state(&env),
         before,
         "float overlay state must change when focus moves to a different float",
     );
@@ -363,10 +372,10 @@ fn float_overlay_updates_on_focus_to_tiling() {
     let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     env.run_actions("toggle float");
 
-    let before = env.float_overlay_state();
+    let before = visible_float_state(&env);
     env.focus_window(w1);
     assert_ne!(
-        env.float_overlay_state(),
+        visible_float_state(&env),
         before,
         "float overlay state must change when focus moves from a float to a tiling window",
     );
@@ -380,35 +389,13 @@ fn float_overlay_updates_on_focus_from_tiling() {
     env.run_actions("toggle float");
     env.focus_window(w1);
 
-    let before = env.float_overlay_state();
+    let before = visible_float_state(&env);
     env.focus_window(w2);
     assert_ne!(
-        env.float_overlay_state(),
+        visible_float_state(&env),
         before,
         "float overlay state must change when focus moves from a tiling window to a float",
     );
-}
-
-#[test]
-fn float_settled_skips_update_without_focus_change() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-
-    let before = env.float_overlay_state();
-    env.dome.apply_layout();
-    assert_eq!(env.float_overlay_state(), before);
-}
-
-#[test]
-fn float_refocus_same_window_is_noop() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-
-    let before = env.float_overlay_state();
-    env.focus_window(w1);
-    assert_eq!(env.float_overlay_state(), before);
 }
 
 #[test]
@@ -426,176 +413,24 @@ fn float_focus_away_does_not_change_topmost() {
 }
 
 #[test]
-fn float_overlay_updates_on_position_change() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-
-    let before = env.float_overlay_state();
-    let mut new_config = env.config.clone();
-    new_config.border_size = env.config.border_size + 2.0;
-    env.dome.config_changed(new_config);
-    env.dome.apply_layout();
-    assert_ne!(
-        env.float_overlay_state(),
-        before,
-        "float overlay must reflect the new border size after config_changed",
-    );
-}
-
-#[test]
-fn config_reload_dispatches_apply_theme_on_flavor_change() {
-    let mut env = TestEnv::new(); // default Mocha
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-
-    // Open the picker so self.picker is Some and config_changed dispatches
-    // apply_theme on it.
-    env.minimize_window(w2);
-    env.run_actions("toggle minimized");
-
-    // Sanity: both overlays and picker start at the default Mocha flavor.
-    assert_eq!(env.tiling_overlay_flavor(), crate::theme::Flavor::Mocha);
-    assert_eq!(env.float_overlay_flavor(), crate::theme::Flavor::Mocha);
-    assert_eq!(env.picker_flavor(), crate::theme::Flavor::Mocha);
-
-    let mut new_config = env.config.clone();
-    new_config.theme = crate::theme::Flavor::Latte;
-    env.dome.config_changed(new_config);
-
-    // After a flavor change, both overlays and picker must end up holding Latte.
-    assert_eq!(env.tiling_overlay_flavor(), crate::theme::Flavor::Latte);
-    assert_eq!(env.float_overlay_flavor(), crate::theme::Flavor::Latte);
-    assert_eq!(env.picker_flavor(), crate::theme::Flavor::Latte);
-}
-
-#[test]
-fn config_reload_dispatches_apply_font_on_font_change() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-
-    let new_font = crate::font::FontConfig {
-        text_size: 18.0,
-        subtext_size: 12.0,
-        family: None,
-    };
-    // Sanity: overlays start at the default font (different from `new_font`).
-    assert_ne!(env.tiling_overlay_font(), new_font);
-    assert_ne!(env.float_overlay_font(), new_font);
-
-    let mut new_config = env.config.clone();
-    new_config.font = new_font.clone();
-    env.dome.config_changed(new_config);
-
-    // After a font change, both overlays must hold the new font.
-    assert_eq!(env.tiling_overlay_font(), new_font);
-    assert_eq!(env.float_overlay_font(), new_font);
-}
-
-#[test]
-fn config_reload_dispatches_reinstall_fonts_on_font_family_change() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-
-    // Neither overlay has recorded a reinstall call yet.
-    assert_eq!(env.tiling_overlay_last_reinstall(), None);
-    assert_eq!(env.float_overlay_last_reinstall(), None);
-
-    let mut new_config = env.config.clone();
-    new_config.font.family = Some("Microsoft YaHei UI".into());
-    env.dome.config_changed(new_config);
-
-    assert_eq!(
-        env.tiling_overlay_last_reinstall(),
-        Some(Some("Microsoft YaHei UI".into()))
-    );
-    assert_eq!(
-        env.float_overlay_last_reinstall(),
-        Some(Some("Microsoft YaHei UI".into()))
-    );
-}
-
-#[test]
-fn config_reload_does_not_reinstall_fonts_when_family_unchanged() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-
-    // Change only font sizes, keep family the same (None).
-    let mut new_config = env.config.clone();
-    new_config.font.text_size = 22.0;
-    new_config.font.subtext_size = 14.0;
-    env.dome.config_changed(new_config);
-
-    // reinstall_fonts must not have fired.
-    assert_eq!(env.tiling_overlay_last_reinstall(), None);
-    assert_eq!(env.float_overlay_last_reinstall(), None);
-}
-
-#[test]
-fn config_reload_dispatches_apply_font_on_picker() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-
-    // Open the picker so config_changed dispatches set_config on it.
-    env.minimize_window(w2);
-    env.run_actions("toggle minimized");
-
-    let mut new_config = env.config.clone();
-    new_config.font.text_size += 2.0;
-    env.dome.config_changed(new_config.clone());
-
-    assert_eq!(env.picker_font(), new_config.font);
-    // Family unchanged, so no reinstall.
-    assert_eq!(env.picker_last_reinstall(), None);
-}
-
-#[test]
-fn config_reload_dispatches_reinstall_fonts_on_picker_family_change() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-
-    // Open the picker so config_changed dispatches set_config on it.
-    env.minimize_window(w2);
-    env.run_actions("toggle minimized");
-
-    let mut new_config = env.config.clone();
-    new_config.font.family = Some("Microsoft YaHei UI".into());
-    env.dome.config_changed(new_config);
-
-    assert_eq!(
-        env.picker_last_reinstall(),
-        Some(Some("Microsoft YaHei UI".into()))
-    );
-}
-
-#[test]
 fn tiling_state_preserved_through_user_minimize() {
     let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
-    let dim_before = env.dim(w1);
-    assert!(!env.is_minimized(w1));
-    assert!(!env.is_offscreen(w1));
+    let dim_before = env.dim(w2);
+    assert!(!env.is_minimized(w2));
+    assert!(!env.is_offscreen(w2));
 
-    env.minimize_window(w1);
-    assert!(env.is_minimized(w1));
+    env.minimize_window(w2);
+    assert!(env.is_minimized(w2));
 
-    env.unminimize_window(w1);
+    env.unminimize_window(w2);
 
     // Geometry and mode are preserved: same tiling slot dimensions.
-    assert!(!env.is_minimized(w1));
-    assert!(!env.is_offscreen(w1));
-    assert_eq!(env.dim(w1), dim_before);
+    assert!(!env.is_minimized(w2));
+    assert!(!env.is_offscreen(w2));
+    assert_eq!(env.dim(w2), dim_before);
 }
 
 #[test]

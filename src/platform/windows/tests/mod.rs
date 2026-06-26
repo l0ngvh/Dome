@@ -1,3 +1,4 @@
+mod config_live_reload;
 mod lifecycle;
 mod picker;
 mod placement;
@@ -49,6 +50,12 @@ enum FloatOverlayState {
     },
 }
 
+impl FloatOverlayState {
+    fn is_visible(&self) -> bool {
+        matches!(self, FloatOverlayState::Visible { .. })
+    }
+}
+
 /// Last focus directive Dome issued. The Hub either parks focus on the
 /// sink (no window) or pushes it to a specific window's HWND. The mock
 /// records whichever fires.
@@ -58,6 +65,58 @@ enum FocusTarget {
     Initial,
     Overlay,
     Window(HwndId),
+}
+
+/// Mirrors the real float overlay's shared observable state. `Rc` between
+/// the mock map entry and every `MockFloatOverlay` clone Dome holds.
+/// `Drop` on the last `MockFloatOverlay` sets `stale`; the snapshot skips
+/// stale entries.
+#[derive(Clone, Debug)]
+struct FloatOverlayShared {
+    overlay_id: HwndId,
+    stale: Cell<bool>,
+    state: Cell<FloatOverlayState>,
+    flavor: Cell<Flavor>,
+    font: RefCell<FontConfig>,
+}
+
+// ── Snapshot types ──
+
+/// Owned snapshot of the overlay layer. Tests assert on this, not on live
+/// per-window/per-monitor handles.
+#[derive(Clone, Debug)]
+struct OverlaySnapshot {
+    tiling: Vec<TilingOverlaySnapshot>,
+    floats: Vec<FloatOverlaySnapshot>,
+    tab_bars: HashMap<ContainerId, TabBarUpdate>,
+    picker: Option<PickerSnapshot>,
+}
+
+#[derive(Clone, Debug)]
+struct TilingOverlaySnapshot {
+    overlay_id: HwndId,
+    monitor: Dimension<Physical>,
+    state: TilingOverlayState,
+    flavor: Flavor,
+    font: FontConfig,
+}
+
+#[derive(Clone, Debug)]
+struct FloatOverlaySnapshot {
+    window_id: WindowId,
+    overlay_id: HwndId,
+    state: FloatOverlayState,
+    flavor: Flavor,
+    font: FontConfig,
+}
+
+#[derive(Clone, Debug)]
+struct PickerSnapshot {
+    visible: bool,
+    entries: Vec<PickerEntry>,
+    flavor: Flavor,
+    font: FontConfig,
+    loaded_icons: HashSet<String>,
 }
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
@@ -132,16 +191,11 @@ struct TestEnv {
     mocks: HashMap<HwndId, Arc<MockExternalHwnd>>,
     exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
     config: Config,
-    tiling_overlay: MockTilingOverlay,
-    /// Production creates one float overlay per floating window; the mock
-    /// collapses them onto a single shared instance, so flavor/font cells
-    /// reflect the most recently applied value across all live overlays.
-    float_overlay: MockFloatOverlay,
+    overlays: Rc<RefCell<MockOverlays>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
     picker_flavor: Rc<Cell<Flavor>>,
     picker_font: Rc<RefCell<FontConfig>>,
-    picker_last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
     tab_bars: Rc<RefCell<HashMap<ContainerId, MockTabBarOverlay>>>,
     z_stack: ZOrderStack,
     focus_target: Arc<Mutex<FocusTarget>>,
@@ -161,6 +215,8 @@ impl TestEnv {
     }
 
     fn new_with_monitors(config: Config, layout: LayoutConfig, monitors: Vec<MonitorInfo>) -> Self {
+        setup_logger();
+
         let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
         let display = MockDisplay {
             monitors,
@@ -171,38 +227,36 @@ impl TestEnv {
         let picker_loaded_icons = Rc::new(RefCell::new(HashSet::new()));
         let picker_flavor = Rc::new(Cell::new(config.theme));
         let picker_font = Rc::new(RefCell::new(config.font.clone()));
-        let picker_last_reinstall_family = Rc::new(RefCell::new(None));
+        let picker_visible = Rc::new(Cell::new(false));
         let z_stack = ZOrderStack::new();
         let next_float_overlay_id = Rc::new(Cell::new(9000_isize));
+        let next_tiling_overlay_id = Rc::new(Cell::new(9900_isize));
+        let tiling_focus_target = focus_target.clone();
+        let tiling_overlay_ids: Rc<RefCell<HashSet<HwndId>>> =
+            Rc::new(RefCell::new(HashSet::new()));
         let tab_bars = Rc::new(RefCell::new(HashMap::new()));
-        // Seed flavor/font from the config to mirror production's overlay
-        // constructors.
-        let tiling_overlay = MockTilingOverlay::new(
-            TILING_OVERLAY_ID,
-            z_stack.clone(),
-            config.clone(),
-            focus_target.clone(),
-        );
-        let float_overlay =
-            MockFloatOverlay::new(FLOAT_OVERLAY_ID, z_stack.clone(), config.clone());
+        let overlays = Rc::new(RefCell::new(MockOverlays {
+            tiling_overlays: HashMap::new(),
+            next_tiling_overlay_id: next_tiling_overlay_id.clone(),
+            tiling_focus_target: tiling_focus_target.clone(),
+            tiling_overlay_ids: tiling_overlay_ids.clone(),
+            float_overlays: HashMap::new(),
+            picker_entries: picker_entries.clone(),
+            picker_loaded_icons: picker_loaded_icons.clone(),
+            picker_flavor: picker_flavor.clone(),
+            picker_font: picker_font.clone(),
+            picker_visible: picker_visible.clone(),
+            picker_config: Rc::new(RefCell::new(config.clone())),
+            z_stack: z_stack.clone(),
+            next_float_overlay_id: next_float_overlay_id.clone(),
+            tab_bars: tab_bars.clone(),
+        }));
 
         let dome = Dome::new(
             config.clone(),
             layout,
             Rc::new(NoopTaskbar),
-            Box::new(MockOverlays {
-                tiling_overlay: tiling_overlay.clone(),
-                float_overlay: float_overlay.clone(),
-                picker_entries: picker_entries.clone(),
-                picker_loaded_icons: picker_loaded_icons.clone(),
-                picker_flavor: picker_flavor.clone(),
-                picker_font: picker_font.clone(),
-                picker_last_reinstall_family: picker_last_reinstall_family.clone(),
-                picker_config: Rc::new(RefCell::new(config.clone())),
-                z_stack: z_stack.clone(),
-                next_float_overlay_id: next_float_overlay_id.clone(),
-                tab_bars: tab_bars.clone(),
-            }),
+            Box::new(overlays.clone()),
             Box::new(display),
         )
         .unwrap();
@@ -212,13 +266,11 @@ impl TestEnv {
             mocks: HashMap::new(),
             exclusive_fullscreen_hwnd,
             config,
-            tiling_overlay,
-            float_overlay,
+            overlays,
             picker_entries,
             picker_loaded_icons,
             picker_flavor,
             picker_font,
-            picker_last_reinstall_family,
             tab_bars,
             z_stack,
             focus_target,
@@ -435,10 +487,13 @@ impl TestEnv {
         if !displayed_above {
             return false;
         }
-        match stack.iter().position(|&h| h == TILING_OVERLAY_ID) {
-            Some(overlay_idx) => overlay_idx < idx,
-            None => false,
-        }
+        let overlay_ids = self.overlays.borrow().tiling_overlay_ids.borrow().clone();
+        overlay_ids
+            .iter()
+            .all(|&overlay_id| match stack.iter().position(|&h| h == overlay_id) {
+                Some(overlay_idx) => overlay_idx < idx,
+                None => true,
+            })
     }
 
     fn clear_override_position(&self, hwnd: HwndId) {
@@ -474,36 +529,57 @@ impl TestEnv {
         *self.focus_target.lock().unwrap()
     }
 
-    fn float_overlay_state(&self) -> FloatOverlayState {
-        self.float_overlay.state()
-    }
-
-    fn tiling_overlay_state(&self) -> TilingOverlayState {
-        self.tiling_overlay.state()
-    }
-
-    fn tiling_overlay_flavor(&self) -> Flavor {
-        self.tiling_overlay.flavor()
-    }
-
-    fn tiling_overlay_font(&self) -> FontConfig {
-        self.tiling_overlay.font()
-    }
-
-    fn tiling_overlay_last_reinstall(&self) -> Option<Option<String>> {
-        self.tiling_overlay.last_reinstall_family.borrow().clone()
-    }
-
-    fn float_overlay_flavor(&self) -> Flavor {
-        self.float_overlay.flavor()
-    }
-
-    fn float_overlay_font(&self) -> FontConfig {
-        self.float_overlay.font()
-    }
-
-    fn float_overlay_last_reinstall(&self) -> Option<Option<String>> {
-        self.float_overlay.last_reinstall_family.borrow().clone()
+    fn snapshot(&self) -> OverlaySnapshot {
+        let o = self.overlays.borrow();
+        let tiling = o
+            .tiling_overlays
+            .values()
+            .map(|ov| TilingOverlaySnapshot {
+                overlay_id: ov.overlay_id,
+                monitor: ov.monitor.get(),
+                state: ov.state(),
+                flavor: ov.flavor(),
+                font: ov.font(),
+            })
+            .collect();
+        let floats = o
+            .float_overlays
+            .iter()
+            .filter(|(_, shared)| !shared.stale.get())
+            .map(|(&window_id, shared)| FloatOverlaySnapshot {
+                window_id,
+                overlay_id: shared.overlay_id,
+                state: shared.state.get(),
+                flavor: shared.flavor.get(),
+                font: shared.font.borrow().clone(),
+            })
+            .collect();
+        let tab_bars = o
+            .tab_bars
+            .borrow()
+            .iter()
+            .filter_map(|(cid, tb)| {
+                tb.last_update()
+                    .map(|update| (*cid, update))
+            })
+            .collect();
+        let picker = if o.picker_visible.get() {
+            Some(PickerSnapshot {
+                visible: true,
+                entries: o.picker_entries.borrow().clone(),
+                flavor: o.picker_flavor.get(),
+                font: o.picker_font.borrow().clone(),
+                loaded_icons: o.picker_loaded_icons.borrow().clone(),
+            })
+        } else {
+            None
+        };
+        OverlaySnapshot {
+            tiling,
+            floats,
+            tab_bars,
+            picker,
+        }
     }
 
     fn picker_flavor(&self) -> Flavor {
@@ -512,10 +588,6 @@ impl TestEnv {
 
     fn picker_font(&self) -> FontConfig {
         self.picker_font.borrow().clone()
-    }
-
-    fn picker_last_reinstall(&self) -> Option<Option<String>> {
-        self.picker_last_reinstall_family.borrow().clone()
     }
 
     fn picker_loaded_icons(&self) -> HashSet<String> {
@@ -550,14 +622,7 @@ impl TestEnv {
     fn tiling_z_order(&self) -> Vec<HwndId> {
         self.z_stack.normal_stack()
     }
-
-    fn overlay_id(&self) -> HwndId {
-        TILING_OVERLAY_ID
-    }
 }
-
-const TILING_OVERLAY_ID: HwndId = HwndId::test(9999);
-const FLOAT_OVERLAY_ID: HwndId = HwndId::test(9000);
 
 fn fullscreen_dim() -> Dimension {
     Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT)
@@ -907,38 +972,33 @@ impl ManageTaskbar for NoopTaskbar {
 
 #[derive(Clone)]
 struct MockFloatOverlay {
-    hwnd_id: HwndId,
+    overlay_id: HwndId,
     z_stack: ZOrderStack,
-    flavor: Rc<Cell<Flavor>>,
-    font: Rc<RefCell<FontConfig>>,
-    state: Rc<Cell<FloatOverlayState>>,
-    last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
+    shared: Rc<FloatOverlayShared>,
+    overlays: Rc<RefCell<MockOverlays>>,
     config: Rc<RefCell<Config>>,
 }
 
 impl MockFloatOverlay {
-    fn new(hwnd_id: HwndId, z_stack: ZOrderStack, config: Config) -> Self {
+    fn new(
+        overlay_id: HwndId,
+        z_stack: ZOrderStack,
+        config: Config,
+        overlays: Rc<RefCell<MockOverlays>>,
+    ) -> Self {
         Self {
-            hwnd_id,
+            overlay_id,
             z_stack,
-            flavor: Rc::new(Cell::new(config.theme)),
-            font: Rc::new(RefCell::new(config.font.clone())),
-            state: Rc::new(Cell::new(FloatOverlayState::Hidden)),
-            last_reinstall_family: Rc::new(RefCell::new(None)),
+            shared: Rc::new(FloatOverlayShared {
+                overlay_id,
+                stale: Cell::new(false),
+                state: Cell::new(FloatOverlayState::Hidden),
+                flavor: Cell::new(config.theme),
+                font: RefCell::new(config.font.clone()),
+            }),
+            overlays,
             config: Rc::new(RefCell::new(config)),
         }
-    }
-
-    fn flavor(&self) -> Flavor {
-        self.flavor.get()
-    }
-
-    fn font(&self) -> FontConfig {
-        self.font.borrow().clone()
-    }
-
-    fn state(&self) -> FloatOverlayState {
-        self.state.get()
     }
 }
 
@@ -950,26 +1010,31 @@ impl FloatOverlayApi for MockFloatOverlay {
         z_order: ZOrder,
         _scale: f32,
     ) {
-        self.state.set(FloatOverlayState::Visible {
+        self.shared.state.set(FloatOverlayState::Visible {
             window_id: wp.id,
             visible_frame: wp.visible_frame,
             z_order,
         });
-        self.z_stack.apply(self.hwnd_id, z_order);
+        self.overlays
+            .borrow_mut()
+            .float_overlays
+            .insert(wp.id, self.shared.clone());
+        self.z_stack.apply(self.overlay_id, z_order);
     }
     fn hide(&mut self) {
-        self.state.set(FloatOverlayState::Hidden);
-        self.z_stack.remove(self.hwnd_id);
+        self.shared.state.set(FloatOverlayState::Hidden);
+        self.z_stack.remove(self.overlay_id);
     }
     fn set_config(&mut self, config: &Config) {
-        self.flavor.set(config.theme);
-        *self.font.borrow_mut() = config.font.clone();
-        if self.config.borrow().font.family != config.font.family {
-            self.last_reinstall_family
-                .borrow_mut()
-                .replace(config.font.family.clone());
-        }
+        self.shared.flavor.set(config.theme);
+        *self.shared.font.borrow_mut() = config.font.clone();
         *self.config.borrow_mut() = config.clone();
+    }
+}
+
+impl Drop for MockFloatOverlay {
+    fn drop(&mut self) {
+        self.shared.stale.set(true);
     }
 }
 
@@ -984,7 +1049,6 @@ struct MockTilingOverlay {
     flavor: Rc<Cell<Flavor>>,
     font: Rc<RefCell<FontConfig>>,
     monitor: Rc<Cell<Dimension>>,
-    last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
     config: Rc<RefCell<Config>>,
     focus_target: Arc<Mutex<FocusTarget>>,
 }
@@ -1003,7 +1067,6 @@ impl MockTilingOverlay {
             flavor: Rc::new(Cell::new(config.theme)),
             font: Rc::new(RefCell::new(config.font.clone())),
             monitor: Rc::new(Cell::new(Dimension::default())),
-            last_reinstall_family: Rc::new(RefCell::new(None)),
             config: Rc::new(RefCell::new(config)),
             focus_target,
         }
@@ -1047,11 +1110,6 @@ impl TilingOverlayApi for MockTilingOverlay {
     fn set_config(&mut self, config: &Config) {
         self.flavor.set(config.theme);
         *self.font.borrow_mut() = config.font.clone();
-        if self.config.borrow().font.family != config.font.family {
-            self.last_reinstall_family
-                .borrow_mut()
-                .replace(config.font.family.clone());
-        }
         *self.config.borrow_mut() = config.clone();
     }
     fn set_tab_bar_height(&mut self, _height: Length<Logical>) {}
@@ -1067,27 +1125,26 @@ impl TilingOverlayApi for MockTilingOverlay {
 }
 
 struct MockPicker {
-    visible: bool,
+    visible: Rc<Cell<bool>>,
     entries: Rc<RefCell<Vec<PickerEntry>>>,
     loaded_icons: Rc<RefCell<HashSet<String>>>,
     flavor: Rc<Cell<Flavor>>,
     font: Rc<RefCell<FontConfig>>,
-    last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
     config: Rc<RefCell<Config>>,
 }
 
 impl PickerApi for MockPicker {
     fn show(&mut self, entries: Vec<PickerEntry>, _monitor_dim: Dimension, _scale: f32) {
         *self.entries.borrow_mut() = entries;
-        self.visible = true;
+        self.visible.set(true);
     }
 
     fn hide(&mut self) {
-        self.visible = false;
+        self.visible.set(false);
     }
 
     fn is_visible(&self) -> bool {
-        self.visible
+        self.visible.get()
     }
 
     fn icons_to_load(
@@ -1122,11 +1179,6 @@ impl PickerApi for MockPicker {
     fn set_config(&mut self, config: &Config) {
         self.flavor.set(config.theme);
         *self.font.borrow_mut() = config.font.clone();
-        if self.config.borrow().font.family != config.font.family {
-            self.last_reinstall_family
-                .borrow_mut()
-                .replace(config.font.family.clone());
-        }
         *self.config.borrow_mut() = config.clone();
     }
 }
@@ -1195,32 +1247,56 @@ impl Drop for MockTabBarHandle {
 }
 
 struct MockOverlays {
-    tiling_overlay: MockTilingOverlay,
-    float_overlay: MockFloatOverlay,
+    tiling_overlays: HashMap<HwndId, MockTilingOverlay>,
+    next_tiling_overlay_id: Rc<Cell<isize>>,
+    tiling_focus_target: Arc<Mutex<FocusTarget>>,
+    tiling_overlay_ids: Rc<RefCell<HashSet<HwndId>>>,
+    float_overlays: HashMap<WindowId, Rc<FloatOverlayShared>>,
     picker_entries: Rc<RefCell<Vec<PickerEntry>>>,
     picker_loaded_icons: Rc<RefCell<HashSet<String>>>,
     picker_flavor: Rc<Cell<Flavor>>,
     picker_font: Rc<RefCell<FontConfig>>,
-    picker_last_reinstall_family: Rc<RefCell<Option<Option<String>>>>,
+    picker_visible: Rc<Cell<bool>>,
     picker_config: Rc<RefCell<Config>>,
     z_stack: ZOrderStack,
     next_float_overlay_id: Rc<Cell<isize>>,
     tab_bars: Rc<RefCell<HashMap<ContainerId, MockTabBarOverlay>>>,
 }
 
-impl CreateOverlay for MockOverlays {
+impl CreateOverlay for Rc<RefCell<MockOverlays>> {
     fn create_tiling_overlay(
         &self,
-        _: Config,
+        config: Config,
         _tab_bar_height: Length<Logical>,
-        _monitor: Dimension,
+        monitor: Dimension,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
-        // Mirror production: CreateWindowExW seeds at top of normal band, then
-        // we explicitly drop the overlay to HWND_BOTTOM.
-        self.z_stack.simulate_create(self.tiling_overlay.overlay_id);
-        self.z_stack.move_to_bottom(self.tiling_overlay.overlay_id);
-        Ok(Box::new(self.tiling_overlay.clone()))
+        let this = self.borrow();
+        let id_val = this.next_tiling_overlay_id.get();
+        this.next_tiling_overlay_id.set(id_val + 1);
+        let id = HwndId::test(id_val);
+
+        let overlay = MockTilingOverlay::new(
+            id,
+            this.z_stack.clone(),
+            config.clone(),
+            this.tiling_focus_target.clone(),
+        );
+        // Record monitor dimension from create call (also updated on
+        // subsequent `update` calls).
+        overlay.monitor.set(monitor);
+        // Mirror production: CreateWindowExW seeds at top of normal band,
+        // then explicitly drop to HWND_BOTTOM.
+        this.z_stack.simulate_create(id);
+        this.z_stack.move_to_bottom(id);
+        this.tiling_overlay_ids
+            .borrow_mut()
+            .insert(id);
+        drop(this);
+        self.borrow_mut()
+            .tiling_overlays
+            .insert(id, overlay.clone());
+        Ok(Box::new(overlay))
     }
     fn create_float_overlay(
         &self,
@@ -1228,20 +1304,20 @@ impl CreateOverlay for MockOverlays {
         _scale: f32,
         _visible_frame: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
-        let id = self.next_float_overlay_id.get();
-        self.next_float_overlay_id.set(id + 1);
-        // Production seeds flavor/font on float overlay creation.
-        self.float_overlay.flavor.set(config.theme);
-        *self.float_overlay.font.borrow_mut() = config.font.clone();
-        *self.float_overlay.config.borrow_mut() = config;
+        let this = self.borrow();
+        let id_val = this.next_float_overlay_id.get();
+        drop(this);
+        self.borrow_mut().next_float_overlay_id.set(id_val + 1);
+        let id = HwndId::test(id_val);
+
+        let z_stack = self.borrow().z_stack.clone();
+        let overlays = self.clone();
+        let overlay = MockFloatOverlay::new(id, z_stack, config, overlays);
+
         // Mirror CreateWindowExW: seed at top of normal band. The first
-        // `update()` call will reposition (typically `ZOrder::After(float_window)`)
-        // and `hide()` removes it. Without this, the very first update would
-        // see no existing entry, and although `apply` re-inserts cleanly,
-        // having the create event modeled keeps the timeline closer to
-        // production.
-        self.z_stack.simulate_create(FLOAT_OVERLAY_ID);
-        Ok(Box::new(self.float_overlay.clone()))
+        // `update()` call will reposition (typically `ZOrder::After(float_window)`).
+        self.borrow().z_stack.simulate_create(id);
+        Ok(Box::new(overlay))
     }
     fn create_picker(
         &self,
@@ -1250,17 +1326,17 @@ impl CreateOverlay for MockOverlays {
         config: Config,
         scale: f32,
     ) -> anyhow::Result<Box<dyn PickerApi>> {
-        self.picker_flavor.set(config.theme);
-        *self.picker_font.borrow_mut() = config.font.clone();
-        *self.picker_config.borrow_mut() = config.clone();
+        let this = self.borrow();
+        this.picker_flavor.set(config.theme);
+        *this.picker_font.borrow_mut() = config.font.clone();
+        *this.picker_config.borrow_mut() = config.clone();
         let mut picker = MockPicker {
-            visible: false,
-            entries: self.picker_entries.clone(),
-            loaded_icons: self.picker_loaded_icons.clone(),
-            flavor: self.picker_flavor.clone(),
-            font: self.picker_font.clone(),
-            last_reinstall_family: self.picker_last_reinstall_family.clone(),
-            config: self.picker_config.clone(),
+            visible: this.picker_visible.clone(),
+            entries: this.picker_entries.clone(),
+            loaded_icons: this.picker_loaded_icons.clone(),
+            flavor: this.picker_flavor.clone(),
+            font: this.picker_font.clone(),
+            config: this.picker_config.clone(),
         };
         picker.show(entries, monitor_dim, scale);
         Ok(Box::new(picker))
@@ -1272,13 +1348,20 @@ impl CreateOverlay for MockOverlays {
         _rect: Dimension,
         _scale: f32,
     ) -> anyhow::Result<Box<dyn TabBarOverlayApi>> {
+        let this = self.borrow();
         let inner = MockTabBarOverlay::new(container_id);
-        self.tab_bars
+        this.tab_bars
             .borrow_mut()
             .insert(container_id, inner.clone());
         Ok(Box::new(MockTabBarHandle {
             inner,
-            map: self.tab_bars.clone(),
+            map: this.tab_bars.clone(),
         }))
     }
+}
+
+fn setup_logger() {
+    use tracing_subscriber::EnvFilter;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }

@@ -381,10 +381,10 @@ fn programmatic_echo_keeps_tiling_overlay() {
 
     // Overlay must remain visible with both tiling windows; an echo round-
     // trip must not blink the borders off.
-    let TilingOverlayState::Visible { windows, .. } = env.tiling_overlay_state() else {
+    let TilingOverlayState::Visible { windows, .. } = env.snapshot().tiling[0].state.clone() else {
         panic!(
             "tiling overlay should be visible after programmatic echo, got {:?}",
-            env.tiling_overlay_state()
+            env.snapshot().tiling[0].state
         );
     };
     assert_eq!(windows.len(), 2);
@@ -405,10 +405,10 @@ fn user_drag_keeps_tiling_overlay() {
     assert_eq!(env.dim(w1), placed_w1);
     // Overlay must remain visible with both tiling windows; w2's border
     // must survive the drag.
-    let TilingOverlayState::Visible { windows, .. } = env.tiling_overlay_state() else {
+    let TilingOverlayState::Visible { windows, .. } = env.snapshot().tiling[0].state.clone() else {
         panic!(
             "tiling overlay should be visible during drag, got {:?}",
-            env.tiling_overlay_state()
+            env.snapshot().tiling[0].state
         );
     };
     assert_eq!(windows.len(), 2);
@@ -423,7 +423,7 @@ fn empty_monitor_clears_tiling_overlay() {
     // Monitor has zero tiling windows and zero containers, so the overlay
     // must be hidden.
     assert!(matches!(
-        env.tiling_overlay_state(),
+        env.snapshot().tiling[0].state,
         TilingOverlayState::Hidden
     ));
 }

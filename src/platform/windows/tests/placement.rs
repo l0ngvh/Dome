@@ -524,10 +524,11 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
 
     env.moves.lock().unwrap().clear();
     env.run_actions("move monitor right");
+    let snapshot = env.moves.lock().unwrap().clone();
     env.settle(10);
 
     assert!(
-        env.moves.lock().unwrap().iter().any(|(id, ..)| *id == w1),
+        snapshot.iter().any(|(id, ..)| *id == w1),
         "cross-monitor float move should trigger set_position"
     );
     // Both monitors are scale 1.0, so border inset is identical and content
@@ -582,10 +583,11 @@ fn float_move_monitor_different_dpi_rescales_border() {
     let border = Length::new(env.config.border_size);
     env.moves.lock().unwrap().clear();
     env.run_actions("move monitor right");
+    let snapshot = env.moves.lock().unwrap().clone();
     env.settle(10);
 
     assert!(
-        env.moves.lock().unwrap().iter().any(|(id, ..)| *id == w1),
+        snapshot.iter().any(|(id, ..)| *id == w1),
         "cross-monitor float move should trigger set_position"
     );
 
@@ -593,11 +595,12 @@ fn float_move_monitor_different_dpi_rescales_border() {
     // monitor at scale 2.0, physical_border = border * 2.0. The content rect
     // is apply_inset(outer, border * 2.0) which differs from the original
     // apply_inset(outer, border * 1.0).
+    let scaled_border = border * 2.0;
     let d = env.dim(w1);
-    assert_eq!(d.x, (Length::new(100.0) + border).round());
-    assert_eq!(d.y, (Length::new(100.0) + border).round());
-    assert_eq!(d.width, (Length::new(400.0) - 2.0 * border).round());
-    assert_eq!(d.height, (Length::new(300.0) - 2.0 * border).round());
+    assert_eq!(d.x, (Length::new(100.0) + scaled_border).round());
+    assert_eq!(d.y, (Length::new(100.0) + scaled_border).round());
+    assert_eq!(d.width, (Length::new(400.0) - 2.0 * scaled_border).round());
+    assert_eq!(d.height, (Length::new(300.0) - 2.0 * scaled_border).round());
 }
 
 #[test]
@@ -688,11 +691,15 @@ fn float_drift_repositions_overlay() {
         Length::new(400.0) + 2.0 * border,
         Length::new(250.0) + 2.0 * border,
     );
-    let FloatOverlayState::Visible { visible_frame, .. } = env.float_overlay_state() else {
-        panic!(
-            "float overlay must be visible after drag, got {:?}",
-            env.float_overlay_state()
-        );
+    let state = env
+        .snapshot()
+        .floats
+        .iter()
+        .find(|f| f.state.is_visible())
+        .map(|f| f.state)
+        .unwrap_or(FloatOverlayState::Hidden);
+    let FloatOverlayState::Visible { visible_frame, .. } = state else {
+        panic!("float overlay must be visible after drag, got {:?}", state);
     };
     assert_eq!(
         visible_frame, expected_outer,
@@ -747,14 +754,27 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
     env.window_moved(w1, dim(500, 300, 400, 250), 1);
 
     // Snapshot the float overlay state after the first update (from window_drifted)
-    let after_drift = env.float_overlay_state();
+    let after_drift = env
+        .snapshot()
+        .floats
+        .iter()
+        .find(|f| f.state.is_visible())
+        .map(|f| f.state)
+        .unwrap_or(FloatOverlayState::Hidden);
 
     // show_float's settled branch must remain a no-op
     env.dome.apply_layout();
     env.settle(10);
 
+    let after_settle = env
+        .snapshot()
+        .floats
+        .iter()
+        .find(|f| f.state.is_visible())
+        .map(|f| f.state)
+        .unwrap_or(FloatOverlayState::Hidden);
     assert_eq!(
-        env.float_overlay_state(),
+        after_settle,
         after_drift,
         "apply_layout after drift must not re-update the overlay (settled short-circuit)"
     );
