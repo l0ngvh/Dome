@@ -267,10 +267,7 @@ fn show_float_places_at_125pct() {
     env.run_actions("toggle float");
     env.settle(10);
 
-    // Clear moves to baseline
-    env.moves.lock().unwrap().clear();
-
-    env.window_moved(w1, dim(200, 150, 600, 400), 1);
+    env.set_dim(w1, dim(200, 150, 600, 400));
     // Drive the next placement cycle
     env.dome.apply_layout();
     env.settle(10);

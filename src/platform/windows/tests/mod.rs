@@ -358,20 +358,16 @@ impl TestEnv {
                 // never sees an iconic observation.
                 continue;
             }
-            if let Some(id) = self.dome.registry_get_id(hwnd_id) {
-                self.dome.window_moved(id, dim, 1, Instant::now());
-            }
+            self.dome
+                .handle_window_moved(hwnd_id, dim, 1, Instant::now());
         }
         self.dome.apply_layout();
         true
     }
 
     fn window_moved(&mut self, id: HwndId, dim: Dimension, monitor: isize) {
-        if let Some(window_id) = self.dome.registry_get_id(id) {
-            self.dome
-                .window_moved(window_id, dim, monitor, Instant::now());
-            self.dome.apply_layout();
-        }
+        self.dome
+            .handle_window_moved(id, dim, monitor, Instant::now());
     }
 
     fn window_moved_at(
@@ -381,10 +377,8 @@ impl TestEnv {
         monitor: isize,
         observed_at: Instant,
     ) {
-        if let Some(window_id) = self.dome.registry_get_id(id) {
-            self.dome.window_moved(window_id, dim, monitor, observed_at);
-            self.dome.apply_layout();
-        }
+        self.dome
+            .handle_window_moved(id, dim, monitor, observed_at);
     }
 
     /// Configure a window to resist repositioning and report it at `pos`.
@@ -442,6 +436,7 @@ impl TestEnv {
 
     fn set_dim(&self, hwnd: HwndId, dim: Dimension) {
         *self.mock(hwnd).dimension.lock().unwrap() = dim;
+        self.moves.lock().unwrap().push((hwnd, dim));
     }
 
     fn is_minimized(&self, hwnd: HwndId) -> bool {

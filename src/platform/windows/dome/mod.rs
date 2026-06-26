@@ -322,14 +322,6 @@ impl Dome {
         to_refresh
     }
 
-    pub(super) fn registry_contains_hwnd(&self, id: HwndId) -> bool {
-        self.registry.contains_hwnd(id)
-    }
-
-    pub(super) fn registry_get_id(&self, id: HwndId) -> Option<WindowId> {
-        self.registry.get_id(id)
-    }
-
     pub(super) fn ignore_rules(&self) -> &[crate::config::WindowsWindow] {
         &self.config.windows.ignore
     }
@@ -414,6 +406,17 @@ impl Dome {
                 to_frame(max_h),
             );
         }
+    }
+
+    pub(super) fn set_constraints_for(
+        &mut self,
+        hwnd_id: HwndId,
+        constraints: (f32, f32, f32, f32),
+    ) {
+        let Some(id) = self.registry.get_id(hwnd_id) else {
+            return;
+        };
+        self.set_constraints(id, constraints);
     }
 
     #[tracing::instrument(

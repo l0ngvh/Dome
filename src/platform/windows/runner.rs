@@ -135,20 +135,14 @@ impl Runner {
                 }
             }
             HubEvent::WindowTitleChanged(hwnd_id) => {
-                if self.dome.registry_contains_hwnd(hwnd_id) {
-                    let inspect: Arc<dyn InspectExternalWindow> =
-                        Arc::new(ExternalHwnd::new(hwnd_id.into()));
-                    self.dispatcher.dispatch(
-                        move || inspect.get_window_title(),
-                        move |title, runner| {
-                            if runner.dome.registry_contains_hwnd(hwnd_id) {
-                                runner.dome.update_titles(vec![(hwnd_id, title)]);
-                            }
-                        },
-                    );
-                } else {
-                    self.dispatch_window_created(hwnd_id);
-                }
+                let inspect: Arc<dyn InspectExternalWindow> =
+                    Arc::new(ExternalHwnd::new(hwnd_id.into()));
+                self.dispatcher.dispatch(
+                    move || inspect.get_window_title(),
+                    move |title, runner| {
+                        runner.dome.update_titles(vec![(hwnd_id, title)]);
+                    },
+                );
             }
             HubEvent::Action(a) => {
                 self.handle_actions(&a);
@@ -321,17 +315,11 @@ impl Runner {
     }
 
     fn dispatch_constraint_read(&mut self, hwnd_id: HwndId) {
-        let Some(id) = self.dome.registry_get_id(hwnd_id) else {
-            return;
-        };
         let inspect: Arc<dyn InspectExternalWindow> = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         self.dispatcher.dispatch(
             move || inspect.get_size_constraints(),
             move |constraints, runner| {
-                if runner.dome.registry_get_id(hwnd_id) != Some(id) {
-                    return;
-                }
-                runner.dome.set_constraints(id, constraints);
+                runner.dome.set_constraints_for(hwnd_id, constraints);
                 runner.dome.apply_layout();
             },
         );

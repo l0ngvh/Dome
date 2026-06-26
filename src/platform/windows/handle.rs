@@ -428,6 +428,8 @@ impl ManageExternalWindow for ExternalHwnd {
 
 impl InspectExternalWindow for ExternalHwnd {
     fn check_unmanageable(&self) -> Option<RejectionReason> {
+        // We don't check for empty title here, as most some text editor apps open windows with
+        // empty title for untitled documents
         let hwnd = self.0;
         if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
             return Some(RejectionReason::NotVisible);
