@@ -49,9 +49,9 @@ impl OwnedHwnd {
     /// `WS_EX_NOREDIRECTIONBITMAP` is force-OR'd in because every Dome overlay
     /// uses DirectComposition and must suppress the GDI redirection bitmap.
     /// Click-through (`WS_EX_LAYERED | WS_EX_TRANSPARENT`) is per-call: only
-    /// the tiling overlay opts in. Force-OR'ing it here would silently route
-    /// pointer events past the picker (which needs keyboard and mouse) and
-    /// the float overlay (which sits inside its window's pointer band).
+    /// the tiling overlay and float overlay opt in. Force-OR'ing it here would
+    /// silently route pointer events past the picker (which needs keyboard and
+    /// mouse) and tab bars (which handle clicks).
     pub(super) fn new(
         class: PCWSTR,
         ex_style: WINDOW_EX_STYLE,
@@ -711,7 +711,7 @@ impl FloatOverlay {
     ) -> anyhow::Result<Box<Self>> {
         let window = OwnedHwnd::new(
             FLOAT_OVERLAY_CLASS,
-            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT,
             x,
             y,
             width_phys,
