@@ -82,15 +82,7 @@ struct FloatOverlayShared {
 
 // ── Snapshot types ──
 
-/// Owned snapshot of the overlay layer. Tests assert on this, not on live
-/// per-window/per-monitor handles.
-#[derive(Clone, Debug)]
-struct OverlaySnapshot {
-    tiling: Vec<TilingOverlaySnapshot>,
-    floats: Vec<FloatOverlaySnapshot>,
-    tab_bars: HashMap<ContainerId, TabBarUpdate>,
-    picker: Option<PickerSnapshot>,
-}
+
 
 #[derive(Clone, Debug)]
 struct TilingOverlaySnapshot {
@@ -110,14 +102,7 @@ struct FloatOverlaySnapshot {
     font: FontConfig,
 }
 
-#[derive(Clone, Debug)]
-struct PickerSnapshot {
-    visible: bool,
-    entries: Vec<PickerEntry>,
-    flavor: Flavor,
-    font: FontConfig,
-    loaded_icons: HashSet<String>,
-}
+
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
 const SCREEN_HEIGHT: Length = Length::new(1080.0);
@@ -516,10 +501,9 @@ impl TestEnv {
         *self.focus_target.lock().unwrap()
     }
 
-    fn snapshot(&self) -> OverlaySnapshot {
+    fn tiling_overlays(&self) -> Vec<TilingOverlaySnapshot> {
         let o = self.overlays.borrow();
-        let tiling = o
-            .tiling_overlays
+        o.tiling_overlays
             .values()
             .map(|ov| TilingOverlaySnapshot {
                 overlay_id: ov.overlay_id,
@@ -528,9 +512,12 @@ impl TestEnv {
                 flavor: ov.flavor(),
                 font: ov.font(),
             })
-            .collect();
-        let floats = o
-            .float_overlays
+            .collect()
+    }
+
+    fn float_overlays(&self) -> Vec<FloatOverlaySnapshot> {
+        let o = self.overlays.borrow();
+        o.float_overlays
             .iter()
             .filter(|(_, shared)| !shared.stale.get())
             .map(|(&window_id, shared)| FloatOverlaySnapshot {
@@ -540,33 +527,16 @@ impl TestEnv {
                 flavor: shared.flavor.get(),
                 font: shared.font.borrow().clone(),
             })
-            .collect();
-        let tab_bars = o
-            .tab_bars
+            .collect()
+    }
+
+    fn tab_bars(&self) -> Vec<(ContainerId, TabBarUpdate)> {
+        let o = self.overlays.borrow();
+        o.tab_bars
             .borrow()
             .iter()
             .filter_map(|(cid, tb)| tb.last_update().map(|update| (*cid, update)))
-            .collect();
-        let picker = {
-            let p = self.picker.borrow();
-            if p.visible.get() {
-                Some(PickerSnapshot {
-                    visible: true,
-                    entries: p.entries.borrow().clone(),
-                    flavor: p.flavor.get(),
-                    font: p.font.borrow().clone(),
-                    loaded_icons: p.loaded_icons.borrow().clone(),
-                })
-            } else {
-                None
-            }
-        };
-        OverlaySnapshot {
-            tiling,
-            floats,
-            tab_bars,
-            picker,
-        }
+            .collect()
     }
 
     fn picker_flavor(&self) -> Flavor {

@@ -43,9 +43,9 @@ fn config_reload_dispatches_apply_theme_on_flavor_change() {
     // Sanity: both overlays and picker start at the default Mocha flavor.
     // w2 is the floated window; w1 is tiling (no float overlay). Only w2
     // has a float overlay entry.
-    let snap = env.snapshot();
-    assert_eq!(snap.tiling[0].flavor, crate::theme::Flavor::Mocha);
-    for f in &snap.floats {
+    let tiling = env.tiling_overlays();
+    assert_eq!(tiling[0].flavor, crate::theme::Flavor::Mocha);
+    for f in &env.float_overlays() {
         assert_eq!(f.flavor, crate::theme::Flavor::Mocha);
     }
     assert_eq!(env.picker_flavor(), crate::theme::Flavor::Mocha);
@@ -55,9 +55,9 @@ fn config_reload_dispatches_apply_theme_on_flavor_change() {
     env.dome.config_changed(new_config);
 
     // After a flavor change, both overlays and picker must end up holding Latte.
-    let snap = env.snapshot();
-    assert_eq!(snap.tiling[0].flavor, crate::theme::Flavor::Latte);
-    for f in &snap.floats {
+    let tiling = env.tiling_overlays();
+    assert_eq!(tiling[0].flavor, crate::theme::Flavor::Latte);
+    for f in &env.float_overlays() {
         assert_eq!(f.flavor, crate::theme::Flavor::Latte);
     }
     assert_eq!(env.picker_flavor(), crate::theme::Flavor::Latte);
@@ -76,9 +76,9 @@ fn config_reload_dispatches_apply_font_on_font_change() {
         family: None,
     };
     // Sanity: overlays start at the default font (different from `new_font`).
-    let snap = env.snapshot();
-    assert_ne!(snap.tiling[0].font, new_font);
-    for f in &snap.floats {
+    let tiling = env.tiling_overlays();
+    assert_ne!(tiling[0].font, new_font);
+    for f in &env.float_overlays() {
         assert_ne!(f.font, new_font);
     }
 
@@ -87,9 +87,9 @@ fn config_reload_dispatches_apply_font_on_font_change() {
     env.dome.config_changed(new_config);
 
     // After a font change, both overlays must hold the new font.
-    let snap = env.snapshot();
-    assert_eq!(snap.tiling[0].font, new_font);
-    for f in &snap.floats {
+    let tiling = env.tiling_overlays();
+    assert_eq!(tiling[0].font, new_font);
+    for f in &env.float_overlays() {
         assert_eq!(f.font, new_font);
     }
 }
