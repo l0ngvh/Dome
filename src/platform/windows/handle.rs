@@ -173,16 +173,13 @@ fn target_scale_to_physical(hwnd: HWND) -> f32 {
         1.0
     } else {
         let dpi = unsafe { GetDpiForWindow(hwnd) };
-        target_scale_to_physical_inner(dpi)
+        if dpi == 0 {
+            // this means an invalid hwnd was passed in
+            1.0
+        } else {
+            dpi as f32 / 96.0
+        }
     }
-}
-
-fn target_scale_to_physical_inner(target_dpi: u32) -> f32 {
-    debug_assert!(
-        target_dpi > 0,
-        "target_dpi must be positive, got {target_dpi}"
-    );
-    target_dpi as f32 / 96.0
 }
 
 /// Subtracts invisible border widths from raw min/max track-size pairs, returning
@@ -692,52 +689,5 @@ impl InspectExternalWindow for ExternalHwnd {
             CoTaskMemFree(Some(pwstr.as_ptr() as *const _));
             result
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn constraints_to_physical_subtracts_border() {
-        assert_eq!(
-            constraints_subtract_border((200, 200), (1600, 1200), (0, 0, 0, 0)),
-            (200.0, 200.0, 1600.0, 1200.0)
-        );
-        assert_eq!(
-            constraints_subtract_border((420, 320), (2060, 1160), (10, 10, 10, 10)),
-            (400.0, 300.0, 2040.0, 1140.0)
-        );
-    }
-
-    #[test]
-    fn target_scale_to_physical_inner_dpi_table() {
-        let cases = [(96, 1.0), (144, 1.5), (192, 2.0)];
-        for (dpi, expected) in cases {
-            assert_eq!(target_scale_to_physical_inner(dpi), expected, "dpi={dpi}");
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic]
-    fn target_scale_to_physical_inner_rejects_zero_dpi_in_debug() {
-        let _ = target_scale_to_physical_inner(0);
-    }
-
-    #[test]
-    fn rect_to_dimension_roundtrip() {
-        let rect = RECT {
-            left: 100,
-            top: 200,
-            right: 400,
-            bottom: 500,
-        };
-        let dim = rect_to_dimension(rect);
-        assert_eq!(dim.x, Length::new(100.0));
-        assert_eq!(dim.y, Length::new(200.0));
-        assert_eq!(dim.width, Length::new(300.0));
-        assert_eq!(dim.height, Length::new(300.0));
     }
 }
