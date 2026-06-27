@@ -1,56 +1,124 @@
 use std::env;
+use std::fs;
+use std::path::PathBuf;
 
-const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-const VALUE_NAME: &str = "Dome";
+use windows::core::{HSTRING, Interface, PCWSTR};
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoInitializeEx,
+                                  COINIT_APARTMENTTHREADED, IPersistFile};
+use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
-/// Registers or unregisters Dome in the Windows Registry `HKCU\...\Run` key
-/// so it starts (or stops starting) at login.
+const LINK_NAME: &str = "Dome.lnk";
+
+/// Places or removes a shortcut in the Startup folder
+/// (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`)
+/// so Dome starts (or stops starting) at login.
 ///
 /// Best-effort: errors are logged but not propagated — failing to register
 /// a login item should never prevent Dome from running.
 pub(super) fn sync_login_item(enabled: bool) {
-    if enabled {
-        let exe_path = match env::current_exe() {
-            Ok(p) => {
-                let s = p.to_string_lossy();
-                // Same dev-build guard as macOS: don't register a cargo build artifact.
-                if s.contains(r"\target\debug\") || s.contains(r"\target\release\") {
-                    tracing::warn!("start_at_login ignored: running from a development build");
-                    return;
-                }
-                s.into_owned()
-            }
-            Err(e) => {
-                tracing::warn!("Cannot determine executable path for login item: {e}");
-                return;
-            }
-        };
+    let startup_dir = match startup_folder() {
+        Some(d) => d,
+        None => {
+            tracing::warn!("Cannot determine Startup folder (APPDATA not set)");
+            return;
+        }
+    };
+    let shortcut_path = startup_dir.join(LINK_NAME);
 
-        let key = match windows_registry::CURRENT_USER.create(RUN_KEY) {
-            Ok(k) => k,
-            Err(e) => {
-                tracing::warn!("Failed to open registry Run key: {e}");
-                return;
-            }
+    if enabled {
+        let exe_path = match current_exe_abs() {
+            Some(p) => p,
+            None => return,
         };
-        // Quoted path + "launch" subcommand, matching the macOS LaunchAgent ProgramArguments.
-        if let Err(e) = key.set_string(VALUE_NAME, format!("\"{exe_path}\" launch")) {
-            tracing::warn!("Failed to set registry login item: {e}");
-        }
+        create_shortcut(&exe_path, &shortcut_path);
     } else {
-        let key = match windows_registry::CURRENT_USER.open(RUN_KEY) {
-            Ok(k) => k,
-            Err(_) => return, // Key doesn't exist, nothing to remove
-        };
-        match key.remove_value(VALUE_NAME) {
+        match fs::remove_file(&shortcut_path) {
             Ok(()) => {}
-            Err(e) => {
-                // Named constant for the HRESULT so the magic number is documented.
-                const FILE_NOT_FOUND: i32 = 0x80070002_u32 as i32;
-                if e.code().0 != FILE_NOT_FOUND {
-                    tracing::warn!("Failed to remove registry login item: {e}");
-                }
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!("Failed to remove startup shortcut: {e}"),
         }
+    }
+}
+
+fn startup_folder() -> Option<PathBuf> {
+    let appdata = env::var("APPDATA").ok()?;
+    Some(PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs\Startup"))
+}
+
+fn current_exe_abs() -> Option<String> {
+    let p = match env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("Cannot determine executable path for login item: {e}");
+            return None;
+        }
+    };
+    let s = p.to_string_lossy();
+    if s.contains(r"\target\debug\") || s.contains(r"\target\release\") {
+        tracing::warn!("start_at_login ignored: running from a development build");
+        return None;
+    }
+    Some(s.into_owned())
+}
+
+fn create_shortcut(exe_path: &str, shortcut_path: &std::path::Path) {
+    // COM may not be initialised on this thread (e.g. config-watcher callback).
+    // Safe to call when already initialised with the same model.
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+
+    let shell_link: IShellLinkW = match unsafe {
+        CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+    } {
+        Ok(sl) => sl,
+        Err(e) => {
+            tracing::warn!("Failed to create ShellLink COM object: {e}");
+            return;
+        }
+    };
+
+    let exe_hs = HSTRING::from(exe_path);
+    if let Err(e) = unsafe { shell_link.SetPath(PCWSTR(exe_hs.as_ptr())) } {
+        tracing::warn!("Failed to set shortcut target path: {e}");
+        return;
+    }
+
+    let args_hs = HSTRING::from("launch");
+    if let Err(e) = unsafe { shell_link.SetArguments(PCWSTR(args_hs.as_ptr())) } {
+        tracing::warn!("Failed to set shortcut arguments: {e}");
+        return;
+    }
+
+    let desc_hs = HSTRING::from("Dome");
+    if let Err(e) = unsafe { shell_link.SetDescription(PCWSTR(desc_hs.as_ptr())) } {
+        tracing::warn!("Failed to set shortcut description: {e}");
+        return;
+    }
+
+    if let Some(parent) = std::path::Path::new(exe_path).parent() {
+        let wd_hs = HSTRING::from(parent.to_string_lossy().as_ref());
+        if let Err(e) = unsafe { shell_link.SetWorkingDirectory(PCWSTR(wd_hs.as_ptr())) } {
+            tracing::warn!("Failed to set shortcut working directory: {e}");
+            return;
+        }
+    }
+
+    let persist_file: IPersistFile = match shell_link.cast() {
+        Ok(pf) => pf,
+        Err(e) => {
+            tracing::warn!("Failed to query IPersistFile from IShellLink: {e}");
+            return;
+        }
+    };
+
+    if let Some(parent) = shortcut_path.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        tracing::warn!("Failed to create Startup folder: {e}");
+        return;
+    }
+
+    let path_hs = HSTRING::from(shortcut_path.to_string_lossy().as_ref());
+    if let Err(e) = unsafe { persist_file.Save(PCWSTR(path_hs.as_ptr()), true) } {
+        tracing::warn!("Failed to save startup shortcut: {e}");
     }
 }
