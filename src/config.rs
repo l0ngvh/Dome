@@ -8,7 +8,7 @@ use std::str::FromStr;
 use crate::action::{
     Action, Actions, FocusTarget, MonitorTarget, MoveTarget, TabDirection, ToggleTarget,
 };
-use crate::core::{Length, Logical, Unit};
+use crate::core::{Dimension, Length, Logical, Unit};
 use crate::font::{
     FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_subtext_size, default_text_size,
 };
@@ -461,6 +461,7 @@ fn default_windows() -> WindowsConfig {
 impl WalkRecover for LayoutConfig {
     fn walk(w: &mut Walker) -> Self {
         let strategy = w.field("strategy", default_strategy());
+        let gaps = w.nested::<GapsConfig>("gaps");
         let partition_tree = w.nested::<PartitionTreeConfig>("partition_tree");
         let master = w.nested::<MasterConfig>("master");
         let min_width = w.field("min_width", SizeConstraint::default_min());
@@ -471,6 +472,7 @@ impl WalkRecover for LayoutConfig {
         let workspace = dedup_workspace_overrides(raw, &w.prefix);
         LayoutConfig {
             strategy,
+            gaps,
             partition_tree,
             master,
             min_width,
@@ -478,6 +480,35 @@ impl WalkRecover for LayoutConfig {
             max_width,
             max_height,
             workspace,
+        }
+    }
+}
+
+impl WalkRecover for GapsConfig {
+    fn walk(w: &mut Walker) -> Self {
+        GapsConfig {
+            inner: w.nested::<InnerGaps>("inner"),
+            outer: w.nested::<OuterGaps>("outer"),
+        }
+    }
+}
+
+impl WalkRecover for InnerGaps {
+    fn walk(w: &mut Walker) -> Self {
+        InnerGaps {
+            horizontal: w.field("horizontal", Length::ZERO),
+            vertical: w.field("vertical", Length::ZERO),
+        }
+    }
+}
+
+impl WalkRecover for OuterGaps {
+    fn walk(w: &mut Walker) -> Self {
+        OuterGaps {
+            top: w.field("top", Length::ZERO),
+            right: w.field("right", Length::ZERO),
+            bottom: w.field("bottom", Length::ZERO),
+            left: w.field("left", Length::ZERO),
         }
     }
 }
@@ -836,6 +867,8 @@ impl WalkRule for MasterWorkspaceConfig {
 pub(crate) struct LayoutConfig {
     #[serde(default = "default_strategy")]
     pub(crate) strategy: Strategy,
+    #[serde(default)]
+    pub(crate) gaps: GapsConfig,
     #[serde(default = "default_partition_tree_config")]
     pub(crate) partition_tree: PartitionTreeConfig,
     #[serde(default = "default_master_config")]
@@ -850,6 +883,79 @@ pub(crate) struct LayoutConfig {
     pub(crate) max_height: SizeConstraint,
     #[serde(default)]
     pub(crate) workspace: Vec<LayoutWorkspaceConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+pub(crate) struct GapsConfig {
+    #[serde(default)]
+    pub(crate) inner: InnerGaps,
+    #[serde(default)]
+    pub(crate) outer: OuterGaps,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+pub(crate) struct InnerGaps {
+    #[serde(default)]
+    pub(crate) horizontal: Length<Logical>,
+    #[serde(default)]
+    pub(crate) vertical: Length<Logical>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+pub(crate) struct OuterGaps {
+    #[serde(default)]
+    pub(crate) top: Length<Logical>,
+    #[serde(default)]
+    pub(crate) right: Length<Logical>,
+    #[serde(default)]
+    pub(crate) bottom: Length<Logical>,
+    #[serde(default)]
+    pub(crate) left: Length<Logical>,
+}
+
+impl Default for GapsConfig {
+    fn default() -> Self {
+        Self {
+            inner: InnerGaps::default(),
+            outer: OuterGaps::default(),
+        }
+    }
+}
+
+impl Default for InnerGaps {
+    fn default() -> Self {
+        Self {
+            horizontal: Length::ZERO,
+            vertical: Length::ZERO,
+        }
+    }
+}
+
+impl Default for OuterGaps {
+    fn default() -> Self {
+        Self {
+            top: Length::ZERO,
+            right: Length::ZERO,
+            bottom: Length::ZERO,
+            left: Length::ZERO,
+        }
+    }
+}
+
+impl OuterGaps {
+    pub(crate) fn apply_to(self, dim: Dimension<Unit>, scale: f32) -> Dimension<Unit> {
+        let top = self.top.to_unit(scale);
+        let right = self.right.to_unit(scale);
+        let bottom = self.bottom.to_unit(scale);
+        let left = self.left.to_unit(scale);
+
+        Dimension::new(
+            dim.x + left,
+            dim.y + top,
+            (dim.width - left - right).max(Length::ZERO),
+            (dim.height - top - bottom).max(Length::ZERO),
+        )
+    }
 }
 
 fn default_strategy() -> Strategy {
@@ -935,6 +1041,7 @@ impl Default for LayoutConfig {
     fn default() -> Self {
         Self {
             strategy: default_strategy(),
+            gaps: GapsConfig::default(),
             partition_tree: default_partition_tree_config(),
             master: default_master_config(),
             min_width: SizeConstraint::default_min(),
@@ -954,6 +1061,18 @@ impl LayoutConfig {
     }
 
     fn validate(&self) -> anyhow::Result<()> {
+        for (name, value) in [
+            ("gaps.inner.horizontal", self.gaps.inner.horizontal),
+            ("gaps.inner.vertical", self.gaps.inner.vertical),
+            ("gaps.outer.top", self.gaps.outer.top),
+            ("gaps.outer.right", self.gaps.outer.right),
+            ("gaps.outer.bottom", self.gaps.outer.bottom),
+            ("gaps.outer.left", self.gaps.outer.left),
+        ] {
+            if value.logical() < 0.0 {
+                anyhow::bail!("{name} ({value}) cannot be negative");
+            }
+        }
         // Validation compares config values in logical space directly. No scale
         // factor exists at validation time, so `.logical()` is the correct escape
         // hatch here (not `to_unit`).
@@ -1941,6 +2060,32 @@ mod tests {
     }
 
     #[test]
+    fn gaps_config_parses_fields() {
+        let layout: LayoutConfig = toml::from_str(concat!(
+            "[gaps]\n",
+            "inner.horizontal = 8.0\n",
+            "inner.vertical = 12.0\n",
+            "outer.top = 32.0\n",
+            "outer.right = 4.0\n",
+            "outer.bottom = 8.0\n",
+            "outer.left = 2.0\n",
+        ))
+        .unwrap();
+        assert_eq!(layout.gaps.inner.horizontal.logical(), 8.0);
+        assert_eq!(layout.gaps.inner.vertical.logical(), 12.0);
+        assert_eq!(layout.gaps.outer.top.logical(), 32.0);
+        assert_eq!(layout.gaps.outer.right.logical(), 4.0);
+        assert_eq!(layout.gaps.outer.bottom.logical(), 8.0);
+        assert_eq!(layout.gaps.outer.left.logical(), 2.0);
+    }
+
+    #[test]
+    fn gaps_config_defaults() {
+        let layout: LayoutConfig = toml::from_str("").unwrap();
+        assert_eq!(layout.gaps, GapsConfig::default());
+    }
+
+    #[test]
     fn layout_defaults_to_partition_tree() {
         let layout: LayoutConfig = toml::from_str("").unwrap();
         assert_eq!(layout.strategy, Strategy::PartitionTree);
@@ -2514,6 +2659,10 @@ mod tests {
             concat!(
                 "strategy = \"master\"\n",
                 "\n",
+                "[gaps]\n",
+                "inner.horizontal = 8.0\n",
+                "outer.top = 12.0\n",
+                "\n",
                 "[partition_tree]\n",
                 "tab_bar_height = 32.0\n",
                 "\n",
@@ -2526,6 +2675,8 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let layout = LayoutConfig::load(path.to_str().unwrap()).unwrap();
         assert_eq!(layout.strategy, Strategy::Master);
+        assert_eq!(layout.gaps.inner.horizontal.logical(), 8.0);
+        assert_eq!(layout.gaps.outer.top.logical(), 12.0);
         assert_eq!(layout.partition_tree.tab_bar_height.logical(), 32.0);
         assert_eq!(layout.master.master_ratio, 0.6);
         assert_eq!(layout.master.master_count, 2);

@@ -1,10 +1,24 @@
 use super::setup_master;
-use crate::config::{LayoutConfig, MasterConfig, Strategy};
+use crate::config::{GapsConfig, InnerGaps, LayoutConfig, MasterConfig, Strategy};
+use crate::core::hub::{Hub, MonitorLayout};
+use crate::core::node::{Dimension, Length, WindowId};
 use crate::core::strategy::TilingAction;
 use crate::core::tests::default_layout_for_tests;
 use crate::core::tests::default_partition_tree_config_for_tests;
 use crate::core::tests::snapshot;
 use insta::assert_snapshot;
+
+fn tiling_frame(hub: &Hub, id: WindowId) -> Dimension {
+    let placements = hub.get_visible_placements();
+    let MonitorLayout::Normal { tiling_windows, .. } = &placements.monitors[0].layout else {
+        panic!("expected normal layout");
+    };
+    tiling_windows
+        .iter()
+        .find(|p| p.id == id)
+        .unwrap_or_else(|| panic!("missing placement for {id:?}"))
+        .frame
+}
 
 #[test]
 fn min_height_master_pane_overflows_and_scrolls_to_focus() {
@@ -66,6 +80,39 @@ fn min_height_master_pane_overflows_and_scrolls_to_focus() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
+}
+
+#[test]
+fn vertical_gaps_contribute_to_master_scroll_extent() {
+    let mut hub = setup_master();
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        gaps: GapsConfig {
+            inner: InnerGaps {
+                horizontal: Length::ZERO,
+                vertical: Length::new(5.0),
+            },
+            ..GapsConfig::default()
+        },
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.5,
+            master_count: 4,
+            workspace: vec![],
+        },
+        ..default_layout_for_tests()
+    });
+    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace());
+    let w2 = hub.insert_tiling(hub.current_workspace());
+    let w3 = hub.insert_tiling(hub.current_workspace());
+    for id in [w0, w1, w2, w3] {
+        hub.set_window_constraint(id, None, Some(10.0), None, None);
+    }
+
+    let focused = tiling_frame(&hub, w3);
+    assert_eq!(focused.y, Length::new(20.0));
+    assert_eq!(focused.y + focused.height, Length::new(30.0));
 }
 
 #[test]

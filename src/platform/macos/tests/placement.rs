@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::{GapsConfig, OuterGaps};
 
 #[test]
 fn single_window_placed_in_view() {
@@ -11,6 +12,30 @@ fn single_window_placed_in_view() {
 
     assert!(!macos.is_offscreen(cg1));
     assert_eq!(macos.window_frame(cg1), (4, 4, 1912, 1072));
+}
+
+#[test]
+fn outer_gaps_shrink_normal_tiled_work_area() {
+    let mut macos = MacOS::new();
+    let layout = LayoutConfig {
+        gaps: GapsConfig {
+            outer: OuterGaps {
+                top: Length::new(32.0),
+                right: Length::new(20.0),
+                bottom: Length::new(40.0),
+                left: Length::new(10.0),
+            },
+            ..GapsConfig::default()
+        },
+        ..LayoutConfig::default()
+    };
+    let mut dome = macos.setup_dome_with_layout(layout);
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(cg1), (14, 36, 1882, 1000));
 }
 
 #[test]

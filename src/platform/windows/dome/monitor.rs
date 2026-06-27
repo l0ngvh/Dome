@@ -9,6 +9,7 @@ use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotific
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MONITORINFOF_PRIMARY};
 use windows::core::BOOL;
 
+use crate::config::OuterGaps;
 use crate::core::{Dimension, Hub, Length, MonitorId, Physical, WindowId};
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
@@ -173,7 +174,12 @@ impl MonitorRegistry {
     /// Adds new monitors, removes stale ones, and updates dimensions/scales
     /// for monitors that changed. Returns the set of added and removed IDs
     /// so the caller can drive overlay creation/destruction.
-    pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) -> MonitorChange {
+    pub(super) fn reconcile(
+        &mut self,
+        hub: &mut Hub,
+        monitors: &[MonitorInfo],
+        outer_gaps: OuterGaps,
+    ) -> MonitorChange {
         let mut added = Vec::new();
         let mut removed = Vec::new();
 
@@ -182,7 +188,11 @@ impl MonitorRegistry {
         for monitor in monitors {
             let already_tracked = self.monitors.values().any(|m| m.handle == monitor.handle);
             if !already_tracked {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
+                let id = hub.add_monitor(
+                    monitor.name.clone(),
+                    outer_gaps.apply_to(monitor.dimension, monitor.scale),
+                    monitor.scale,
+                );
                 self.insert(monitor.handle, id, monitor.dimension, monitor.scale);
                 added.push(id);
                 tracing::info!(
@@ -236,14 +246,24 @@ impl MonitorRegistry {
                 let ms = self.monitors.get_mut(&id).expect("just checked");
                 ms.dimension = monitor.dimension;
                 ms.scale = monitor.scale;
-                hub.update_monitor(id, monitor.dimension, monitor.scale);
+                hub.update_monitor(
+                    id,
+                    outer_gaps.apply_to(monitor.dimension, monitor.scale),
+                    monitor.scale,
+                );
             }
         }
 
         MonitorChange { added, removed }
     }
 
-    pub(super) fn apply_dpi_change(&mut self, handle: isize, dpi: u32, hub: &mut Hub) {
+    pub(super) fn apply_dpi_change(
+        &mut self,
+        handle: isize,
+        dpi: u32,
+        hub: &mut Hub,
+        outer_gaps: OuterGaps,
+    ) {
         let Some(id) = self.id_for_handle(handle) else {
             tracing::warn!(handle, dpi, "DPI change for unknown monitor handle");
             return;
@@ -258,8 +278,18 @@ impl MonitorRegistry {
             prev
         });
         let dim = self.monitors[&id].dimension;
-        hub.update_monitor(id, dim, scale);
+        hub.update_monitor(id, outer_gaps.apply_to(dim, scale), scale);
         tracing::info!(%id, dpi, scale, ?previous, "Monitor scale updated via DPI change");
+    }
+
+    pub(super) fn update_hub_dimensions(&self, hub: &mut Hub, outer_gaps: OuterGaps) {
+        for monitor in self.monitors.values() {
+            hub.update_monitor(
+                monitor.id,
+                outer_gaps.apply_to(monitor.dimension, monitor.scale),
+                monitor.scale,
+            );
+        }
     }
 }
 

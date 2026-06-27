@@ -129,12 +129,20 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.dimension, 1.0, layout.clone());
+        let mut hub = Hub::new(
+            layout.gaps.outer.apply_to(primary.dimension, 1.0),
+            1.0,
+            layout.clone(),
+        );
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
             if monitor.display_id != primary.display_id {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, 1.0);
+                let id = hub.add_monitor(
+                    monitor.name.clone(),
+                    layout.gaps.outer.apply_to(monitor.dimension, 1.0),
+                    1.0,
+                );
                 monitor_registry.insert(monitor, id);
             }
         }
@@ -302,6 +310,8 @@ impl Dome {
     pub(in crate::platform::macos) fn layout_changed(&mut self, new_layout: LayoutConfig) {
         self.layout = new_layout;
         self.hub.sync_config(self.layout.clone());
+        let monitors = self.monitor_registry.all_monitors();
+        self.update_monitors(&monitors);
         tracing::info!("Layout reloaded");
         self.flush_layout();
     }
