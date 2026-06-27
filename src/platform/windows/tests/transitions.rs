@@ -1,8 +1,7 @@
 use super::*;
 
 fn visible_float_state(env: &TestEnv) -> FloatOverlayState {
-    env.snapshot()
-        .floats
+    env.float_overlays()
         .iter()
         .find(|f| f.state.is_visible())
         .map(|f| f.state)

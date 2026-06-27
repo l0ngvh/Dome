@@ -689,8 +689,7 @@ fn float_drift_repositions_overlay() {
         Length::new(250.0) + 2.0 * border,
     );
     let state = env
-        .snapshot()
-        .floats
+        .float_overlays()
         .iter()
         .find(|f| f.state.is_visible())
         .map(|f| f.state)
@@ -752,8 +751,7 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
 
     // Snapshot the float overlay state after the first update (from window_drifted)
     let after_drift = env
-        .snapshot()
-        .floats
+        .float_overlays()
         .iter()
         .find(|f| f.state.is_visible())
         .map(|f| f.state)
@@ -764,8 +762,7 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
     env.settle(10);
 
     let after_settle = env
-        .snapshot()
-        .floats
+        .float_overlays()
         .iter()
         .find(|f| f.state.is_visible())
         .map(|f| f.state)

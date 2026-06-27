@@ -24,9 +24,9 @@ fn assert_tiling_above_overlay(env: &TestEnv, tiling: &[HwndId], overlay_id: Hwn
 
 /// Returns the single tiling overlay id from the snapshot.
 fn tiling_overlay_id(env: &TestEnv) -> HwndId {
-    let snap = env.snapshot();
-    assert_eq!(snap.tiling.len(), 1, "expected single tiling overlay");
-    snap.tiling[0].overlay_id
+    let tiling = env.tiling_overlays();
+    assert_eq!(tiling.len(), 1, "expected single tiling overlay");
+    tiling[0].overlay_id
 }
 
 #[test]
@@ -312,9 +312,9 @@ fn float_overlay_sits_directly_below_float_window() {
 
     env.run_actions("toggle float");
 
-    let snap = env.snapshot();
-    let float_overlay = snap
-        .floats
+    let float_overlays = env.float_overlays();
+
+    let float_overlay = float_overlays
         .iter()
         .find(|f| f.state.is_visible())
         .expect("float overlay must be visible after toggle float");
