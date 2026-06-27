@@ -173,16 +173,13 @@ fn target_scale_to_physical(hwnd: HWND) -> f32 {
         1.0
     } else {
         let dpi = unsafe { GetDpiForWindow(hwnd) };
-        target_scale_to_physical_inner(dpi)
+        if dpi == 0 {
+            // this means an invalid hwnd was passed in
+            1.0
+        } else {
+            dpi as f32 / 96.0
+        }
     }
-}
-
-fn target_scale_to_physical_inner(target_dpi: u32) -> f32 {
-    debug_assert!(
-        target_dpi > 0,
-        "target_dpi must be positive, got {target_dpi}"
-    );
-    target_dpi as f32 / 96.0
 }
 
 /// Subtracts invisible border widths from raw min/max track-size pairs, returning
