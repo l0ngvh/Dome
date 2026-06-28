@@ -313,8 +313,8 @@ pub(super) fn hidden_monitor(monitors: &[MonitorInfo]) -> &MonitorInfo {
     monitors
         .iter()
         .max_by_key(|m| {
-            (m.dimension.x + m.dimension.width).value() as i32
-                + (m.dimension.y + m.dimension.height).value() as i32
+            (m.work_area.x + m.work_area.width).value() as i32
+                + (m.work_area.y + m.work_area.height).value() as i32
         })
         .unwrap()
 }
@@ -323,7 +323,7 @@ fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
     // MacOS doesn't allow completely set windows offscreen, so we need to leave at
     // least one pixel left
     // https://nikitabobko.github.io/AeroSpace/guide#emulation-of-virtual-workspaces
-    let d = &hidden_monitor(monitors).dimension;
+    let d = &hidden_monitor(monitors).work_area;
     (
         d.x + d.width - Length::new(1.0),
         d.y + d.height - Length::new(1.0),
@@ -526,7 +526,7 @@ impl Dome {
         // inactive. The workspace is visible again, so transition back to
         // BorderlessFullscreen and drive the OS-side restore.
         let monitor = self.monitor_registry.monitor(monitor_id);
-        let monitor_dim = monitor.dimension();
+        let monitor_dim = monitor.work_area();
         match &mut window.state {
             WindowState::BorderlessMinimized { .. } => {
                 // BorderlessFullscreen windows previously in other workspaces. Restore it
@@ -726,7 +726,19 @@ impl Dome {
                 fp.target = new_placement;
                 let outer_dim =
                     reverse_inset(new_placement, Length::<Unit>::new(self.config.border_size));
-                self.hub.update_float_dimension(window_id, outer_dim);
+                let dim = Dimension::new(
+                    Length::new(new_placement.x as f32),
+                    Length::new(new_placement.y as f32),
+                    Length::new(new_placement.width as f32),
+                    Length::new(new_placement.height as f32),
+                );
+                let monitor_id = self
+                    .monitor_registry
+                    .find_closest_monitor(dim)
+                    .map(|m| m.id)
+                    .unwrap_or_else(|| self.monitor_registry.primary_monitor_id());
+                self.hub
+                    .update_float_dimension(window_id, outer_dim, monitor_id);
             }
             WindowState::BorderlessMinimized { retries } => {
                 tracing::trace!("Previously minimized borderless fullscreen window reappeared");

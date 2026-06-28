@@ -13,7 +13,11 @@ use super::{Dome, RoundedDimension};
 pub(in crate::platform::macos) struct MonitorInfo {
     pub(in crate::platform::macos) display_id: CGDirectDisplayID,
     pub(in crate::platform::macos) name: String,
-    pub(in crate::platform::macos) dimension: Dimension,
+    /// Visible area: `bounds` minus the menu bar and dock insets.
+    pub(in crate::platform::macos) work_area: Dimension,
+    /// Full physical bounds reported by `CGDisplayBounds`, used for monitor
+    /// lookup against raw window coordinates (e.g. borderless fullscreen).
+    pub(in crate::platform::macos) bounds: Dimension,
     pub(in crate::platform::macos) full_height: f32,
     pub(in crate::platform::macos) is_primary: bool,
     /// NSScreen.backingScaleFactor — used for egui render density only.
@@ -26,8 +30,8 @@ impl std::fmt::Display for MonitorInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} (id={}, dim={:?}, scale={})",
-            self.name, self.display_id, self.dimension, self.scale
+            "{} (id={}, work_area={:?}, scale={})",
+            self.name, self.display_id, self.work_area, self.scale
         )
     }
 }
@@ -51,11 +55,17 @@ pub(in crate::platform::macos) fn get_all_monitors(mtm: MainThreadMarker) -> Vec
             MonitorInfo {
                 display_id,
                 name,
-                dimension: Dimension::new(
+                work_area: Dimension::new(
                     Length::new(bounds.origin.x as f32),
                     Length::new((bounds.origin.y + top_inset) as f32),
                     Length::new(bounds.size.width as f32),
                     Length::new((bounds.size.height - top_inset - bottom_inset) as f32),
+                ),
+                bounds: Dimension::new(
+                    Length::new(bounds.origin.x as f32),
+                    Length::new(bounds.origin.y as f32),
+                    Length::new(bounds.size.width as f32),
+                    Length::new(bounds.size.height as f32),
                 ),
                 full_height: bounds.size.height as f32,
                 is_primary: display_id == primary_id,
@@ -85,8 +95,12 @@ pub(in crate::platform::macos) struct Monitor {
 }
 
 impl Monitor {
-    pub(in crate::platform::macos) fn dimension(&self) -> Dimension {
-        self.info.dimension
+    pub(in crate::platform::macos) fn id(&self) -> MonitorId {
+        self.id
+    }
+
+    pub(in crate::platform::macos) fn work_area(&self) -> Dimension {
+        self.info.work_area
     }
 
     /// NSScreen.backingScaleFactor for egui render density. Not the Hub-side
@@ -238,17 +252,23 @@ impl MonitorRegistry {
         self.map.values().map(|e| e.info.clone()).collect()
     }
 
-    pub(super) fn find_monitor_at(&self, x: f32, y: f32) -> Option<&MonitorInfo> {
-        self.map
-            .values()
-            .find(|e| {
-                let d = &e.info.dimension;
-                x >= d.x.value()
-                    && x < (d.x + d.width).value()
-                    && y >= d.y.value()
-                    && y < (d.y + d.height).value()
-            })
-            .map(|e| &e.info)
+    /// Return the `Monitor` whose full display bounds overlap `dim` the most
+    /// (by intersection area). Pure-Rust intersection over the cached
+    /// `MonitorInfo.bounds` -- no CoreGraphics call, so this is safe to
+    /// hit from test contexts where CGS is not initialized.
+    /// Returns `None` when no monitor intersects the dimension.
+    pub(super) fn find_closest_monitor(&self, dim: Dimension) -> Option<&Monitor> {
+        let mut best: Option<(&Monitor, f32)> = None;
+        for monitor in self.map.values() {
+            let area = intersection_area(dim, monitor.info.bounds);
+            if area <= 0.0 {
+                continue;
+            }
+            if best.map(|(_, b)| area > b).unwrap_or(true) {
+                best = Some((monitor, area));
+            }
+        }
+        best.map(|(m, _)| m)
     }
 
     /// macOS scale is always 1.0 (AppKit reports in points), so this returns
@@ -258,9 +278,15 @@ impl MonitorRegistry {
     }
 
     pub(super) fn is_borderless_fullscreen_at(&self, dim: RoundedDimension) -> bool {
-        let monitor = self.find_monitor_at(dim.x as f32, dim.y as f32);
+        let point = Dimension::new(
+            Length::new(dim.x as f32),
+            Length::new(dim.y as f32),
+            Length::new(1.0),
+            Length::new(1.0),
+        );
+        let monitor = self.find_closest_monitor(point);
         monitor.is_some_and(|m| {
-            let mon = &m.dimension;
+            let mon = &m.info.work_area;
             let tolerance = 2;
             (dim.x - mon.x.value() as i32).abs() <= tolerance
                 && (dim.y - mon.y.value() as i32).abs() <= tolerance
@@ -274,10 +300,20 @@ impl MonitorRegistry {
         monitor: &MonitorInfo,
     ) -> Option<(MonitorId, Dimension)> {
         let entry = self.map.get_mut(&monitor.display_id)?;
-        let old_dim = entry.info.dimension;
+        let old_dim = entry.info.work_area;
         entry.info = monitor.clone();
         Some((entry.id, old_dim))
     }
+}
+
+fn intersection_area(a: Dimension, b: Dimension) -> f32 {
+    let x1 = a.x.value().max(b.x.value());
+    let y1 = a.y.value().max(b.y.value());
+    let x2 = (a.x + a.width).value().min((b.x + b.width).value());
+    let y2 = (a.y + a.height).value().min((b.y + b.height).value());
+    let w = (x2 - x1).max(0.0);
+    let h = (y2 - y1).max(0.0);
+    w * h
 }
 
 impl MonitorRegistry {
@@ -289,7 +325,7 @@ impl MonitorRegistry {
         if let Some(new_primary) = monitors.iter().find(|s| s.is_primary) {
             if !self.contains(new_primary.display_id) {
                 self.replace_primary(new_primary);
-                hub.update_monitor(self.primary_monitor_id(), new_primary.dimension, 1.0);
+                hub.update_monitor(self.primary_monitor_id(), new_primary.work_area, 1.0);
             } else {
                 self.set_primary_display_id(new_primary.display_id);
             }
@@ -298,7 +334,7 @@ impl MonitorRegistry {
         // Add new monitors first to prevent exhausting all monitors
         for monitor in monitors {
             if !self.contains(monitor.display_id) {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, 1.0);
+                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
                 self.insert(monitor, id);
                 tracing::info!(%monitor, "Monitor added");
             }
@@ -313,15 +349,15 @@ impl MonitorRegistry {
         // Update monitor info (dimension, scale, etc.)
         for monitor in monitors {
             if let Some((monitor_id, old_dim)) = self.update_monitor(monitor) {
-                if old_dim != monitor.dimension {
+                if old_dim != monitor.work_area {
                     tracing::info!(
                         name = %monitor.name,
                         ?old_dim,
-                        new_dim = ?monitor.dimension,
+                        new_dim = ?monitor.work_area,
                         "Monitor dimension changed"
                     );
                 }
-                hub.update_monitor(monitor_id, monitor.dimension, 1.0);
+                hub.update_monitor(monitor_id, monitor.work_area, 1.0);
             }
         }
     }

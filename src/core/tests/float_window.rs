@@ -1,5 +1,5 @@
 use crate::core::allocator::NodeId;
-use crate::core::node::{Dimension, Length, WindowId};
+use crate::core::node::{Dimension, Length, MonitorId, WindowId};
 use crate::core::tests::{setup, snapshot, titled};
 use insta::assert_snapshot;
 
@@ -801,6 +801,7 @@ fn update_float_dimension_writes_new_dim() {
             Length::new(60.0),
             Length::new(40.0),
         ),
+        MonitorId::new(0),
     );
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
@@ -883,6 +884,7 @@ fn update_float_dimension_preserves_z_order() {
             Length::new(30.0),
             Length::new(20.0),
         ),
+        MonitorId::new(0),
     );
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -938,6 +940,7 @@ fn update_float_dimension_on_tiling_panics() {
             Length::new(30.0),
             Length::new(20.0),
         ),
+        MonitorId::new(0),
     );
 }
 
@@ -964,5 +967,6 @@ fn update_float_dimension_on_unknown_panics() {
             Length::new(30.0),
             Length::new(20.0),
         ),
+        MonitorId::new(0),
     );
 }

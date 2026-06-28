@@ -1,5 +1,7 @@
+use crate::core::allocator::NodeId;
+
 use super::{setup, snapshot, titled};
-use crate::core::node::{Dimension, Length, PickerEntry, WindowRestrictions};
+use crate::core::node::{Dimension, Length, MonitorId, PickerEntry, WindowRestrictions};
 use insta::assert_snapshot;
 
 #[test]
@@ -399,6 +401,7 @@ fn update_float_dimension_on_minimized_panics() {
             Length::new(50.0),
             Length::new(20.0),
         ),
+        MonitorId::new(0),
     );
 }
 

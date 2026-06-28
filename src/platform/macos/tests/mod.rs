@@ -30,7 +30,8 @@ fn default_monitor() -> MonitorInfo {
     MonitorInfo {
         display_id: 1,
         name: "Test".to_string(),
-        dimension: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
+        work_area: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
+        bounds: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
         full_height: SCREEN_HEIGHT.value(),
         is_primary: true,
         scale: 2.0,

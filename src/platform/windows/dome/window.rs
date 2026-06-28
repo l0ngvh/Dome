@@ -686,7 +686,7 @@ impl Dome {
                     .physical_border(resolved, self.config.border_size);
                 let scale = self.monitors.monitor(resolved).scale();
                 let outer_dim = reverse_inset(new_placement, border);
-                self.hub.update_float_dimension(id, outer_dim);
+                self.hub.update_float_dimension(id, outer_dim, resolved);
 
                 // Reposition the float overlay to follow the drag.
                 let hwnd = entry.ext.id();

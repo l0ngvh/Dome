@@ -470,34 +470,40 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     env.move_window_to(w1, dim(200, 150, 600, 400));
     env.settle(10);
 
-    let baseline_dim = env.dim(w1);
-    // At scale 1.0, content rect equals the observed rect (identity round-trip)
-    assert_eq!(
-        baseline_dim,
-        Dimension::new(
-            Length::new(200.0),
-            Length::new(150.0),
-            Length::new(600.0),
-            Length::new(400.0)
-        )
-    );
+    let float_overlays = env.float_overlays();
+    let float_overlay = &float_overlays[0];
+    let FloatOverlayState::Visible {
+        visible_frame: overlay_dim,
+        ..
+    } = float_overlay.state
+    else {
+        panic!("Float invisible");
+    };
+
+    let border = Length::new(env.config.border_size);
+    assert_eq!(overlay_dim.x, Length::new(200.0) - border);
+    assert_eq!(overlay_dim.y, Length::new(150.0) - border);
+    assert_eq!(overlay_dim.width, Length::new(600.0) + 2.0 * border);
+    assert_eq!(overlay_dim.height, Length::new(400.0) + 2.0 * border);
 
     env.moves.lock().unwrap().clear();
-    env.run_actions("move monitor right");
-    let snapshot = env.moves.lock().unwrap().clone();
+    env.move_window_to(w1, dim(2020, 100, 400, 300));
     env.settle(10);
 
-    assert!(
-        snapshot.iter().any(|(id, ..)| *id == w1),
-        "cross-monitor float move should trigger set_position"
-    );
-    // Both monitors are scale 1.0, so border inset is identical and content
-    // rect is preserved byte-for-byte across the workspace move.
-    assert_eq!(
-        env.dim(w1),
-        baseline_dim,
-        "same-DPI move should preserve the content rect byte-for-byte"
-    );
+    let float_overlays = env.float_overlays();
+    let float_overlay = &float_overlays[0];
+    let FloatOverlayState::Visible {
+        visible_frame: overlay_dim,
+        ..
+    } = float_overlay.state
+    else {
+        panic!("Float invisible");
+    };
+
+    assert_eq!(overlay_dim.x, Length::new(2020.0) - border);
+    assert_eq!(overlay_dim.y, Length::new(100.0) - border);
+    assert_eq!(overlay_dim.width, Length::new(400.0) + 2.0 * border);
+    assert_eq!(overlay_dim.height, Length::new(300.0) + 2.0 * border);
 }
 
 #[test]
@@ -543,24 +549,27 @@ fn float_move_monitor_different_dpi_rescales_border() {
     let border = Length::new(env.config.border_size);
     env.moves.lock().unwrap().clear();
     env.move_window_to(w1, dim(2020, 100, 400, 300));
-    let snapshot = env.moves.lock().unwrap().clone();
+
     env.settle(10);
 
-    assert!(
-        snapshot.iter().any(|(id, ..)| *id == w1),
-        "cross-monitor float move should trigger set_position"
-    );
+    let float_overlays = env.float_overlays();
+    let float_overlay = &float_overlays[0];
+    let FloatOverlayState::Visible {
+        visible_frame: overlay_dim,
+        ..
+    } = float_overlay.state
+    else {
+        panic!("Float invisible");
+    };
 
-    // The outer frame is preserved across the workspace move. On the target
-    // monitor at scale 2.0, physical_border = border * 2.0. The content rect
-    // is apply_inset(outer, border * 2.0) which differs from the original
-    // apply_inset(outer, border * 1.0).
+    // On the target monitor at scale 2.0, physical_border = border * 2.0. The content rect is
+    // apply_inset(outer, border * 2.0) which differs from the original apply_inset(outer, border *
+    // 1.0).
     let scaled_border = border * 2.0;
-    let d = env.dim(w1);
-    assert_eq!(d.x, (Length::new(100.0) + scaled_border).round());
-    assert_eq!(d.y, (Length::new(100.0) + scaled_border).round());
-    assert_eq!(d.width, (Length::new(400.0) - 2.0 * scaled_border).round());
-    assert_eq!(d.height, (Length::new(300.0) - 2.0 * scaled_border).round());
+    assert_eq!(overlay_dim.x, Length::new(2020.0) - scaled_border);
+    assert_eq!(overlay_dim.y, Length::new(100.0) - scaled_border);
+    assert_eq!(overlay_dim.width, Length::new(400.0) + 2.0 * scaled_border);
+    assert_eq!(overlay_dim.height, Length::new(300.0) + 2.0 * scaled_border);
 }
 
 #[test]

@@ -155,12 +155,12 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.dimension, 1.0, layout.clone());
+        let mut hub = Hub::new(primary.work_area, 1.0, layout.clone());
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
             if monitor.display_id != primary.display_id {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, 1.0);
+                let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
                 monitor_registry.insert(monitor, id);
             }
         }
@@ -265,7 +265,7 @@ impl Dome {
                         ax_for_recovery,
                         dim.width,
                         dim.height,
-                        self.monitor_registry.primary_monitor().dimension(),
+                        self.monitor_registry.primary_monitor().work_area(),
                     );
                 }
             }
@@ -538,7 +538,7 @@ impl Dome {
         let entries = build_picker_entries(&minimized);
         let focused_monitor = self.hub.focused_monitor();
         let m = self.monitor_registry.monitor(focused_monitor);
-        let monitor_dim = m.dimension();
+        let monitor_dim = m.work_area();
         let scale = m.egui_scale();
         let cocoa_frame = crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa(
             Length::new(self.primary_full_height),

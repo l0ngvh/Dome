@@ -126,7 +126,7 @@ impl Dome {
             MonitorLayout::Fullscreen(window_id) => {
                 self.place_fullscreen_window(*window_id, mp.monitor_id);
                 let monitor = self.monitor_registry.monitor(mp.monitor_id);
-                let dim = monitor.dimension();
+                let dim = monitor.work_area();
                 (
                     MonitorTilingData {
                         monitor_id: mp.monitor_id,
@@ -151,7 +151,7 @@ impl Dome {
                     .monitor_registry
                     .physical_border(mp.monitor_id, Length::new(self.config.border_size));
                 let monitor = self.monitor_registry.monitor(mp.monitor_id);
-                let monitor_dim = monitor.dimension();
+                let monitor_dim = monitor.work_area();
                 let scale = monitor.egui_scale();
 
                 let mut placed_tiling = Vec::new();

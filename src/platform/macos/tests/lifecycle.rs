@@ -187,7 +187,13 @@ fn monitor_change_rehides_offscreen_windows() {
     let second_monitor = MonitorInfo {
         display_id: 2,
         name: "External".to_string(),
-        dimension: Dimension::new(
+        work_area: Dimension::new(
+            Length::new(1920.0),
+            Length::new(0.0),
+            Length::new(2560.0),
+            Length::new(1440.0),
+        ),
+        bounds: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
             Length::new(2560.0),
@@ -358,7 +364,13 @@ fn render_frame_focused_monitor_changes_on_focus_monitor() {
     let second_monitor = MonitorInfo {
         display_id: 2,
         name: "External".to_string(),
-        dimension: Dimension::new(
+        work_area: Dimension::new(
+            Length::new(1920.0),
+            Length::ZERO,
+            Length::new(2560.0),
+            Length::new(1440.0),
+        ),
+        bounds: Dimension::new(
             Length::new(1920.0),
             Length::ZERO,
             Length::new(2560.0),

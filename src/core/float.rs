@@ -1,7 +1,7 @@
 use crate::core::{
     Hub, WindowId,
     hub::RestrictedAction,
-    node::{Dimension, DisplayMode, WorkspaceId},
+    node::{Dimension, DisplayMode, MonitorId, WorkspaceId},
 };
 
 impl Hub {
@@ -63,18 +63,39 @@ impl Hub {
 
     /// Write back the observed screen-absolute dimension for a floating window.
     /// Called by platform shells after a user drag/resize settles.
-    /// Panics if the window is not Float (invariant violation in the caller).
+    /// Clients must make sure that the dimension and the monitor_id are consistent. If the
+    /// `monitor_id` is not what the operating system agreed with, the window will be assigned to a
+    /// wrong workspace and toggling workspace on this monitor will hide/show this window, causing
+    /// confusion. It's not the end of the world though.
     #[tracing::instrument(skip(self))]
-    pub(crate) fn update_float_dimension(&mut self, window_id: WindowId, dim: Dimension) {
-        let window = self.access.windows.get_mut(window_id);
-        assert!(
-            window.is_float(),
-            "update_float_dimension: {window_id} is not Float"
-        );
-        window
-            .workspace()
-            .expect("non-minimized float window has a workspace");
-        window.mode = DisplayMode::Float { dim };
+    pub(crate) fn update_float_dimension(
+        &mut self,
+        window_id: WindowId,
+        dim: Dimension,
+        monitor_id: MonitorId,
+    ) {
+        let old_ws = {
+            let window = self.access.windows.get_mut(window_id);
+            assert!(
+                window.is_float(),
+                "update_float_dimension: {window_id} is not Float"
+            );
+            let ws = window
+                .workspace()
+                .expect("non-minimized float window has a workspace");
+            window.mode = DisplayMode::Float { dim };
+            ws
+        };
+
+        let old_monitor = self.access.workspaces.get(old_ws).monitor;
+        tracing::debug!("{old_monitor} {monitor_id} {dim:?}");
+        if monitor_id != old_monitor {
+            let target_ws = self.access.monitors.get(monitor_id).active_workspace;
+            if target_ws != old_ws {
+                let stored_dim = self.detach_float_from_workspace(window_id);
+                self.attach_float_to_workspace(target_ws, window_id, stored_dim);
+            }
+        }
     }
 
     /// Toggle the focused window between tiling and floating mode.
