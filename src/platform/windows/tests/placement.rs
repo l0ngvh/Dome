@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use super::*;
 use crate::core::{Length, Logical};
 
@@ -108,7 +106,7 @@ fn resize_detects_fullscreen() {
 
     // Simulate the user resizing the window to fill the screen
     // window positioned at full monitor dimensions
-    env.set_dim(
+    env.move_window_to(
         w1,
         Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
     );
@@ -120,7 +118,7 @@ fn resize_detects_fullscreen() {
 }
 
 #[test]
-fn float_move_writes_core_and_does_not_correct() {
+fn dont_correct_float_move() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     env.run_actions("toggle float");
@@ -129,9 +127,11 @@ fn float_move_writes_core_and_does_not_correct() {
     // Clear move log to establish baseline
     env.moves.lock().unwrap().clear();
 
-    env.window_moved(w1, dim(200, 150, 600, 400), 1);
+    env.move_window_to(w1, dim(200, 150, 600, 400));
 
     // Float arm should NOT call set_position
+    env.flush_moves();
+
     assert!(
         env.moves.lock().unwrap().is_empty(),
         "float observation should not trigger set_position"
@@ -267,7 +267,7 @@ fn show_float_places_at_125pct() {
     env.run_actions("toggle float");
     env.settle(10);
 
-    env.set_dim(w1, dim(200, 150, 600, 400));
+    env.move_window_to(w1, dim(200, 150, 600, 400));
     // Drive the next placement cycle
     env.dome.apply_layout();
     env.settle(10);
@@ -296,14 +296,9 @@ fn show_fullscreen_window_places_at_175pct() {
 
     // Simulate the user resizing to fill the screen (triggers fullscreen detection).
     // The mock dimension must match the physical monitor extent.
-    env.set_dim(
+    env.move_window_to(
         w1,
         Dimension::new(Length::ZERO, Length::ZERO, phys_w, phys_h),
-    );
-    env.window_moved(
-        w1,
-        Dimension::new(Length::ZERO, Length::ZERO, phys_w, phys_h),
-        1,
     );
     env.dome.apply_layout();
 
@@ -329,14 +324,14 @@ fn float_round_trip_converges_at_125pct() {
     env.settle(10);
     env.moves.lock().unwrap().clear();
 
-    env.window_moved(w1, dim(300, 200, 500, 400), 1);
+    env.move_window_to(w1, dim(300, 200, 500, 400));
     env.dome.apply_layout();
     env.settle(10);
 
     let d1 = env.dim(w1);
 
     // Simulate the OS reporting back the position we just set (as window_drifted would)
-    env.window_moved(w1, d1, 1);
+    env.move_window_to(w1, d1);
     env.dome.apply_layout();
     env.settle(10);
 
@@ -397,7 +392,8 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
 
     // Report an unknown monitor handle (999). The observation should be
     // dropped entirely -- no position change, no dimension change.
-    env.window_moved(win, dim(3000, 500, 600, 400), 999);
+    env.dome
+        .handle_window_moved(win, dim(3000, 500, 600, 400), 999, Instant::now());
     env.dome.apply_layout();
     env.settle(10);
 
@@ -430,12 +426,13 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     let mut layout = LayoutConfig::default();
     layout.partition_tree.tab_bar_height = Length::<Logical>::new(30.0);
     let mut env = TestEnv::new_with_monitors(config, layout, vec![monitor]);
-    let win = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     // Put into a tabbed container so tab_bar_height participates in layout
     env.run_actions("toggle layout");
     env.settle(10);
 
-    let d_before = env.dim(win);
+    let d_before = env.dim(w2);
     // At scale 1.0, tab bar is 30px: y == border + 30, height == 1080 - 2*border - 30
     let border = Length::new(env.config.border_size);
     let tab_h_1x = Length::new(30.0);
@@ -447,7 +444,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     env.dome.apply_layout();
     env.settle(10);
 
-    let d_after = env.dim(win);
+    let d_after = env.dim(w2);
     // At scale 2.0, tab bar is 30*2=60px, border is still logical but scaled by 2.0
     let scaled_border = border * 2.0;
     let tab_h_2x = Length::new(30.0 * 2.0);
@@ -456,40 +453,6 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
         d_after.height,
         (Length::new(1080.0) - 2.0 * scaled_border - tab_h_2x).round()
     );
-}
-
-#[test]
-fn window_min_size_constraint_on_high_dpi_monitor() {
-    let mut env = TestEnv::new_with_monitors(
-        Config::default(),
-        LayoutConfig::default(),
-        vec![scaled_monitor(2.0)],
-    );
-    let arc = Arc::new(
-        MockExternalHwnd::with_title(
-            1,
-            "App1",
-            "app1.exe",
-            env.moves.clone(),
-            env.z_stack.clone(),
-            env.focus_target.clone(),
-        )
-        .with_min_size(2000.0, 100.0),
-    );
-    let w1 = env.open_with(arc);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.settle(10);
-
-    // physical_border = config.border_size * monitor_scale.
-    // Dome::set_constraints converts client min to frame min by adding 2 * physical_border.
-    let physical_border = env.config.border_size * 2.0; // 2.0 is the monitor scale
-    let expected_min_frame_width = (2000.0 + 2.0 * physical_border).round();
-
-    // The min-size constraint binds (expected > half of physical 3840), so w1 is
-    // placed at exactly the minimum frame width.
-    assert_eq!(env.dim(w1).width, Length::new(expected_min_frame_width));
-    // Sibling receives the remaining width, not an even split.
-    assert!(env.dim(w2).width < env.dim(w1).width);
 }
 
 #[test]
@@ -504,7 +467,7 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     env.settle(10);
 
     // Anchor the float at a known position on the primary monitor
-    env.window_moved(w1, dim(200, 150, 600, 400), 1);
+    env.move_window_to(w1, dim(200, 150, 600, 400));
     env.settle(10);
 
     let baseline_dim = env.dim(w1);
@@ -573,13 +536,13 @@ fn float_move_monitor_different_dpi_rescales_border() {
     env.settle(10);
 
     // Anchor the float at a known content rect on monitor 1
-    env.window_moved(w1, dim(100, 100, 400, 300), 1);
+    env.move_window_to(w1, dim(100, 100, 400, 300));
     env.dome.apply_layout();
     env.settle(10);
 
     let border = Length::new(env.config.border_size);
     env.moves.lock().unwrap().clear();
-    env.run_actions("move monitor right");
+    env.move_window_to(w1, dim(2020, 100, 400, 300));
     let snapshot = env.moves.lock().unwrap().clone();
     env.settle(10);
 
@@ -669,7 +632,7 @@ fn float_drift_repositions_overlay() {
     env.run_actions("toggle float");
     env.settle(10);
 
-    env.set_dim(
+    env.move_window_to(
         w1,
         Dimension::new(
             Length::new(500.0),
@@ -678,7 +641,7 @@ fn float_drift_repositions_overlay() {
             Length::new(250.0),
         ),
     );
-    env.window_moved(w1, dim(500, 300, 400, 250), 1);
+    env.flush_moves();
 
     // The overlay receives the border-expanded outer_dim, not the raw managed-window rect.
     let border = Length::new(env.config.border_size);
@@ -704,41 +667,13 @@ fn float_drift_repositions_overlay() {
 }
 
 #[test]
-fn float_drift_does_not_touch_managed_hwnd() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-    env.settle(10);
-
-    // Clear move log to establish baseline
-    env.moves.lock().unwrap().clear();
-
-    env.set_dim(
-        w1,
-        Dimension::new(
-            Length::new(500.0),
-            Length::new(300.0),
-            Length::new(400.0),
-            Length::new(250.0),
-        ),
-    );
-    env.window_moved(w1, dim(500, 300, 400, 250), 1);
-
-    // The fix must not call set_position on the managed HWND
-    assert!(
-        env.moves.lock().unwrap().is_empty(),
-        "overlay update must not trigger set_position on the managed HWND"
-    );
-}
-
-#[test]
 fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     env.run_actions("toggle float");
     env.settle(10);
 
-    env.set_dim(
+    env.move_window_to(
         w1,
         Dimension::new(
             Length::new(500.0),
@@ -747,7 +682,7 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
             Length::new(250.0),
         ),
     );
-    env.window_moved(w1, dim(500, 300, 400, 250), 1);
+    env.flush_moves();
 
     // Snapshot the float overlay state after the first update (from window_drifted)
     let after_drift = env

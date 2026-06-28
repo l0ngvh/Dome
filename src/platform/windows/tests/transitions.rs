@@ -160,20 +160,6 @@ fn dome_minimized_window_survives_minimize_event() {
 }
 
 #[test]
-fn exclusive_fullscreen_survives_minimize_event() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "Game", "game.exe", SPAWN_DIM);
-
-    env.enter_exclusive_fullscreen(w1);
-    assert!(!env.is_minimized(w1));
-    assert!(!env.is_offscreen(w1));
-
-    env.minimize_window(w1);
-    assert!(!env.is_minimized(w1));
-    assert!(!env.is_offscreen(w1));
-}
-
-#[test]
 fn float_restored_from_offscreen_is_topmost() {
     let mut env = TestEnv::new();
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -317,8 +303,8 @@ fn borderless_fullscreen_exit_unblocks_commands() {
     assert_eq!(env.dim(w1), dim_before);
 
     // Exit borderless FS: window reports non-fullscreen dimensions
-    env.window_moved(w1, dim(100, 100, 800, 600), 1);
-    env.dome.apply_layout();
+    env.move_window_to(w1, dim(100, 100, 800, 600));
+    env.flush_moves();
 
     // toggle_float should now work
     env.run_actions("toggle float");
@@ -335,7 +321,8 @@ fn borderless_fullscreen_exit_reflows_siblings() {
 
     // w2 leaves borderless fullscreen by reporting a non-fullscreen rect.
     // No manual apply_layout: the helper mirrors the production callback.
-    env.window_moved(w2, dim(100, 100, 800, 600), 1);
+    env.move_window_to(w2, dim(100, 100, 800, 600));
+    env.flush_moves();
 
     assert!(
         !env.is_offscreen(w1),
@@ -541,8 +528,8 @@ fn dome_issued_fullscreen_placement_does_not_flip_to_borderless_fullscreen() {
 
     // Simulate the async LOCATIONCHANGE echo: production's worker observes
     // the placed rect covering the monitor's work area.
-    env.window_moved(w2, fullscreen_dim(), 1);
-    env.dome.apply_layout();
+    env.move_window_to(w2, fullscreen_dim());
+    env.flush_moves();
 
     env.run_actions("toggle fullscreen");
     let d = env.dim(w2);

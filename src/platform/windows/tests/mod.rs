@@ -151,13 +151,13 @@ fn second_monitor() -> MonitorInfo {
 }
 
 struct MockDisplay {
-    monitors: Vec<MonitorInfo>,
+    monitors: Arc<Mutex<Vec<MonitorInfo>>>,
     exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
 }
 
 impl QueryDisplay for MockDisplay {
     fn get_all_monitors(&self) -> anyhow::Result<Vec<MonitorInfo>> {
-        Ok(self.monitors.clone())
+        Ok(self.monitors.lock().unwrap().clone())
     }
 
     fn get_exclusive_fullscreen_hwnd(&self) -> Option<HwndId> {
@@ -170,6 +170,8 @@ struct TestEnv {
     moves: MoveLog,
     /// Per-HwndId handle to every mock window registered with the dome.
     mocks: HashMap<HwndId, Arc<MockExternalHwnd>>,
+    /// Monitors shared with MockDisplay so add_monitor can mutate them.
+    monitors: Arc<Mutex<Vec<MonitorInfo>>>,
     exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
     config: Config,
     overlays: Rc<RefCell<MockOverlays>>,
@@ -196,8 +198,9 @@ impl TestEnv {
         setup_logger();
 
         let exclusive_fullscreen_hwnd = Arc::new(Mutex::new(None));
+        let shared_monitors = Arc::new(Mutex::new(monitors));
         let display = MockDisplay {
-            monitors,
+            monitors: shared_monitors.clone(),
             exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
         };
         let focus_target = Arc::new(Mutex::new(FocusTarget::Initial));
@@ -240,6 +243,7 @@ impl TestEnv {
             dome,
             moves: Arc::new(Mutex::new(Vec::new())),
             mocks: HashMap::new(),
+            monitors: shared_monitors,
             exclusive_fullscreen_hwnd,
             config,
             overlays,
@@ -320,6 +324,18 @@ impl TestEnv {
         }
     }
 
+    fn monitor_for_pos(&self, x: Length, y: Length) -> isize {
+        let monitors = self.monitors.lock().unwrap();
+        monitors
+            .iter()
+            .find(|m| {
+                let d = m.dimension;
+                x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height
+            })
+            .map(|m| m.handle)
+            .unwrap_or(1)
+    }
+
     fn flush_moves(&mut self) -> bool {
         let pending = std::mem::take(&mut *self.moves.lock().unwrap());
         if pending.is_empty() {
@@ -341,26 +357,12 @@ impl TestEnv {
                 // never sees an iconic observation.
                 continue;
             }
+            let monitor = self.monitor_for_pos(dim.x, dim.y);
             self.dome
-                .handle_window_moved(hwnd_id, dim, 1, Instant::now());
+                .handle_window_moved(hwnd_id, dim, monitor, Instant::now());
         }
         self.dome.apply_layout();
         true
-    }
-
-    fn window_moved(&mut self, id: HwndId, dim: Dimension, monitor: isize) {
-        self.dome
-            .handle_window_moved(id, dim, monitor, Instant::now());
-    }
-
-    fn window_moved_at(
-        &mut self,
-        id: HwndId,
-        dim: Dimension,
-        monitor: isize,
-        observed_at: Instant,
-    ) {
-        self.dome.handle_window_moved(id, dim, monitor, observed_at);
     }
 
     /// Configure a window to resist repositioning and report it at `pos`.
@@ -397,7 +399,8 @@ impl TestEnv {
         // Flag clear before move: `flush_moves`'s iconic guard drops moves for
         // minimized windows. Matches OS ordering (MINIMIZEEND before LOCATIONCHANGE).
         self.mock(hwnd).minimized.store(false, Ordering::Relaxed);
-        self.simulate_external_move(hwnd);
+        let dim = self.mock(hwnd).get_dim();
+        self.moves.lock().unwrap().push((hwnd, dim));
         self.flush_moves();
     }
 
@@ -416,7 +419,7 @@ impl TestEnv {
         self.mock(hwnd).get_dim()
     }
 
-    fn set_dim(&self, hwnd: HwndId, dim: Dimension) {
+    fn move_window_to(&self, hwnd: HwndId, dim: Dimension) {
         *self.mock(hwnd).dimension.lock().unwrap() = dim;
         self.moves.lock().unwrap().push((hwnd, dim));
     }
@@ -467,11 +470,6 @@ impl TestEnv {
 
     fn clear_override_position(&self, hwnd: HwndId) {
         self.mock(hwnd).set_override_position(None);
-    }
-
-    fn simulate_external_move(&self, hwnd: HwndId) {
-        let dim = self.mock(hwnd).get_dim();
-        self.moves.lock().unwrap().push((hwnd, dim));
     }
 
     fn run_actions(&mut self, s: &str) {
@@ -552,9 +550,8 @@ impl TestEnv {
     }
 
     fn add_monitor(&mut self, monitor: MonitorInfo) {
-        let mut monitors = vec![default_monitor()];
-        monitors.push(monitor);
-        self.dome.monitors_changed(monitors);
+        self.monitors.lock().unwrap().push(monitor);
+        self.dome.handle_display_change();
         self.dome.apply_layout();
     }
 

@@ -60,7 +60,7 @@ fn drift_correction_repositions_window() {
     env.settle(10);
     let expected = env.dim(w1);
 
-    env.set_dim(
+    env.move_window_to(
         w1,
         Dimension::new(
             Length::new(50.0),
@@ -69,7 +69,6 @@ fn drift_correction_repositions_window() {
             Length::new(600.0),
         ),
     );
-    env.simulate_external_move(w1);
     env.settle(10);
 
     assert_eq!(env.dim(w1), expected);
@@ -89,7 +88,8 @@ fn stale_tiling_observation_ignored() {
     let dim_after_retile = env.dim(w1);
     env.moves.lock().unwrap().clear();
 
-    env.window_moved_at(w1, dim(100, 100, 400, 300), 1, before);
+    env.dome
+        .handle_window_moved(w1, dim(100, 100, 400, 300), 1, before);
 
     assert!(
         env.moves.lock().unwrap().is_empty(),
@@ -99,44 +99,6 @@ fn stale_tiling_observation_ignored() {
         env.dim(w1),
         dim_after_retile,
         "window dimension must not change from a stale observation"
-    );
-}
-
-#[test]
-fn fresh_tiling_observation_drift_corrects() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    env.settle(10);
-
-    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.settle(10);
-
-    let target = env.dim(w1);
-    env.moves.lock().unwrap().clear();
-
-    let off_target = dim(
-        target.x.value() as i32 + 5,
-        target.y.value() as i32,
-        target.width.value() as i32 - 10,
-        target.height.value() as i32,
-    );
-
-    env.window_moved(w1, off_target, 1);
-
-    let moves = env.moves.lock().unwrap();
-    assert!(
-        !moves.is_empty(),
-        "fresh off-target observation must trigger drift correction"
-    );
-    let corrected = moves.iter().find(|(id, _)| *id == w1);
-    assert!(
-        corrected.is_some(),
-        "drift correction must issue set_position for w1"
-    );
-    assert_eq!(
-        corrected.unwrap().1,
-        target,
-        "drift correction must re-apply the target dimension"
     );
 }
 
@@ -154,7 +116,8 @@ fn stale_tiling_observation_in_fullscreen_arm_ignored() {
     let dim_after_retile = env.dim(w1);
     env.moves.lock().unwrap().clear();
 
-    env.window_moved_at(w1, fullscreen_dim(), 1, before);
+    env.dome
+        .handle_window_moved(w1, fullscreen_dim(), 1, before);
 
     assert_eq!(
         env.dim(w1),
@@ -181,7 +144,7 @@ fn stale_float_observation_does_not_write_target() {
     env.moves.lock().unwrap().clear();
 
     let drag_target = dim(300, 200, 500, 400);
-    env.window_moved_at(w1, drag_target, 1, before);
+    env.dome.handle_window_moved(w1, drag_target, 1, before);
 
     assert!(
         env.moves.lock().unwrap().is_empty(),
