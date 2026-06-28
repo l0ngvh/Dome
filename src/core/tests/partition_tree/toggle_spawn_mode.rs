@@ -1,24 +1,24 @@
 use crate::core::node::{Dimension, Length};
-use crate::core::tests::{setup, snapshot};
+use crate::core::tests::{setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn toggle_spawn_mode_creates_new_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_tiling(hub.current_workspace(), titled("w1"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w2"));
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=15.00, highlighted, spawn=bottom)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[w1, w2])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -57,16 +57,16 @@ fn toggle_spawn_mode_creates_new_container() {
 fn toggle_spawn_mode_in_single_window_workspace_creates_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w3"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w4"));
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00, highlighted, spawn=bottom)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w3, w4])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -106,23 +106,23 @@ fn toggle_spawn_mode_in_single_window_workspace_creates_vertical_container() {
 fn toggle_spawn_mode_in_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w5"));
+    hub.insert_tiling(hub.current_workspace(), titled("w6"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w7"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w8"));
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=112.50, y=15.00, w=37.50, h=15.00, highlighted, spawn=right)
         Window(id=WindowId(2), x=75.00, y=15.00, w=37.50, h=15.00)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w5, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[w6, Container])
+        Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, titles=[w7, w8])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -649,6 +649,7 @@ fn toggle_spawn_mode_noop() {
             Length::new(30.0),
             Length::new(20.0),
         ),
+        titled("w9"),
     );
     let before = snapshot(&hub);
     hub.toggle_spawn_mode();

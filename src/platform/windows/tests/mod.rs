@@ -15,17 +15,19 @@ use std::time::Instant;
 
 use crate::action::{Action, Actions};
 use crate::config::{Config, LayoutConfig};
+use crate::core::PickerEntry;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Length, Logical, Physical, TilingWindowPlacement,
     WindowId,
 };
 use crate::font::FontConfig;
-use crate::picker::PickerEntry;
 use crate::platform::windows::dome::MonitorInfo;
 use crate::platform::windows::dome::overlay::{
     FloatOverlayApi, PickerApi, TabBarOverlayApi, TilingOverlayApi,
 };
-use crate::platform::windows::dome::{CreateOverlay, Dome, NewWindow, QueryDisplay};
+use crate::platform::windows::dome::{
+    CreateOverlay, Dome, NewWindow, QueryDisplay, WindowsMetadata,
+};
 use crate::platform::windows::external::{HwndId, ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::taskbar::ManageTaskbar;
 use crate::theme::Flavor;
@@ -82,8 +84,6 @@ struct FloatOverlayShared {
 
 // ── Snapshot types ──
 
-
-
 #[derive(Clone, Debug)]
 struct TilingOverlaySnapshot {
     overlay_id: HwndId,
@@ -99,8 +99,6 @@ struct FloatOverlaySnapshot {
     flavor: Flavor,
     font: FontConfig,
 }
-
-
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
 const SCREEN_HEIGHT: Length = Length::new(1080.0);
@@ -280,24 +278,26 @@ impl TestEnv {
         }
         let new = NewWindow {
             ext: ext.clone(),
-            title: ext.title.clone(),
-            process: ext.process.clone(),
-            class: ext.class.clone(),
-            aumid: None,
+            metadata: WindowsMetadata {
+                title: ext.title.clone(),
+                process: ext.process.clone(),
+                class: ext.class.clone(),
+                aumid: None,
+                app_name: ext.app_name.clone(),
+            },
             constraints: (
                 ext.min_size.0,
                 ext.min_size.1,
                 ext.max_size.0,
                 ext.max_size.1,
             ),
-            app_name: ext.app_name.clone(),
         };
         let ignored = self.dome.ignore_rules().iter().any(|r| {
             r.matches(
-                &new.process,
-                new.title.as_deref(),
-                new.class.as_deref(),
-                new.aumid.as_deref(),
+                &new.metadata.process,
+                new.metadata.title.as_deref(),
+                new.metadata.class.as_deref(),
+                new.metadata.aumid.as_deref(),
             )
         });
         if ignored {
@@ -360,8 +360,7 @@ impl TestEnv {
         monitor: isize,
         observed_at: Instant,
     ) {
-        self.dome
-            .handle_window_moved(id, dim, monitor, observed_at);
+        self.dome.handle_window_moved(id, dim, monitor, observed_at);
     }
 
     /// Configure a window to resist repositioning and report it at `pos`.

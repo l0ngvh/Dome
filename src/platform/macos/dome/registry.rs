@@ -14,32 +14,9 @@ pub(in crate::platform::macos) struct ManagedWindow {
     pub(in crate::platform::macos) ext: Arc<dyn ExternalWindow>,
     pub(super) cg_id: CGWindowID,
     pub(in crate::platform::macos) window_id: WindowId,
-    pub(super) app_name: Option<String>,
-    pub(super) bundle_id: Option<String>,
-    pub(super) title: Option<String>,
     pub(super) state: WindowState,
     pub(super) is_minimized: bool,
     pub(super) is_moving: bool,
-}
-
-impl std::fmt::Display for ManagedWindow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[id={}|pid={}|cg={}] {}",
-            self.window_id,
-            self.ext.pid(),
-            self.cg_id,
-            self.app_name.as_deref().unwrap_or("Unknown"),
-        )?;
-        if let Some(bundle_id) = &self.bundle_id {
-            write!(f, " ({bundle_id})")?;
-        }
-        if let Some(title) = &self.title {
-            write!(f, " - {title}")?;
-        }
-        Ok(())
-    }
 }
 
 /// Allow querying by CGWindowID for interaction between Dome and external events/UI, and by
@@ -81,7 +58,7 @@ impl WindowRegistry {
                 self.pid_to_cg.remove(&pid);
             }
         }
-        tracing::info!(%entry, window_id = %entry.window_id, "Window removed");
+        tracing::info!(window_id = %entry.window_id, "Window removed");
         Some(entry.window_id)
     }
 
@@ -111,12 +88,7 @@ impl WindowRegistry {
     }
 
     pub(super) fn insert(&mut self, new: NewWindow, window_id: WindowId, state: WindowState) {
-        let NewWindow {
-            ax,
-            app_name,
-            bundle_id,
-            title,
-        } = new;
+        let NewWindow { ax, metadata: _ } = new;
         let cg_id = ax.cg_id();
         let pid = ax.pid();
         if pid as u32 == std::process::id() {
@@ -130,9 +102,6 @@ impl WindowRegistry {
                 ext: ax,
                 cg_id,
                 window_id,
-                app_name,
-                bundle_id,
-                title,
                 state,
                 is_minimized: false,
                 is_moving: false,

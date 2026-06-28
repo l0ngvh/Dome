@@ -338,7 +338,9 @@ impl Dome {
         dim: RoundedDimension,
         target_ws: WorkspaceId,
     ) -> WindowId {
-        let window_id = self.hub.insert_tiling(target_ws);
+        let window_id = self
+            .hub
+            .insert_tiling(target_ws, Box::new(new.metadata.clone()));
         let state =
             WindowState::Positioned(PositionedState::Offscreen(OffscreenPlacement::new(dim)));
         self.finalize_added_window(new, window_id, state);
@@ -356,7 +358,9 @@ impl Dome {
         // Convert the observed content rect back to an outer-frame dimension
         // (mirrors what window_moved does for float observations).
         let outer_dim = reverse_inset(dim, Length::<Unit>::new(self.config.border_size));
-        let window_id = self.hub.insert_float(target_ws, outer_dim);
+        let window_id = self
+            .hub
+            .insert_float(target_ws, outer_dim, Box::new(new.metadata.clone()));
         let state = WindowState::Positioned(PositionedState::Float(FloatPlacement::new(dim)));
         self.finalize_added_window(new, window_id, state);
         tracing::info!(%window_id, "New float window");
@@ -370,7 +374,9 @@ impl Dome {
         target_ws: WorkspaceId,
         restrictions: WindowRestrictions,
     ) -> WindowId {
-        let window_id = self.hub.insert_fullscreen(target_ws, restrictions);
+        let window_id =
+            self.hub
+                .insert_fullscreen(target_ws, restrictions, Box::new(new.metadata.clone()));
         self.finalize_added_window(new, window_id, WindowState::BorderlessFullscreen);
         tracing::info!(%window_id, ?restrictions, "New borderless fullscreen window");
         window_id
@@ -382,18 +388,17 @@ impl Dome {
         new: NewWindow,
         target_ws: WorkspaceId,
     ) -> WindowId {
-        let window_id = self
-            .hub
-            .insert_fullscreen(target_ws, WindowRestrictions::ProtectFullscreen);
+        let window_id = self.hub.insert_fullscreen(
+            target_ws,
+            WindowRestrictions::ProtectFullscreen,
+            Box::new(new.metadata.clone()),
+        );
         self.finalize_added_window(new, window_id, WindowState::NativeFullscreen);
         tracing::info!(%window_id, "New native fullscreen window");
         window_id
     }
 
     fn finalize_added_window(&mut self, new: NewWindow, window_id: WindowId, state: WindowState) {
-        if let Some(ref title) = new.title {
-            self.hub.set_window_title(window_id, title.clone());
-        }
         self.registry.insert(new, window_id, state);
         self.pending_created.push(window_id);
     }

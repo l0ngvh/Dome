@@ -1,7 +1,7 @@
 use crate::action::MonitorTarget;
 use crate::core::WorkspaceInfo;
 use crate::core::node::{Dimension, Length, WindowRestrictions};
-use crate::core::tests::setup;
+use crate::core::tests::{setup, titled};
 
 #[test]
 fn empty_hub() {
@@ -17,9 +17,9 @@ fn empty_hub() {
 #[test]
 fn single_workspace_with_windows() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    hub.insert_tiling(hub.current_workspace(), titled("w2"));
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 1);
     assert_eq!(ws[0].window_count, 3);
@@ -30,10 +30,10 @@ fn single_workspace_with_windows() {
 #[test]
 fn multiple_workspaces() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w3"));
+    hub.insert_tiling(hub.current_workspace(), titled("w4"));
     hub.focus_workspace("web");
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w5"));
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
 
@@ -51,7 +51,7 @@ fn multiple_workspaces() {
 #[test]
 fn workspace_with_floats_and_fullscreen() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w6"));
     hub.insert_float(
         hub.current_workspace(),
         Dimension::new(
@@ -60,8 +60,9 @@ fn workspace_with_floats_and_fullscreen() {
             Length::new(200.0),
             Length::new(100.0),
         ),
+        titled("w7"),
     );
-    let third = hub.insert_tiling(hub.current_workspace());
+    let third = hub.insert_tiling(hub.current_workspace(), titled("w8"));
     hub.set_fullscreen(third, WindowRestrictions::None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 1);
@@ -72,7 +73,7 @@ fn workspace_with_floats_and_fullscreen() {
 #[test]
 fn focused_vs_visible_multi_monitor() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w9"));
     hub.add_monitor(
         "secondary".to_string(),
         Dimension::new(
@@ -84,7 +85,7 @@ fn focused_vs_visible_multi_monitor() {
         1.0,
     );
     hub.focus_monitor(&MonitorTarget::Name("secondary".into()));
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w10"));
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
 
@@ -102,7 +103,7 @@ fn focused_vs_visible_multi_monitor() {
 #[test]
 fn empty_non_active_workspace_persists() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w11"));
     hub.focus_workspace("empty");
     hub.focus_workspace("0");
     let ws = hub.query_workspaces();
@@ -141,6 +142,7 @@ fn workspace_with_only_floats() {
             Length::new(200.0),
             Length::new(100.0),
         ),
+        titled("w12"),
     );
     hub.insert_float(
         hub.current_workspace(),
@@ -150,6 +152,7 @@ fn workspace_with_only_floats() {
             Length::new(200.0),
             Length::new(100.0),
         ),
+        titled("w13"),
     );
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 1);
@@ -159,8 +162,8 @@ fn workspace_with_only_floats() {
 #[test]
 fn workspace_with_only_fullscreen() {
     let mut hub = setup();
-    let first = hub.insert_tiling(hub.current_workspace());
-    let second = hub.insert_tiling(hub.current_workspace());
+    let first = hub.insert_tiling(hub.current_workspace(), titled("w14"));
+    let second = hub.insert_tiling(hub.current_workspace(), titled("w15"));
     hub.set_fullscreen(first, WindowRestrictions::None);
     hub.set_fullscreen(second, WindowRestrictions::None);
     let ws = hub.query_workspaces();

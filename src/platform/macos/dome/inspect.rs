@@ -10,7 +10,7 @@ use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::registry::ManagedWindow;
 use crate::platform::macos::dome::rejection_log_filter::RejectionLogFilter;
 use crate::platform::macos::dome::window::{RoundedDimension, WindowState};
-use crate::platform::macos::dome::{NewWindow, PendingAdd};
+use crate::platform::macos::dome::{MacOSMetadata, NewWindow, PendingAdd};
 use crate::platform::macos::running_application::RunningApp;
 
 /// A window currently returned by the app's `kAXWindowsAttribute` query
@@ -168,9 +168,11 @@ pub(in crate::platform::macos) fn compute_reconciliation(
         let title = ax.title().map(str::to_owned);
         let new = NewWindow {
             ax: Arc::new(ax),
-            app_name,
-            bundle_id,
-            title,
+            metadata: MacOSMetadata {
+                title,
+                app_name,
+                bundle_id,
+            },
         };
         if should_ignore(&new, ignore_rules, cg_id, pid, log_filter) {
             continue;
@@ -326,9 +328,9 @@ fn should_ignore(
 ) -> bool {
     let matched = rules.iter().find(|r| {
         r.matches(
-            new.app_name.as_deref(),
-            new.bundle_id.as_deref(),
-            new.title.as_deref(),
+            new.metadata.app_name.as_deref(),
+            new.metadata.bundle_id.as_deref(),
+            new.metadata.title.as_deref(),
         )
     });
     if matched.is_some() {

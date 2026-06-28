@@ -14,6 +14,7 @@ mod strategy_switch;
 use std::collections::HashSet;
 
 use crate::config::{LayoutConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, Strategy};
+use crate::core::WindowMetadata;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Dimension, Direction, Length, Logical, WindowId};
@@ -224,7 +225,7 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
     let mut ids: Vec<WindowId> = hub
         .minimized_window_entries()
         .into_iter()
-        .map(|(id, _)| id)
+        .map(|e| e.id)
         .collect();
     if !ids.is_empty() {
         ids.sort();
@@ -556,7 +557,7 @@ fn validate_minimized(hub: &Hub) {
     let minimized_ids: Vec<WindowId> = hub
         .minimized_window_entries()
         .into_iter()
-        .map(|(id, _)| id)
+        .map(|e| e.id)
         .collect();
 
     for &id in &minimized_ids {
@@ -680,7 +681,7 @@ impl Hub {
     /// Non-tabbed tests should keep calling `insert_tiling` directly to avoid
     /// churning the `titles=[...]` textual line in their snapshots.
     pub(crate) fn insert_tiling_titled(&mut self) -> WindowId {
-        let id = self.insert_tiling(self.current_workspace());
+        let id = self.insert_tiling(self.current_workspace(), titled("w0"));
         self.set_window_title(id, format!("W{}", id.get()));
         id
     }
@@ -754,4 +755,42 @@ pub(super) fn setup_with_automatic_tiling() -> Hub {
             ..default_layout_for_tests()
         },
     )
+}
+
+/// Minimal test metadata with no structure — title set via `titled` or
+/// left blank.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TestMetadata {
+    pub title: Option<String>,
+}
+
+impl std::fmt::Display for TestMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.title.as_deref().unwrap_or(""))
+    }
+}
+
+impl WindowMetadata for TestMetadata {
+    fn icon_key(&self) -> Option<String> {
+        None
+    }
+    fn app_name(&self) -> Option<String> {
+        None
+    }
+    fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+    fn set_title(&mut self, title: String) {
+        self.title = Some(title);
+    }
+    fn clone_box(&self) -> Box<dyn WindowMetadata> {
+        Box::new(self.clone())
+    }
+}
+
+/// Convenience: create a boxed `TestMetadata` with the given title.
+pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
+    Box::new(TestMetadata {
+        title: Some(t.to_owned()),
+    })
 }

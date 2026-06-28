@@ -28,12 +28,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Interface, PCWSTR};
 
+use crate::core::PickerEntry;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
     TilingWindowPlacement, WindowId,
 };
 use crate::overlay;
-use crate::picker::PickerEntry;
 use crate::platform::windows::dome::CreateOverlay;
 use crate::platform::windows::external::{HwndId, ZOrder};
 

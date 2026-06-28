@@ -17,8 +17,8 @@ use crate::keymap::KeymapState;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::GcdDispatcher;
 use crate::platform::macos::dome::{
-    DebounceBurst, Dome, HubEvent, NewWindow, PendingAdd, WindowMove, compute_reconcile_all,
-    compute_reconciliation, compute_window_positions,
+    DebounceBurst, Dome, HubEvent, MacOSMetadata, NewWindow, PendingAdd, WindowMove,
+    compute_reconcile_all, compute_reconciliation, compute_window_positions,
 };
 use crate::platform::macos::running_application::RunningApp;
 
@@ -366,9 +366,11 @@ fn dispatch_space_changed(runner: &mut DomeRunner) {
                     cg_id,
                     NewWindow {
                         ax,
-                        app_name,
-                        bundle_id,
-                        title,
+                        metadata: MacOSMetadata {
+                            title,
+                            app_name,
+                            bundle_id,
+                        },
                     },
                 );
             } else if let (Some(pos), Some(size)) = (pos, size) {

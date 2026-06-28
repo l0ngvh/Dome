@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use super::allocator::{Allocator, NodeId};
 use super::node::{
     ContainerId, Dimension, DisplayMode, Length, Monitor, MonitorId, Window, WindowId,
-    WindowRestrictions, Workspace, WorkspaceId,
+    WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
 };
 use super::strategy::{StrategySet, TilingAction, clip};
 
@@ -450,10 +450,10 @@ impl Hub {
 
     pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) -> bool {
         let window = self.access.windows.get_mut(window_id);
-        if window.title == title {
+        if window.metadata.title() == Some(&title) {
             return false;
         }
-        window.title = title;
+        window.metadata.set_title(title);
         true
     }
 
@@ -527,8 +527,15 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_tiling(&mut self, target_ws: WorkspaceId) -> WindowId {
-        let window_id = self.access.windows.allocate(Window::tiling(target_ws));
+    pub(crate) fn insert_tiling(
+        &mut self,
+        target_ws: WorkspaceId,
+        metadata: Box<dyn WindowMetadata>,
+    ) -> WindowId {
+        let window_id = self
+            .access
+            .windows
+            .allocate(Window::tiling(target_ws, metadata));
         self.strategies.for_workspace_mut(target_ws).attach_window(
             &mut self.access,
             window_id,
@@ -542,11 +549,12 @@ impl Hub {
         &mut self,
         target_ws: WorkspaceId,
         dimension: Dimension,
+        metadata: Box<dyn WindowMetadata>,
     ) -> WindowId {
         let window_id = self
             .access
             .windows
-            .allocate(Window::float(target_ws, dimension));
+            .allocate(Window::float(target_ws, dimension, metadata));
         tracing::debug!(%window_id, ?dimension, "Inserting float window");
         self.attach_float_to_workspace(target_ws, window_id, dimension);
         window_id
@@ -557,11 +565,12 @@ impl Hub {
         &mut self,
         target_ws: WorkspaceId,
         restrictions: WindowRestrictions,
+        metadata: Box<dyn WindowMetadata>,
     ) -> WindowId {
-        let window_id = self
-            .access
-            .windows
-            .allocate(Window::fullscreen(target_ws, restrictions));
+        let window_id =
+            self.access
+                .windows
+                .allocate(Window::fullscreen(target_ws, restrictions, metadata));
         self.attach_fullscreen_to_workspace(target_ws, window_id);
         self.set_focus(window_id);
         window_id

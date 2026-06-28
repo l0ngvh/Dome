@@ -8,11 +8,11 @@ use objc2_foundation::NSRect;
 use crate::action::Actions;
 use crate::action::Query;
 use crate::config::{Config, LayoutConfig};
+use crate::core::PickerEntry;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId,
     TilingWindowPlacement, WindowId,
 };
-use crate::picker::PickerEntry;
 
 use super::super::MonitorInfo;
 

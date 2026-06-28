@@ -3,7 +3,7 @@ use crate::config::{LayoutConfig, MasterConfig, Strategy};
 use crate::core::strategy::TilingAction;
 use crate::core::tests::default_layout_for_tests;
 use crate::core::tests::default_partition_tree_config_for_tests;
-use crate::core::tests::snapshot;
+use crate::core::tests::{snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
@@ -19,10 +19,10 @@ fn min_height_master_pane_overflows_and_scrolls_to_focus() {
         },
         ..default_layout_for_tests()
     });
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    let w2 = hub.insert_tiling(hub.current_workspace());
-    let w3 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
     hub.set_window_constraint(w0, None, Some(20.0), None, None);
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
     hub.set_window_constraint(w2, None, Some(20.0), None, None);
@@ -81,12 +81,12 @@ fn min_height_stack_pane_overflows_independently_of_master() {
         },
         ..default_layout_for_tests()
     });
-    let _w0 = hub.insert_tiling(hub.current_workspace());
-    let _w1 = hub.insert_tiling(hub.current_workspace());
-    let w2 = hub.insert_tiling(hub.current_workspace());
-    let w3 = hub.insert_tiling(hub.current_workspace());
-    let w4 = hub.insert_tiling(hub.current_workspace());
-    let w5 = hub.insert_tiling(hub.current_workspace());
+    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    let _w1 = hub.insert_tiling(hub.current_workspace(), titled("w5"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w6"));
+    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w7"));
+    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w8"));
+    let w5 = hub.insert_tiling(hub.current_workspace(), titled("w9"));
     hub.set_window_constraint(w2, None, Some(20.0), None, None);
     hub.set_window_constraint(w3, None, Some(20.0), None, None);
     hub.set_window_constraint(w4, None, Some(20.0), None, None);
@@ -147,14 +147,14 @@ fn both_panes_scroll_independently() {
         },
         ..default_layout_for_tests()
     });
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    let w2 = hub.insert_tiling(hub.current_workspace());
-    let w3 = hub.insert_tiling(hub.current_workspace());
-    let w4 = hub.insert_tiling(hub.current_workspace());
-    let w5 = hub.insert_tiling(hub.current_workspace());
-    let w6 = hub.insert_tiling(hub.current_workspace());
-    let w7 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w10"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w11"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w12"));
+    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w13"));
+    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w14"));
+    let w5 = hub.insert_tiling(hub.current_workspace(), titled("w15"));
+    let w6 = hub.insert_tiling(hub.current_workspace(), titled("w16"));
+    let w7 = hub.insert_tiling(hub.current_workspace(), titled("w17"));
     hub.set_window_constraint(w0, None, Some(20.0), None, None);
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
     hub.set_window_constraint(w2, None, Some(20.0), None, None);
@@ -214,11 +214,11 @@ fn both_panes_scroll_independently() {
 #[test]
 fn min_width_both_panes_meet_min_layout_overflows_screen() {
     let mut hub = setup_master();
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w18"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w19"));
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
     hub.set_window_constraint(w1, Some(100.0), None, None, None);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
@@ -261,11 +261,11 @@ fn min_width_both_panes_meet_min_layout_overflows_screen() {
 #[test]
 fn min_width_master_alone_exceeds_screen_layout_overflows() {
     let mut hub = setup_master();
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w20"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w21"));
     hub.set_window_constraint(w0, Some(200.0), None, None, None);
     hub.set_window_constraint(w1, Some(50.0), None, None, None);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
@@ -307,8 +307,8 @@ fn min_width_master_alone_exceeds_screen_layout_overflows() {
 #[test]
 fn min_width_master_expands_when_only_master_constrained() {
     let mut hub = setup_master();
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    let _w1 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w22"));
+    let _w1 = hub.insert_tiling(hub.current_workspace(), titled("w23"));
     hub.set_window_constraint(w0, Some(120.0), None, None, None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -353,10 +353,10 @@ fn min_width_master_expands_when_only_master_constrained() {
 #[test]
 fn max_height_centers_window_in_pane_slot() {
     let mut hub = setup_master();
-    let _w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
+    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w24"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w25"));
     hub.set_window_constraint(w1, None, None, None, Some(10.0));
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
@@ -399,10 +399,10 @@ fn max_height_centers_window_in_pane_slot() {
 #[test]
 fn max_width_centers_window_in_stack_pane() {
     let mut hub = setup_master();
-    let _w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
+    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w26"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w27"));
     hub.set_window_constraint(w1, None, None, Some(30.0), None);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
@@ -445,8 +445,8 @@ fn max_width_centers_window_in_stack_pane() {
 #[test]
 fn max_width_centers_window_in_master_pane() {
     let mut hub = setup_master();
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    let _w1 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w28"));
+    let _w1 = hub.insert_tiling(hub.current_workspace(), titled("w29"));
     hub.set_window_constraint(w0, None, None, Some(40.0), None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -491,11 +491,11 @@ fn max_width_centers_window_in_master_pane() {
 #[test]
 fn master_count_increment_clamps_stack_scroll() {
     let mut hub = setup_master();
-    let _w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    let w2 = hub.insert_tiling(hub.current_workspace());
-    let w3 = hub.insert_tiling(hub.current_workspace());
-    let w4 = hub.insert_tiling(hub.current_workspace());
+    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w30"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w31"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w32"));
+    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w33"));
+    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w34"));
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
     hub.set_window_constraint(w2, None, Some(20.0), None, None);
     hub.set_window_constraint(w3, None, Some(20.0), None, None);
@@ -558,11 +558,11 @@ fn master_count_decrement_clamps_master_scroll() {
         },
         ..default_layout_for_tests()
     });
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    let w2 = hub.insert_tiling(hub.current_workspace());
-    let w3 = hub.insert_tiling(hub.current_workspace());
-    let _w4 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w35"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w36"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w37"));
+    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w38"));
+    let _w4 = hub.insert_tiling(hub.current_workspace(), titled("w39"));
     hub.set_window_constraint(w0, None, Some(20.0), None, None);
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
     hub.set_window_constraint(w2, None, Some(20.0), None, None);
@@ -629,10 +629,10 @@ fn detach_clamps_scroll() {
         },
         ..default_layout_for_tests()
     });
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    let w2 = hub.insert_tiling(hub.current_workspace());
-    let w3 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w40"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w41"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w42"));
+    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w43"));
     hub.set_window_constraint(w0, None, Some(20.0), None, None);
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
     hub.set_window_constraint(w2, None, Some(20.0), None, None);
@@ -683,18 +683,18 @@ fn detach_clamps_scroll() {
 #[test]
 fn attach_does_not_disturb_other_pane_scroll() {
     let mut hub = setup_master();
-    let _w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    let w2 = hub.insert_tiling(hub.current_workspace());
-    let w3 = hub.insert_tiling(hub.current_workspace());
-    let w4 = hub.insert_tiling(hub.current_workspace());
+    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w44"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w45"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w46"));
+    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w47"));
+    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w48"));
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
     hub.set_window_constraint(w2, None, Some(20.0), None, None);
     hub.set_window_constraint(w3, None, Some(20.0), None, None);
     hub.set_window_constraint(w4, None, Some(20.0), None, None);
     // w4 is already focused (last stack window). Stack scrolled to show it.
     // Attach a new window (lands in stack since master_count=1 is full)
-    let w5 = hub.insert_tiling(hub.current_workspace());
+    let w5 = hub.insert_tiling(hub.current_workspace(), titled("w49"));
     hub.set_window_constraint(w5, None, Some(20.0), None, None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(5))
@@ -740,11 +740,11 @@ fn attach_does_not_disturb_other_pane_scroll() {
 #[test]
 fn apply_config_relayouts_and_clamps_scroll() {
     let mut hub = setup_master();
-    let _w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    let w2 = hub.insert_tiling(hub.current_workspace());
-    let w3 = hub.insert_tiling(hub.current_workspace());
-    let w4 = hub.insert_tiling(hub.current_workspace());
+    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w50"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w51"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w52"));
+    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w53"));
+    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w54"));
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
     hub.set_window_constraint(w2, None, Some(20.0), None, None);
     hub.set_window_constraint(w3, None, Some(20.0), None, None);

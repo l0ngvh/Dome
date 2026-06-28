@@ -24,7 +24,8 @@ use objc2_core_graphics::CGWindowID;
 use crate::action::{FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
 use crate::config::{Config, LayoutConfig, MacosWindow, WindowMode};
 use crate::core::{
-    ContainerId, Direction, Hub, Length, Logical, TilingAction, WindowId, WindowRestrictions,
+    ContainerId, Direction, Hub, Length, Logical, TilingAction, WindowId, WindowMetadata,
+    WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -34,31 +35,56 @@ use recovery::Recovery;
 use registry::{ManagedWindow, WindowRegistry};
 use rejection_log_filter::RejectionLogFilter;
 
+pub(in crate::platform::macos) use self::MacOSMetadata;
 pub(in crate::platform::macos) use window::RoundedDimension;
 
 pub(in crate::platform::macos) struct NewWindow {
     pub(in crate::platform::macos) ax: Arc<dyn ExternalWindow>,
-    pub(in crate::platform::macos) app_name: Option<String>,
-    pub(in crate::platform::macos) bundle_id: Option<String>,
-    pub(in crate::platform::macos) title: Option<String>,
+    pub(in crate::platform::macos) metadata: MacOSMetadata,
 }
 
 impl std::fmt::Display for NewWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[pid={}|cg={}] {}",
-            self.ax.pid(),
-            self.ax.cg_id(),
-            self.app_name.as_deref().unwrap_or("Unknown"),
-        )?;
-        if let Some(bundle_id) = &self.bundle_id {
-            write!(f, " ({bundle_id})")?;
+        write!(f, "[pid={}|cg={}] ", self.ax.pid(), self.ax.cg_id())?;
+        write!(f, "{}", self.metadata)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::platform::macos) struct MacOSMetadata {
+    pub title: Option<String>,
+    pub app_name: Option<String>,
+    pub bundle_id: Option<String>,
+}
+
+impl std::fmt::Display for MacOSMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.app_name.as_deref().unwrap_or("Unknown"))?;
+        if let Some(bid) = &self.bundle_id {
+            write!(f, " ({bid})")?;
         }
-        if let Some(title) = &self.title {
-            write!(f, " - {title}")?;
+        if let Some(t) = &self.title {
+            write!(f, " - {t}")?;
         }
         Ok(())
+    }
+}
+
+impl WindowMetadata for MacOSMetadata {
+    fn icon_key(&self) -> Option<String> {
+        self.bundle_id.clone()
+    }
+    fn app_name(&self) -> Option<String> {
+        self.app_name.clone()
+    }
+    fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+    fn set_title(&mut self, title: String) {
+        self.title = Some(title);
+    }
+    fn clone_box(&self) -> Box<dyn WindowMetadata> {
+        Box::new(self.clone())
     }
 }
 
@@ -194,9 +220,9 @@ impl Dome {
 
             let rule = self.config.macos.on_open.iter().find(|r| {
                 r.matches(
-                    new_ref.app_name.as_deref(),
-                    new_ref.bundle_id.as_deref(),
-                    new_ref.title.as_deref(),
+                    new_ref.metadata.app_name.as_deref(),
+                    new_ref.metadata.bundle_id.as_deref(),
+                    new_ref.metadata.title.as_deref(),
                 )
             });
             let target_ws = self
@@ -313,12 +339,11 @@ impl Dome {
         self.registry.get(cg_id).cloned()
     }
 
-    #[tracing::instrument(skip(self), fields(cg_id = %cg_id, window = tracing::field::Empty))]
+    #[tracing::instrument(skip(self), fields(cg_id = %cg_id))]
     pub(in crate::platform::macos) fn focus_window_by_cg(&mut self, cg_id: CGWindowID) {
         let Some(entry) = self.registry.get(cg_id) else {
             return;
         };
-        tracing::Span::current().record("window", entry.to_string());
         let window_id = entry.window_id;
         let was_minimized = entry.is_minimized;
         if was_minimized {
@@ -328,7 +353,7 @@ impl Dome {
         self.flush_layout();
     }
 
-    #[tracing::instrument(skip(self, title), fields(cg_id = %cg_id, window = tracing::field::Empty))]
+    #[tracing::instrument(skip(self, title), fields(cg_id = %cg_id))]
     pub(in crate::platform::macos) fn update_title(
         &mut self,
         cg_id: CGWindowID,
@@ -337,9 +362,6 @@ impl Dome {
         if let Some(entry) = self.registry.get_mut(cg_id)
             && let Some(title) = title
         {
-            entry.title = Some(title.clone());
-            tracing::Span::current().record("window", entry.to_string());
-
             if self.hub.set_window_title(entry.window_id, title) {
                 tracing::trace!("Title changed");
             }
@@ -357,12 +379,11 @@ impl Dome {
         self.flush_layout();
     }
 
-    #[tracing::instrument(skip(self), fields(cg_id = %cg_id, window = tracing::field::Empty))]
+    #[tracing::instrument(skip(self), fields(cg_id = %cg_id))]
     pub(in crate::platform::macos) fn mirror_clicked(&mut self, cg_id: CGWindowID) {
         let Some(entry) = self.registry.get(cg_id) else {
             return;
         };
-        tracing::Span::current().record("window", entry.to_string());
         let window_id = entry.window_id;
         let was_minimized = entry.is_minimized;
         let ext = entry.ext.clone();
@@ -389,14 +410,13 @@ impl Dome {
     /// Handles the frontmost window entering native fullscreen after a space
     /// change. If `cg_id` is tracked, transitions it to `NativeFullscreen`
     /// state. If untracked, inserts it as a new fullscreen window.
-    #[tracing::instrument(skip(self, new), fields(cg_id = %cg_id, window = tracing::field::Empty))]
+    #[tracing::instrument(skip(self, new), fields(cg_id = %cg_id))]
     pub(in crate::platform::macos) fn enter_native_fullscreen(
         &mut self,
         cg_id: CGWindowID,
         new: NewWindow,
     ) {
         if let Some(entry) = self.registry.get(cg_id) {
-            tracing::Span::current().record("window", entry.to_string());
             let window_id = entry.window_id;
             self.window_entered_native_fullscreen(window_id);
         } else {
@@ -410,7 +430,7 @@ impl Dome {
     /// change. Only acts if `cg_id` is tracked and currently in
     /// `NativeFullscreen` state, routing through `window_moved` so the window
     /// re-enters tiling via the same path as reconcile-detected exits.
-    #[tracing::instrument(skip(self, pos, size), fields(cg_id = %cg_id, window = tracing::field::Empty))]
+    #[tracing::instrument(skip(self, pos, size), fields(cg_id = %cg_id))]
     pub(in crate::platform::macos) fn exit_native_fullscreen(
         &mut self,
         cg_id: CGWindowID,
@@ -420,7 +440,6 @@ impl Dome {
         if let Some(entry) = self.registry.get(cg_id)
             && matches!(entry.state, WindowState::NativeFullscreen)
         {
-            tracing::Span::current().record("window", entry.to_string());
             let window_id = entry.window_id;
             let now = Instant::now();
             self.window_moved(
@@ -516,13 +535,7 @@ impl Dome {
     /// creates it if absent, closes it if already open.
     pub(in crate::platform::macos) fn toggle_picker(&mut self) {
         let minimized = self.hub.minimized_window_entries();
-        let entries = build_picker_entries(&minimized, |wid| {
-            let e = self.registry.by_id(wid);
-            (
-                e.and_then(|e| e.bundle_id.clone()),
-                e.and_then(|e| e.app_name.clone()),
-            )
-        });
+        let entries = build_picker_entries(&minimized);
         let focused_monitor = self.hub.focused_monitor();
         let m = self.monitor_registry.monitor(focused_monitor);
         let monitor_dim = m.dimension();
@@ -541,13 +554,12 @@ impl Dome {
 
     /// Unminimize a window selected via the picker. Clears the minimize flag
     /// and drives the OS-side restore.
-    #[tracing::instrument(skip(self), fields(window_id = %window_id, window = tracing::field::Empty))]
+    #[tracing::instrument(skip(self), fields(window_id = %window_id))]
     pub(in crate::platform::macos) fn picker_unminimize_window(&mut self, window_id: WindowId) {
         self.hub.unminimize_window(window_id);
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
         };
-        tracing::Span::current().record("window", window.to_string());
         if window.is_minimized {
             window.is_minimized = false;
             if let Err(e) = window.ext.unminimize() {

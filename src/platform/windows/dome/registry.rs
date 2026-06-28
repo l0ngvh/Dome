@@ -10,30 +10,6 @@ pub(super) struct ManagedWindow {
     pub(super) ext: Arc<dyn ManageExternalWindow>,
     pub(super) state: WindowState,
     pub(super) is_minimized: bool,
-    pub(super) title: Option<String>,
-    pub(super) process: String,
-    pub(super) app_name: Option<String>,
-    pub(super) window_id: WindowId,
-}
-
-impl std::fmt::Display for ManagedWindow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[id={}|pid={}|hwnd={}] ",
-            self.window_id,
-            self.ext.pid(),
-            self.ext.id(),
-        )?;
-        match self.app_name.as_deref() {
-            Some(name) => write!(f, "{name} ({})", self.process)?,
-            None => write!(f, "{}", self.process)?,
-        }
-        if let Some(title) = &self.title {
-            write!(f, " - {title}")?;
-        }
-        Ok(())
-    }
 }
 
 pub(super) struct WindowRegistry {
@@ -78,13 +54,5 @@ impl WindowRegistry {
 
     pub(super) fn iter(&self) -> impl Iterator<Item = (HwndId, WindowId)> + '_ {
         self.by_hwnd.iter().map(|(&h, &id)| (h, id))
-    }
-
-    pub(super) fn set_title(&mut self, hwnd: HwndId, title: Option<String>) {
-        if let Some(&id) = self.by_hwnd.get(&hwnd)
-            && let Some(entry) = self.by_id.get_mut(&id)
-        {
-            entry.title = title;
-        }
     }
 }

@@ -3,7 +3,7 @@ use crate::core::hub::Hub;
 use crate::core::node::{Dimension, Length, WindowRestrictions};
 
 use super::{
-    default_layout_for_tests, default_partition_tree_config_for_tests, setup_hub, snapshot,
+    default_layout_for_tests, default_partition_tree_config_for_tests, setup_hub, snapshot, titled,
 };
 use insta::assert_snapshot;
 
@@ -36,8 +36,8 @@ fn setup_hub_with_layout(layout_cfg: LayoutConfig) -> Hub {
 #[test]
 fn sync_config_no_op_when_layout_unchanged() {
     let mut hub = setup_hub();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_tiling(hub.current_workspace(), titled("w1"));
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
     let snap_before = snapshot(&hub);
@@ -49,8 +49,8 @@ fn sync_config_no_op_when_layout_unchanged() {
 #[test]
 fn sync_config_inactive_master_field_change_preserves_tree() {
     let mut hub = setup_hub();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_tiling(hub.current_workspace(), titled("w3"));
     // Create a tabbed container to verify tree state survives.
     hub.toggle_container_layout();
     let ws = hub.current_workspace();
@@ -68,15 +68,15 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
 
     // Tree state (tabbed container) and focus preserved.
     assert_eq!(hub.focused_window(ws), focus_before);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=right)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[w2, w3])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                          |                                  []                                     |
+    |                                   w2                                     |                                 [w3]                                    |
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
     *                                                                                                                                                    *
@@ -111,10 +111,10 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
 #[test]
 fn sync_config_switches_partition_tree_to_master() {
     let mut hub = setup_hub();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_tiling(hub.current_workspace(), titled("w5"));
+    hub.insert_tiling(hub.current_workspace(), titled("w6"));
+    hub.insert_tiling(hub.current_workspace(), titled("w7"));
 
     hub.sync_config(layout(Strategy::Master, 0.5, 1));
 
@@ -163,21 +163,21 @@ fn sync_config_switches_partition_tree_to_master() {
 #[test]
 fn sync_config_switches_master_to_partition_tree() {
     let mut hub = setup_hub_with_layout(layout(Strategy::Master, 0.5, 1));
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w8"));
+    hub.insert_tiling(hub.current_workspace(), titled("w9"));
+    hub.insert_tiling(hub.current_workspace(), titled("w10"));
+    hub.insert_tiling(hub.current_workspace(), titled("w11"));
 
     hub.sync_config(default_layout_for_tests());
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=112.50, y=0.00, w=37.50, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(2), x=75.00, y=0.00, w=37.50, h=30.00)
         Window(id=WindowId(1), x=37.50, y=0.00, w=37.50, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=37.50, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w8, w9, w10, w11])
       )
 
     +------------------------------------++-----------------------------------++------------------------------------+*************************************
@@ -222,9 +222,13 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
         Length::new(30.0),
         Length::new(20.0),
     );
-    hub.insert_tiling(hub.current_workspace());
-    let _float_id = hub.insert_float(hub.current_workspace(), float_dim);
-    let _fs_id = hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::None);
+    hub.insert_tiling(hub.current_workspace(), titled("w12"));
+    let _float_id = hub.insert_float(hub.current_workspace(), float_dim, titled("w13"));
+    let _fs_id = hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::None,
+        titled("w14"),
+    );
 
     // With fullscreen on top, only it is visible.
     assert_snapshot!(snapshot(&hub), @"
@@ -326,23 +330,23 @@ fn sync_config_swap_empty_workspace_no_panic() {
 fn sync_config_swap_iterates_every_active_workspace() {
     let mut hub = setup_hub();
     // Workspace "0": two tiling windows.
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w15"));
+    hub.insert_tiling(hub.current_workspace(), titled("w16"));
+    hub.insert_tiling(hub.current_workspace(), titled("w17"));
+    hub.insert_tiling(hub.current_workspace(), titled("w18"));
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w19"));
+    hub.insert_tiling(hub.current_workspace(), titled("w20"));
+    hub.insert_tiling(hub.current_workspace(), titled("w21"));
+    hub.insert_tiling(hub.current_workspace(), titled("w22"));
     let float_dim = Dimension::new(
         Length::new(10.0),
         Length::new(5.0),
         Length::new(30.0),
         Length::new(20.0),
     );
-    let _float_id = hub.insert_float(hub.current_workspace(), float_dim);
+    let _float_id = hub.insert_float(hub.current_workspace(), float_dim, titled("w23"));
 
     // Go back to workspace "0" so post-swap snapshot shows it.
     hub.focus_workspace("0");
@@ -438,14 +442,14 @@ fn sync_config_swap_iterates_every_active_workspace() {
 #[test]
 fn sync_config_swap_preserves_float_focus() {
     let mut hub = setup_hub();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w24"));
     let float_dim = Dimension::new(
         Length::new(10.0),
         Length::new(5.0),
         Length::new(30.0),
         Length::new(20.0),
     );
-    let float_id = hub.insert_float(hub.current_workspace(), float_dim);
+    let float_id = hub.insert_float(hub.current_workspace(), float_dim, titled("w25"));
     // Focus the float so is_float_focused becomes true.
     hub.set_focus(float_id);
 
@@ -504,12 +508,12 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
         ..default_layout_for_tests()
     });
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w26"));
+    hub.insert_tiling(hub.current_workspace(), titled("w27"));
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w28"));
+    hub.insert_tiling(hub.current_workspace(), titled("w29"));
 
     // Reload with same config: workspace "1" stays master, "0" stays partition-tree.
     hub.sync_config(LayoutConfig {
@@ -562,12 +566,12 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
 
     // Workspace "0" still uses partition-tree (equal horizontal split).
     hub.focus_workspace("0");
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w26, w27])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -607,14 +611,14 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
 fn override_added_via_reload_rebuilds_only_target() {
     let mut hub = setup_hub();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w30"));
+    hub.insert_tiling(hub.current_workspace(), titled("w31"));
+    hub.insert_tiling(hub.current_workspace(), titled("w32"));
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w33"));
+    hub.insert_tiling(hub.current_workspace(), titled("w34"));
+    hub.insert_tiling(hub.current_workspace(), titled("w35"));
 
     // Snapshot workspace "1" before reload (partition-tree layout).
     let snap_ws1_before = {
@@ -694,13 +698,13 @@ fn override_removed_via_reload_falls_back_to_global() {
         ..default_layout_for_tests()
     });
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w36"));
+    hub.insert_tiling(hub.current_workspace(), titled("w37"));
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w38"));
+    hub.insert_tiling(hub.current_workspace(), titled("w39"));
+    hub.insert_tiling(hub.current_workspace(), titled("w40"));
 
     hub.focus_workspace("0");
     let snap_ws0_before = snapshot(&hub);
@@ -713,13 +717,13 @@ fn override_removed_via_reload_falls_back_to_global() {
 
     // Workspace "1": rebuilt as partition-tree (equal horizontal split).
     hub.focus_workspace("1");
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(3), x=50.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(2), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , ])
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w38, w39, w40])
       )
 
     +------------------------------------------------++------------------------------------------------+**************************************************

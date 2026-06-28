@@ -1,7 +1,7 @@
 use crate::core::ContainerId;
 use crate::core::allocator::NodeId;
 use crate::core::node::{Dimension, Length};
-use crate::core::tests::{setup, snapshot};
+use crate::core::tests::{setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
@@ -411,17 +411,17 @@ fn focus_tab_change_workspace_focus_to_tabbed_container_active_tab_focused() {
 fn toggle_tabbed_off() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_tiling(hub.current_workspace(), titled("w1"));
     hub.toggle_container_layout();
     hub.toggle_container_layout();
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -1031,9 +1031,9 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     let mut hub = setup();
 
     // Create horizontal container with 3 windows
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_tiling(hub.current_workspace(), titled("w3"));
+    hub.insert_tiling(hub.current_workspace(), titled("w4"));
 
     // Make it tabbed
     hub.toggle_container_layout();
@@ -1041,7 +1041,7 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     // Create a vertical nested container in the middle tab
     hub.focus_prev_tab();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w5"));
 
     // Focus parent and toggle back to split (horizontal)
     hub.focus_parent();
@@ -1049,15 +1049,15 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     hub.toggle_container_layout();
 
     // The nested container should stay vertical (not rotated) since it differs from parent
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(3), x=50.00, y=15.00, w=50.00, h=15.00)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right, titles=[, Container, ])
-        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted, spawn=right, titles=[w2, Container, w4])
+        Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, titles=[w3, w5])
       )
 
     ******************************************************************************************************************************************************
@@ -1435,6 +1435,7 @@ fn focus_tab_noop() {
             Length::new(30.0),
             Length::new(20.0),
         ),
+        titled("w6"),
     );
     let before = snapshot(&hub);
     hub.focus_next_tab();
@@ -1444,8 +1445,8 @@ fn focus_tab_noop() {
 
     // Two tiling windows with no tabbed ancestor
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w7"));
+    hub.insert_tiling(hub.current_workspace(), titled("w8"));
     let before = snapshot(&hub);
     hub.focus_next_tab();
     assert_eq!(before, snapshot(&hub));
@@ -1460,7 +1461,7 @@ fn toggle_container_layout_noop() {
     hub.toggle_container_layout();
     assert_eq!(before, snapshot(&hub));
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w9"));
     let before = snapshot(&hub);
     hub.toggle_container_layout();
     assert_eq!(before, snapshot(&hub));
@@ -1474,6 +1475,7 @@ fn toggle_container_layout_noop() {
             Length::new(30.0),
             Length::new(20.0),
         ),
+        titled("w10"),
     );
     let before = snapshot(&hub);
     hub.toggle_container_layout();

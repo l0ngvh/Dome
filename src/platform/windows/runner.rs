@@ -8,7 +8,7 @@ use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::rejection_log_filter::{RejectionLogFilter, RejectionReason};
-use crate::platform::windows::dome::{Dome, HubEvent, NewWindow};
+use crate::platform::windows::dome::{Dome, HubEvent, NewWindow, WindowsMetadata};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
 use crate::platform::windows::throttle::{Throttle, ThrottleResult};
@@ -256,12 +256,14 @@ impl Runner {
                 Some((
                     NewWindow {
                         ext: manage,
-                        title,
-                        process,
-                        class,
-                        aumid,
+                        metadata: WindowsMetadata {
+                            title,
+                            process,
+                            class,
+                            aumid,
+                            app_name: inspect.get_app_display_name(),
+                        },
                         constraints: inspect.get_size_constraints(),
-                        app_name: inspect.get_app_display_name(),
                     },
                     inspect.get_visible_rect(),
                     inspect.get_monitor(),

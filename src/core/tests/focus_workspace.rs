@@ -1,29 +1,29 @@
-use crate::core::tests::{setup, snapshot};
+use crate::core::tests::{setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn switch_workspace_attaches_windows_correctly() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_tiling(hub.current_workspace(), titled("w1"));
 
     hub.focus_workspace("1");
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_tiling(hub.current_workspace(), titled("w3"));
 
     hub.focus_workspace("0");
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w4"));
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1, w4])
       )
 
     +------------------------------------------------++------------------------------------------------+**************************************************
@@ -63,7 +63,7 @@ fn switch_workspace_attaches_windows_correctly() {
 fn focus_same_workspace() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w5"));
     let initial_workspace = hub.current_workspace();
     hub.focus_workspace("0");
 

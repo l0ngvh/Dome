@@ -1,16 +1,20 @@
 use crate::action::MonitorTarget;
 use crate::core::node::WindowRestrictions;
 use crate::core::node::{Dimension, Length};
-use crate::core::tests::{setup, snapshot};
+use crate::core::tests::{setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn insert_fullscreen_sets_focus() {
     let mut hub = setup();
-    let w1 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
     hub.set_focus(w1);
 
-    hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::None);
+    hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::None,
+        titled("w1"),
+    );
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -54,8 +58,8 @@ fn insert_fullscreen_sets_focus() {
 #[test]
 fn set_fullscreen_from_tiling() {
     let mut hub = setup();
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_tiling(hub.current_workspace(), titled("w3"));
     hub.set_focus(w1);
 
     hub.set_fullscreen(w1, WindowRestrictions::None);
@@ -102,7 +106,7 @@ fn set_fullscreen_from_tiling() {
 #[test]
 fn set_fullscreen_from_float() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w4"));
     let w2 = hub.insert_float(
         hub.current_workspace(),
         Dimension::new(
@@ -111,6 +115,7 @@ fn set_fullscreen_from_float() {
             Length::new(40.0),
             Length::new(10.0),
         ),
+        titled("w5"),
     );
 
     hub.set_fullscreen(w2, WindowRestrictions::None);
@@ -157,7 +162,7 @@ fn set_fullscreen_from_float() {
 #[test]
 fn set_fullscreen_already_fullscreen() {
     let mut hub = setup();
-    let w1 = hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w6"));
     hub.set_fullscreen(w1, WindowRestrictions::None);
 
     let before = snapshot(&hub);
@@ -205,18 +210,18 @@ fn set_fullscreen_already_fullscreen() {
 #[test]
 fn unset_fullscreen_to_tiling() {
     let mut hub = setup();
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w7"));
+    hub.insert_tiling(hub.current_workspace(), titled("w8"));
     hub.set_fullscreen(w1, WindowRestrictions::None);
 
     hub.unset_fullscreen(w1);
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w8, w7])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -255,9 +260,9 @@ fn unset_fullscreen_to_tiling() {
 #[test]
 fn fullscreen_only_topmost_in_placements() {
     let mut hub = setup();
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    let w2 = hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w9"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w10"));
+    hub.insert_tiling(hub.current_workspace(), titled("w11"));
 
     hub.set_fullscreen(w1, WindowRestrictions::None);
     hub.set_fullscreen(w2, WindowRestrictions::None);
@@ -304,8 +309,8 @@ fn fullscreen_only_topmost_in_placements() {
 #[test]
 fn delete_fullscreen_window() {
     let mut hub = setup();
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w12"));
+    hub.insert_tiling(hub.current_workspace(), titled("w13"));
     hub.set_fullscreen(w1, WindowRestrictions::None);
 
     hub.delete_window(w1);
@@ -352,8 +357,8 @@ fn delete_fullscreen_window() {
 #[test]
 fn toggle_fullscreen_on_off() {
     let mut hub = setup();
-    let w1 = hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w14"));
+    hub.insert_tiling(hub.current_workspace(), titled("w15"));
     hub.set_focus(w1);
 
     hub.toggle_fullscreen();
@@ -396,12 +401,12 @@ fn toggle_fullscreen_on_off() {
     ");
 
     hub.toggle_fullscreen();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w15, w14])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -440,11 +445,11 @@ fn toggle_fullscreen_on_off() {
 #[test]
 fn insert_doesnt_steal_focus_from_fullscreen() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w16"));
     hub.toggle_fullscreen();
 
     // Insert tiling: fullscreen still focused
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w17"));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -492,6 +497,7 @@ fn insert_doesnt_steal_focus_from_fullscreen() {
             Length::new(40.0),
             Length::new(10.0),
         ),
+        titled("w18"),
     );
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -535,7 +541,7 @@ fn insert_doesnt_steal_focus_from_fullscreen() {
 #[test]
 fn move_fullscreen_to_workspace_sets_focus() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w19"));
     hub.toggle_fullscreen();
 
     hub.move_focused_to_workspace("1");
@@ -549,9 +555,13 @@ fn move_fullscreen_to_workspace_sets_focus() {
 #[test]
 fn block_all_blocks_user_commands() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::BlockAll);
+    hub.insert_tiling(hub.current_workspace(), titled("w20"));
+    hub.insert_tiling(hub.current_workspace(), titled("w21"));
+    hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::BlockAll,
+        titled("w22"),
+    );
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
@@ -623,8 +633,12 @@ fn block_all_blocks_user_commands() {
 #[test]
 fn block_all_allows_lifecycle_ops() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::BlockAll);
+    hub.insert_tiling(hub.current_workspace(), titled("w23"));
+    hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::BlockAll,
+        titled("w24"),
+    );
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
@@ -665,7 +679,7 @@ fn block_all_allows_lifecycle_ops() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    let w2 = hub.insert_tiling(hub.current_workspace());
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w25"));
     assert_eq!(snapshot(&hub), before);
 
     hub.delete_window(w2);
@@ -675,8 +689,8 @@ fn block_all_allows_lifecycle_ops() {
 #[test]
 fn block_all_cleared_by_unset_fullscreen() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w26"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w27"));
     hub.set_fullscreen(w1, WindowRestrictions::BlockAll);
 
     let before = snapshot(&hub);
@@ -722,12 +736,12 @@ fn block_all_cleared_by_unset_fullscreen() {
     assert_eq!(snapshot(&hub), before);
 
     hub.unset_fullscreen(w1);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w26, w27])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -807,8 +821,12 @@ fn block_all_cleared_by_unset_fullscreen() {
 #[test]
 fn block_all_does_not_persist_after_delete() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::BlockAll);
+    hub.insert_tiling(hub.current_workspace(), titled("w28"));
+    let w1 = hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::BlockAll,
+        titled("w29"),
+    );
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"
@@ -946,10 +964,14 @@ fn block_all_on_unfocused_window_does_not_block() {
     );
     // Put a tiling window on the second monitor's workspace.
     hub.focus_monitor(&MonitorTarget::Right);
-    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w30"));
     // Switch back and insert the BlockAll fullscreen on workspace 0.
     hub.focus_monitor(&MonitorTarget::Left);
-    hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::BlockAll);
+    hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::BlockAll,
+        titled("w31"),
+    );
     // set_focus is a lifecycle op not guarded by restrictions, so it can
     // escape the BlockAll workspace and focus the tiling window.
     hub.set_focus(w0);
@@ -1051,8 +1073,8 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
         ),
         1.0,
     );
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w32"));
+    hub.insert_tiling(hub.current_workspace(), titled("w33"));
     hub.set_fullscreen(w0, WindowRestrictions::ProtectFullscreen);
     hub.set_focus(w0);
 
@@ -1109,7 +1131,7 @@ fn protect_fullscreen_blocks_display_mode_and_monitor_move() {
 #[test]
 fn protect_fullscreen_allows_workspace_move_and_navigation() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w34"));
     hub.set_fullscreen(w0, WindowRestrictions::ProtectFullscreen);
 
     let fullscreen_state = snapshot(&hub);
@@ -1168,7 +1190,7 @@ fn protect_fullscreen_allows_workspace_move_and_navigation() {
 #[test]
 fn upgrade_protect_to_block_all() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w35"));
     hub.set_fullscreen(w0, WindowRestrictions::ProtectFullscreen);
 
     assert_snapshot!(snapshot(&hub), @"
@@ -1231,8 +1253,12 @@ fn upgrade_protect_to_block_all() {
 #[test]
 fn downgrade_block_all_to_protect() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::BlockAll);
+    hub.insert_tiling(hub.current_workspace(), titled("w36"));
+    let w1 = hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::BlockAll,
+        titled("w37"),
+    );
 
     let before = snapshot(&hub);
     assert_snapshot!(before, @"

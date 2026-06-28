@@ -22,8 +22,8 @@ pub(crate) use node::Direction;
 #[cfg(target_os = "windows")]
 pub(crate) use node::Physical;
 pub(crate) use node::{
-    ContainerId, Dimension, Length, Logical, MonitorId, Unit, WindowId, WindowRestrictions,
-    WorkspaceId,
+    ContainerId, Dimension, Length, Logical, MonitorId, PickerEntry, Unit, WindowId,
+    WindowMetadata, WindowRestrictions, WorkspaceId,
 };
 pub(crate) use strategy::TilingAction;
 

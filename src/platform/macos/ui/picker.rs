@@ -16,7 +16,8 @@ use super::renderer::{MetalBackend, Renderer};
 use crate::action::{Action, Actions};
 use crate::config::Config;
 use crate::core::Dimension;
-use crate::picker::{PickerEntry, PickerResult};
+use crate::core::PickerEntry;
+use crate::picker::PickerResult;
 use crate::platform::macos::dome::HubEvent;
 use crate::theme::Theme;
 

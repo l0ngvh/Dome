@@ -36,9 +36,9 @@ use windows::Win32::UI::HiDpi::{
     GetDpiAwarenessContextForProcess, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, IDC_ARROW, LoadCursorW, MA_NOACTIVATE,
-    MSG, PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP, WM_DPICHANGED,
-    WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW,
+    DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, IDC_ARROW, LoadCursorW,
+    MA_NOACTIVATE, MSG, PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP,
+    WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW,
 };
 use windows::core::BOOL;
 

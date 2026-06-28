@@ -19,8 +19,8 @@ use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::{
-    DebounceBurst, Dome, ExitNativeFullscreen, FrameSender, HubMessage, NewWindow, PendingAdd,
-    RoundedDimension, WindowMove,
+    DebounceBurst, Dome, ExitNativeFullscreen, FrameSender, HubMessage, MacOSMetadata, NewWindow,
+    PendingAdd, RoundedDimension, WindowMove,
 };
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);
@@ -498,9 +498,11 @@ fn new_window(macos: &MacOS, cg_id: CGWindowID) -> PendingAdd {
     PendingAdd::Positioned {
         new: NewWindow {
             ax: Arc::new(ax.clone()),
-            app_name: Some(ax.app_name.clone()),
-            bundle_id: None,
-            title: Some(ax.title.clone()),
+            metadata: MacOSMetadata {
+                title: Some(ax.title.clone()),
+                app_name: Some(ax.app_name.clone()),
+                bundle_id: None,
+            },
         },
         dim: RoundedDimension {
             x: pos.0,

@@ -19,29 +19,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-fn configure_picker_dwm(hwnd: HWND) {
-    let preference = DWMWCP_ROUND;
-    let result = unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            &preference as *const DWM_WINDOW_CORNER_PREFERENCE as *const _,
-            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
-        )
-    };
-    if let Err(e) = result {
-        // Windows 11 22000+ only. Older versions return E_INVALIDARG; fall through without
-        // rounded corners and log at debug so we don't spam the console.
-        tracing::debug!("DWM corner preference not supported: {e:#}");
-    }
-}
-
 use super::HubEvent;
 use super::overlay::{OwnedHwnd, PickerApi, Renderer};
 use crate::action::{Action, Actions};
 use crate::config::Config;
+use crate::core::PickerEntry;
 use crate::core::{Dimension, Physical, WindowId};
-use crate::picker::{PickerEntry, PickerResult};
+use crate::picker::PickerResult;
 use crate::platform::windows::HubSender;
 use crate::platform::windows::external::HwndId;
 use crate::theme::Theme;
@@ -417,12 +401,61 @@ pub(in crate::platform::windows) unsafe extern "system" fn picker_wnd_proc(
     }
 }
 
+fn configure_picker_dwm(hwnd: HWND) {
+    let preference = DWMWCP_ROUND;
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &preference as *const DWM_WINDOW_CORNER_PREFERENCE as *const _,
+            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+        )
+    };
+    if let Err(e) = result {
+        // Windows 11 22000+ only. Older versions return E_INVALIDARG; fall through without
+        // rounded corners and log at debug so we don't spam the console.
+        tracing::debug!("DWM corner preference not supported: {e:#}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::LayoutConfig;
-    use crate::core::{Dimension, Hub, Length, Physical};
+    use crate::core::{Dimension, Hub, Length, Physical, WindowId, WindowMetadata};
     use crate::platform::windows::external::HwndId;
+
+    fn titled(t: &str) -> Box<dyn WindowMetadata> {
+        #[derive(Debug, Clone, Default)]
+        struct Meta {
+            title: Option<String>,
+        }
+        impl std::fmt::Display for Meta {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.title.as_deref().unwrap_or(""))
+            }
+        }
+        impl WindowMetadata for Meta {
+            fn icon_key(&self) -> Option<String> {
+                None
+            }
+            fn app_name(&self) -> Option<String> {
+                None
+            }
+            fn title(&self) -> Option<&str> {
+                self.title.as_deref()
+            }
+            fn set_title(&mut self, title: String) {
+                self.title = Some(title);
+            }
+            fn clone_box(&self) -> Box<dyn WindowMetadata> {
+                Box::new(self.clone())
+            }
+        }
+        Box::new(Meta {
+            title: Some(t.to_owned()),
+        })
+    }
 
     fn test_hub() -> Hub {
         Hub::new(
@@ -440,10 +473,10 @@ mod tests {
     #[test]
     fn icons_to_load_filters_dispatched_and_loaded() {
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling(hub.current_workspace());
-        let w2 = hub.insert_tiling(hub.current_workspace());
-        let w3 = hub.insert_tiling(hub.current_workspace());
-        let w4 = hub.insert_tiling(hub.current_workspace());
+        let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
+        let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
+        let w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
+        let w4 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
         let entries = vec![
             PickerEntry {
                 id: w1,

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::Dome;
+use super::display_from_process;
 use super::registry::ManagedWindow;
 use crate::core::{
     Dimension, FloatWindowPlacement, Length, MonitorId, Physical, TilingWindowPlacement, WindowId,
@@ -16,17 +17,28 @@ use crate::platform::windows::handle::OFFSCREEN_POS;
 /// always-co-occurring scalars apiece.
 pub(in crate::platform::windows) struct NewWindow {
     pub(in crate::platform::windows) ext: Arc<dyn ManageExternalWindow>,
-    pub(in crate::platform::windows) title: Option<String>,
-    pub(in crate::platform::windows) process: String,
-    pub(in crate::platform::windows) class: Option<String>,
-    pub(in crate::platform::windows) aumid: Option<String>,
+    pub(in crate::platform::windows) metadata: WindowsMetadata,
     pub(in crate::platform::windows) constraints: (f32, f32, f32, f32),
-    pub(in crate::platform::windows) app_name: Option<String>,
 }
 
 impl std::fmt::Display for NewWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[pid={}|hwnd={}] ", self.ext.pid(), self.ext.id())?;
+        write!(f, "{}", self.metadata)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::platform::windows) struct WindowsMetadata {
+    pub title: Option<String>,
+    pub process: String,
+    pub class: Option<String>,
+    pub aumid: Option<String>,
+    pub app_name: Option<String>,
+}
+
+impl std::fmt::Display for WindowsMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.app_name.as_deref() {
             Some(name) => write!(f, "{name} ({})", self.process)?,
             None => write!(f, "{}", self.process)?,
@@ -35,6 +47,26 @@ impl std::fmt::Display for NewWindow {
             write!(f, " - {title}")?;
         }
         Ok(())
+    }
+}
+
+impl crate::core::WindowMetadata for WindowsMetadata {
+    fn icon_key(&self) -> Option<String> {
+        Some(self.process.clone())
+    }
+    fn app_name(&self) -> Option<String> {
+        self.app_name
+            .clone()
+            .or_else(|| Some(display_from_process(&self.process)))
+    }
+    fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+    fn set_title(&mut self, title: String) {
+        self.title = Some(title);
+    }
+    fn clone_box(&self) -> Box<dyn crate::core::WindowMetadata> {
+        Box::new(self.clone())
     }
 }
 
@@ -161,7 +193,9 @@ impl Dome {
         rect: Dimension<Physical>,
         target_ws: WorkspaceId,
     ) {
-        let id = self.hub.insert_tiling(target_ws);
+        let id = self
+            .hub
+            .insert_tiling(target_ws, Box::new(new.metadata.clone()));
         let state = WindowState::Positioned(PositionedState::Offscreen {
             retries: 0,
             actual: rect,
@@ -177,7 +211,9 @@ impl Dome {
         rect: Dimension<Physical>,
         target_ws: WorkspaceId,
     ) {
-        let id = self.hub.insert_float(target_ws, rect);
+        let id = self
+            .hub
+            .insert_float(target_ws, rect, Box::new(new.metadata.clone()));
         let state = WindowState::Positioned(PositionedState::Offscreen {
             retries: 0,
             actual: rect,
@@ -193,7 +229,9 @@ impl Dome {
         target_ws: WorkspaceId,
         restrictions: WindowRestrictions,
     ) {
-        let id = self.hub.insert_fullscreen(target_ws, restrictions);
+        let id =
+            self.hub
+                .insert_fullscreen(target_ws, restrictions, Box::new(new.metadata.clone()));
         let state = WindowState::BorderlessFullscreen;
         self.finalize_inserted_window(new, id, state);
         tracing::info!(window_id = %id, ?restrictions, "New borderless fullscreen window");
@@ -202,18 +240,11 @@ impl Dome {
     fn finalize_inserted_window(&mut self, new: NewWindow, id: WindowId, state: WindowState) {
         let NewWindow {
             ext,
-            title,
-            process,
-            class: _,
-            aumid: _,
+            metadata: _,
             constraints,
-            app_name,
         } = new;
         let id_key = ext.id();
         self.set_constraints(id, constraints);
-        if let Some(title) = &title {
-            self.hub.set_window_title(id, title.clone());
-        }
         self.recovery.track(&ext);
 
         self.registry.insert(
@@ -223,10 +254,6 @@ impl Dome {
                 ext,
                 state,
                 is_minimized: false,
-                title,
-                process,
-                app_name,
-                window_id: id,
             },
         );
         self.pending_created.push(id);
@@ -235,7 +262,7 @@ impl Dome {
     #[tracing::instrument(
         level = "trace",
         skip(self, wp),
-        fields(window_id = %id, window = tracing::field::Empty),
+        fields(window_id = %id),
     )]
     pub(super) fn show_float(
         &mut self,
@@ -243,11 +270,8 @@ impl Dome {
         wp: &FloatWindowPlacement,
         focus_changed: bool,
         is_focused: bool,
-        // monitor is caller-supplied (not part of FloatWindowPlacement) for DPI scale lookup.
         monitor: MonitorId,
     ) {
-        // Hub delivers frames in the OS-native unit (physical pixels on Windows
-        // under PMv2).
         let scale = self.monitors.monitor(monitor).scale();
         let border = self
             .monitors
@@ -255,7 +279,6 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        tracing::Span::current().record("window", entry.to_string());
         let content = apply_inset(wp.frame, border);
         let new_target = content.round();
 
@@ -310,7 +333,7 @@ impl Dome {
     #[tracing::instrument(
         level = "trace",
         skip(self, wp),
-        fields(window_id = %id, window = tracing::field::Empty),
+        fields(window_id = %id),
     )]
     pub(super) fn show_tiling(
         &mut self,
@@ -332,7 +355,6 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        tracing::Span::current().record("window", entry.to_string());
         let content = apply_inset(wp.frame, border);
         let new_target = content.round();
 
@@ -431,7 +453,7 @@ impl Dome {
     #[tracing::instrument(
         level = "trace",
         skip(self),
-        fields(window_id = %id, window = tracing::field::Empty),
+        fields(window_id = %id),
     )]
     pub(super) fn show_fullscreen_window(
         &mut self,
@@ -442,7 +464,6 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        tracing::Span::current().record("window", entry.to_string());
         // Borderless-fullscreen window hidden by Dome because its workspace
         // was inactive. The workspace is now visible again, so transition
         // back and drive the OS-side restore.

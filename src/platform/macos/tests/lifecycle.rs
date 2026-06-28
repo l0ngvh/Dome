@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::action::{Action, Actions};
 use crate::config::{Config, MacosOnOpenRule, WindowMode};
-use crate::platform::macos::dome::{ExtRefresh, NewWindow, PendingAdd};
+use crate::platform::macos::dome::{ExtRefresh, MacOSMetadata, NewWindow, PendingAdd};
 
 use super::*;
 
@@ -17,9 +17,11 @@ fn discover_native_fullscreen_window() {
     let nw = PendingAdd::NativeFullscreen {
         new: NewWindow {
             ax: Arc::new(ax.clone()),
-            app_name: Some("Safari".to_owned()),
-            bundle_id: None,
-            title: Some("Google".to_owned()),
+            metadata: MacOSMetadata {
+                app_name: Some("Safari".to_owned()),
+                bundle_id: None,
+                title: Some("Google".to_owned()),
+            },
         },
     };
     dome.reconcile_windows(&[], &[], &[], vec![nw], &[], &[]);

@@ -1,23 +1,23 @@
 use crate::core::Dimension;
 use crate::core::node::{Length, WindowRestrictions};
-use crate::core::tests::{setup, snapshot};
+use crate::core::tests::{setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn set_focus_same_workspace_tiling_and_float() {
     let mut hub = setup();
 
-    let w0 = hub.insert_tiling(hub.current_workspace());
-    let w1 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
 
     // Tiling: focus w0, then w1
     hub.set_focus(w0);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1])
       )
 
     ***************************************************************************+-------------------------------------------------------------------------+
@@ -53,12 +53,12 @@ fn set_focus_same_workspace_tiling_and_float() {
     ");
 
     hub.set_focus(w1);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -102,14 +102,15 @@ fn set_focus_same_workspace_tiling_and_float() {
             Length::new(30.0),
             Length::new(10.0),
         ),
+        titled("w2"),
     );
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
         Window(id=WindowId(2), x=10.00, y=5.00, w=30.00, h=10.00, float, highlighted)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -149,9 +150,9 @@ fn set_focus_same_workspace_tiling_and_float() {
 fn set_focus_switches_workspace() {
     // Tiling: switch workspace via set_focus
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w4"));
     hub.set_focus(w0);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -201,11 +202,12 @@ fn set_focus_switches_workspace() {
             Length::new(30.0),
             Length::new(10.0),
         ),
+        titled("w5"),
     );
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w6"));
     hub.set_focus(f0);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=10.00, float, highlighted)
@@ -232,7 +234,7 @@ fn set_focus_switches_workspace() {
 #[test]
 fn set_focus_in_other_workspace_keeps_origin_workspace() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling(hub.current_workspace());
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w7"));
 
     hub.move_focused_to_workspace("2");
     hub.set_focus(w0);
@@ -288,6 +290,7 @@ fn float_focus_changes_float_z_order() {
             Length::new(30.0),
             Length::new(10.0),
         ),
+        titled("w8"),
     );
     let w1 = hub.insert_float(
         hub.current_workspace(),
@@ -297,6 +300,7 @@ fn float_focus_changes_float_z_order() {
             Length::new(30.0),
             Length::new(10.0),
         ),
+        titled("w9"),
     );
     let _w2 = hub.insert_float(
         hub.current_workspace(),
@@ -306,13 +310,14 @@ fn float_focus_changes_float_z_order() {
             Length::new(30.0),
             Length::new(10.0),
         ),
+        titled("w10"),
     );
 
     hub.set_focus(w0);
     hub.set_focus(w1);
     // Now z-order from top to bottom should be [w1, w0, w2]
     hub.delete_window(w0);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=100.00, y=5.00, w=30.00, h=10.00, float)
@@ -340,9 +345,17 @@ fn float_focus_changes_float_z_order() {
 #[test]
 fn detach_topmost_fullscreen_focuses_next_fullscreen() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::None);
-    let fs2 = hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::None);
+    hub.insert_tiling(hub.current_workspace(), titled("w11"));
+    hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::None,
+        titled("w12"),
+    );
+    let fs2 = hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::None,
+        titled("w13"),
+    );
 
     hub.delete_window(fs2);
     assert_snapshot!(snapshot(&hub), @"
@@ -387,7 +400,7 @@ fn detach_topmost_fullscreen_focuses_next_fullscreen() {
 #[test]
 fn detach_only_fullscreen_focuses_tiling_even_in_presence_of_float() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w14"));
     hub.insert_float(
         hub.current_workspace(),
         Dimension::new(
@@ -396,8 +409,13 @@ fn detach_only_fullscreen_focuses_tiling_even_in_presence_of_float() {
             Length::new(30.0),
             Length::new(10.0),
         ),
+        titled("w15"),
     );
-    let fs = hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::None);
+    let fs = hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::None,
+        titled("w16"),
+    );
 
     hub.delete_window(fs);
     assert_snapshot!(snapshot(&hub), @"
@@ -443,7 +461,7 @@ fn detach_only_fullscreen_focuses_tiling_even_in_presence_of_float() {
 #[test]
 fn detach_last_tiling_with_floats_focuses_float() {
     let mut hub = setup();
-    let t = hub.insert_tiling(hub.current_workspace());
+    let t = hub.insert_tiling(hub.current_workspace(), titled("w17"));
     hub.insert_float(
         hub.current_workspace(),
         Dimension::new(
@@ -452,10 +470,11 @@ fn detach_last_tiling_with_floats_focuses_float() {
             Length::new(30.0),
             Length::new(10.0),
         ),
+        titled("w18"),
     );
     hub.set_focus(t);
     hub.delete_window(t);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=10.00, float, highlighted)
@@ -491,6 +510,7 @@ fn detach_non_topmost_keeps_focus() {
             Length::new(30.0),
             Length::new(10.0),
         ),
+        titled("w19"),
     );
     hub.insert_float(
         hub.current_workspace(),
@@ -500,9 +520,10 @@ fn detach_non_topmost_keeps_focus() {
             Length::new(30.0),
             Length::new(10.0),
         ),
+        titled("w20"),
     );
     hub.delete_window(a);
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=10.00, float, highlighted)
@@ -527,8 +548,16 @@ fn detach_non_topmost_keeps_focus() {
 
     // Fullscreen: delete non-topmost, topmost stays focused
     let mut hub = setup();
-    let fs1 = hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::None);
-    hub.insert_fullscreen(hub.current_workspace(), WindowRestrictions::None);
+    let fs1 = hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::None,
+        titled("w21"),
+    );
+    hub.insert_fullscreen(
+        hub.current_workspace(),
+        WindowRestrictions::None,
+        titled("w22"),
+    );
     hub.delete_window(fs1);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))

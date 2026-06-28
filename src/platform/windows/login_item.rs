@@ -2,10 +2,11 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use windows::core::{HSTRING, Interface, PCWSTR};
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoInitializeEx,
-                                  COINIT_APARTMENTTHREADED, IPersistFile};
+use windows::Win32::System::Com::{
+    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, IPersistFile,
+};
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+use windows::core::{HSTRING, Interface, PCWSTR};
 
 const LINK_NAME: &str = "Dome.lnk";
 
@@ -66,15 +67,14 @@ fn create_shortcut(exe_path: &str, shortcut_path: &std::path::Path) {
     // Safe to call when already initialised with the same model.
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
 
-    let shell_link: IShellLinkW = match unsafe {
-        CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-    } {
-        Ok(sl) => sl,
-        Err(e) => {
-            tracing::warn!("Failed to create ShellLink COM object: {e}");
-            return;
-        }
-    };
+    let shell_link: IShellLinkW =
+        match unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER) } {
+            Ok(sl) => sl,
+            Err(e) => {
+                tracing::warn!("Failed to create ShellLink COM object: {e}");
+                return;
+            }
+        };
 
     let exe_hs = HSTRING::from(exe_path);
     if let Err(e) = unsafe { shell_link.SetPath(PCWSTR(exe_hs.as_ptr())) } {

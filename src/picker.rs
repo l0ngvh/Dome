@@ -5,35 +5,11 @@ use egui::{
     TextStyle, TextureHandle, UiBuilder, load::SizedTexture, pos2, vec2,
 };
 
-use crate::core::WindowId;
+use crate::core::{PickerEntry, WindowId};
 use crate::theme::Theme;
-
-#[derive(Clone, Debug)]
-pub(crate) struct PickerEntry {
-    pub(crate) id: WindowId,
-    pub(crate) title: String,
-    pub(crate) app_id: Option<String>,
-    pub(crate) app_name: Option<String>,
-}
-
-/// The closure returns `(app_id, app_name)` for each window: `app_id` is the
-/// icon-cache key, `app_name` is a human-readable display string.
-pub(crate) fn build_picker_entries(
-    minimized: &[(WindowId, String)],
-    lookup: impl Fn(WindowId) -> (Option<String>, Option<String>),
-) -> Vec<PickerEntry> {
-    minimized
-        .iter()
-        .map(|(id, title)| {
-            let (app_id, app_name) = lookup(*id);
-            PickerEntry {
-                id: *id,
-                title: title.clone(),
-                app_id,
-                app_name,
-            }
-        })
-        .collect()
+/// Build picker entries from minimized window data.
+pub(crate) fn build_picker_entries(entries: &[PickerEntry]) -> Vec<PickerEntry> {
+    entries.to_vec()
 }
 
 pub(crate) enum PickerResult {
@@ -183,7 +159,39 @@ pub(crate) fn paint_picker(
 mod tests {
     use super::*;
     use crate::config::LayoutConfig;
-    use crate::core::{Dimension, Hub, Length};
+    use crate::core::{Dimension, Hub, Length, WindowMetadata};
+
+    fn titled(t: &str) -> Box<dyn WindowMetadata> {
+        #[derive(Debug, Clone, Default)]
+        struct Meta {
+            title: Option<String>,
+        }
+        impl std::fmt::Display for Meta {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.title.as_deref().unwrap_or(""))
+            }
+        }
+        impl WindowMetadata for Meta {
+            fn icon_key(&self) -> Option<String> {
+                None
+            }
+            fn app_name(&self) -> Option<String> {
+                None
+            }
+            fn title(&self) -> Option<&str> {
+                self.title.as_deref()
+            }
+            fn set_title(&mut self, title: String) {
+                self.title = Some(title);
+            }
+            fn clone_box(&self) -> Box<dyn WindowMetadata> {
+                Box::new(self.clone())
+            }
+        }
+        Box::new(Meta {
+            title: Some(t.to_owned()),
+        })
+    }
 
     fn test_hub() -> Hub {
         let layout = LayoutConfig::default();
@@ -202,58 +210,41 @@ mod tests {
     #[test]
     fn build_entries_resolves_app_id() {
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling(hub.current_workspace());
-        let w2 = hub.insert_tiling(hub.current_workspace());
-        let w3 = hub.insert_tiling(hub.current_workspace());
-        let minimized = vec![
-            (w1, "Window One".to_string()),
-            (w2, "Window Two".to_string()),
-            (w3, "Window Three".to_string()),
-        ];
-        let entries = build_picker_entries(&minimized, |id| match id {
-            id if id == w1 => (Some("com.app.one".to_string()), Some("App One".to_string())),
-            id if id == w3 => (
-                Some("com.app.three".to_string()),
-                Some("App Three".to_string()),
-            ),
-            _ => (None, None),
-        });
+        let w1 = hub.insert_tiling(hub.current_workspace(), titled("Window One"));
+        let w2 = hub.insert_tiling(hub.current_workspace(), titled("Window Two"));
+        let w3 = hub.insert_tiling(hub.current_workspace(), titled("Window Three"));
+        hub.minimize_window(w1);
+        hub.minimize_window(w2);
+        hub.minimize_window(w3);
+        let entries = build_picker_entries(&hub.minimized_window_entries());
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].id, w1);
         assert_eq!(entries[0].title, "Window One");
-        assert_eq!(entries[0].app_id.as_deref(), Some("com.app.one"));
-        assert_eq!(entries[0].app_name.as_deref(), Some("App One"));
         assert_eq!(entries[1].id, w2);
         assert_eq!(entries[1].title, "Window Two");
-        assert!(entries[1].app_id.is_none());
-        assert!(entries[1].app_name.is_none());
         assert_eq!(entries[2].id, w3);
         assert_eq!(entries[2].title, "Window Three");
-        assert_eq!(entries[2].app_id.as_deref(), Some("com.app.three"));
-        assert_eq!(entries[2].app_name.as_deref(), Some("App Three"));
     }
 
     #[test]
     fn build_entries_empty_input() {
-        let entries = build_picker_entries(&[], |_| (None, None));
+        let entries = build_picker_entries(&[]);
         assert!(entries.is_empty());
     }
 
     #[test]
     fn build_entries_duplicate_app_id() {
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling(hub.current_workspace());
-        let w2 = hub.insert_tiling(hub.current_workspace());
-        let minimized = vec![(w1, "Chrome 1".to_string()), (w2, "Chrome 2".to_string())];
-        let entries = build_picker_entries(&minimized, |_| {
-            (
-                Some("com.google.Chrome".to_string()),
-                Some("Google Chrome".to_string()),
-            )
-        });
+        let w1 = hub.insert_tiling(hub.current_workspace(), titled("Chrome 1"));
+        let w2 = hub.insert_tiling(hub.current_workspace(), titled("Chrome 2"));
+        hub.minimize_window(w1);
+        hub.minimize_window(w2);
+        let entries = build_picker_entries(&hub.minimized_window_entries());
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].app_id.as_deref(), Some("com.google.Chrome"));
-        assert_eq!(entries[1].app_id.as_deref(), Some("com.google.Chrome"));
+        assert_eq!(entries[0].id, w1);
+        assert_eq!(entries[0].title, "Chrome 1");
+        assert_eq!(entries[1].id, w2);
+        assert_eq!(entries[1].title, "Chrome 2");
     }
 
     /// Smoke test: paint_picker does not panic across all icon states and produces
@@ -267,9 +258,9 @@ mod tests {
         let theme = Theme::from_flavor(Flavor::Mocha);
 
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling(hub.current_workspace());
-        let w2 = hub.insert_tiling(hub.current_workspace());
-        let w3 = hub.insert_tiling(hub.current_workspace());
+        let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
+        let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
+        let w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
         let entries = vec![
             PickerEntry {
                 id: w1,

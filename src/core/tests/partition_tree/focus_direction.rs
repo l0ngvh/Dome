@@ -1,22 +1,22 @@
-use crate::core::tests::{setup, snapshot};
+use crate::core::tests::{setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn focus_left_right_in_horizontal_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    hub.insert_tiling(hub.current_workspace(), titled("w2"));
 
     hub.focus_left();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1, w2])
       )
 
     +------------------------------------------------+**************************************************+------------------------------------------------+
@@ -52,13 +52,13 @@ fn focus_left_right_in_horizontal_container() {
     ");
 
     hub.focus_right();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1, w2])
       )
 
     +------------------------------------------------++------------------------------------------------+**************************************************
@@ -98,19 +98,19 @@ fn focus_left_right_in_horizontal_container() {
 fn focus_up_down_in_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w3"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_tiling(hub.current_workspace(), titled("w5"));
 
     hub.focus_up();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=0.00, y=20.00, w=150.00, h=10.00)
         Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=10.00, highlighted, spawn=bottom)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w3, w4, w5])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -146,13 +146,13 @@ fn focus_up_down_in_vertical_container() {
     ");
 
     hub.focus_down();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=0.00, y=20.00, w=150.00, h=10.00, highlighted, spawn=bottom)
         Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=10.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=10.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w3, w4, w5])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -192,26 +192,26 @@ fn focus_up_down_in_vertical_container() {
 fn focus_right_selects_first_child_of_next_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w6"));
+    hub.insert_tiling(hub.current_workspace(), titled("w7"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w8"));
     hub.focus_up();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w9"));
 
     // Focus w0
     hub.focus_left();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(3), x=112.50, y=0.00, w=37.50, h=15.00)
         Window(id=WindowId(1), x=75.00, y=0.00, w=37.50, h=15.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[Container, ])
-        Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=15.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w6, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[Container, w8])
+        Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=15.00, titles=[w7, w9])
       )
 
     +-------------------------------------------------------------------------+**************************************+-----------------------------------+
@@ -248,16 +248,16 @@ fn focus_right_selects_first_child_of_next_container() {
 
     // focus_right should select w2 (first child of first nested container)
     hub.focus_right();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(3), x=112.50, y=0.00, w=37.50, h=15.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=75.00, y=0.00, w=37.50, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[Container, ])
-        Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=15.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w6, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[Container, w8])
+        Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=15.00, titles=[w7, w9])
       )
 
     +-------------------------------------------------------------------------++------------------------------------+*************************************
@@ -298,24 +298,24 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     let mut hub = setup();
 
     // Create: [w0, [w1, [w2, w3]]]
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w10"));
+    hub.insert_tiling(hub.current_workspace(), titled("w11"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w12"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w13"));
 
     hub.focus_left();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=112.50, y=15.00, w=37.50, h=15.00)
         Window(id=WindowId(2), x=75.00, y=15.00, w=37.50, h=15.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w10, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[w11, Container])
+        Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, titles=[w12, w13])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -351,16 +351,16 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     ");
     hub.focus_left();
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=112.50, y=15.00, w=37.50, h=15.00)
         Window(id=WindowId(2), x=75.00, y=15.00, w=37.50, h=15.00)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w10, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[w11, Container])
+        Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, titles=[w12, w13])
       )
 
     ***************************************************************************+-------------------------------------------------------------------------+
@@ -400,25 +400,25 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
 fn focus_down_from_nested_container_goes_to_grandparent_next() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w14"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w15"));
     hub.focus_up();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w16"));
     hub.focus_left();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
-    assert_snapshot!(snapshot(&hub), @"
+    hub.insert_tiling(hub.current_workspace(), titled("w17"));
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
         Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(3), x=0.00, y=7.50, w=75.00, h=7.50, highlighted, spawn=bottom)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=7.50)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, ])
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=15.00, titles=[Container, ])
-        Container(id=ContainerId(2), x=0.00, y=0.00, w=75.00, h=15.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, w15])
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=15.00, titles=[Container, w16])
+        Container(id=ContainerId(2), x=0.00, y=0.00, w=75.00, h=15.00, titles=[w14, w17])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -454,16 +454,16 @@ fn focus_down_from_nested_container_goes_to_grandparent_next() {
     ");
     hub.focus_down();
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00, highlighted, spawn=bottom)
         Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(3), x=0.00, y=7.50, w=75.00, h=7.50)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=7.50)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, ])
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=15.00, titles=[Container, ])
-        Container(id=ContainerId(2), x=0.00, y=0.00, w=75.00, h=15.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, w15])
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=15.00, titles=[Container, w16])
+        Container(id=ContainerId(2), x=0.00, y=0.00, w=75.00, h=15.00, titles=[w14, w17])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -504,23 +504,23 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
     let mut hub = setup();
 
     // Create: [w0, w1] [w2]
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w18"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w19"));
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w20"));
 
     // Focus w1 (last in nested container)
     hub.focus_left();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
         Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00, highlighted, spawn=bottom)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, ])
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, w20])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, titles=[w18, w19])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -558,14 +558,14 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
     // focus_right from w1 should go to w2 (next sibling in parent)
     hub.focus_right();
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=15.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, ])
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, w20])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=75.00, h=30.00, titles=[w18, w19])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -605,27 +605,27 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
 fn focus_down_into_horizontal_nested_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w21"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w22"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w23"));
+    hub.insert_tiling(hub.current_workspace(), titled("w24"));
 
     // Move to middle
     hub.focus_left();
 
     hub.focus_up();
     hub.focus_up();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=100.00, y=15.00, w=50.00, h=15.00)
         Window(id=WindowId(2), x=50.00, y=15.00, w=50.00, h=15.00)
         Window(id=WindowId(1), x=0.00, y=15.00, w=50.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00, highlighted, spawn=bottom)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w21, Container])
+        Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, titles=[w22, w23, w24])
       )
 
     ******************************************************************************************************************************************************
@@ -661,15 +661,15 @@ fn focus_down_into_horizontal_nested_container() {
     ");
 
     hub.focus_down();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=100.00, y=15.00, w=50.00, h=15.00)
         Window(id=WindowId(2), x=50.00, y=15.00, w=50.00, h=15.00, highlighted, spawn=right)
         Window(id=WindowId(1), x=0.00, y=15.00, w=50.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w21, Container])
+        Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, titles=[w22, w23, w24])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -709,17 +709,17 @@ fn focus_down_into_horizontal_nested_container() {
 fn focus_left_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w25"));
+    hub.insert_tiling(hub.current_workspace(), titled("w26"));
     hub.focus_left();
     hub.focus_left(); // Already at leftmost
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w25, w26])
       )
 
     ***************************************************************************+-------------------------------------------------------------------------+
@@ -759,16 +759,16 @@ fn focus_left_at_boundary_does_nothing() {
 fn focus_right_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w27"));
+    hub.insert_tiling(hub.current_workspace(), titled("w28"));
     hub.focus_right(); // Already at rightmost
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w27, w28])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************
@@ -808,18 +808,18 @@ fn focus_right_at_boundary_does_nothing() {
 fn focus_up_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w29"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w30"));
     hub.focus_up();
     hub.focus_up(); // Already at topmost
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00, highlighted, spawn=bottom)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w29, w30])
       )
 
     ******************************************************************************************************************************************************
@@ -859,17 +859,17 @@ fn focus_up_at_boundary_does_nothing() {
 fn focus_down_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w31"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w32"));
     hub.focus_down(); // Already at bottommost
 
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=0.00, y=15.00, w=150.00, h=15.00, highlighted, spawn=bottom)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w31, w32])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -962,22 +962,22 @@ fn focus_from_inside_tabbed_parent_goes_to_parent_sibling() {
 fn focus_into_container_uses_container_focus() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w33"));
+    hub.insert_tiling(hub.current_workspace(), titled("w34"));
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w35"));
+    hub.insert_tiling(hub.current_workspace(), titled("w36"));
 
     hub.focus_up();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=75.00, y=20.00, w=75.00, h=10.00)
         Window(id=WindowId(2), x=75.00, y=10.00, w=75.00, h=10.00, highlighted, spawn=bottom)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=10.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w33, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[w34, w35, w36])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -1013,15 +1013,15 @@ fn focus_into_container_uses_container_focus() {
     ");
 
     hub.focus_left();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=75.00, y=20.00, w=75.00, h=10.00)
         Window(id=WindowId(2), x=75.00, y=10.00, w=75.00, h=10.00)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=10.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w33, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[w34, w35, w36])
       )
 
     ***************************************************************************+-------------------------------------------------------------------------+
@@ -1058,15 +1058,15 @@ fn focus_into_container_uses_container_focus() {
 
     // focus_right should go to W2 (container's focus), not W1 (first child)
     hub.focus_right();
-    assert_snapshot!(snapshot(&hub), @"
+    assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(3), x=75.00, y=20.00, w=75.00, h=10.00)
         Window(id=WindowId(2), x=75.00, y=10.00, w=75.00, h=10.00, highlighted, spawn=bottom)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=10.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[, Container])
-        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[, , ])
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w33, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[w34, w35, w36])
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -1218,7 +1218,7 @@ fn focus_direction_noop() {
     hub.focus_down();
     assert_eq!(before, snapshot(&hub));
 
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w37"));
     let before = snapshot(&hub);
     hub.focus_left();
     assert_eq!(before, snapshot(&hub));

@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use super::{setup_hub, setup_logger_with_level, validate_hub};
+use super::{setup_hub, setup_logger_with_level, titled, validate_hub};
 use crate::action::MonitorTarget;
 use crate::core::hub::Hub;
 use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
@@ -52,7 +52,7 @@ fn strategy_smoke_test() {
     use crate::core::hub::MonitorLayout;
 
     let mut hub = setup();
-    let id = hub.insert_tiling(hub.current_workspace());
+    let id = hub.insert_tiling(hub.current_workspace(), titled("w0"));
     let placements = hub.get_visible_placements();
 
     assert_eq!(placements.monitors.len(), 1);
@@ -684,13 +684,13 @@ fn apply_op(
 ) {
     match op {
         RecordedOp::InsertTiling { producer_id } => {
-            let id = hub.insert_tiling(hub.current_workspace());
+            let id = hub.insert_tiling(hub.current_workspace(), titled("w1"));
             windows.push(id);
             window_origin.push(*producer_id);
             window_minimized.push(false);
         }
         RecordedOp::InsertFloat { producer_id, dim } => {
-            let id = hub.insert_float(hub.current_workspace(), *dim);
+            let id = hub.insert_float(hub.current_workspace(), *dim, titled("w2"));
             windows.push(id);
             window_origin.push(*producer_id);
             window_minimized.push(false);
@@ -699,7 +699,7 @@ fn apply_op(
             producer_id,
             restrictions,
         } => {
-            let id = hub.insert_fullscreen(hub.current_workspace(), *restrictions);
+            let id = hub.insert_fullscreen(hub.current_workspace(), *restrictions, titled("w3"));
             windows.push(id);
             window_origin.push(*producer_id);
             window_minimized.push(false);
@@ -1017,18 +1017,19 @@ fn replay(ops: &[RecordedOp], make_hub: fn() -> Hub) -> Option<FailureSignature>
         for op in ops {
             match op {
                 RecordedOp::InsertTiling { producer_id } => {
-                    let id = hub.insert_tiling(hub.current_workspace());
+                    let id = hub.insert_tiling(hub.current_workspace(), titled("w4"));
                     live_window[*producer_id] = Some(id);
                 }
                 RecordedOp::InsertFloat { producer_id, dim } => {
-                    let id = hub.insert_float(hub.current_workspace(), *dim);
+                    let id = hub.insert_float(hub.current_workspace(), *dim, titled("w5"));
                     live_window[*producer_id] = Some(id);
                 }
                 RecordedOp::InsertFullscreen {
                     producer_id,
                     restrictions,
                 } => {
-                    let id = hub.insert_fullscreen(hub.current_workspace(), *restrictions);
+                    let id =
+                        hub.insert_fullscreen(hub.current_workspace(), *restrictions, titled("w6"));
                     live_window[*producer_id] = Some(id);
                 }
                 RecordedOp::AddMonitor {

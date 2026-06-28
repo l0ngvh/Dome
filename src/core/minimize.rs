@@ -15,7 +15,10 @@
 //! owned by the OS); `set_window_title` and `set_window_constraint`
 //! (bookkeeping that does not affect layout).
 
-use crate::core::{Hub, WindowId, node::DisplayMode};
+use crate::core::{
+    Hub, WindowId,
+    node::{DisplayMode, PickerEntry},
+};
 
 impl Hub {
     /// Detach a window from its current layout and mark it minimized.
@@ -87,13 +90,18 @@ impl Hub {
         tracing::info!(?prior_mode, "Window unminimized");
     }
 
-    /// Returns (id, title) pairs for all minimized windows, in insertion order.
-    pub(crate) fn minimized_window_entries(&self) -> Vec<(WindowId, String)> {
+    /// Returns picker entries for all minimized windows, in insertion order.
+    pub(crate) fn minimized_window_entries(&self) -> Vec<PickerEntry> {
         self.minimized_windows
             .iter()
             .map(|&id| {
-                let title = self.access.windows.get(id).title.clone();
-                (id, title)
+                let w = self.access.windows.get(id);
+                PickerEntry {
+                    id,
+                    title: w.metadata.title().map(str::to_owned).unwrap_or_default(),
+                    app_id: w.metadata.icon_key(),
+                    app_name: w.metadata.app_name(),
+                }
             })
             .collect()
     }

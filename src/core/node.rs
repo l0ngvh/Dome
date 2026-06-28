@@ -128,14 +128,31 @@ pub(crate) enum WindowRestrictions {
     ProtectFullscreen,
 }
 
+/// Per-platform metadata for a window (title, app name, icon key, etc.).
+/// Each platform provides its own concrete type implementing this trait.
+pub(crate) trait WindowMetadata:
+    std::fmt::Display + std::fmt::Debug + Send + Sync + 'static
+{
+    /// Icon cache key: process executable path on Windows, bundle ID on macOS.
+    fn icon_key(&self) -> Option<String>;
+    /// Human-readable app name for the picker subtitle.
+    fn app_name(&self) -> Option<String>;
+    /// Current window title, if any.
+    fn title(&self) -> Option<&str>;
+    /// Update the window title.
+    fn set_title(&mut self, title: String);
+    /// Clone into a boxed trait object.
+    fn clone_box(&self) -> Box<dyn WindowMetadata>;
+}
+
 /// Represents a single application window
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct Window {
     pub(super) workspace: Option<WorkspaceId>,
     pub(super) mode: DisplayMode,
     pub(super) restrictions: WindowRestrictions,
     is_minimized: bool,
-    pub(super) title: String,
+    pub(super) metadata: Box<dyn WindowMetadata>,
     pub(super) min_width: f32,
     pub(super) min_height: f32,
     pub(super) max_width: f32,
@@ -144,6 +161,22 @@ pub(crate) struct Window {
 
 impl Node for Window {
     type Id = WindowId;
+}
+
+impl Clone for Window {
+    fn clone(&self) -> Self {
+        Self {
+            metadata: self.metadata.clone_box(),
+            workspace: self.workspace,
+            mode: self.mode,
+            restrictions: self.restrictions,
+            is_minimized: self.is_minimized,
+            min_width: self.min_width,
+            min_height: self.min_height,
+            max_width: self.max_width,
+            max_height: self.max_height,
+        }
+    }
 }
 
 impl Window {
@@ -165,13 +198,13 @@ impl Window {
         self.workspace = ws;
     }
 
-    pub(super) fn tiling(workspace: WorkspaceId) -> Self {
+    pub(super) fn tiling(workspace: WorkspaceId, metadata: Box<dyn WindowMetadata>) -> Self {
         Self {
             workspace: Some(workspace),
             mode: DisplayMode::Tiling,
             restrictions: WindowRestrictions::None,
             is_minimized: false,
-            title: String::new(),
+            metadata,
             min_width: 0.0,
             min_height: 0.0,
             max_width: 0.0,
@@ -179,13 +212,17 @@ impl Window {
         }
     }
 
-    pub(super) fn float(workspace: WorkspaceId, dim: Dimension) -> Self {
+    pub(super) fn float(
+        workspace: WorkspaceId,
+        dim: Dimension,
+        metadata: Box<dyn WindowMetadata>,
+    ) -> Self {
         Self {
             workspace: Some(workspace),
             mode: DisplayMode::Float { dim },
             restrictions: WindowRestrictions::None,
             is_minimized: false,
-            title: String::new(),
+            metadata,
             min_width: 0.0,
             min_height: 0.0,
             max_width: 0.0,
@@ -193,13 +230,17 @@ impl Window {
         }
     }
 
-    pub(super) fn fullscreen(workspace: WorkspaceId, restrictions: WindowRestrictions) -> Self {
+    pub(super) fn fullscreen(
+        workspace: WorkspaceId,
+        restrictions: WindowRestrictions,
+        metadata: Box<dyn WindowMetadata>,
+    ) -> Self {
         Self {
             workspace: Some(workspace),
             mode: DisplayMode::Fullscreen,
             restrictions,
             is_minimized: false,
-            title: String::new(),
+            metadata,
             min_width: 0.0,
             min_height: 0.0,
             max_width: 0.0,
@@ -216,7 +257,7 @@ impl Window {
     }
 
     pub(crate) fn title(&self) -> &str {
-        &self.title
+        self.metadata.title().unwrap_or("")
     }
 
     pub(crate) fn is_float(&self) -> bool {
@@ -226,6 +267,16 @@ impl Window {
     pub(crate) fn is_fullscreen(&self) -> bool {
         matches!(self.mode, DisplayMode::Fullscreen)
     }
+}
+
+/// Entry for the window picker overlay. Created by `minimized_window_entries`
+/// on `Hub` and consumed by `build_picker_entries` in the platform shell.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PickerEntry {
+    pub(crate) id: WindowId,
+    pub(crate) title: String,
+    pub(crate) app_id: Option<String>,
+    pub(crate) app_name: Option<String>,
 }
 
 /// Unit marker for rectangles expressed in **logical points** (DPI-independent).

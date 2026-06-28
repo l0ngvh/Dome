@@ -31,6 +31,7 @@ use self::registry::WindowRegistry;
 use self::window::{PositionedState, WindowState};
 
 pub(super) use self::window::NewWindow;
+pub(super) use self::window::WindowsMetadata;
 
 use self::monitor::MonitorRegistry;
 use super::external::{HwndId, ShowCmd};
@@ -239,15 +240,9 @@ impl Dome {
 
     #[tracing::instrument(
         skip(self, id_key),
-        fields(hwnd = %id_key, window = tracing::field::Empty),
+        fields(hwnd = %id_key),
     )]
     pub(super) fn window_destroyed(&mut self, id_key: HwndId) {
-        if let Some(id) = self.registry.get_id(id_key)
-            && let Some(entry) = self.registry.get(id)
-        {
-            tracing::Span::current().record("window", entry.to_string());
-        }
-
         self.clear_move_state(id_key);
         self.taskbar.delete_tab(id_key);
         self.recovery.untrack(id_key);
@@ -262,7 +257,7 @@ impl Dome {
 
     #[tracing::instrument(
         skip(self, id_key),
-        fields(hwnd = %id_key, window = tracing::field::Empty),
+        fields(hwnd = %id_key),
     )]
     pub(super) fn window_minimized(&mut self, id_key: HwndId) {
         let Some(id) = self.registry.get_id(id_key) else {
@@ -271,7 +266,6 @@ impl Dome {
         let Some(entry) = self.registry.get(id) else {
             return;
         };
-        tracing::Span::current().record("window", entry.to_string());
         // Dome-initiated minimize
         if matches!(entry.state, WindowState::BorderlessMinimized { .. }) {
             return;
@@ -421,7 +415,7 @@ impl Dome {
 
     #[tracing::instrument(
         skip(self, id_key),
-        fields(hwnd = %id_key, window = tracing::field::Empty),
+        fields(hwnd = %id_key),
     )]
     pub(super) fn handle_focus(&mut self, id_key: HwndId) {
         let Some(id) = self.registry.get_id(id_key) else {
@@ -430,10 +424,7 @@ impl Dome {
         let was_minimized = self
             .registry
             .get(id)
-            .map(|entry| {
-                tracing::Span::current().record("window", entry.to_string());
-                entry.is_minimized
-            })
+            .map(|entry| entry.is_minimized)
             .unwrap_or(false);
         if was_minimized {
             self.hub.unminimize_window(id);
@@ -530,17 +521,7 @@ impl Dome {
             self.picker.hide();
         } else {
             let minimized = self.hub.minimized_window_entries();
-            let entries = build_picker_entries(&minimized, |wid| {
-                let Some(e) = self.registry.get(wid) else {
-                    return (None, None);
-                };
-                let display = e
-                    .app_name
-                    .clone()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| display_from_process(&e.process));
-                (Some(e.process.clone()), Some(display))
-            });
+            let entries = build_picker_entries(&minimized);
             let focused_monitor = self.hub.focused_monitor();
             let m = self.monitors.monitor(focused_monitor);
             let monitor_dim = m.dimension();
@@ -865,7 +846,6 @@ impl Dome {
 
     pub(super) fn update_titles(&mut self, titles: Vec<(HwndId, Option<String>)>) {
         for (hwnd_id, title) in &titles {
-            self.registry.set_title(*hwnd_id, title.clone());
             if let (Some(window_id), Some(title)) = (self.registry.get_id(*hwnd_id), title)
                 && self.hub.set_window_title(window_id, title.clone())
             {
@@ -923,10 +903,10 @@ impl Dome {
     fn resolve_on_open(&mut self, new: &NewWindow) -> (WorkspaceId, Option<WindowMode>) {
         let rule = self.config.windows.on_open.iter().find(|r| {
             r.matches(
-                &new.process,
-                new.title.as_deref(),
-                new.class.as_deref(),
-                new.aumid.as_deref(),
+                &new.metadata.process,
+                new.metadata.title.as_deref(),
+                new.metadata.class.as_deref(),
+                new.metadata.aumid.as_deref(),
             )
         });
         let target_ws = self
@@ -939,7 +919,7 @@ impl Dome {
 
 // Fallback display string derived from the executable name. Prefer
 // FileDescription from version info when available (see get_app_display_name).
-fn display_from_process(process: &str) -> String {
+pub(super) fn display_from_process(process: &str) -> String {
     process.strip_suffix(".exe").unwrap_or(process).to_string()
 }
 

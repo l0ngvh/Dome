@@ -5,13 +5,13 @@ use crate::core::node::WindowId;
 use crate::core::strategy::TilingAction;
 use crate::core::tests::default_layout_for_tests;
 use crate::core::tests::default_partition_tree_config_for_tests;
-use crate::core::tests::{snapshot, validate_hub};
+use crate::core::tests::{snapshot, titled, validate_hub};
 use insta::assert_snapshot;
 
 #[test]
 fn single_window_layout() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w0"));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -54,8 +54,8 @@ fn single_window_layout() {
 #[test]
 fn two_windows_default_ratio() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    hub.insert_tiling(hub.current_workspace(), titled("w2"));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -99,9 +99,9 @@ fn two_windows_default_ratio() {
 #[test]
 fn three_windows_layout() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w3"));
+    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_tiling(hub.current_workspace(), titled("w5"));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -146,8 +146,8 @@ fn three_windows_layout() {
 #[test]
 fn focus_direction_left_right() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace()); // W0 = master
-    hub.insert_tiling(hub.current_workspace()); // W1 = stack (focused)
+    hub.insert_tiling(hub.current_workspace(), titled("w6")); // W0 = master
+    hub.insert_tiling(hub.current_workspace(), titled("w7")); // W1 = stack (focused)
 
     // Focus is on W1 (stack). Move left to master.
     hub.focus_left();
@@ -171,9 +171,9 @@ fn focus_direction_left_right() {
 #[test]
 fn focus_direction_up_down() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace()); // W0 = master
-    hub.insert_tiling(hub.current_workspace()); // W1 = stack
-    hub.insert_tiling(hub.current_workspace()); // W2 = stack (focused)
+    hub.insert_tiling(hub.current_workspace(), titled("w8")); // W0 = master
+    hub.insert_tiling(hub.current_workspace(), titled("w9")); // W1 = stack
+    hub.insert_tiling(hub.current_workspace(), titled("w10")); // W2 = stack (focused)
 
     let ws = hub.current_workspace();
 
@@ -197,8 +197,8 @@ fn focus_direction_up_down() {
 #[test]
 fn move_direction_left_right() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace()); // W0 = master
-    hub.insert_tiling(hub.current_workspace()); // W1 = stack (focused)
+    hub.insert_tiling(hub.current_workspace(), titled("w11")); // W0 = master
+    hub.insert_tiling(hub.current_workspace(), titled("w12")); // W1 = stack (focused)
 
     // Move W1 left: swaps with last master (W0). W1 becomes master, W0 becomes stack.
     hub.move_left();
@@ -245,9 +245,9 @@ fn move_direction_left_right() {
 #[test]
 fn move_direction_up_down() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace()); // W0 = master
-    hub.insert_tiling(hub.current_workspace()); // W1 = stack
-    hub.insert_tiling(hub.current_workspace()); // W2 = stack (focused)
+    hub.insert_tiling(hub.current_workspace(), titled("w13")); // W0 = master
+    hub.insert_tiling(hub.current_workspace(), titled("w14")); // W1 = stack
+    hub.insert_tiling(hub.current_workspace(), titled("w15")); // W2 = stack (focused)
 
     // Move W2 up within stack: swap with W1.
     hub.move_up();
@@ -295,7 +295,7 @@ fn move_direction_up_down() {
 #[test]
 fn single_window_focus_move_noop() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w16"));
 
     let before = snapshot(&hub);
 
@@ -314,8 +314,8 @@ fn single_window_focus_move_noop() {
 #[test]
 fn increase_decrease_master_ratio() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w17"));
+    hub.insert_tiling(hub.current_workspace(), titled("w18"));
 
     // Increase ratio: master gets wider
     hub.handle_tiling_action(TilingAction::GrowMaster);
@@ -490,9 +490,9 @@ fn increase_decrease_master_ratio() {
 #[test]
 fn increment_decrement_master_count() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace()); // W0
-    hub.insert_tiling(hub.current_workspace()); // W1
-    hub.insert_tiling(hub.current_workspace()); // W2
+    hub.insert_tiling(hub.current_workspace(), titled("w19")); // W0
+    hub.insert_tiling(hub.current_workspace(), titled("w20")); // W1
+    hub.insert_tiling(hub.current_workspace(), titled("w21")); // W2
 
     // Increment master_count to 2: two masters on left, one stack on right
     hub.handle_tiling_action(TilingAction::MoreMaster);
@@ -587,9 +587,9 @@ fn increment_decrement_master_count() {
 #[test]
 fn master_count_exceeds_window_count() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace()); // W0
-    hub.insert_tiling(hub.current_workspace()); // W1
-    hub.insert_tiling(hub.current_workspace()); // W2
+    hub.insert_tiling(hub.current_workspace(), titled("w22")); // W0
+    hub.insert_tiling(hub.current_workspace(), titled("w23")); // W1
+    hub.insert_tiling(hub.current_workspace(), titled("w24")); // W2
 
     // Set master_count to 5 (exceeds 3 windows): all windows fill screen
     for _ in 0..4 {
@@ -639,9 +639,9 @@ fn master_count_exceeds_window_count() {
 #[test]
 fn delete_window() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace()); // W0 = master
-    hub.insert_tiling(hub.current_workspace()); // W1 = stack
-    hub.insert_tiling(hub.current_workspace()); // W2 = stack (focused)
+    hub.insert_tiling(hub.current_workspace(), titled("w25")); // W0 = master
+    hub.insert_tiling(hub.current_workspace(), titled("w26")); // W1 = stack
+    hub.insert_tiling(hub.current_workspace(), titled("w27")); // W2 = stack (focused)
 
     // Delete focused (last inserted)
     hub.delete_window(WindowId::new(2));
@@ -730,8 +730,8 @@ fn move_window_to_workspace() {
     // Move master to another workspace
     {
         let mut hub = setup_master();
-        hub.insert_tiling(hub.current_workspace()); // W0 = master
-        hub.insert_tiling(hub.current_workspace()); // W1 = stack (focused)
+        hub.insert_tiling(hub.current_workspace(), titled("w28")); // W0 = master
+        hub.insert_tiling(hub.current_workspace(), titled("w29")); // W1 = stack (focused)
         hub.focus_left();
         hub.move_focused_to_workspace("1");
         assert_snapshot!(snapshot(&hub), @"
@@ -815,9 +815,9 @@ fn move_window_to_workspace() {
     // Move stack window to another workspace
     {
         let mut hub = setup_master();
-        hub.insert_tiling(hub.current_workspace()); // W0 = master
-        hub.insert_tiling(hub.current_workspace()); // W1 = stack
-        hub.insert_tiling(hub.current_workspace()); // W2 = stack (focused)
+        hub.insert_tiling(hub.current_workspace(), titled("w30")); // W0 = master
+        hub.insert_tiling(hub.current_workspace(), titled("w31")); // W1 = stack
+        hub.insert_tiling(hub.current_workspace(), titled("w32")); // W2 = stack (focused)
         hub.move_focused_to_workspace("1");
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(1))
@@ -902,7 +902,7 @@ fn move_window_to_workspace() {
 #[test]
 fn move_only_window_to_workspace() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace()); // W0
+    hub.insert_tiling(hub.current_workspace(), titled("w33")); // W0
 
     hub.move_focused_to_workspace("1");
 
@@ -956,8 +956,8 @@ fn move_only_window_to_workspace() {
 #[test]
 fn empty_workspace_persists_after_switch() {
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace()); // W0
-    hub.insert_tiling(hub.current_workspace()); // W1
+    hub.insert_tiling(hub.current_workspace(), titled("w34")); // W0
+    hub.insert_tiling(hub.current_workspace(), titled("w35")); // W1
 
     // Move both windows to workspace "1"
     hub.move_focused_to_workspace("1");
@@ -979,11 +979,11 @@ fn sync_config_preserves_workspace_master_count() {
     // was seeded with master_count=1 and a reload with master_count=2 does
     // NOT push into the existing workspace's state.
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w36"));
+    hub.insert_tiling(hub.current_workspace(), titled("w37"));
+    hub.insert_tiling(hub.current_workspace(), titled("w38"));
+    hub.insert_tiling(hub.current_workspace(), titled("w39"));
+    hub.insert_tiling(hub.current_workspace(), titled("w40"));
 
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
@@ -1064,9 +1064,9 @@ fn sync_config_seeds_new_workspace_with_master_ratio() {
     });
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w41"));
+    hub.insert_tiling(hub.current_workspace(), titled("w42"));
+    hub.insert_tiling(hub.current_workspace(), titled("w43"));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1116,16 +1116,16 @@ fn sync_config_preserves_seeded_ratio_across_workspaces() {
     let mut hub = setup_master();
 
     // Workspace "0": insert 3 windows (ids allocated in order).
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w44"));
+    hub.insert_tiling(hub.current_workspace(), titled("w45"));
+    hub.insert_tiling(hub.current_workspace(), titled("w46"));
     let ws0 = hub.current_workspace();
     let focus_ws0 = hub.focused_window(ws0);
 
     // Switch to workspace "1" and insert 2 windows.
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w47"));
+    hub.insert_tiling(hub.current_workspace(), titled("w48"));
     let ws1 = hub.current_workspace();
     let focus_ws1 = hub.focused_window(ws1);
 
@@ -1193,8 +1193,8 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
     // Runtime GrowMaster tuning persists across config reload. A hot-reload
     // does NOT reset the ratio back to the file value (preserve semantics).
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w49"));
+    hub.insert_tiling(hub.current_workspace(), titled("w50"));
 
     // GrowMaster 3 times: 0.5 -> 0.55 -> 0.60 -> 0.65
     hub.handle_tiling_action(TilingAction::GrowMaster);
@@ -1259,10 +1259,10 @@ fn sync_config_preserves_runtime_tuned_master_count() {
     // Runtime MoreMaster tuning persists across config reload. A hot-reload
     // does NOT reset the count back to the file value (preserve semantics).
     let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w51"));
+    hub.insert_tiling(hub.current_workspace(), titled("w52"));
+    hub.insert_tiling(hub.current_workspace(), titled("w53"));
+    hub.insert_tiling(hub.current_workspace(), titled("w54"));
 
     // MoreMaster: master_count 1 -> 2
     hub.handle_tiling_action(TilingAction::MoreMaster);
@@ -1326,12 +1326,12 @@ fn sync_config_preserves_runtime_tuned_master_count() {
 fn more_master_only_affects_focused_workspace() {
     let mut hub = setup_master();
     // Workspace "0": 2 windows.
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w55"));
+    hub.insert_tiling(hub.current_workspace(), titled("w56"));
     // Switch to workspace "1": 2 windows.
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w57"));
+    hub.insert_tiling(hub.current_workspace(), titled("w58"));
     // MoreMaster on workspace "1".
     hub.handle_tiling_action(TilingAction::MoreMaster);
 
@@ -1395,10 +1395,10 @@ fn attach_window_seeds_master_count_from_per_workspace_override() {
         ..default_layout_for_tests()
     });
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w59"));
+    hub.insert_tiling(hub.current_workspace(), titled("w60"));
+    hub.insert_tiling(hub.current_workspace(), titled("w61"));
+    hub.insert_tiling(hub.current_workspace(), titled("w62"));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1459,9 +1459,9 @@ fn attach_window_falls_back_to_global_when_no_per_workspace_override() {
         ..default_layout_for_tests()
     });
     hub.focus_workspace("2");
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
-    hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace(), titled("w63"));
+    hub.insert_tiling(hub.current_workspace(), titled("w64"));
+    hub.insert_tiling(hub.current_workspace(), titled("w65"));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
