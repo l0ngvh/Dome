@@ -9,10 +9,10 @@ Default paths:
 - Windows: `%APPDATA%\dome\layout.toml`.
 
 The schema is flat. `strategy` and four window-size constraint fields sit at
-the file root, alongside `[partition_tree]` and `[master]` sub-tables for
-strategy-specific options. Within `[master]`, an optional `[[master.workspace]]`
-array sets per-workspace master defaults. A separate `[[workspace]]` array
-overrides the strategy on a per-workspace basis.
+the file root, alongside `[gaps]`, `[partition_tree]`, and `[master]`
+sub-tables for spacing and strategy-specific options. Within `[master]`,
+an optional `[[master.workspace]]` array sets per-workspace master defaults. A
+separate `[[workspace]]` array overrides the strategy on a per-workspace basis.
 
 ```toml
 strategy = "partition_tree"
@@ -21,6 +21,14 @@ min_width = "5%"
 min_height = "5%"
 max_width = 0
 max_height = 0
+
+[gaps]
+inner.horizontal = 8.0
+inner.vertical = 8.0
+outer.top = 0.0
+outer.right = 0.0
+outer.bottom = 0.0
+outer.left = 0.0
 
 [partition_tree]
 tab_bar_height = 24.0
@@ -41,6 +49,26 @@ strategy = "master"
 
 `strategy` selects the active tiling strategy, either `"partition_tree"` or
 `"master"`. The default is `"partition_tree"`.
+
+## Gaps
+
+The optional `[gaps]` table controls spacing in logical pixels. Values default
+to `0.0`.
+
+- `inner.horizontal` separates side-by-side tiled windows.
+- `inner.vertical` separates vertically stacked tiled windows.
+- `outer.*` reserves monitor edges for external bars, launchers, or widgets.
+
+Use `outer.top` for a top-aligned SketchyBar:
+
+```toml
+[gaps]
+outer.top = 32.0
+```
+
+Outer gaps apply to the normal tiled work area. Inner gaps apply only between
+tiled siblings, not at monitor edges. Fullscreen windows still use the
+platform's real fullscreen bounds.
 
 ## Per-workspace overrides
 

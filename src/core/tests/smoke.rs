@@ -1196,7 +1196,7 @@ mod tests {
     }
 
     #[test]
-    fn ddmin_strips_padding_to_sentinel() {
+    fn ddmin_strips_context_to_sentinel() {
         let sentinel_title = "SENTINEL";
         let sentinel = RecordedOp::SetWindowTitle {
             window: RecordedWindow(0),

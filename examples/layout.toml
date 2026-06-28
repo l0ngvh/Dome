@@ -13,6 +13,15 @@ min_height = "10%"
 max_width = 800
 max_height = "50%"
 
+# Configure spacing between tiled windows and screen edges, in logical pixels.
+[gaps]
+inner.horizontal = 8.0
+inner.vertical = 8.0
+outer.top = 0.0
+outer.right = 0.0
+outer.bottom = 0.0
+outer.left = 0.0
+
 [partition_tree]
 tab_bar_height = 24.0       # height of the tab bar in tabbed containers, logical pixels
 automatic_tiling = true     # pick split direction based on focused window dimensions

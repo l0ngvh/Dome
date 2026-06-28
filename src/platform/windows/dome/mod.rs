@@ -143,7 +143,11 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.dimension, primary.scale, layout.clone());
+        let mut hub = Hub::new(
+            layout.gaps.outer.apply_to(primary.dimension, primary.scale),
+            primary.scale,
+            layout.clone(),
+        );
         let primary_monitor_id = hub.focused_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
@@ -156,7 +160,7 @@ impl Dome {
         if let Ok(overlay) = overlay_factory.create_tiling_overlay(
             config.clone(),
             layout.partition_tree.tab_bar_height,
-            primary.dimension,
+            layout.gaps.outer.apply_to(primary.dimension, primary.scale),
             primary.scale,
         ) {
             tiling_overlays.insert(primary_monitor_id, overlay);
@@ -170,12 +174,16 @@ impl Dome {
 
         for monitor in &monitors {
             if monitor.handle != primary.handle {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
+                let id = hub.add_monitor(
+                    monitor.name.clone(),
+                    layout.gaps.outer.apply_to(monitor.dimension, monitor.scale),
+                    monitor.scale,
+                );
                 monitors_reg.insert(monitor.handle, id, monitor.dimension, monitor.scale);
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
                     layout.partition_tree.tab_bar_height,
-                    monitor.dimension,
+                    layout.gaps.outer.apply_to(monitor.dimension, monitor.scale),
                     monitor.scale,
                 ) {
                     tiling_overlays.insert(id, overlay);
@@ -230,6 +238,8 @@ impl Dome {
     pub(super) fn layout_changed(&mut self, new_layout: LayoutConfig) {
         self.layout = new_layout;
         self.hub.sync_config(self.layout.clone());
+        self.monitors
+            .update_hub_dimensions(&mut self.hub, self.layout.gaps.outer);
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_tab_bar_height(self.layout.partition_tree.tab_bar_height);
         }
@@ -604,14 +614,16 @@ impl Dome {
         let mut new_displayed: HashMap<MonitorId, HashSet<WindowId>> = HashMap::new();
 
         for mp in result.monitors {
-            let dimension = self.monitors.monitor(mp.monitor_id).dimension();
+            let real_dimension = self.monitors.monitor(mp.monitor_id).dimension();
+            let scale = self.monitors.monitor(mp.monitor_id).scale();
+            let dimension = self.layout.gaps.outer.apply_to(real_dimension, scale);
 
             let mut window_ids = HashSet::new();
 
             match &mp.layout {
                 MonitorLayout::Fullscreen(id) => {
                     window_ids.insert(*id);
-                    self.show_fullscreen_window(*id, dimension, mp.monitor_id);
+                    self.show_fullscreen_window(*id, real_dimension, mp.monitor_id);
                 }
                 MonitorLayout::Normal {
                     tiling_windows,
@@ -882,13 +894,15 @@ impl Dome {
             tracing::warn!("Empty monitor list, skipping update");
             return Vec::new();
         }
-        let change = self.monitors.reconcile(&mut self.hub, &monitors);
+        let change = self
+            .monitors
+            .reconcile(&mut self.hub, &monitors, self.layout.gaps.outer);
         for id in change.added {
             let m = self.monitors.monitor(id);
             if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
                 self.config.clone(),
                 self.layout.partition_tree.tab_bar_height,
-                m.dimension(),
+                self.layout.gaps.outer.apply_to(m.dimension(), m.scale()),
                 m.scale(),
             ) {
                 self.tiling_overlays.insert(id, overlay);
@@ -917,7 +931,8 @@ impl Dome {
     /// same monitor (all four HWNDs default to the primary monitor, so a
     /// primary-monitor DPI change posts WM_APP_DPI_CHANGE four times).
     pub(super) fn monitor_dpi_changed(&mut self, handle: isize, dpi: u32) {
-        self.monitors.apply_dpi_change(handle, dpi, &mut self.hub);
+        self.monitors
+            .apply_dpi_change(handle, dpi, &mut self.hub, self.layout.gaps.outer);
     }
 
     fn resolve_on_open(&mut self, new: &NewWindow) -> (WorkspaceId, Option<WindowMode>) {

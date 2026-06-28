@@ -311,12 +311,15 @@ fn kind_for(name: &str, config: &LayoutConfig) -> Strategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint};
+    use crate::config::{
+        GapsConfig, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint,
+    };
     use crate::core::node::Length;
 
     fn config_with(strategy: Strategy, overrides: Vec<LayoutWorkspaceConfig>) -> LayoutConfig {
         LayoutConfig {
             strategy,
+            gaps: GapsConfig::default(),
             partition_tree: PartitionTreeConfig {
                 tab_bar_height: Length::ZERO,
                 automatic_tiling: false,

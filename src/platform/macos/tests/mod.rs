@@ -431,15 +431,18 @@ impl MacOS {
     }
 
     fn setup_dome_with_config(&self, config: Config) -> Dome {
+        self.setup_dome_with_config_and_layout(config, LayoutConfig::default())
+    }
+
+    fn setup_dome_with_layout(&self, layout: LayoutConfig) -> Dome {
+        self.setup_dome_with_config_and_layout(Config::default(), layout)
+    }
+
+    fn setup_dome_with_config_and_layout(&self, config: Config, layout: LayoutConfig) -> Dome {
         let sender = TestSender {
             frame_state: self.frame_state.clone(),
         };
-        Dome::new(
-            &[default_monitor()],
-            config.clone(),
-            LayoutConfig::default(),
-            Box::new(sender),
-        )
+        Dome::new(&[default_monitor()], config, layout, Box::new(sender))
     }
 
     fn last_frame_state(&self) -> FrameState {

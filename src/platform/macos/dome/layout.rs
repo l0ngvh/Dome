@@ -151,7 +151,7 @@ impl Dome {
                     .monitor_registry
                     .physical_border(mp.monitor_id, Length::new(self.config.border_size));
                 let monitor = self.monitor_registry.monitor(mp.monitor_id);
-                let monitor_dim = monitor.dimension();
+                let monitor_dim = self.layout.gaps.outer.apply_to(monitor.dimension(), 1.0);
                 let scale = monitor.egui_scale();
 
                 let mut placed_tiling = Vec::new();

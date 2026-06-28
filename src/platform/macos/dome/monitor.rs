@@ -281,7 +281,12 @@ impl MonitorRegistry {
 }
 
 impl MonitorRegistry {
-    pub(super) fn reconcile(&mut self, hub: &mut Hub, monitors: &[MonitorInfo]) {
+    pub(super) fn reconcile(
+        &mut self,
+        hub: &mut Hub,
+        monitors: &[MonitorInfo],
+        outer_gaps: crate::config::OuterGaps,
+    ) {
         let current_keys: HashSet<_> = monitors.iter().map(|s| s.display_id).collect();
 
         // Special handling for when the primary monitor got replaced, i.e. due to mirroring to prevent
@@ -289,7 +294,11 @@ impl MonitorRegistry {
         if let Some(new_primary) = monitors.iter().find(|s| s.is_primary) {
             if !self.contains(new_primary.display_id) {
                 self.replace_primary(new_primary);
-                hub.update_monitor(self.primary_monitor_id(), new_primary.dimension, 1.0);
+                hub.update_monitor(
+                    self.primary_monitor_id(),
+                    outer_gaps.apply_to(new_primary.dimension, 1.0),
+                    1.0,
+                );
             } else {
                 self.set_primary_display_id(new_primary.display_id);
             }
@@ -298,7 +307,11 @@ impl MonitorRegistry {
         // Add new monitors first to prevent exhausting all monitors
         for monitor in monitors {
             if !self.contains(monitor.display_id) {
-                let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, 1.0);
+                let id = hub.add_monitor(
+                    monitor.name.clone(),
+                    outer_gaps.apply_to(monitor.dimension, 1.0),
+                    1.0,
+                );
                 self.insert(monitor, id);
                 tracing::info!(%monitor, "Monitor added");
             }
@@ -321,7 +334,7 @@ impl MonitorRegistry {
                         "Monitor dimension changed"
                     );
                 }
-                hub.update_monitor(monitor_id, monitor.dimension, 1.0);
+                hub.update_monitor(monitor_id, outer_gaps.apply_to(monitor.dimension, 1.0), 1.0);
             }
         }
     }
@@ -329,7 +342,8 @@ impl MonitorRegistry {
 
 impl Dome {
     pub(super) fn update_monitors(&mut self, monitors: &[MonitorInfo]) {
-        self.monitor_registry.reconcile(&mut self.hub, monitors);
+        self.monitor_registry
+            .reconcile(&mut self.hub, monitors, self.layout.gaps.outer);
         self.primary_full_height = self.monitor_registry.primary_full_height();
     }
 }

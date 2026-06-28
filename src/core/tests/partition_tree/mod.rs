@@ -3,6 +3,7 @@ mod delete_window;
 mod float_window;
 mod focus_direction;
 mod focus_parent;
+mod gaps;
 mod insert_window;
 mod monitor;
 mod move_in_direction;

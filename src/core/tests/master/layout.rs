@@ -1,12 +1,54 @@
 use super::setup_master;
-use crate::config::{LayoutConfig, MasterConfig, MasterWorkspaceConfig, Strategy};
+use crate::config::{
+    GapsConfig, InnerGaps, LayoutConfig, MasterConfig, MasterWorkspaceConfig, Strategy,
+};
 use crate::core::allocator::NodeId;
-use crate::core::node::WindowId;
+use crate::core::hub::{Hub, MonitorLayout};
+use crate::core::node::{Dimension, Length, WindowId};
 use crate::core::strategy::TilingAction;
 use crate::core::tests::default_layout_for_tests;
 use crate::core::tests::default_partition_tree_config_for_tests;
 use crate::core::tests::{snapshot, validate_hub};
 use insta::assert_snapshot;
+
+fn set_master_inner_gaps(hub: &mut Hub, horizontal: f32, vertical: f32, master_count: usize) {
+    hub.sync_config(LayoutConfig {
+        strategy: Strategy::Master,
+        gaps: GapsConfig {
+            inner: InnerGaps {
+                horizontal: Length::new(horizontal),
+                vertical: Length::new(vertical),
+            },
+            ..GapsConfig::default()
+        },
+        partition_tree: default_partition_tree_config_for_tests(),
+        master: MasterConfig {
+            master_ratio: 0.5,
+            master_count,
+            workspace: vec![],
+        },
+        ..default_layout_for_tests()
+    });
+}
+
+fn tiling_frame(hub: &Hub, id: WindowId) -> Dimension {
+    let placements = hub.get_visible_placements();
+    let MonitorLayout::Normal { tiling_windows, .. } = &placements.monitors[0].layout else {
+        panic!("expected normal layout");
+    };
+    tiling_windows
+        .iter()
+        .find(|p| p.id == id)
+        .unwrap_or_else(|| panic!("missing placement for {id:?}"))
+        .frame
+}
+
+fn assert_length_close(actual: Length, expected: Length) {
+    assert!(
+        (actual - expected).abs() < Length::new(0.01),
+        "expected {actual} to be within 0.01 of {expected}"
+    );
+}
 
 #[test]
 fn single_window_layout() {
@@ -49,6 +91,20 @@ fn single_window_layout() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
+}
+
+#[test]
+fn single_window_is_not_shrunk_by_inner_gaps() {
+    let mut hub = setup_master();
+    set_master_inner_gaps(&mut hub, 10.0, 12.0, 1);
+
+    let id = hub.insert_tiling(hub.current_workspace());
+
+    let frame = tiling_frame(&hub, id);
+    assert_eq!(frame.x, Length::ZERO);
+    assert_length_close(frame.y, Length::ZERO);
+    assert_eq!(frame.width, Length::new(150.0));
+    assert_length_close(frame.height, Length::new(30.0));
 }
 
 #[test]
@@ -97,6 +153,21 @@ fn two_windows_default_ratio() {
 }
 
 #[test]
+fn pane_gap_separates_master_and_stack() {
+    let mut hub = setup_master();
+    set_master_inner_gaps(&mut hub, 10.0, 0.0, 1);
+
+    let master = hub.insert_tiling(hub.current_workspace());
+    let stack = hub.insert_tiling(hub.current_workspace());
+
+    let master = tiling_frame(&hub, master);
+    let stack = tiling_frame(&hub, stack);
+    assert_eq!(master.x, Length::ZERO);
+    assert_eq!(master.x + master.width + Length::new(10.0), stack.x);
+    assert_eq!(stack.x + stack.width, Length::new(150.0));
+}
+
+#[test]
 fn three_windows_layout() {
     let mut hub = setup_master();
     hub.insert_tiling(hub.current_workspace());
@@ -141,6 +212,22 @@ fn three_windows_layout() {
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
     ");
+}
+
+#[test]
+fn vertical_gap_separates_windows_within_master_pane() {
+    let mut hub = setup_master();
+    set_master_inner_gaps(&mut hub, 0.0, 12.0, 2);
+
+    let top = hub.insert_tiling(hub.current_workspace());
+    let bottom = hub.insert_tiling(hub.current_workspace());
+    hub.insert_tiling(hub.current_workspace());
+
+    let top = tiling_frame(&hub, top);
+    let bottom = tiling_frame(&hub, bottom);
+    assert_eq!(top.y, Length::ZERO);
+    assert_eq!(top.y + top.height + Length::new(12.0), bottom.y);
+    assert_eq!(bottom.y + bottom.height, Length::new(30.0));
 }
 
 #[test]

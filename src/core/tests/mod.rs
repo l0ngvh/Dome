@@ -708,6 +708,7 @@ pub(super) fn default_master_config_for_tests() -> MasterConfig {
 pub(super) fn default_layout_for_tests() -> LayoutConfig {
     LayoutConfig {
         strategy: Strategy::PartitionTree,
+        gaps: crate::config::GapsConfig::default(),
         partition_tree: default_partition_tree_config_for_tests(),
         master: default_master_config_for_tests(),
         min_width: SizeConstraint::Pixels(Length::new(0.0)),

@@ -163,7 +163,9 @@ impl PartitionTreeStrategy {
         viewport_rect: Dimension,
     ) -> Vec<Dimension> {
         match direction {
-            Some(dir) => self.layout_split_axis_children(hub, children, dim, dir, viewport_rect),
+            Some(dir) => {
+                self.layout_split_axis_children(hub, children, dim, dir, scale, viewport_rect)
+            }
             None => self.layout_tabbed_children(hub, children, dim, scale, viewport_rect),
         }
     }
@@ -174,6 +176,7 @@ impl PartitionTreeStrategy {
         children: &[Child],
         dim: Dimension,
         direction: Direction,
+        scale: f32,
         viewport_rect: Dimension,
     ) -> Vec<Dimension> {
         let constraints: Vec<Constraints> = children
@@ -181,6 +184,8 @@ impl PartitionTreeStrategy {
             .map(|&c| self.get_effective_constraints(hub, c))
             .collect();
         let axis = Axis::from_direction(direction);
+        let gap = inner_gap(hub, direction, scale);
+        let total_gap = gap * children.len().saturating_sub(1) as f32;
 
         let cross_extent = axis.cross_extent(dim).max(
             constraints
@@ -189,10 +194,11 @@ impl PartitionTreeStrategy {
                 .fold(Length::ZERO, Length::max),
         );
         let along_pairs: Vec<_> = constraints.iter().map(|c| axis.along_min_max(c)).collect();
-        let along_sizes = distribute_space(&along_pairs, axis.along_extent(dim));
+        let along_extent = (axis.along_extent(dim) - total_gap).max(Length::ZERO);
+        let along_sizes = distribute_space(&along_pairs, along_extent);
 
         let visible = clip(dim, viewport_rect).unwrap_or(dim);
-        let group_total: Length = along_sizes.iter().copied().sum();
+        let group_total: Length = along_sizes.iter().copied().sum::<Length>() + total_gap;
         let (_, group_off) = apply_max_constraint(
             group_total,
             axis.along_extent(dim),
@@ -215,7 +221,7 @@ impl PartitionTreeStrategy {
                 axis.cross_origin(dim) + cross_off,
                 cross_size,
             ));
-            along_cursor += along_size;
+            along_cursor += along_size + gap;
         }
         result
     }
@@ -325,11 +331,13 @@ impl PartitionTreeStrategy {
         let (min_w, min_h) = match direction {
             Some(Direction::Horizontal) => {
                 let sum_w: Length = child_constraints.iter().map(|c| c.min_width).sum();
+                let total_gap = inner_gap(hub, Direction::Horizontal, scale)
+                    * children.len().saturating_sub(1) as f32;
                 let max_h = child_constraints
                     .iter()
                     .map(|c| c.min_height)
                     .fold(Length::ZERO, Length::max);
-                (sum_w, max_h)
+                (sum_w + total_gap, max_h)
             }
             Some(Direction::Vertical) => {
                 let max_w = child_constraints
@@ -337,7 +345,9 @@ impl PartitionTreeStrategy {
                     .map(|c| c.min_width)
                     .fold(Length::ZERO, Length::max);
                 let sum_h: Length = child_constraints.iter().map(|c| c.min_height).sum();
-                (max_w, sum_h)
+                let total_gap = inner_gap(hub, Direction::Vertical, scale)
+                    * children.len().saturating_sub(1) as f32;
+                (max_w, sum_h + total_gap)
             }
             None => {
                 let max_w = child_constraints
@@ -512,6 +522,13 @@ fn place_in_visible(container: Dimension, max: (Length, Length), visible: Dimens
         visible.y - container.y,
     );
     Dimension::new(container.x + x_off, container.y + y_off, w, h)
+}
+
+fn inner_gap(hub: &HubAccess, direction: Direction, scale: f32) -> Length {
+    match direction {
+        Direction::Horizontal => hub.config.gaps.inner.horizontal.to_unit(scale),
+        Direction::Vertical => hub.config.gaps.inner.vertical.to_unit(scale),
+    }
 }
 
 fn nudge_offset_into_view(
