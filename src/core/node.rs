@@ -289,7 +289,7 @@ pub(crate) struct Logical;
 /// DWM frame bounds). See `src/platform/windows/handle.rs::get_dimension` for the
 /// cross-DPI virtualization rationale.
 #[cfg_attr(
-    not(target_os = "windows"),
+    all(not(target_os = "windows"), not(test)),
     expect(
         dead_code,
         reason = "phantom marker used only as a type parameter on Windows"

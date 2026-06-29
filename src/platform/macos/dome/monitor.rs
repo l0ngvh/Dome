@@ -173,7 +173,7 @@ impl MonitorRegistry {
             .expect("primary monitor present")
     }
 
-    fn primary_monitor_id(&self) -> MonitorId {
+    pub(super) fn primary_monitor_id(&self) -> MonitorId {
         self.get(self.primary_display_id).unwrap()
     }
 

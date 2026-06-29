@@ -735,7 +735,7 @@ impl Dome {
                 let monitor_id = self
                     .monitor_registry
                     .find_closest_monitor(dim)
-                    .map(|m| m.id)
+                    .map(|m| m.id())
                     .unwrap_or_else(|| self.monitor_registry.primary_monitor_id());
                 self.hub
                     .update_float_dimension(window_id, outer_dim, monitor_id);

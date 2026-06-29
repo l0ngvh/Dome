@@ -35,7 +35,6 @@ use recovery::Recovery;
 use registry::{ManagedWindow, WindowRegistry};
 use rejection_log_filter::RejectionLogFilter;
 
-pub(in crate::platform::macos) use self::MacOSMetadata;
 pub(in crate::platform::macos) use window::RoundedDimension;
 
 pub(in crate::platform::macos) struct NewWindow {
