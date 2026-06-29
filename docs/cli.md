@@ -18,7 +18,7 @@ file. Without them, Dome reads the platform defaults documented in
 Every action listed in [commands.md](commands.md) is also a `dome` subcommand,
 with the same word-for-word syntax used in `[keymaps]` bindings:
 
-```
+```bash
 dome focus right
 dome move workspace 2
 dome toggle minimized
@@ -30,7 +30,7 @@ dome exit
 Action payloads with spaces need to be quoted on the command line. `exec` is
 the main case, since its command string is taken verbatim:
 
-```
+```bash
 dome exec "open -a Terminal"
 ```
 
