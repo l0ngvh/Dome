@@ -48,8 +48,46 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-make
+      - name: Import signing certificate
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12_BASE64" ]; then
+            echo "No signing cert configured; release will be ad-hoc signed."
+            exit 0
+          fi
+          KEYCHAIN_PATH="$RUNNER_TEMP/dome-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" \
+            $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+          rm -f "$RUNNER_TEMP/cert.p12"
       - name: Build and bundle
+        env:
+          DOME_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
         run: cargo make bundle -e BUNDLE_TARGET=${{ matrix.target }}
+      - name: Verify code signature
+        env:
+          DOME_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          if [ -z "$DOME_SIGNING_IDENTITY" ]; then
+            echo "::warning::No MACOS_SIGNING_IDENTITY; release is ad-hoc signed and TCC grants will not persist."
+            exit 0
+          fi
+          codesign -dv --verbose=4 target/bundle/Dome.app 2>&1 | tee /tmp/codesign-out
+          if ! grep -qF "Authority=$DOME_SIGNING_IDENTITY" /tmp/codesign-out; then
+            echo "::error::Dome.app is not signed with '$DOME_SIGNING_IDENTITY'."
+            exit 1
+          fi
+          codesign --verify --strict --verbose=2 target/bundle/Dome.app
       - name: Create DMG
         run: |
           VERSION=${GITHUB_REF_NAME#v}
@@ -71,6 +109,11 @@ jobs:
           path: |
             ${{ env.DMG_NAME }}
             ${{ env.TAR_NAME }}
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/dome-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/cert.p12"
 
   build-windows:
     needs: validate

@@ -154,6 +154,11 @@ run_task = [
     { name = "bundle-windows-impl", condition = { platforms = ["windows"] } },
 ]
 
+# macOS attribute app's permissions to its package's signature, not just the
+# bundle id. Without code signing, macOS will resort to the package's hash
+# itself, which changes every release, prompting users to grant the permissions
+# again.
+# https://www.nick-liu.com/posts/tcc-cdhash-trap/
 [tasks.bundle-macos-impl]
 private = true
 script_runner = "@shell"
@@ -175,6 +180,13 @@ plutil -replace CFBundleShortVersionString -string "$VERSION" "$BUNDLE_DIR/Info.
 plutil -replace CFBundleVersion -string "$VERSION" "$BUNDLE_DIR/Info.plist"
 cp "$BIN_SRC" "$BUNDLE_DIR/MacOS/dome"
 cp resources/macos/icon/AppIcon.icns "$BUNDLE_DIR/Resources/AppIcon.icns"
+if [ -n "${DOME_SIGNING_IDENTITY:-}" ]; then
+  codesign --force --options runtime --timestamp=none \
+    --sign "$DOME_SIGNING_IDENTITY" "$BUNDLE_DIR/MacOS/dome"
+  codesign --force --options runtime --timestamp=none \
+    --sign "$DOME_SIGNING_IDENTITY" target/bundle/Dome.app
+  codesign --verify --strict --verbose=2 target/bundle/Dome.app
+fi
 hdiutil create -volname "Dome" -srcfolder target/bundle/Dome.app -ov -format UDZO "target/Dome-${VERSION}.dmg"
 echo "Created target/bundle/Dome.app and target/Dome-${VERSION}.dmg (v$VERSION)"
 '''
