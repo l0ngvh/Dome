@@ -184,11 +184,8 @@ impl Runner {
                     }
                 }
                 Action::Exec { command } => {
-                    if let Err(e) = std::process::Command::new("cmd")
-                        .args(["/C", command])
-                        .spawn()
-                    {
-                        tracing::warn!(%command, "Failed to exec: {e}");
+                    if let Err(e) = crate::platform::windows::spawn::spawn(command) {
+                        tracing::warn!(%command, "Failed to exec: {e:#}");
                     }
                 }
                 Action::Exit => {

@@ -7,6 +7,7 @@ mod keyboard;
 mod login_item;
 mod process;
 mod runner;
+mod spawn;
 mod taskbar;
 mod throttle;
 mod timer_registry;
