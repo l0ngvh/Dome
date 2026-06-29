@@ -289,7 +289,7 @@ pub(crate) struct Logical;
 /// DWM frame bounds). See `src/platform/windows/handle.rs::get_dimension` for the
 /// cross-DPI virtualization rationale.
 #[cfg_attr(
-    all(not(target_os = "windows"), not(test)),
+    not(target_os = "windows"),
     expect(
         dead_code,
         reason = "phantom marker used only as a type parameter on Windows"
@@ -617,23 +617,6 @@ impl std::fmt::Display for ContainerId {
 impl std::fmt::Display for WorkspaceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "WorkspaceId({})", self.0)
-    }
-}
-
-/// Parent role in a tiling tree. A `Container` can be parent of other nodes.
-/// A `Workspace` is parent only of the root node. Windows are never parents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Parent {
-    Container(ContainerId),
-    Workspace(WorkspaceId),
-}
-
-impl std::fmt::Display for Parent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Parent::Container(id) => write!(f, "{}", id),
-            Parent::Workspace(id) => write!(f, "{}", id),
-        }
     }
 }
 

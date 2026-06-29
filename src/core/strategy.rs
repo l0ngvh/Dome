@@ -94,7 +94,6 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Re-attach a previously-detached `Child` into `ws_id`. Sets focus
     /// to the attached child. No-op when `child` is not applicable to
     /// this strategy (e.g. `Child::Container` for MasterStrategy).
-
     /// Returns true if the workspace has any tiling windows (root is Some).
     fn has_tiling_windows(&self, hub: &HubAccess, ws_id: WorkspaceId) -> bool;
 

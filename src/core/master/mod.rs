@@ -656,12 +656,8 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child> {
-        let Some(state) = self.workspaces.get(&ws_id) else {
-            return None;
-        };
-        let Some(focused) = state.focused_index else {
-            return None;
-        };
+        let state = self.workspaces.get(&ws_id)?;
+        let focused = state.focused_index?;
         let id = state.windows[focused];
 
         let state = self.workspaces.get_mut(&ws_id).unwrap();
