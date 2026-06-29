@@ -2234,6 +2234,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn windows_rule_parses_class_and_aumid() {
         let config: Config = toml::from_str(concat!(
             "[[windows.ignore]]\n",
@@ -2415,6 +2416,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn default_windows_ignore_contains_shell_tray() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2434,6 +2436,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn default_windows_ignore_contains_core_window() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
