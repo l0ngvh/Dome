@@ -8,6 +8,7 @@ mod listeners;
 mod login_item;
 mod objc2_wrapper;
 mod running_application;
+mod spawn;
 mod throttle;
 mod ui;
 

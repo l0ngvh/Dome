@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::os::unix::process::CommandExt;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -176,12 +175,7 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
                 runner.dome.toggle_picker();
             }
             Action::Exec { command } => {
-                if let Err(e) = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(command)
-                    .process_group(0)
-                    .spawn()
-                {
+                if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command) {
                     tracing::warn!(%command, "Failed to exec: {e}");
                 }
             }
