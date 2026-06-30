@@ -16,18 +16,18 @@ use std::time::Instant;
 
 use crate::action::Query;
 use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, LayoutConfig, WindowMode};
+use crate::config::{Config, LayoutConfig};
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
-    Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId,
-    WindowRestrictions, WorkspaceId,
+    ContainerId, ContainerPlacement, Dimension, Direction, DisplayMode, FloatWindowPlacement, Hub,
+    Length, Logical, MonitorId, MonitorLayout, OnOpenRule, Physical, TilingAction,
+    TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 
 use self::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
-use self::registry::WindowRegistry;
+use self::registry::{ManagedWindow, WindowRegistry};
 use self::window::{PositionedState, WindowState};
 
 pub(super) use self::window::NewWindow;
@@ -145,6 +145,7 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(primary.dimension, primary.scale, layout.clone());
+        hub.set_on_open_rules(convert_windows_on_open_rules(&config.windows.on_open));
         let primary_monitor_id = hub.focused_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
@@ -214,6 +215,8 @@ impl Dome {
     pub(super) fn config_changed(&mut self, new_config: Config) {
         self.hub.sync_config(self.layout.clone());
         self.config = new_config;
+        self.hub
+            .set_on_open_rules(convert_windows_on_open_rules(&self.config.windows.on_open));
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_config(&self.config);
         }
@@ -321,37 +324,57 @@ impl Dome {
     }
 
     /// Adding a manageable window.
-    #[tracing::instrument(skip_all, fields(window = %new))]
-    pub(super) fn add_window(&mut self, new: NewWindow, rect: Dimension<Physical>, monitor: isize) {
-        if self.registry.contains_hwnd(new.ext.id()) {
+    #[tracing::instrument(skip_all, fields(pid = ext.pid(), hwnd = %ext.id(), metadata = %metadata))]
+    pub(super) fn add_window(
+        &mut self,
+        NewWindow {
+            ext,
+            metadata,
+            constraints,
+        }: NewWindow,
+        rect: Dimension<Physical>,
+        monitor: isize,
+    ) {
+        if self.registry.contains_hwnd(ext.id()) {
             return;
         }
-        let (target_ws, mode_override) = self.resolve_on_open(&new);
-        let resolved_mode = mode_override.unwrap_or_else(|| {
-            if self.monitors.is_borderless_fullscreen_at(rect, monitor) {
-                WindowMode::Fullscreen
-            } else {
-                WindowMode::Tiling
-            }
-        });
-        match resolved_mode {
-            WindowMode::Tiling => {
-                self.insert_tiling_window(new, rect, target_ws);
-            }
-            WindowMode::Float => {
-                self.insert_float_window(new, rect, target_ws);
-            }
-            WindowMode::Fullscreen => {
-                // mode_override == Some(Fullscreen) is a user-explicit rule -> no protection.
-                // mode_override == None && is_borderless_fullscreen_at is shell-detected -> protect.
-                let restrictions = if mode_override.is_some() {
-                    WindowRestrictions::None
-                } else {
-                    WindowRestrictions::ProtectFullscreen
-                };
-                self.insert_fullscreen_window(new, target_ws, restrictions);
-            }
-        }
+        let borderless_fs = self.monitors.is_borderless_fullscreen_at(rect, monitor);
+        let restrictions = if borderless_fs {
+            WindowRestrictions::ProtectFullscreen
+        } else {
+            WindowRestrictions::None
+        };
+        let (id, mode) = self.hub.insert_window(
+            Box::new(metadata.clone()),
+            rect,
+            borderless_fs,
+            restrictions,
+        );
+        tracing::info!(%id, ?mode, "New window");
+        let state = match mode {
+            DisplayMode::Tiling => WindowState::Positioned(PositionedState::Offscreen {
+                retries: 0,
+                actual: rect,
+            }),
+            DisplayMode::Float { .. } => WindowState::Positioned(PositionedState::Offscreen {
+                retries: 0,
+                actual: rect,
+            }),
+            DisplayMode::Fullscreen => WindowState::BorderlessFullscreen,
+        };
+        let id_key = ext.id();
+        self.set_constraints(id, constraints);
+        self.recovery.track(&ext);
+        self.registry.insert(
+            id_key,
+            id,
+            ManagedWindow {
+                ext,
+                state,
+                is_minimized: false,
+            },
+        );
+        self.pending_created.push(id);
         self.apply_layout();
     }
 
@@ -899,22 +922,24 @@ impl Dome {
     pub(super) fn monitor_dpi_changed(&mut self, handle: isize, dpi: u32) {
         self.monitors.apply_dpi_change(handle, dpi, &mut self.hub);
     }
+}
 
-    fn resolve_on_open(&mut self, new: &NewWindow) -> (WorkspaceId, Option<WindowMode>) {
-        let rule = self.config.windows.on_open.iter().find(|r| {
-            r.matches(
-                &new.metadata.process,
-                new.metadata.title.as_deref(),
-                new.metadata.class.as_deref(),
-                new.metadata.aumid.as_deref(),
-            )
-        });
-        let target_ws = self
-            .hub
-            .resolve_workspace(rule.and_then(|r| r.workspace.as_deref()));
-        let mode_override = rule.and_then(|r| r.mode);
-        (target_ws, mode_override)
-    }
+pub(super) fn convert_windows_on_open_rules(
+    rules: &[crate::config::WindowsOnOpenRule],
+) -> Vec<OnOpenRule> {
+    rules
+        .iter()
+        .map(|r| OnOpenRule {
+            mode: r.mode,
+            workspace: r.workspace.clone(),
+            app: None,
+            bundle_id: None,
+            title: r.title.clone(),
+            process: r.process.clone(),
+            class: r.class.clone(),
+            aumid: r.aumid.clone(),
+        })
+        .collect()
 }
 
 // Fallback display string derived from the executable name. Prefer

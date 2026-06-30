@@ -1,5 +1,5 @@
 use crate::action::MonitorTarget;
-use crate::config::{LayoutConfig, Strategy};
+use crate::config::{LayoutConfig, Strategy, WindowMode};
 
 use std::collections::HashSet;
 
@@ -8,7 +8,7 @@ use super::node::{
     ContainerId, Dimension, DisplayMode, Length, Monitor, MonitorId, Window, WindowId,
     WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
 };
-use super::strategy::{StrategySet, TilingAction, clip};
+use super::strategy::{OnOpenRule, StrategySet, TilingAction, clip};
 
 pub(crate) struct VisiblePlacements {
     /// Window that should receive keyboard focus
@@ -103,6 +103,7 @@ pub(crate) struct HubAccess {
     pub(super) config: LayoutConfig,
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
+    pub(super) on_open_rules: Vec<OnOpenRule>,
 }
 
 #[derive(Debug)]
@@ -151,6 +152,7 @@ impl Hub {
                 config,
                 workspaces,
                 windows: Allocator::new(),
+                on_open_rules: Vec::new(),
             },
             strategies,
             minimized_windows: Vec::new(),
@@ -446,6 +448,55 @@ impl Hub {
     #[cfg(test)]
     pub(crate) fn validate_tree(&self) {
         self.strategies.validate_tree(&self.access);
+    }
+
+    /// Replace the on-open rule list. Called from the platform on startup
+    /// and on config reload.
+    pub(crate) fn set_on_open_rules(&mut self, rules: Vec<OnOpenRule>) {
+        self.access.on_open_rules = rules;
+    }
+
+    pub(crate) fn resolve_on_open(&self, metadata: &dyn WindowMetadata) -> Option<&OnOpenRule> {
+        self.access
+            .on_open_rules
+            .iter()
+            .find(|r| metadata.matches_on_open_rule(r))
+    }
+
+    #[tracing::instrument(skip(self, metadata))]
+    pub(crate) fn insert_window(
+        &mut self,
+        metadata: Box<dyn WindowMetadata>,
+        dimension: Dimension,
+        borderless_fullscreen: bool,
+        restrictions: WindowRestrictions,
+    ) -> (WindowId, DisplayMode) {
+        let workspace_name = self
+            .resolve_on_open(&*metadata)
+            .and_then(|r| r.workspace.clone());
+        let mode_override = self.resolve_on_open(&*metadata).and_then(|r| r.mode);
+        let target_ws = self.resolve_workspace(workspace_name.as_deref());
+        let mode = mode_override.unwrap_or(if borderless_fullscreen {
+            WindowMode::Fullscreen
+        } else {
+            WindowMode::Tiling
+        });
+        let id = match mode {
+            WindowMode::Tiling => self.insert_tiling(target_ws, metadata),
+            WindowMode::Float => self.insert_float(target_ws, dimension, metadata),
+            WindowMode::Fullscreen => {
+                // Rule-explicit fullscreen -> no protection.
+                // Shell-detected fullscreen -> keep caller's restrictions.
+                let r = if mode_override.is_some() {
+                    WindowRestrictions::None
+                } else {
+                    restrictions
+                };
+                self.insert_fullscreen(target_ws, r, metadata)
+            }
+        };
+        let display_mode = self.access.windows.get(id).mode;
+        (id, display_mode)
     }
 
     pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) -> bool {

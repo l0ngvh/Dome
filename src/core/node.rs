@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
 use crate::core::allocator::{Node, NodeId};
+pub(crate) use crate::core::strategy::OnOpenRule;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MonitorId(usize);
@@ -143,6 +144,8 @@ pub(crate) trait WindowMetadata:
     fn set_title(&mut self, title: String);
     /// Clone into a boxed trait object.
     fn clone_box(&self) -> Box<dyn WindowMetadata>;
+
+    fn matches_on_open_rule(&self, rule: &OnOpenRule) -> bool;
 }
 
 /// Represents a single application window

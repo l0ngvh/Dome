@@ -3,10 +3,10 @@ use std::time::Instant;
 
 use super::Dome;
 use super::display_from_process;
-use super::registry::ManagedWindow;
+use crate::config::pattern_matches;
 use crate::core::{
-    Dimension, FloatWindowPlacement, Length, MonitorId, Physical, TilingWindowPlacement, WindowId,
-    WindowRestrictions, WorkspaceId,
+    Dimension, FloatWindowPlacement, Length, MonitorId, OnOpenRule, Physical,
+    TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
@@ -67,6 +67,37 @@ impl crate::core::WindowMetadata for WindowsMetadata {
     }
     fn clone_box(&self) -> Box<dyn crate::core::WindowMetadata> {
         Box::new(self.clone())
+    }
+
+    fn matches_on_open_rule(&self, rule: &OnOpenRule) -> bool {
+        let title = self.title.as_deref();
+        let class = self.class.as_deref();
+        let aumid = self.aumid.as_deref();
+
+        if let Some(p) = rule.process.as_deref()
+            && !pattern_matches(p, &self.process)
+        {
+            return false;
+        }
+        if let Some(p) = rule.title.as_deref()
+            && !title.is_some_and(|t| pattern_matches(p, t))
+        {
+            return false;
+        }
+        if let Some(p) = rule.class.as_deref()
+            && !class.is_some_and(|c| pattern_matches(p, c))
+        {
+            return false;
+        }
+        if let Some(p) = rule.aumid.as_deref()
+            && !aumid.is_some_and(|a| pattern_matches(p, a))
+        {
+            return false;
+        }
+        rule.process.is_some()
+            || rule.title.is_some()
+            || rule.class.is_some()
+            || rule.aumid.is_some()
     }
 }
 
@@ -186,79 +217,6 @@ impl std::fmt::Display for WindowState {
 }
 
 impl Dome {
-    #[tracing::instrument(skip_all, fields(window = %new))]
-    pub(super) fn insert_tiling_window(
-        &mut self,
-        new: NewWindow,
-        rect: Dimension<Physical>,
-        target_ws: WorkspaceId,
-    ) {
-        let id = self
-            .hub
-            .insert_tiling(target_ws, Box::new(new.metadata.clone()));
-        let state = WindowState::Positioned(PositionedState::Offscreen {
-            retries: 0,
-            actual: rect,
-        });
-        self.finalize_inserted_window(new, id, state);
-        tracing::info!(window_id = %id, "New tiling window");
-    }
-
-    #[tracing::instrument(skip_all, fields(window = %new))]
-    pub(super) fn insert_float_window(
-        &mut self,
-        new: NewWindow,
-        rect: Dimension<Physical>,
-        target_ws: WorkspaceId,
-    ) {
-        let id = self
-            .hub
-            .insert_float(target_ws, rect, Box::new(new.metadata.clone()));
-        let state = WindowState::Positioned(PositionedState::Offscreen {
-            retries: 0,
-            actual: rect,
-        });
-        self.finalize_inserted_window(new, id, state);
-        tracing::info!(window_id = %id, "New float window");
-    }
-
-    #[tracing::instrument(skip_all, fields(window = %new))]
-    pub(super) fn insert_fullscreen_window(
-        &mut self,
-        new: NewWindow,
-        target_ws: WorkspaceId,
-        restrictions: WindowRestrictions,
-    ) {
-        let id =
-            self.hub
-                .insert_fullscreen(target_ws, restrictions, Box::new(new.metadata.clone()));
-        let state = WindowState::BorderlessFullscreen;
-        self.finalize_inserted_window(new, id, state);
-        tracing::info!(window_id = %id, ?restrictions, "New borderless fullscreen window");
-    }
-
-    fn finalize_inserted_window(&mut self, new: NewWindow, id: WindowId, state: WindowState) {
-        let NewWindow {
-            ext,
-            metadata: _,
-            constraints,
-        } = new;
-        let id_key = ext.id();
-        self.set_constraints(id, constraints);
-        self.recovery.track(&ext);
-
-        self.registry.insert(
-            id_key,
-            id,
-            ManagedWindow {
-                ext,
-                state,
-                is_minimized: false,
-            },
-        );
-        self.pending_created.push(id);
-    }
-
     #[tracing::instrument(
         level = "trace",
         skip(self, wp),

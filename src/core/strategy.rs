@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::config::{LayoutConfig, Strategy};
+use crate::config::{LayoutConfig, Strategy, WindowMode};
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
@@ -8,6 +8,23 @@ use crate::core::node::{
     Child, ContainerId, Dimension, Direction, Length, WindowId, Workspace, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
+
+#[derive(Debug, Clone)]
+pub(crate) struct OnOpenRule {
+    pub(crate) mode: Option<WindowMode>,
+    pub(crate) workspace: Option<String>,
+    #[cfg_attr(target_os = "windows", expect(dead_code))]
+    pub(crate) app: Option<String>,
+    #[cfg_attr(target_os = "windows", expect(dead_code))]
+    pub(crate) bundle_id: Option<String>,
+    pub(crate) title: Option<String>,
+    #[cfg_attr(target_os = "macos", expect(dead_code))]
+    pub(crate) process: Option<String>,
+    #[cfg_attr(target_os = "macos", expect(dead_code))]
+    pub(crate) class: Option<String>,
+    #[cfg_attr(target_os = "macos", expect(dead_code))]
+    pub(crate) aumid: Option<String>,
+}
 
 /// Actions that are specific to the tiling strategy.
 #[derive(Debug)]

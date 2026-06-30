@@ -99,7 +99,7 @@ pub(super) struct FloatPlacement {
 }
 
 impl FloatPlacement {
-    fn new(target: RoundedDimension) -> Self {
+    pub(super) fn new(target: RoundedDimension) -> Self {
         Self {
             target,
             placed_at: Instant::now(),
@@ -256,7 +256,7 @@ impl RoundedDimension {
     /// Reconstruct a `Dimension<Logical>` from the stored i32 fields.
     /// Used for drift correction: the stored target must be sent back to
     /// `set_frame` which now speaks `Dimension<Logical>`.
-    fn to_dimension(self) -> Dimension {
+    pub(super) fn to_dimension(self) -> Dimension {
         Dimension::new(
             Length::new(self.x as f32),
             Length::new(self.y as f32),
@@ -332,57 +332,6 @@ fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
 
 impl Dome {
     #[tracing::instrument(skip_all, fields(window = %new))]
-    pub(super) fn add_tiling_window(
-        &mut self,
-        new: NewWindow,
-        dim: RoundedDimension,
-        target_ws: WorkspaceId,
-    ) -> WindowId {
-        let window_id = self
-            .hub
-            .insert_tiling(target_ws, Box::new(new.metadata.clone()));
-        let state =
-            WindowState::Positioned(PositionedState::Offscreen(OffscreenPlacement::new(dim)));
-        self.finalize_added_window(new, window_id, state);
-        tracing::info!(%window_id, "New tiling window");
-        window_id
-    }
-
-    #[tracing::instrument(skip_all, fields(window = %new))]
-    pub(super) fn add_float_window(
-        &mut self,
-        new: NewWindow,
-        dim: RoundedDimension,
-        target_ws: WorkspaceId,
-    ) -> WindowId {
-        // Convert the observed content rect back to an outer-frame dimension
-        // (mirrors what window_moved does for float observations).
-        let outer_dim = reverse_inset(dim, Length::<Unit>::new(self.config.border_size));
-        let window_id = self
-            .hub
-            .insert_float(target_ws, outer_dim, Box::new(new.metadata.clone()));
-        let state = WindowState::Positioned(PositionedState::Float(FloatPlacement::new(dim)));
-        self.finalize_added_window(new, window_id, state);
-        tracing::info!(%window_id, "New float window");
-        window_id
-    }
-
-    #[tracing::instrument(skip_all, fields(window = %new))]
-    pub(super) fn add_borderless_fullscreen_window(
-        &mut self,
-        new: NewWindow,
-        target_ws: WorkspaceId,
-        restrictions: WindowRestrictions,
-    ) -> WindowId {
-        let window_id =
-            self.hub
-                .insert_fullscreen(target_ws, restrictions, Box::new(new.metadata.clone()));
-        self.finalize_added_window(new, window_id, WindowState::BorderlessFullscreen);
-        tracing::info!(%window_id, ?restrictions, "New borderless fullscreen window");
-        window_id
-    }
-
-    #[tracing::instrument(skip_all, fields(window = %new))]
     pub(super) fn add_native_fullscreen_window(
         &mut self,
         new: NewWindow,
@@ -398,7 +347,12 @@ impl Dome {
         window_id
     }
 
-    fn finalize_added_window(&mut self, new: NewWindow, window_id: WindowId, state: WindowState) {
+    pub(super) fn finalize_added_window(
+        &mut self,
+        new: NewWindow,
+        window_id: WindowId,
+        state: WindowState,
+    ) {
         self.registry.insert(new, window_id, state);
         self.pending_created.push(window_id);
     }

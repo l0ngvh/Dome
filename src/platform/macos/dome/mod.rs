@@ -22,10 +22,10 @@ use std::time::Instant;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, LayoutConfig, MacosWindow, WindowMode};
+use crate::config::{Config, LayoutConfig, MacosWindow, pattern_matches};
 use crate::core::{
-    ContainerId, Direction, Hub, Length, Logical, TilingAction, WindowId, WindowMetadata,
-    WindowRestrictions,
+    ContainerId, Direction, DisplayMode, Hub, Length, Logical, OnOpenRule, TilingAction, WindowId,
+    WindowMetadata, WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -84,6 +84,32 @@ impl WindowMetadata for MacOSMetadata {
     }
     fn clone_box(&self) -> Box<dyn WindowMetadata> {
         Box::new(self.clone())
+    }
+
+    fn matches_on_open_rule(&self, rule: &OnOpenRule) -> bool {
+        let app = self.app_name.as_deref();
+        let bundle_id = self.bundle_id.as_deref();
+        let title = self.title.as_deref();
+
+        if let Some(p) = rule.app.as_deref()
+            && !app.is_some_and(|a| pattern_matches(p, a))
+        {
+            return false;
+        }
+        if let Some(b) = rule.bundle_id.as_deref()
+            && bundle_id != Some(b)
+        {
+            return false;
+        }
+        if let Some(p) = rule.title.as_deref()
+            && !title.is_some_and(|t| pattern_matches(p, t))
+        {
+            return false;
+        }
+        if app.is_none() && bundle_id.is_none() && title.is_none() {
+            return false;
+        }
+        rule.app.is_some() || rule.bundle_id.is_some() || rule.title.is_some()
     }
 }
 
@@ -155,6 +181,7 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(primary.work_area, 1.0, layout.clone());
+        hub.set_on_open_rules(convert_macos_on_open_rules(&config.macos.on_open));
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
@@ -217,49 +244,43 @@ impl Dome {
                 continue;
             }
 
-            let rule = self.config.macos.on_open.iter().find(|r| {
-                r.matches(
-                    new_ref.metadata.app_name.as_deref(),
-                    new_ref.metadata.bundle_id.as_deref(),
-                    new_ref.metadata.title.as_deref(),
-                )
-            });
-            let target_ws = self
+            let workspace_name = self
                 .hub
-                .resolve_workspace(rule.and_then(|r| r.workspace.as_deref()));
-            let mode_override = rule.and_then(|r| r.mode);
+                .resolve_on_open(&new_ref.metadata)
+                .and_then(|r| r.workspace.clone());
 
             match pending {
                 PendingAdd::NativeFullscreen { new } => {
+                    let target_ws = self.hub.resolve_workspace(workspace_name.as_deref());
                     self.add_native_fullscreen_window(new, target_ws);
                 }
                 PendingAdd::Positioned { new, dim } => {
                     let ax_for_recovery = new.ax.clone();
-                    let resolved_mode = mode_override.unwrap_or_else(|| {
-                        if self.is_borderless_fullscreen_at(dim) {
-                            WindowMode::Fullscreen
-                        } else {
-                            WindowMode::Tiling
+                    let borderless_fs = self.is_borderless_fullscreen_at(dim);
+                    let restrictions = if borderless_fs {
+                        WindowRestrictions::ProtectFullscreen
+                    } else {
+                        WindowRestrictions::None
+                    };
+                    let (id, display_mode) = self.hub.insert_window(
+                        Box::new(new.metadata.clone()),
+                        dim.to_dimension(),
+                        borderless_fs,
+                        restrictions,
+                    );
+                    tracing::info!(%id, ?display_mode, %new, "New window");
+                    let state = match display_mode {
+                        DisplayMode::Tiling => {
+                            WindowState::Positioned(window::PositionedState::Offscreen(
+                                window::OffscreenPlacement::new(dim),
+                            ))
                         }
-                    });
-                    match resolved_mode {
-                        WindowMode::Tiling => {
-                            self.add_tiling_window(new, dim, target_ws);
-                        }
-                        WindowMode::Float => {
-                            self.add_float_window(new, dim, target_ws);
-                        }
-                        WindowMode::Fullscreen => {
-                            // mode_override == Some(Fullscreen) is a user-explicit rule -> no protection.
-                            // mode_override == None && is_borderless_fullscreen is shell-detected -> protect.
-                            let restrictions = if mode_override.is_some() {
-                                WindowRestrictions::None
-                            } else {
-                                WindowRestrictions::ProtectFullscreen
-                            };
-                            self.add_borderless_fullscreen_window(new, target_ws, restrictions);
-                        }
-                    }
+                        DisplayMode::Float { .. } => WindowState::Positioned(
+                            window::PositionedState::Float(window::FloatPlacement::new(dim)),
+                        ),
+                        DisplayMode::Fullscreen => WindowState::BorderlessFullscreen,
+                    };
+                    self.finalize_added_window(new, id, state);
                     self.recovery.track(
                         ax_for_recovery,
                         dim.width,
@@ -320,6 +341,8 @@ impl Dome {
         self.sender
             .send(HubMessage::ConfigChanged(Box::new(new_config.clone())));
         self.config = new_config;
+        self.hub
+            .set_on_open_rules(convert_macos_on_open_rules(&self.config.macos.on_open));
         tracing::info!("Config reloaded");
         self.flush_layout();
     }
@@ -652,4 +675,22 @@ impl Drop for Dome {
         self.recovery.restore_all();
         self.sender.send(HubMessage::Shutdown);
     }
+}
+
+pub(super) fn convert_macos_on_open_rules(
+    rules: &[crate::config::MacosOnOpenRule],
+) -> Vec<OnOpenRule> {
+    rules
+        .iter()
+        .map(|r| OnOpenRule {
+            mode: r.mode,
+            workspace: r.workspace.clone(),
+            app: r.app.clone(),
+            bundle_id: r.bundle_id.clone(),
+            title: r.title.clone(),
+            process: None,
+            class: None,
+            aumid: None,
+        })
+        .collect()
 }

@@ -1003,14 +1003,27 @@ impl MacosWindow {
         bundle_id: Option<&str>,
         title: Option<&str>,
     ) -> bool {
-        macos_predicate_matches(
-            self.app.as_deref(),
-            self.bundle_id.as_deref(),
-            self.title.as_deref(),
-            app,
-            bundle_id,
-            title,
-        )
+        if let Some(p) = self.app.as_deref()
+            && !app.is_some_and(|a| pattern_matches(p, a))
+        {
+            return false;
+        }
+        // bundle_id matches by exact equality, not pattern_matches.
+        if let Some(b) = self.bundle_id.as_deref()
+            && bundle_id != Some(b)
+        {
+            return false;
+        }
+        if let Some(p) = self.title.as_deref()
+            && !title.is_some_and(|t| pattern_matches(p, t))
+        {
+            return false;
+        }
+        // Reject when all window metadata is absent.
+        if app.is_none() && bundle_id.is_none() && title.is_none() {
+            return false;
+        }
+        self.app.is_some() || self.bundle_id.is_some() || self.title.is_some()
     }
 }
 
@@ -1039,16 +1052,30 @@ impl WindowsWindow {
         class: Option<&str>,
         aumid: Option<&str>,
     ) -> bool {
-        windows_predicate_matches(
-            self.process.as_deref(),
-            self.title.as_deref(),
-            self.class.as_deref(),
-            self.aumid.as_deref(),
-            process,
-            title,
-            class,
-            aumid,
-        )
+        if let Some(p) = self.process.as_deref()
+            && !pattern_matches(p, process)
+        {
+            return false;
+        }
+        if let Some(p) = self.title.as_deref()
+            && !title.is_some_and(|t| pattern_matches(p, t))
+        {
+            return false;
+        }
+        if let Some(p) = self.class.as_deref()
+            && !class.is_some_and(|c| pattern_matches(p, c))
+        {
+            return false;
+        }
+        if let Some(p) = self.aumid.as_deref()
+            && !aumid.is_some_and(|a| pattern_matches(p, a))
+        {
+            return false;
+        }
+        self.process.is_some()
+            || self.title.is_some()
+            || self.class.is_some()
+            || self.aumid.is_some()
     }
 }
 
@@ -1056,7 +1083,7 @@ impl WalkRule for WindowsWindow {
     const KNOWN: &'static [&'static str] = &["process", "title", "class", "aumid"];
 }
 
-fn pattern_matches(pattern: &str, text: &str) -> bool {
+pub(crate) fn pattern_matches(pattern: &str, text: &str) -> bool {
     if let Some(regex) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/')) {
         regex::Regex::new(regex)
             .map(|r| r.is_match(text))
@@ -1092,28 +1119,6 @@ pub(crate) struct MacosOnOpenRule {
     pub(crate) workspace: Option<String>,
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    expect(dead_code, reason = "macOS-only schema")
-)]
-impl MacosOnOpenRule {
-    pub(crate) fn matches(
-        &self,
-        app: Option<&str>,
-        bundle_id: Option<&str>,
-        title: Option<&str>,
-    ) -> bool {
-        macos_predicate_matches(
-            self.app.as_deref(),
-            self.bundle_id.as_deref(),
-            self.title.as_deref(),
-            app,
-            bundle_id,
-            title,
-        )
-    }
-}
-
 impl WalkRule for MacosOnOpenRule {
     const KNOWN: &'static [&'static str] = &["app", "bundle_id", "title", "mode", "workspace"];
 }
@@ -1136,31 +1141,6 @@ pub(crate) struct WindowsOnOpenRule {
     pub(crate) mode: Option<WindowMode>,
     #[serde(default)]
     pub(crate) workspace: Option<String>,
-}
-
-#[cfg_attr(
-    not(target_os = "windows"),
-    expect(dead_code, reason = "Windows-only schema")
-)]
-impl WindowsOnOpenRule {
-    pub(crate) fn matches(
-        &self,
-        process: &str,
-        title: Option<&str>,
-        class: Option<&str>,
-        aumid: Option<&str>,
-    ) -> bool {
-        windows_predicate_matches(
-            self.process.as_deref(),
-            self.title.as_deref(),
-            self.class.as_deref(),
-            self.aumid.as_deref(),
-            process,
-            title,
-            class,
-            aumid,
-        )
-    }
 }
 
 impl WalkRule for WindowsOnOpenRule {
@@ -1473,80 +1453,6 @@ pub(crate) fn start_config_watcher<T: Send + 'static>(
     watcher.watch(&watch_dir, RecursiveMode::NonRecursive)?;
     tracing::info!(%path, "File watcher started");
     Ok(watcher)
-}
-
-/// Evaluates macOS on-open and ignore-rule predicates. Returns false when:
-/// - any specified predicate does not match its corresponding window field,
-/// - all window metadata fields are None (empty-predicate guard), or
-/// - no predicate field is set on the rule at all.
-fn macos_predicate_matches(
-    rule_app: Option<&str>,
-    rule_bundle_id: Option<&str>,
-    rule_title: Option<&str>,
-    app: Option<&str>,
-    bundle_id: Option<&str>,
-    title: Option<&str>,
-) -> bool {
-    if let Some(p) = rule_app
-        && !app.is_some_and(|a| pattern_matches(p, a))
-    {
-        return false;
-    }
-    // bundle_id matches by exact equality, not pattern_matches.
-    if let Some(b) = rule_bundle_id
-        && bundle_id != Some(b)
-    {
-        return false;
-    }
-    if let Some(p) = rule_title
-        && !title.is_some_and(|t| pattern_matches(p, t))
-    {
-        return false;
-    }
-    // Reject when all window metadata is absent. Without this a rule with
-    // e.g. only `app` set would spuriously match windows whose AX query
-    // returned no metadata at all.
-    if app.is_none() && bundle_id.is_none() && title.is_none() {
-        return false;
-    }
-    rule_app.is_some() || rule_bundle_id.is_some() || rule_title.is_some()
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "predicate fields are individually named for clarity at call sites"
-)]
-fn windows_predicate_matches(
-    rule_process: Option<&str>,
-    rule_title: Option<&str>,
-    rule_class: Option<&str>,
-    rule_aumid: Option<&str>,
-    process: &str,
-    title: Option<&str>,
-    class: Option<&str>,
-    aumid: Option<&str>,
-) -> bool {
-    if let Some(p) = rule_process
-        && !pattern_matches(p, process)
-    {
-        return false;
-    }
-    if let Some(p) = rule_title
-        && !title.is_some_and(|t| pattern_matches(p, t))
-    {
-        return false;
-    }
-    if let Some(p) = rule_class
-        && !class.is_some_and(|c| pattern_matches(p, c))
-    {
-        return false;
-    }
-    if let Some(p) = rule_aumid
-        && !aumid.is_some_and(|a| pattern_matches(p, a))
-    {
-        return false;
-    }
-    rule_process.is_some() || rule_title.is_some() || rule_class.is_some() || rule_aumid.is_some()
 }
 
 #[cfg(test)]
@@ -2255,164 +2161,6 @@ mod tests {
         let on_open = &config.windows.on_open;
         assert_eq!(on_open[0].class.as_deref(), Some("Bar"));
         assert_eq!(on_open[0].aumid.as_deref(), Some("Other.App"));
-    }
-
-    #[test]
-    fn windows_predicate_matches_class_only() {
-        assert!(windows_predicate_matches(
-            None,
-            None,
-            Some("Foo"),
-            None,
-            "any.exe",
-            Some("title"),
-            Some("Foo"),
-            None,
-        ));
-        assert!(!windows_predicate_matches(
-            None,
-            None,
-            Some("Foo"),
-            None,
-            "any.exe",
-            Some("title"),
-            Some("Bar"),
-            None,
-        ));
-    }
-
-    #[test]
-    fn windows_predicate_matches_class_regex() {
-        assert!(windows_predicate_matches(
-            None,
-            None,
-            Some("/^Shell_/"),
-            None,
-            "explorer.exe",
-            None,
-            Some("Shell_TrayWnd"),
-            None,
-        ));
-        assert!(!windows_predicate_matches(
-            None,
-            None,
-            Some("/^Shell_/"),
-            None,
-            "explorer.exe",
-            None,
-            Some("NotShell"),
-            None,
-        ));
-    }
-
-    #[test]
-    fn windows_predicate_matches_aumid_literal_and_regex() {
-        assert!(windows_predicate_matches(
-            None,
-            None,
-            None,
-            Some("MyApp_8wekyb3d8bbwe"),
-            "app.exe",
-            None,
-            None,
-            Some("MyApp_8wekyb3d8bbwe"),
-        ));
-        assert!(windows_predicate_matches(
-            None,
-            None,
-            None,
-            Some("/^Microsoft\\./"),
-            "app.exe",
-            None,
-            None,
-            Some("Microsoft.WindowsCalculator"),
-        ));
-        assert!(!windows_predicate_matches(
-            None,
-            None,
-            None,
-            Some("/^Microsoft\\./"),
-            "app.exe",
-            None,
-            None,
-            Some("NotMicrosoft.App"),
-        ));
-    }
-
-    #[test]
-    fn windows_predicate_matches_combined_process_and_class() {
-        assert!(windows_predicate_matches(
-            Some("explorer.exe"),
-            None,
-            Some("Shell_TrayWnd"),
-            None,
-            "explorer.exe",
-            None,
-            Some("Shell_TrayWnd"),
-            None,
-        ));
-        assert!(!windows_predicate_matches(
-            Some("explorer.exe"),
-            None,
-            Some("Shell_TrayWnd"),
-            None,
-            "other.exe",
-            None,
-            Some("Shell_TrayWnd"),
-            None,
-        ));
-    }
-
-    #[test]
-    fn windows_predicate_matches_combined_process_and_aumid() {
-        assert!(windows_predicate_matches(
-            Some("app.exe"),
-            None,
-            None,
-            Some("MyApp_id"),
-            "app.exe",
-            None,
-            None,
-            Some("MyApp_id"),
-        ));
-        assert!(!windows_predicate_matches(
-            Some("app.exe"),
-            None,
-            None,
-            Some("MyApp_id"),
-            "app.exe",
-            None,
-            None,
-            Some("WrongApp_id"),
-        ));
-    }
-
-    #[test]
-    fn windows_predicate_fail_open_on_none_class() {
-        assert!(!windows_predicate_matches(
-            None,
-            None,
-            Some("Foo"),
-            None,
-            "any.exe",
-            None,
-            None,
-            None,
-        ));
-    }
-
-    #[test]
-    fn windows_predicate_fail_open_on_none_aumid() {
-        assert!(!windows_predicate_matches(
-            None,
-            None,
-            None,
-            Some("Some.Id"),
-            "any.exe",
-            None,
-            None,
-            None,
-        ));
     }
 
     #[test]

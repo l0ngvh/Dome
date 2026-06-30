@@ -786,6 +786,10 @@ impl WindowMetadata for TestMetadata {
     fn clone_box(&self) -> Box<dyn WindowMetadata> {
         Box::new(self.clone())
     }
+
+    fn matches_on_open_rule(&self, _rule: &crate::core::OnOpenRule) -> bool {
+        false
+    }
 }
 
 /// Convenience: create a boxed `TestMetadata` with the given title.

@@ -451,6 +451,9 @@ mod tests {
             fn clone_box(&self) -> Box<dyn WindowMetadata> {
                 Box::new(self.clone())
             }
+            fn matches_on_open_rule(&self, _rule: &crate::core::OnOpenRule) -> bool {
+                false
+            }
         }
         Box::new(Meta {
             title: Some(t.to_owned()),
