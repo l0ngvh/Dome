@@ -5,7 +5,12 @@ targets = [
 ]
 
 [advisories]
-ignore = []
+ignore = [
+    # paste is unmaintained but still used transitively; no great replacement.
+    "RUSTSEC-2024-0436",
+    # ttf-parser is unmaintained but used transitively via ab_glyph/egui; no great replacement.
+    "RUSTSEC-2026-0192",
+]
 
 [licenses]
 allow = [
