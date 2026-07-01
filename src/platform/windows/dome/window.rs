@@ -46,6 +46,12 @@ impl std::fmt::Display for WindowsMetadata {
         if let Some(title) = &self.title {
             write!(f, " - {title}")?;
         }
+        if let Some(class) = &self.class {
+            write!(f, " class={class}")?;
+        }
+        if let Some(aumid) = &self.aumid {
+            write!(f, " aumid={aumid}")?;
+        }
         Ok(())
     }
 }
