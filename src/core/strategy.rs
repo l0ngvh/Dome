@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::config::{LayoutConfig, Strategy, WindowMode};
+use crate::config::{LayoutConfig, LayoutWorkspaceConfig, Strategy};
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
@@ -8,23 +8,6 @@ use crate::core::node::{
     Child, ContainerId, Dimension, Direction, Length, WindowId, Workspace, WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
-
-#[derive(Debug, Clone)]
-pub(crate) struct OnOpenRule {
-    pub(crate) mode: Option<WindowMode>,
-    pub(crate) workspace: Option<String>,
-    #[cfg_attr(target_os = "windows", expect(dead_code))]
-    pub(crate) app: Option<String>,
-    #[cfg_attr(target_os = "windows", expect(dead_code))]
-    pub(crate) bundle_id: Option<String>,
-    pub(crate) title: Option<String>,
-    #[cfg_attr(target_os = "macos", expect(dead_code))]
-    pub(crate) process: Option<String>,
-    #[cfg_attr(target_os = "macos", expect(dead_code))]
-    pub(crate) class: Option<String>,
-    #[cfg_attr(target_os = "macos", expect(dead_code))]
-    pub(crate) aumid: Option<String>,
-}
 
 /// Actions that are specific to the tiling strategy.
 #[derive(Debug)]
@@ -319,36 +302,18 @@ fn kind_for(name: &str, config: &LayoutConfig) -> Strategy {
     config
         .workspace
         .iter()
-        .find(|w| w.name == name)
-        .map(|w| w.strategy)
+        .find(|w| w.name() == name)
+        .map(|w| match w {
+            LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
+            LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
+        })
         .unwrap_or(config.strategy)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint};
     use crate::core::node::Length;
-
-    fn config_with(strategy: Strategy, overrides: Vec<LayoutWorkspaceConfig>) -> LayoutConfig {
-        LayoutConfig {
-            strategy,
-            partition_tree: PartitionTreeConfig {
-                tab_bar_height: Length::ZERO,
-                automatic_tiling: false,
-            },
-            master: MasterConfig {
-                master_ratio: 0.5,
-                master_count: 1,
-                workspace: vec![],
-            },
-            min_width: SizeConstraint::default(),
-            min_height: SizeConstraint::default(),
-            max_width: SizeConstraint::default(),
-            max_height: SizeConstraint::default(),
-            workspace: overrides,
-        }
-    }
 
     #[test]
     fn distribute_space_returns_mins_when_sum_exceeds_container() {
@@ -397,35 +362,5 @@ mod tests {
         assert!((result[0].value() - 50.0).abs() < 0.01);
         assert!((result[1].value() - 35.0).abs() < 0.01);
         assert!((result[2].value() - 35.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn kind_for_returns_override_when_name_matches() {
-        let config = config_with(
-            Strategy::PartitionTree,
-            vec![LayoutWorkspaceConfig {
-                name: "1".into(),
-                strategy: Strategy::Master,
-            }],
-        );
-        assert_eq!(kind_for("1", &config), Strategy::Master);
-    }
-
-    #[test]
-    fn kind_for_falls_back_to_global_when_no_match() {
-        let config = config_with(
-            Strategy::PartitionTree,
-            vec![LayoutWorkspaceConfig {
-                name: "1".into(),
-                strategy: Strategy::Master,
-            }],
-        );
-        assert_eq!(kind_for("2", &config), Strategy::PartitionTree);
-    }
-
-    #[test]
-    fn kind_for_falls_back_to_global_when_no_overrides() {
-        let config = config_with(Strategy::Master, vec![]);
-        assert_eq!(kind_for("anything", &config), Strategy::Master);
     }
 }

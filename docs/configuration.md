@@ -60,27 +60,20 @@ Changing `family` to a different value takes effect on the next render. Removing
 
 ## Window rules
 
-Window rules come in two kinds:
+`ignore`: do not manage the matching window. Matchers use the same field set as the per-workspace layout matchers (see [layout.md](layout.md)).
 
-- `ignore`: do not manage the window at all.
-- `on_open`: apply initial settings (mode and workspace) when a matching window first appears. Valid `mode` values: `tiling`, `float`, `fullscreen`.
+All fields in a rule must match (AND), and the first matching rule wins. A rule with no fields, or one referencing an unavailable window attribute, never matches.
 
-### Matching
+Wrap values in forward slashes (`/pattern/`) for regex matching, or leave them bare for exact matching.
 
-All fields in a rule must match for the rule to apply. Rules are evaluated in order, and the first matching rule wins. A rule with no fields never matches.
-
-Wrap a value in forward slashes (`/pattern/`) for regex matching. Without slashes, strings match exactly.
-
-If a window attribute is unavailable, any rule that specifies that field does not match.
-
-Both platforms ship built-in `ignore` entries that are always active. User rules add to the defaults, never replace them.
+Both platforms ship built-in `ignore` entries that are always active, and user rules add to the defaults rather than replacing them.
 
 ### macOS
 
 macOS rules match on three fields:
 
 - `app`: the application name.
-- `bundle_id`: the CFBundleIdentifier. Always matched by exact equality (no regex support).
+- `bundle_id`: the CFBundleIdentifier (exact equality only, no regex).
 - `title`: the window title.
 
 The built-in macOS ignore list covers `com.apple.dock`, `com.apple.controlcenter`, `com.apple.notificationcenterui`, and `com.apple.loginwindow`.
@@ -88,13 +81,9 @@ The built-in macOS ignore list covers `com.apple.dock`, `com.apple.controlcenter
 ```toml
 [macos]
 ignore = [
-  { app = "System Preferences" },                       # exact app name
-  { app = "/.*Preferences/" },                          # regex on app name
-  { bundle_id = "com.apple.finder", title = "Trash" },  # bundle and title (AND)
-]
-on_open = [
-  { app = "Slack", workspace = "3" },
-  { app = "Safari", mode = "float" },
+  { app = "System Preferences" },
+  { app = "/.*Preferences/" },
+  { bundle_id = "com.apple.finder", title = "Trash" },
 ]
 ```
 
@@ -105,7 +94,7 @@ Windows rules match on four fields:
 - `process`: the executable name.
 - `title`: the window title.
 - `class`: the Win32 window class name (from `GetClassNameW`).
-- `aumid`: the AppUserModelID, useful for distinguishing UWP apps that share `ApplicationFrameHost.exe` as their host process.
+- `aumid`: the AppUserModelID.
 
 ```toml
 [windows]
@@ -113,12 +102,8 @@ ignore = [
   { process = "SystemSettings.exe" },
   { process = "/.*Settings.*/" },
   { title = "Task Manager" },
-  { class = "Shell_TrayWnd" },                                     # taskbar
-  { aumid = "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App" },     # by AUMID
-]
-on_open = [
-  { process = "slack.exe", workspace = "3" },
-  { class = "Chrome_WidgetWin_1", mode = "float" },                # by class
+  { class = "Shell_TrayWnd" },
+  { aumid = "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App" },
 ]
 ```
 
@@ -247,10 +232,10 @@ This focuses left and enters resize mode in one keypress. If a binding lists mul
 
 ## Error handling
 
-Dome recovers from config errors at field granularity. A wrong type, out-of-range value, or unknown field does not invalidate the rest of the config. Each broken field falls back to its default, and Dome logs a warning to `dome.log` with the dotted field path (for example, `field=master.master_ratio`) and the reason for the fallback.
-
-Per-field recovery covers unknown fields at any nesting level, wrong types or shapes, out-of-range values (`master_ratio`, `master_count`, `text_size`, `subtext_size`, blank `font.family`), bad keybindings (unparseable key or invalid action), bad entries in window-rule arrays, and reserved or empty mode names. In each case the offending item is dropped and the surrounding config survives.
-
-One condition causes the entire config to fall back to defaults:
-
-- TOML syntax errors (missing quotes, unmatched brackets, etc.).
+Dome recovers from config errors at field granularity. A wrong type,
+out-of-range value, or unknown field does not invalidate the rest of the
+config. Each broken field falls back to its default, and Dome logs a warning to
+`dome.log` with the dotted field path (for example,
+`field=master.master_ratio`) and the reason for the fallback. Toml syntax
+errors however will cause the entire config to fall back to defaults, or the
+previously successfully parsed values.

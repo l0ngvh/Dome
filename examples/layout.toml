@@ -18,25 +18,23 @@ tab_bar_height = 24.0       # height of the tab bar in tabbed containers, logica
 automatic_tiling = true     # pick split direction based on focused window dimensions
 
 [master]
-# Global defaults seed new workspaces on first attach. Runtime tuning persists across reloads.
 master_ratio = 0.5          # width of the master area, in [0.1, 0.9]
 master_count = 1            # number of master windows, >= 1
 
-# Per-workspace seed overrides for the master strategy. Each block sets the
-# initial master_ratio and/or master_count for a workspace by name. Omitted
-# fields fall back to the global defaults above. These values apply on first
-# attach only. Runtime tuning (grow/shrink/more/fewer) persists across reloads.
-[[master.workspace]]
-name = "1"
-master_count = 3            # workspace "1" starts with 3 master windows
-
-[[master.workspace]]
-name = "code"
-master_ratio = 0.7          # workspace "code" uses a wider master pane
-
-# Per-workspace strategy override. Each entry pins one workspace to a strategy
-# other than the global default. Workspaces without an entry use the global
-# strategy.
+# Per-workspace overrides.
 [[workspace]]
 name = "3"
 strategy = "master"
+master_ratio = 0.5
+master_count = 3
+float = [
+  { process = "calculator.exe" },
+]
+
+[[workspace]]
+name = "code"
+strategy = "master"
+master_ratio = 0.7
+fullscreen = [
+  { process = "slides.exe" },
+]

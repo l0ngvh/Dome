@@ -1,5 +1,5 @@
 use super::setup_master;
-use crate::config::{LayoutConfig, MasterConfig, MasterWorkspaceConfig, Strategy};
+use crate::config::{LayoutConfig, LayoutWorkspaceConfig, MasterConfig, Strategy};
 use crate::core::allocator::NodeId;
 use crate::core::node::WindowId;
 use crate::core::strategy::TilingAction;
@@ -994,7 +994,6 @@ fn sync_config_preserves_workspace_master_count() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 2,
-            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -1058,7 +1057,6 @@ fn sync_config_seeds_new_workspace_with_master_ratio() {
         master: MasterConfig {
             master_ratio: 0.3,
             master_count: 1,
-            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -1139,7 +1137,6 @@ fn sync_config_preserves_seeded_ratio_across_workspaces() {
         master: MasterConfig {
             master_ratio: 0.4,
             master_count: 1,
-            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -1208,7 +1205,6 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
         master: MasterConfig {
             master_ratio: 0.4,
             master_count: 1,
-            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -1274,7 +1270,6 @@ fn sync_config_preserves_runtime_tuned_master_count() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 3,
-            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -1386,12 +1381,16 @@ fn attach_window_seeds_master_count_from_per_workspace_override() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 1,
-            workspace: vec![MasterWorkspaceConfig {
-                name: "1".to_string(),
-                master_count: Some(3),
-                master_ratio: None,
-            }],
         },
+        workspace: vec![LayoutWorkspaceConfig::Master {
+            name: "1".to_string(),
+            master_count: Some(3),
+            master_ratio: None,
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }],
         ..default_layout_for_tests()
     });
     hub.focus_workspace("1");
@@ -1450,12 +1449,16 @@ fn attach_window_falls_back_to_global_when_no_per_workspace_override() {
         master: MasterConfig {
             master_ratio: 0.5,
             master_count: 1,
-            workspace: vec![MasterWorkspaceConfig {
-                name: "1".to_string(),
-                master_count: Some(3),
-                master_ratio: None,
-            }],
         },
+        workspace: vec![LayoutWorkspaceConfig::Master {
+            name: "1".to_string(),
+            master_count: Some(3),
+            master_ratio: None,
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }],
         ..default_layout_for_tests()
     });
     hub.focus_workspace("2");

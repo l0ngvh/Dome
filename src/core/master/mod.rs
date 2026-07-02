@@ -339,17 +339,20 @@ impl TilingStrategy for MasterStrategy {
     fn attach_window(&mut self, hub: &mut HubAccess, id: WindowId, ws_id: WorkspaceId) {
         hub.windows.get_mut(id).set_workspace(Some(ws_id));
         let ws_name = hub.workspaces.get(ws_id).name.clone();
-        let override_block = hub
-            .config
-            .master
-            .workspace
-            .iter()
-            .find(|w| w.name == ws_name);
+        let override_block = hub.config.workspace.iter().find_map(|w| match w {
+            crate::config::LayoutWorkspaceConfig::Master {
+                name,
+                master_ratio,
+                master_count,
+                ..
+            } if *name == ws_name => Some((*master_ratio, *master_count)),
+            _ => None,
+        });
         let initial_master_count = override_block
-            .and_then(|w| w.master_count)
+            .and_then(|(_, count)| count)
             .unwrap_or(hub.config.master.master_count);
         let initial_master_ratio = override_block
-            .and_then(|w| w.master_ratio)
+            .and_then(|(ratio, _)| ratio)
             .unwrap_or(hub.config.master.master_ratio);
         let state = self.workspaces.entry(ws_id).or_insert_with(|| MasterState {
             windows: Vec::new(),

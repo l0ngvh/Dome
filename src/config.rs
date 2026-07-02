@@ -515,34 +515,9 @@ impl WalkRecover for MasterConfig {
             );
             default_master_count()
         };
-        let mut workspace = w.rule_vec::<MasterWorkspaceConfig>("workspace");
-        for ws in &mut workspace {
-            if let Some(r) = ws.master_ratio
-                && !(0.1..=0.9).contains(&r)
-            {
-                tracing::warn!(
-                    name = %ws.name,
-                    value = r,
-                    "master.workspace.master_ratio out of range, falling back to global"
-                );
-                ws.master_ratio = None;
-            }
-            if let Some(c) = ws.master_count
-                && c == 0
-            {
-                tracing::warn!(
-                    name = %ws.name,
-                    value = c,
-                    "master.workspace.master_count must be > 0, falling back to global"
-                );
-                ws.master_count = None;
-            }
-        }
-        let workspace = dedup_master_workspace_overrides(workspace);
         MasterConfig {
             master_ratio,
             master_count,
-            workspace,
         }
     }
 }
@@ -594,10 +569,7 @@ impl WalkRecover for MacosConfig {
     fn walk(w: &mut Walker) -> Self {
         let mut ignore = w.rule_vec::<MacosWindow>("ignore");
         ignore.extend(default_macos_ignore());
-        MacosConfig {
-            ignore,
-            on_open: w.rule_vec::<MacosOnOpenRule>("on_open"),
-        }
+        MacosConfig { ignore }
     }
 }
 
@@ -605,10 +577,7 @@ impl WalkRecover for WindowsConfig {
     fn walk(w: &mut Walker) -> Self {
         let mut ignore = w.rule_vec::<WindowsWindow>("ignore");
         ignore.extend(default_windows_ignore());
-        WindowsConfig {
-            ignore,
-            on_open: w.rule_vec::<WindowsOnOpenRule>("on_open"),
-        }
+        WindowsConfig { ignore }
     }
 }
 
@@ -786,9 +755,6 @@ pub(crate) enum Strategy {
 ///
 /// All fields are read fresh from `hub.config.layout.partition_tree` by the
 /// strategy on every layout pass (see `src/core/partition_tree/layout.rs`).
-/// No field binds to the strategy instance, so a config change triggers a
-/// relayout but never a strategy rebuild. A future field that needs to bind
-/// to the strategy instance must override `apply_config` to copy it.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub(crate) struct PartitionTreeConfig {
     #[serde(default = "default_tab_bar_height")]
@@ -802,34 +768,33 @@ pub(crate) struct PartitionTreeConfig {
 /// Global `master_ratio` and `master_count` seed new workspaces on their first
 /// `attach_window`. They do NOT flow into existing workspaces on hot-reload.
 /// Runtime tuning via `master grow/shrink/more/fewer` persists across reloads.
-///
-/// Per-workspace overrides (`[[master.workspace]]`) let config set different
-/// seed values by workspace name. Each field is optional and falls back to the
-/// global when absent or out of range. Unmatched names stay in config until a
-/// matching workspace materialises.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub(crate) struct MasterConfig {
     #[serde(default = "default_master_ratio")]
     pub(crate) master_ratio: f32,
     #[serde(default = "default_master_count")]
     pub(crate) master_count: usize,
-    #[serde(default)]
-    pub(crate) workspace: Vec<MasterWorkspaceConfig>,
 }
 
-/// Per-workspace seed override for master-stack layout. Keyed by workspace
-/// name. Option fields fall back to the global MasterConfig value.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub(crate) struct MasterWorkspaceConfig {
-    pub(crate) name: String,
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub(crate) struct WindowMatcher {
     #[serde(default)]
-    pub(crate) master_ratio: Option<f32>,
+    pub(crate) app: Option<String>,
     #[serde(default)]
-    pub(crate) master_count: Option<usize>,
+    pub(crate) bundle_id: Option<String>,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+    #[serde(default)]
+    pub(crate) process: Option<String>,
+    #[serde(default)]
+    pub(crate) class: Option<String>,
+    #[serde(default)]
+    pub(crate) aumid: Option<String>,
 }
 
-impl WalkRule for MasterWorkspaceConfig {
-    const KNOWN: &'static [&'static str] = &["name", "master_ratio", "master_count"];
+impl WalkRule for WindowMatcher {
+    const KNOWN: &'static [&'static str] =
+        &["app", "bundle_id", "title", "process", "class", "aumid"];
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -874,7 +839,6 @@ fn default_master_config() -> MasterConfig {
     MasterConfig {
         master_ratio: default_master_ratio(),
         master_count: default_master_count(),
-        workspace: Vec::new(),
     }
 }
 
@@ -885,46 +849,23 @@ fn dedup_workspace_overrides(
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut out: Vec<LayoutWorkspaceConfig> = Vec::with_capacity(entries.len());
     for entry in entries {
-        if entry.name.is_empty() {
+        let ws_name = entry.name().to_string();
+        if ws_name.is_empty() {
             tracing::warn!(
                 field = %field_path(prefix, "workspace"),
                 "Empty workspace name in override, dropping",
             );
             continue;
         }
-        if let Some(&idx) = seen.get(&entry.name) {
+        if let Some(&idx) = seen.get(&ws_name) {
             tracing::warn!(
                 field = %field_path(prefix, "workspace"),
-                name = %entry.name,
+                name = ws_name,
                 "Duplicate workspace override, replacing earlier entry",
             );
             out[idx] = entry;
         } else {
-            seen.insert(entry.name.clone(), out.len());
-            out.push(entry);
-        }
-    }
-    out
-}
-
-fn dedup_master_workspace_overrides(
-    entries: Vec<MasterWorkspaceConfig>,
-) -> Vec<MasterWorkspaceConfig> {
-    let mut seen: HashMap<String, usize> = HashMap::new();
-    let mut out: Vec<MasterWorkspaceConfig> = Vec::with_capacity(entries.len());
-    for entry in entries {
-        if entry.name.is_empty() {
-            tracing::warn!("master.workspace: empty workspace name, dropping");
-            continue;
-        }
-        if let Some(&idx) = seen.get(&entry.name) {
-            tracing::warn!(
-                name = %entry.name,
-                "master.workspace: duplicate override, replacing earlier entry",
-            );
-            out[idx] = entry;
-        } else {
-            seen.insert(entry.name.clone(), out.len());
+            seen.insert(ws_name, out.len());
             out.push(entry);
         }
     }
@@ -976,13 +917,54 @@ impl LayoutConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-pub(crate) struct LayoutWorkspaceConfig {
-    pub(crate) name: String,
-    pub(crate) strategy: Strategy,
+#[serde(tag = "strategy")]
+pub(crate) enum LayoutWorkspaceConfig {
+    #[serde(rename = "partition_tree")]
+    PartitionTree {
+        name: String,
+        #[serde(default)]
+        float: Vec<WindowMatcher>,
+        #[serde(default)]
+        fullscreen: Vec<WindowMatcher>,
+    },
+    #[serde(rename = "master")]
+    Master {
+        name: String,
+        #[serde(default)]
+        master_ratio: Option<f32>,
+        #[serde(default)]
+        master_count: Option<usize>,
+        #[serde(default)]
+        master: Vec<WindowMatcher>,
+        #[serde(default)]
+        secondary: Vec<WindowMatcher>,
+        #[serde(default)]
+        float: Vec<WindowMatcher>,
+        #[serde(default)]
+        fullscreen: Vec<WindowMatcher>,
+    },
+}
+
+impl LayoutWorkspaceConfig {
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            LayoutWorkspaceConfig::PartitionTree { name, .. }
+            | LayoutWorkspaceConfig::Master { name, .. } => name,
+        }
+    }
 }
 
 impl WalkRule for LayoutWorkspaceConfig {
-    const KNOWN: &'static [&'static str] = &["name", "strategy"];
+    const KNOWN: &'static [&'static str] = &[
+        "name",
+        "strategy",
+        "master_ratio",
+        "master_count",
+        "master",
+        "secondary",
+        "float",
+        "fullscreen",
+    ];
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1101,60 +1083,10 @@ pub(crate) enum WindowMode {
     Fullscreen,
 }
 
-#[cfg_attr(
-    not(target_os = "macos"),
-    expect(dead_code, reason = "macOS-only schema")
-)]
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct MacosOnOpenRule {
-    #[serde(default)]
-    pub(crate) app: Option<String>,
-    #[serde(default)]
-    pub(crate) bundle_id: Option<String>,
-    #[serde(default)]
-    pub(crate) title: Option<String>,
-    #[serde(default)]
-    pub(crate) mode: Option<WindowMode>,
-    #[serde(default)]
-    pub(crate) workspace: Option<String>,
-}
-
-impl WalkRule for MacosOnOpenRule {
-    const KNOWN: &'static [&'static str] = &["app", "bundle_id", "title", "mode", "workspace"];
-}
-
-#[cfg_attr(
-    not(target_os = "windows"),
-    expect(dead_code, reason = "Windows-only schema")
-)]
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct WindowsOnOpenRule {
-    #[serde(default)]
-    pub(crate) process: Option<String>,
-    #[serde(default)]
-    pub(crate) title: Option<String>,
-    #[serde(default)]
-    pub(crate) class: Option<String>,
-    #[serde(default)]
-    pub(crate) aumid: Option<String>,
-    #[serde(default)]
-    pub(crate) mode: Option<WindowMode>,
-    #[serde(default)]
-    pub(crate) workspace: Option<String>,
-}
-
-impl WalkRule for WindowsOnOpenRule {
-    const KNOWN: &'static [&'static str] =
-        &["process", "title", "class", "aumid", "mode", "workspace"];
-}
-
-#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct MacosConfig {
     #[serde(default)]
     pub(crate) ignore: Vec<MacosWindow>,
-    #[serde(default)]
-    pub(crate) on_open: Vec<MacosOnOpenRule>,
 }
 
 fn default_windows_ignore() -> Vec<WindowsWindow> {
@@ -1249,13 +1181,10 @@ fn default_windows_ignore() -> Vec<WindowsWindow> {
     ]
 }
 
-#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct WindowsConfig {
     #[serde(default)]
     pub(crate) ignore: Vec<WindowsWindow>,
-    #[serde(default)]
-    pub(crate) on_open: Vec<WindowsOnOpenRule>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2082,87 +2011,6 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn load_drops_single_bad_macos_on_open_rule() {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("dome_config_bad_on_open_{nanos}.toml"));
-        std::fs::write(
-            &path,
-            concat!(
-                "[[macos.on_open]]\n",
-                "app = \"Finder\"\n",
-                "mode = \"float\"\n",
-                "\n",
-                "[[macos.on_open]]\n",
-                "app = \"Safari\"\n",
-                "mode = \"invalid_not_a_mode\"\n",
-                "\n",
-                "[[macos.on_open]]\n",
-                "bundle_id = \"com.apple.mail\"\n",
-                "workspace = \"mail\"\n",
-            ),
-        )
-        .unwrap();
-        let _cleanup = CleanupFile(path.clone());
-        let config = load_or_default(path.to_str().unwrap(), Config::load);
-        assert_eq!(config.macos.on_open.len(), 2);
-        assert_eq!(config.macos.on_open[0].app.as_deref(), Some("Finder"));
-        assert_eq!(
-            config.macos.on_open[1].bundle_id.as_deref(),
-            Some("com.apple.mail")
-        );
-    }
-
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn load_warns_on_unknown_field_inside_array_of_table_element() {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("dome_config_unknown_arr_{nanos}.toml"));
-        std::fs::write(
-            &path,
-            concat!(
-                "[[macos.on_open]]\n",
-                "app = \"Finder\"\n",
-                "unknown_field = 42\n",
-                "mode = \"float\"\n",
-            ),
-        )
-        .unwrap();
-        let _cleanup = CleanupFile(path.clone());
-        let config = load_or_default(path.to_str().unwrap(), Config::load);
-        assert_eq!(config.macos.on_open.len(), 1);
-        assert_eq!(config.macos.on_open[0].app.as_deref(), Some("Finder"));
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn windows_rule_parses_class_and_aumid() {
-        let config: Config = toml::from_str(concat!(
-            "[[windows.ignore]]\n",
-            "class = \"Foo\"\n",
-            "aumid = \"Some.App.Id\"\n",
-            "\n",
-            "[[windows.on_open]]\n",
-            "class = \"Bar\"\n",
-            "aumid = \"Other.App\"\n",
-            "mode = \"float\"\n",
-        ))
-        .unwrap();
-        let ignore = &config.windows.ignore;
-        let user_rule = ignore.iter().find(|r| r.class.as_deref() == Some("Foo"));
-        assert!(user_rule.is_some());
-        assert_eq!(user_rule.unwrap().aumid.as_deref(), Some("Some.App.Id"));
-
-        let on_open = &config.windows.on_open;
-        assert_eq!(on_open[0].class.as_deref(), Some("Bar"));
-        assert_eq!(on_open[0].aumid.as_deref(), Some("Other.App"));
-    }
-
     #[test]
     #[cfg(windows)]
     fn default_windows_ignore_contains_shell_tray() {
@@ -2338,8 +2186,11 @@ mod tests {
         let layout: LayoutConfig =
             toml::from_str("[[workspace]]\nname = \"1\"\nstrategy = \"master\"\n").unwrap();
         assert_eq!(layout.workspace.len(), 1);
-        assert_eq!(layout.workspace[0].name, "1");
-        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
+        assert_eq!(layout.workspace[0].name(), "1");
+        assert!(matches!(
+            layout.workspace[0],
+            LayoutWorkspaceConfig::Master { .. }
+        ));
     }
 
     #[test]
@@ -2355,10 +2206,16 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(layout.workspace.len(), 2);
-        assert_eq!(layout.workspace[0].name, "1");
-        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
-        assert_eq!(layout.workspace[1].name, "scratch");
-        assert_eq!(layout.workspace[1].strategy, Strategy::PartitionTree);
+        assert_eq!(layout.workspace[0].name(), "1");
+        assert!(matches!(
+            layout.workspace[0],
+            LayoutWorkspaceConfig::Master { .. }
+        ));
+        assert_eq!(layout.workspace[1].name(), "scratch");
+        assert!(matches!(
+            layout.workspace[1],
+            LayoutWorkspaceConfig::PartitionTree { .. }
+        ));
     }
 
     #[test]
@@ -2384,7 +2241,7 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
         assert_eq!(layout.workspace.len(), 1);
-        assert_eq!(layout.workspace[0].name, "good");
+        assert_eq!(layout.workspace[0].name(), "good");
         assert_eq!(layout.strategy, default_strategy());
     }
 
@@ -2410,7 +2267,7 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
         assert_eq!(layout.workspace.len(), 1);
-        assert_eq!(layout.workspace[0].name, "valid");
+        assert_eq!(layout.workspace[0].name(), "valid");
     }
 
     #[test]
@@ -2436,7 +2293,7 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
         assert_eq!(layout.workspace.len(), 1);
-        assert_eq!(layout.workspace[0].name, "valid");
+        assert_eq!(layout.workspace[0].name(), "valid");
     }
 
     #[test]
@@ -2459,8 +2316,11 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
         assert_eq!(layout.workspace.len(), 1);
-        assert_eq!(layout.workspace[0].name, "1");
-        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
+        assert_eq!(layout.workspace[0].name(), "1");
+        assert!(matches!(
+            layout.workspace[0],
+            LayoutWorkspaceConfig::Master { .. }
+        ));
     }
 
     #[test]
@@ -2486,8 +2346,11 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
         assert_eq!(layout.workspace.len(), 1);
-        assert_eq!(layout.workspace[0].name, "1");
-        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
+        assert_eq!(layout.workspace[0].name(), "1");
+        assert!(matches!(
+            layout.workspace[0],
+            LayoutWorkspaceConfig::Master { .. }
+        ));
     }
 
     #[test]
@@ -2527,32 +2390,10 @@ mod tests {
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
         assert_eq!(layout.master.master_ratio, default_master_ratio());
         assert_eq!(layout.workspace.len(), 1);
-        assert_eq!(layout.workspace[0].name, "1");
-        assert_eq!(layout.workspace[0].strategy, Strategy::Master);
-    }
-
-    #[test]
-    fn master_workspace_overrides_parse() {
-        let toml = r#"
-[master]
-master_ratio = 0.5
-master_count = 1
-
-[[master.workspace]]
-name = "1"
-master_count = 3
-
-[[master.workspace]]
-name = "2"
-master_ratio = 0.7
-"#;
-        let layout: LayoutConfig = toml::from_str(toml).unwrap();
-        assert_eq!(layout.master.workspace.len(), 2);
-        assert_eq!(layout.master.workspace[0].name, "1");
-        assert_eq!(layout.master.workspace[0].master_count, Some(3));
-        assert_eq!(layout.master.workspace[0].master_ratio, None);
-        assert_eq!(layout.master.workspace[1].name, "2");
-        assert_eq!(layout.master.workspace[1].master_count, None);
-        assert_eq!(layout.master.workspace[1].master_ratio, Some(0.7));
+        assert_eq!(layout.workspace[0].name(), "1");
+        assert!(matches!(
+            layout.workspace[0],
+            LayoutWorkspaceConfig::Master { .. }
+        ));
     }
 }

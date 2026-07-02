@@ -1,5 +1,5 @@
 use crate::action::MonitorTarget;
-use crate::config::{LayoutConfig, Strategy, WindowMode};
+use crate::config::{LayoutConfig, LayoutWorkspaceConfig, Strategy, WindowMatcher, WindowMode};
 
 use std::collections::HashSet;
 
@@ -8,7 +8,7 @@ use super::node::{
     ContainerId, Dimension, DisplayMode, Length, Monitor, MonitorId, Window, WindowId,
     WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
 };
-use super::strategy::{OnOpenRule, StrategySet, TilingAction, clip};
+use super::strategy::{StrategySet, TilingAction, clip};
 
 pub(crate) struct VisiblePlacements {
     /// Window that should receive keyboard focus
@@ -103,7 +103,6 @@ pub(crate) struct HubAccess {
     pub(super) config: LayoutConfig,
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
-    pub(super) on_open_rules: Vec<OnOpenRule>,
 }
 
 #[derive(Debug)]
@@ -111,6 +110,10 @@ pub(crate) struct Hub {
     pub(super) access: HubAccess,
     pub(super) strategies: StrategySet,
     pub(super) minimized_windows: Vec<WindowId>,
+    /// Flat matcher lists for window-on-open routing (fullscreen, float).
+    /// Filled from LayoutWorkspaceConfig entries. First match wins.
+    pub(super) fullscreen_matchers: Vec<(WindowMatcher, WorkspaceId)>,
+    pub(super) float_matchers: Vec<(WindowMatcher, WorkspaceId)>,
 }
 
 impl Hub {
@@ -138,25 +141,28 @@ impl Hub {
         // that named workspaces have stable IDs from boot. They live on the
         // primary monitor.
         for entry in &config.workspace {
-            if entry.name == primary_ws_name {
+            if entry.name() == primary_ws_name {
                 continue;
             }
-            let ws_id = workspaces.allocate(Workspace::new(entry.name.clone(), primary_id));
-            strategies.register(ws_id, &entry.name, &config);
+            let ws_id = workspaces.allocate(Workspace::new(entry.name().to_string(), primary_id));
+            strategies.register(ws_id, entry.name(), &config);
         }
 
-        Self {
+        let mut hub = Self {
             access: HubAccess {
                 monitors,
                 focused_monitor: primary_id,
                 config,
                 workspaces,
                 windows: Allocator::new(),
-                on_open_rules: Vec::new(),
             },
             strategies,
             minimized_windows: Vec::new(),
-        }
+            fullscreen_matchers: Vec::new(),
+            float_matchers: Vec::new(),
+        };
+        hub.rebuild_matchers();
+        hub
     }
 
     pub(crate) fn current_workspace(&self) -> WorkspaceId {
@@ -412,6 +418,19 @@ impl Hub {
 
     pub(crate) fn sync_config(&mut self, config: LayoutConfig) {
         self.access.config = config;
+
+        // Pre-allocate any workspace entries that don't exist yet.
+        for entry in &self.access.config.workspace {
+            let name = entry.name();
+            if self.access.workspaces.find(|ws| ws.name == name).is_none() {
+                let ws_id = self.access.workspaces.allocate(Workspace::new(
+                    name.to_string(),
+                    self.access.focused_monitor,
+                ));
+                self.strategies.register(ws_id, name, &self.access.config);
+            }
+        }
+
         let changes = self
             .strategies
             .resync(&self.access.workspaces, &self.access.config);
@@ -444,23 +463,49 @@ impl Hub {
                 .prune_workspace(change.ws_id);
             self.reattach_workspace_after_rebuild(change.ws_id, snapshot);
         }
+        self.rebuild_matchers();
     }
+
     #[cfg(test)]
     pub(crate) fn validate_tree(&self) {
         self.strategies.validate_tree(&self.access);
     }
 
-    /// Replace the on-open rule list. Called from the platform on startup
-    /// and on config reload.
-    pub(crate) fn set_on_open_rules(&mut self, rules: Vec<OnOpenRule>) {
-        self.access.on_open_rules = rules;
-    }
-
-    pub(crate) fn resolve_on_open(&self, metadata: &dyn WindowMetadata) -> Option<&OnOpenRule> {
-        self.access
-            .on_open_rules
+    pub(crate) fn rebuild_matchers(&mut self) {
+        self.fullscreen_matchers.clear();
+        self.float_matchers.clear();
+        // Collect all matchers with workspace names first (to avoid borrowing conflict).
+        let entries: Vec<(&[WindowMatcher], &[WindowMatcher], &str)> = self
+            .access
+            .config
+            .workspace
             .iter()
-            .find(|r| metadata.matches_on_open_rule(r))
+            .map(|entry| {
+                use LayoutWorkspaceConfig::*;
+                let (fullscreen_slice, float_slice) = match entry {
+                    PartitionTree {
+                        fullscreen, float, ..
+                    }
+                    | Master {
+                        fullscreen, float, ..
+                    } => (fullscreen.as_slice(), float.as_slice()),
+                };
+                (fullscreen_slice, float_slice, entry.name())
+            })
+            .collect();
+        for (fullscreen_slice, float_slice, name) in entries {
+            let ws_id = self
+                .access
+                .workspaces
+                .find(|ws| ws.name == name)
+                .expect("workspace must be pre-allocated before rebuild_matchers");
+            for m in fullscreen_slice {
+                self.fullscreen_matchers.push((m.clone(), ws_id));
+            }
+            for m in float_slice {
+                self.float_matchers.push((m.clone(), ws_id));
+            }
+        }
     }
 
     #[tracing::instrument(skip(self, metadata))]
@@ -468,35 +513,31 @@ impl Hub {
         &mut self,
         metadata: Box<dyn WindowMetadata>,
         dimension: Dimension,
-        borderless_fullscreen: bool,
         restrictions: WindowRestrictions,
     ) -> (WindowId, DisplayMode) {
-        let workspace_name = self
-            .resolve_on_open(&*metadata)
-            .and_then(|r| r.workspace.clone());
-        let mode_override = self.resolve_on_open(&*metadata).and_then(|r| r.mode);
-        let target_ws = self.resolve_workspace(workspace_name.as_deref());
-        let mode = mode_override.unwrap_or(if borderless_fullscreen {
-            WindowMode::Fullscreen
-        } else {
-            WindowMode::Tiling
-        });
-        let id = match mode {
-            WindowMode::Tiling => self.insert_tiling(target_ws, metadata),
-            WindowMode::Float => self.insert_float(target_ws, dimension, metadata),
-            WindowMode::Fullscreen => {
-                // Rule-explicit fullscreen -> no protection.
-                // Shell-detected fullscreen -> keep caller's restrictions.
-                let r = if mode_override.is_some() {
-                    WindowRestrictions::None
-                } else {
-                    restrictions
+        let matcher = self.resolve_matcher(&*metadata);
+        let target_ws = matcher
+            .map(|(ws_id, _)| ws_id)
+            .unwrap_or_else(|| self.current_workspace());
+
+        // Restrictions == None: use matcher mode if present, else default to tiling.
+        // Restrictions != None: always fullscreen (matcher only routes workspace).
+        if restrictions == WindowRestrictions::None {
+            if let Some((_, mode)) = matcher {
+                let id = match mode {
+                    WindowMode::Fullscreen => {
+                        self.insert_fullscreen(target_ws, WindowRestrictions::None, metadata)
+                    }
+                    WindowMode::Float => self.insert_float(target_ws, dimension, metadata),
+                    _ => unreachable!(),
                 };
-                self.insert_fullscreen(target_ws, r, metadata)
+                return (id, self.access.windows.get(id).mode);
             }
-        };
-        let display_mode = self.access.windows.get(id).mode;
-        (id, display_mode)
+            let id = self.insert_tiling(target_ws, metadata);
+            return (id, self.access.windows.get(id).mode);
+        }
+        let id = self.insert_fullscreen(target_ws, restrictions, metadata);
+        (id, self.access.windows.get(id).mode)
     }
 
     pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) -> bool {
@@ -578,7 +619,7 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_tiling(
+    pub(super) fn insert_tiling(
         &mut self,
         target_ws: WorkspaceId,
         metadata: Box<dyn WindowMetadata>,
@@ -596,7 +637,7 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_float(
+    pub(super) fn insert_float(
         &mut self,
         target_ws: WorkspaceId,
         dimension: Dimension,
@@ -612,7 +653,7 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn insert_fullscreen(
+    pub(super) fn insert_fullscreen(
         &mut self,
         target_ws: WorkspaceId,
         restrictions: WindowRestrictions,
@@ -762,6 +803,7 @@ impl Hub {
         tracing::debug!("Moved to workspace");
     }
 
+    #[expect(dead_code)]
     pub(crate) fn resolve_workspace(&mut self, name: Option<&str>) -> WorkspaceId {
         match name {
             Some(n) => self.get_or_create_workspace(n),
@@ -882,6 +924,21 @@ impl Hub {
         if snapshot.was_float_focused {
             self.access.workspaces.get_mut(ws_id).is_float_focused = true;
         }
+    }
+
+    /// Find workspace + mode via matchers.
+    fn resolve_matcher(&self, metadata: &dyn WindowMetadata) -> Option<(WorkspaceId, WindowMode)> {
+        for (m, ws_id) in &self.fullscreen_matchers {
+            if metadata.matches_window_matcher(m) {
+                return Some((*ws_id, WindowMode::Fullscreen));
+            }
+        }
+        for (m, ws_id) in &self.float_matchers {
+            if metadata.matches_window_matcher(m) {
+                return Some((*ws_id, WindowMode::Float));
+            }
+        }
+        None
     }
 }
 

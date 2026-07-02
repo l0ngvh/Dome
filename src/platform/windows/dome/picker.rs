@@ -422,7 +422,9 @@ fn configure_picker_dwm(hwnd: HWND) {
 mod tests {
     use super::*;
     use crate::config::LayoutConfig;
-    use crate::core::{Dimension, Hub, Length, Physical, WindowId, WindowMetadata};
+    use crate::core::{
+        Dimension, Hub, Length, Physical, WindowId, WindowMetadata, WindowRestrictions,
+    };
     use crate::platform::windows::external::HwndId;
 
     fn titled(t: &str) -> Box<dyn WindowMetadata> {
@@ -451,7 +453,7 @@ mod tests {
             fn clone_box(&self) -> Box<dyn WindowMetadata> {
                 Box::new(self.clone())
             }
-            fn matches_on_open_rule(&self, _rule: &crate::core::OnOpenRule) -> bool {
+            fn matches_window_matcher(&self, _matcher: &crate::config::WindowMatcher) -> bool {
                 false
             }
         }
@@ -476,10 +478,24 @@ mod tests {
     #[test]
     fn icons_to_load_filters_dispatched_and_loaded() {
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
-        let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
-        let w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
-        let w4 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
+        let dim = Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(100.0),
+        );
+        let w1 = hub
+            .insert_window(titled("w1"), dim, WindowRestrictions::None)
+            .0;
+        let w2 = hub
+            .insert_window(titled("w2"), dim, WindowRestrictions::None)
+            .0;
+        let w3 = hub
+            .insert_window(titled("w3"), dim, WindowRestrictions::None)
+            .0;
+        let w4 = hub
+            .insert_window(titled("w4"), dim, WindowRestrictions::None)
+            .0;
         let entries = vec![
             PickerEntry {
                 id: w1,

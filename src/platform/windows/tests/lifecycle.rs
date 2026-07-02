@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::config::{Config, PartitionTreeConfig, WindowsOnOpenRule, WindowsWindow};
+use crate::config::{Config, LayoutConfig, PartitionTreeConfig, WindowsWindow};
 
 #[test]
 fn window_destroyed_fills_screen() {
@@ -58,27 +58,6 @@ fn user_minimize_then_restore() {
         default_monitor().dimension,
         env.config.border_size,
     );
-}
-
-#[test]
-fn on_open_moves_window_to_workspace() {
-    let mut config = Config::default();
-    config.windows.on_open.push(WindowsOnOpenRule {
-        process: Some("slack.exe".to_string()),
-        title: None,
-        class: None,
-        aumid: None,
-        mode: None,
-        workspace: Some("3".to_string()),
-    });
-    let mut env = TestEnv::new_with_config(config);
-
-    let w1 = env.open(1, "Terminal", "terminal.exe", SPAWN_DIM);
-    let w2 = env.open(2, "Slack", "slack.exe", SPAWN_DIM);
-
-    // Slack moved to workspace 3, should be offscreen
-    assert!(env.is_offscreen(w2));
-    assert!(!env.is_offscreen(w1));
 }
 
 #[test]
