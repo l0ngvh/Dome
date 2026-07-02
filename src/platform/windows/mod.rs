@@ -427,12 +427,14 @@ fn run_dome(
     };
     unsafe { RegisterClassW(&wc_picker) };
 
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::DX12,
-        // DX12 is the only backend we target; no instance flags, no dxc shader compiler
-        // (wgsl compiled via wgpu's default path), no GLES minor version.
-        ..Default::default()
-    });
+    // DX12 is the only backend we target. All other descriptor fields (flags, memory
+    // budget thresholds, backend options, display) stay at their defaults. wgpu 29
+    // dropped Default on InstanceDescriptor and now exposes explicit constructors
+    // instead. new_without_display_handle is the right one for a headless overlay
+    // that never presents to a winit display.
+    let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    instance_descriptor.backends = wgpu::Backends::DX12;
+    let instance = wgpu::Instance::new(instance_descriptor);
     let adapter = pollster::block_on(instance.request_adapter(
         // No power-preference hint (system picks the DX12 adapter), no compatible_surface
         // required before surface creation, force_fallback_adapter = false.
@@ -440,8 +442,8 @@ fn run_dome(
     ))
     .expect("No DX12 adapter");
     let (device, queue) = pollster::block_on(adapter.request_device(
-        // No required features; default (downlevel) limits are more than enough for
-        // 2D egui rendering; no memory hints, no trace path.
+        // No required features. Default (downlevel) limits are more than enough for
+        // 2D egui rendering. No memory hints, no trace path.
         &wgpu::DeviceDescriptor::default(),
     ))
     .expect("Failed to create wgpu device");

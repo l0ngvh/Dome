@@ -226,14 +226,14 @@ impl PickerApi for PickerWindow {
             self.height_phys,
             self.pixels_per_point,
             events,
-            |ctx| {
+            |ui| {
                 // Take pending out of the Option so it's only consumed on the first call.
                 // Renderer::render calls the closure exactly once.
                 let pending = pending_opt.take().unwrap_or_default();
                 let new_handles: Vec<(String, TextureHandle)> = pending
                     .into_iter()
                     .map(|(app_id, image)| {
-                        let handle = ctx.load_texture(
+                        let handle = ui.ctx().load_texture(
                             "icon",
                             image,
                             Default::default(), // TextureOptions default is fine for icon textures
@@ -246,7 +246,7 @@ impl PickerApi for PickerWindow {
                     all_icons.insert(id.clone(), Some(handle.clone()));
                 }
                 let result = crate::picker::paint_picker(
-                    ctx,
+                    ui,
                     entries,
                     selected_index,
                     &all_icons,

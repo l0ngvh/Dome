@@ -11,7 +11,7 @@ use objc2_metal::*;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
 
 use crate::font::FontConfig;
-use crate::theme::Flavor;
+use crate::theme::{Flavor, apply_catppuccin};
 
 pub(in crate::platform::macos) struct MetalBackend {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
@@ -121,8 +121,8 @@ impl Renderer {
         // Disable selectable labels so clicks on tab bars register as tab switches
         // instead of triggering egui's text selection behavior.
         let egui_ctx = egui::Context::default();
-        egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
-        catppuccin_egui::set_theme(&egui_ctx, flavor.catppuccin_egui());
+        egui_ctx.global_style_mut(|s| s.interaction.selectable_labels = false);
+        apply_catppuccin(&egui_ctx, flavor);
         if let Some(family) = font.family.as_deref() {
             match crate::platform::macos::font::resolve_system_font(family) {
                 Ok(bytes) => crate::font::install_fonts(bytes, &egui_ctx),
@@ -157,7 +157,7 @@ impl Renderer {
     }
 
     pub(super) fn apply_theme(&self, flavor: Flavor) {
-        catppuccin_egui::set_theme(&self.egui_ctx, flavor.catppuccin_egui());
+        apply_catppuccin(&self.egui_ctx, flavor);
     }
 
     pub(super) fn reinstall_fonts(&self, family: Option<&str>) {
@@ -178,13 +178,13 @@ impl Renderer {
     }
 
     /// Runs the full render pipeline: egui layout then egui meshes.
-    /// `ctx_fn` receives `&egui::Context` and should create its own `egui::Area`s.
+    /// `ctx_fn` receives `&mut egui::Ui` covering the full context area.
     #[tracing::instrument(skip_all)]
     pub(super) fn render<R>(
         &mut self,
         pixels_per_point: f32,
         events: Vec<egui::Event>,
-        ctx_fn: impl FnMut(&egui::Context) -> R,
+        ctx_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> R {
         let (meshes, delta, surface_size, result) = self.prepare(pixels_per_point, events, ctx_fn);
         if let Some(ctx) = self.begin_frame(&delta, surface_size) {
@@ -206,7 +206,7 @@ impl Renderer {
         &mut self,
         pixels_per_point: f32,
         events: Vec<egui::Event>,
-        mut ctx_fn: impl FnMut(&egui::Context) -> R,
+        mut ctx_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> (
         Vec<egui::ClippedPrimitive>,
         egui::TexturesDelta,
@@ -235,8 +235,8 @@ impl Renderer {
         };
 
         let mut result = None;
-        let output = self.egui_ctx.run(raw_input, |ctx| {
-            result = Some(ctx_fn(ctx));
+        let output = self.egui_ctx.run_ui(raw_input, |ui| {
+            result = Some(ctx_fn(ui));
         });
         let meshes = self
             .egui_ctx

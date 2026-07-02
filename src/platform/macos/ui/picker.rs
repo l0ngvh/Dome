@@ -262,11 +262,11 @@ impl PickerView {
             ivars
                 .renderer
                 .borrow_mut()
-                .render(scale as f32, events, |ctx| {
+                .render(scale as f32, events, |ui| {
                     let mut all_icons = icon_snapshot.clone();
                     let mut created = Vec::new();
                     for (app_id, image) in new_icons.drain(..) {
-                        let handle = ctx.load_texture(
+                        let handle = ui.ctx().load_texture(
                             &app_id,
                             image,
                             Default::default(), // TextureOptions default is fine for icon textures
@@ -276,7 +276,7 @@ impl PickerView {
                     }
                     let theme = Theme::from_flavor(flavor);
                     let picker_result = crate::picker::paint_picker(
-                        ctx,
+                        ui,
                         &entries,
                         selected_index,
                         &all_icons,

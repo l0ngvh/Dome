@@ -30,7 +30,7 @@ fn should_draw_separator(index: usize, selected_index: usize) -> bool {
 
 /// Renders the minimized windows picker UI. Returns `Selected(id)` if a row was clicked.
 pub(crate) fn paint_picker(
-    ctx: &egui::Context,
+    ui: &mut egui::Ui,
     entries: &[PickerEntry],
     selected_index: usize,
     icon_textures: &HashMap<String, Option<TextureHandle>>,
@@ -40,7 +40,7 @@ pub(crate) fn paint_picker(
     let mem_id = egui::Id::new("picker_last_selected_index");
     let mut result = PickerResult::None;
 
-    CentralPanel::default().show(ctx, |ui| {
+    CentralPanel::default().show_inside(ui, |ui| {
         if entries.is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.label(
@@ -52,7 +52,10 @@ pub(crate) fn paint_picker(
             return;
         }
 
-        let prev_selected = ctx.data(|d| d.get_temp::<Option<usize>>(mem_id)).flatten();
+        let prev_selected = ui
+            .ctx()
+            .data(|d| d.get_temp::<Option<usize>>(mem_id))
+            .flatten();
 
         ScrollArea::vertical().show(ui, |ui| {
             for (i, entry) in entries.iter().enumerate() {
@@ -150,7 +153,8 @@ pub(crate) fn paint_picker(
         });
     });
 
-    ctx.data_mut(|d| d.insert_temp(mem_id, Some(selected_index)));
+    ui.ctx()
+        .data_mut(|d| d.insert_temp(mem_id, Some(selected_index)));
 
     result
 }
@@ -338,8 +342,8 @@ mod tests {
             ..Default::default()
         };
         let mut result = PickerResult::None;
-        let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, selected_index, &all_loaded, &theme);
+        let output = ctx.run_ui(raw.clone(), |ui| {
+            result = paint_picker(ui, &entries, selected_index, &all_loaded, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));
@@ -349,8 +353,8 @@ mod tests {
         mixed.insert("app-a".to_string(), Some(texture.clone()));
         mixed.insert("app-b".to_string(), None);
         let mut result = PickerResult::None;
-        let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, selected_index, &mixed, &theme);
+        let output = ctx.run_ui(raw.clone(), |ui| {
+            result = paint_picker(ui, &entries, selected_index, &mixed, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));
@@ -358,24 +362,24 @@ mod tests {
         // Frame 3: empty map
         let empty: HashMap<String, Option<TextureHandle>> = HashMap::new();
         let mut result = PickerResult::None;
-        let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, selected_index, &empty, &theme);
+        let output = ctx.run_ui(raw.clone(), |ui| {
+            result = paint_picker(ui, &entries, selected_index, &empty, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));
 
         // Frame 4: selected_index changes to 1, exercises scroll_to_rect branch
         let mut result = PickerResult::None;
-        let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, 1, &empty, &theme);
+        let output = ctx.run_ui(raw.clone(), |ui| {
+            result = paint_picker(ui, &entries, 1, &empty, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));
 
         // Frame 5: selected_index stays at 1, exercises the skip branch
         let mut result = PickerResult::None;
-        let output = ctx.run(raw.clone(), |ctx| {
-            result = paint_picker(ctx, &entries, 1, &empty, &theme);
+        let output = ctx.run_ui(raw.clone(), |ui| {
+            result = paint_picker(ui, &entries, 1, &empty, &theme);
         });
         assert!(!output.shapes.is_empty());
         assert!(matches!(result, PickerResult::None));

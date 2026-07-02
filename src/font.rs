@@ -51,7 +51,7 @@ impl FontConfig {
     /// `.text_style(TextStyle::Body|Small)`, otherwise picker subtext would
     /// shrink to egui's default Small (10pt) instead of our 12pt.
     pub(crate) fn apply_to(&self, ctx: &Context) {
-        ctx.style_mut(|s| {
+        ctx.global_style_mut(|s| {
             s.text_styles.insert(
                 TextStyle::Body,
                 FontId::new(self.text_size, FontFamily::Proportional),
@@ -104,7 +104,7 @@ mod tests {
             family: None,
         };
         fc.apply_to(&ctx);
-        let style = ctx.style();
+        let style = ctx.global_style();
         assert_eq!(style.text_styles[&TextStyle::Body].size, 20.0);
         assert_eq!(style.text_styles[&TextStyle::Small].size, 11.0);
     }

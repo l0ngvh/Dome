@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::font::FontConfig;
 use crate::platform::windows::{HubEvent, HubSender, WM_APP_DISPLAY_CHANGE};
-use crate::theme::Flavor;
+use crate::theme::{Flavor, apply_catppuccin};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
@@ -181,16 +181,18 @@ impl Renderer {
         let painter = egui_wgpu::Renderer::new(
             &device,
             surface_config.format,
-            None,  // no depth format
-            1,     // msaa_samples
-            false, // dithering
+            egui_wgpu::RendererOptions {
+                msaa_samples: 1,
+                dithering: false,
+                ..Default::default()
+            },
         );
 
         // Disable selectable labels so clicks on tab bars register as tab switches
         // instead of triggering egui's text selection behavior.
         let egui_ctx = egui::Context::default(); // only egui context in this overlay
-        egui_ctx.style_mut(|s| s.interaction.selectable_labels = false);
-        catppuccin_egui::set_theme(&egui_ctx, flavor.catppuccin_egui());
+        egui_ctx.global_style_mut(|s| s.interaction.selectable_labels = false);
+        apply_catppuccin(&egui_ctx, flavor);
         if let Some(family) = font.family.as_deref() {
             match crate::platform::windows::font::resolve_system_font(family) {
                 Ok(bytes) => crate::font::install_fonts(bytes, &egui_ctx),
@@ -230,7 +232,7 @@ impl Renderer {
     }
 
     pub(super) fn apply_theme(&self, flavor: Flavor) {
-        catppuccin_egui::set_theme(&self.egui_ctx, flavor.catppuccin_egui());
+        apply_catppuccin(&self.egui_ctx, flavor);
     }
 
     pub(super) fn apply_font(&self, font: &FontConfig) {
@@ -243,12 +245,22 @@ impl Renderer {
         height: u32,
         pixels_per_point: f32,
         events: Vec<egui::Event>,
-        mut ctx_fn: impl FnMut(&egui::Context) -> R,
+        mut ctx_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> R {
-        let frame = self.surface.get_current_texture().expect("surface texture");
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default()); // default view of the surface texture
+        // Acquire the swap-chain texture before running egui so overlays keep
+        // the same present-vs-input ordering as pre-bump wgpu 25. wgpu 29
+        // returns a status enum instead of a Result. Transient variants
+        // (Timeout, Occluded, Outdated) skip only the GPU paint. Unrecoverable
+        // variants (Lost, Validation) panic like the old `.expect(...)` did.
+        let frame = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Some(frame),
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Outdated => None,
+            wgpu::CurrentSurfaceTexture::Lost => panic!("surface lost"),
+            wgpu::CurrentSurfaceTexture::Validation => panic!("surface validation error"),
+        };
 
         let w_pts = width as f32 / pixels_per_point;
         let h_pts = height as f32 / pixels_per_point;
@@ -269,64 +281,80 @@ impl Renderer {
             ..Default::default() // remaining RawInput fields (focused, max_texture_side, etc.) not needed for overlay rendering
         };
 
+        // egui_ctx.run_ui must fire every frame: it drives input handling,
+        // produces R for the caller, and emits textures_delta entries that
+        // the painter's ledger has to see. Skipping it on a frameless call
+        // would desync the painter and corrupt subsequent frames.
         let mut result = None;
-        let output = self.egui_ctx.run(raw_input, |ctx| {
-            result = Some(ctx_fn(ctx));
+        let output = self.egui_ctx.run_ui(raw_input, |ui| {
+            result = Some(ctx_fn(ui));
         });
-        let meshes = self
-            .egui_ctx
-            .tessellate(output.shapes, output.pixels_per_point);
-
-        let screen = egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [width, height],
-            pixels_per_point: output.pixels_per_point,
-        };
 
         for (id, delta) in &output.textures_delta.set {
             self.painter
                 .update_texture(&self.device, &self.queue, *id, delta);
         }
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        let user_cmds =
-            self.painter
-                .update_buffers(&self.device, &self.queue, &mut encoder, &meshes, &screen);
-
-        {
-            let clear_color = wgpu::Color {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 0.0,
+        if let Some(frame) = frame {
+            let view = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default()); // default view of the surface texture
+            let meshes = self
+                .egui_ctx
+                .tessellate(output.shapes, output.pixels_per_point);
+            let screen = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [width, height],
+                pixels_per_point: output.pixels_per_point,
             };
-            let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default() // no occlusion query, no timestamp writes
-            });
-            // forget_lifetime() is required because egui_wgpu::Renderer::render
-            // needs a RenderPass with 'static lifetime.
-            self.painter
-                .render(&mut rpass.forget_lifetime(), &meshes, &screen);
-            // rpass dropped here before encoder.finish()
-        }
 
-        self.queue.submit(
-            user_cmds
-                .into_iter()
-                .chain(std::iter::once(encoder.finish())),
-        );
-        frame.present();
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            let user_cmds = self.painter.update_buffers(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &meshes,
+                &screen,
+            );
+
+            {
+                let clear_color = wgpu::Color {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.0,
+                };
+                let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        // 2D overlay renders to a plain color view. No layered / 3D target,
+                        // so no depth slice to select.
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(clear_color),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default() // no occlusion query, no timestamp writes
+                });
+                // forget_lifetime() is required because egui_wgpu::Renderer::render
+                // needs a RenderPass with 'static lifetime.
+                self.painter
+                    .render(&mut rpass.forget_lifetime(), &meshes, &screen);
+                // rpass dropped here before encoder.finish()
+            }
+
+            self.queue.submit(
+                user_cmds
+                    .into_iter()
+                    .chain(std::iter::once(encoder.finish())),
+            );
+            frame.present();
+        }
 
         for id in &output.textures_delta.free {
             self.painter.free_texture(id);
@@ -462,9 +490,9 @@ impl TilingOverlay {
         // Borders-only mode: tab bars live in dedicated per-container windows,
         // so the per-monitor overlay never sees pointer events. The returned
         // click vector is always empty.
-        let _ = self.renderer.render(w_phys, h_phys, scale, vec![], |ctx| {
+        let _ = self.renderer.render(w_phys, h_phys, scale, vec![], |ui| {
             overlay::paint_tiling_overlay(
-                ctx,
+                ui.ctx(),
                 monitor_logical,
                 &windows_logical,
                 &containers_logical,
@@ -779,10 +807,10 @@ impl FloatOverlayApi for FloatOverlay {
             overlay::BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
         let is_highlighted = wp.is_highlighted;
 
-        self.renderer.render(w_phys, h_phys, scale, vec![], |ctx| {
+        self.renderer.render(w_phys, h_phys, scale, vec![], |ui| {
             // layer_painter bypasses egui's Area sizing pass, avoiding
             // black/invisible borders on the first frame.
-            let painter = ctx.layer_painter(egui::LayerId::new(
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
                 egui::Id::new("border"),
             ));
@@ -1052,9 +1080,9 @@ impl TabBarOverlay {
         };
         let canvas_local =
             Dimension::<Logical>::new(Length::ZERO, Length::ZERO, bar_w_logical, bar_h_logical);
-        self.renderer.render(w_phys, h_phys, scale, events, |ctx| {
+        self.renderer.render(w_phys, h_phys, scale, events, |ui| {
             overlay::paint_tab_bar(
-                ctx,
+                ui.ctx(),
                 container_id,
                 canvas_local,
                 &titles,

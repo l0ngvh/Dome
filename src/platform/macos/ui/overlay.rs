@@ -183,10 +183,10 @@ impl FloatOverlay {
         let config = &self.config;
         let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
         let theme = config.theme();
-        self.renderer.render(scale as f32, Vec::new(), |ctx| {
+        self.renderer.render(scale as f32, Vec::new(), |ui| {
             // layer_painter bypasses egui's Area sizing pass, avoiding
             // black/invisible borders on the first frame.
-            let painter = ctx.layer_painter(egui::LayerId::new(
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
                 egui::Id::new("border"),
             ));
@@ -226,8 +226,8 @@ impl FloatOverlay {
             let config = &self.config;
             let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
             let theme = config.theme();
-            self.renderer.render(self.scale as f32, Vec::new(), |ctx| {
-                let painter = ctx.layer_painter(egui::LayerId::new(
+            self.renderer.render(self.scale as f32, Vec::new(), |ui| {
+                let painter = ui.ctx().layer_painter(egui::LayerId::new(
                     egui::Order::Middle,
                     egui::Id::new("border"),
                 ));
@@ -565,9 +565,9 @@ impl TilingOverlayView {
         ivars
             .renderer
             .borrow_mut()
-            .render(scale as f32, Vec::new(), |ctx| {
+            .render(scale as f32, Vec::new(), |ui| {
                 overlay::paint_tiling_overlay(
-                    ctx,
+                    ui.ctx(),
                     monitor_logical,
                     &windows_logical,
                     &containers_logical,
@@ -840,9 +840,9 @@ impl TabBarOverlayView {
         let clicked = ivars
             .renderer
             .borrow_mut()
-            .render(scale as f32, events, |ctx| {
+            .render(scale as f32, events, |ui| {
                 overlay::paint_tab_bar(
-                    ctx,
+                    ui.ctx(),
                     container_id,
                     canvas_local,
                     &titles,
