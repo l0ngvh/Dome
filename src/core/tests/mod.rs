@@ -716,6 +716,8 @@ pub(super) fn default_layout_for_tests() -> LayoutConfig {
         max_width: SizeConstraint::Pixels(Length::new(0.0)),
         max_height: SizeConstraint::Pixels(Length::new(0.0)),
         workspace: vec![],
+        float: vec![],
+        fullscreen: vec![],
     }
 }
 

@@ -4,6 +4,15 @@
 # Tiling strategy. One of "partition_tree" or "master" (default: "partition_tree").
 strategy = "partition_tree"
 
+# Global float/fullscreen matchers — apply to all workspaces.
+# Per-workspace matchers (below) take priority over these.
+# float = [
+#   { process = "calculator.exe" },
+# ]
+# fullscreen = [
+#   { process = "slides.exe" },
+# ]
+
 # Minimum window size - float for pixels, string for percentage (default: "5%")
 min_width = 200
 min_height = "10%"

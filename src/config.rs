@@ -469,6 +469,8 @@ impl WalkRecover for LayoutConfig {
         let max_height = w.field("max_height", SizeConstraint::default());
         let raw = w.rule_vec::<LayoutWorkspaceConfig>("workspace");
         let workspace = dedup_workspace_overrides(raw, &w.prefix);
+        let float = w.rule_vec::<WindowMatcher>("float");
+        let fullscreen = w.rule_vec::<WindowMatcher>("fullscreen");
         LayoutConfig {
             strategy,
             partition_tree,
@@ -478,6 +480,8 @@ impl WalkRecover for LayoutConfig {
             max_width,
             max_height,
             workspace,
+            float,
+            fullscreen,
         }
     }
 }
@@ -815,6 +819,10 @@ pub(crate) struct LayoutConfig {
     pub(crate) max_height: SizeConstraint,
     #[serde(default)]
     pub(crate) workspace: Vec<LayoutWorkspaceConfig>,
+    #[serde(default)]
+    pub(crate) float: Vec<WindowMatcher>,
+    #[serde(default)]
+    pub(crate) fullscreen: Vec<WindowMatcher>,
 }
 
 fn default_strategy() -> Strategy {
@@ -883,6 +891,8 @@ impl Default for LayoutConfig {
             max_width: SizeConstraint::default(),
             max_height: SizeConstraint::default(),
             workspace: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
         }
     }
 }

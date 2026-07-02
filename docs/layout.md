@@ -48,8 +48,6 @@ max_height = 0
 
 ## Forcing display mode
 
-Matcher fields are the same cross-platform set:
-
 - `app`: macOS application name.
 - `bundle_id`: macOS bundle identifier.
 - `title`: window title (both platforms).
@@ -57,25 +55,21 @@ Matcher fields are the same cross-platform set:
 - `class`: Win32 window class name.
 - `aumid`: AppUserModelID.
 
-Wrap a value in forward slashes (`/pattern/`) for regex matching. Without
-slashes, strings match exactly. An empty matcher never matches.
+Wrap a value in forward slashes (`/pattern/`) for regex matching.
 
 ```toml
-[[workspace]]
-name = "3"
 float = [
   { process = "calculator.exe" },
-  { app = "Calculator" },
 ]
 fullscreen = [
-  { process = "slides.exe" },
+  { app = "Keynote" },
 ]
 ```
 
 ## Tiling strategy
 
-`strategy` selects the active tiling strategy, either `"partition_tree"` or
-`"master"`. The default is `"partition_tree"`.
+`strategy` selects the active tiling strategy for tiled windows, either
+`"partition_tree"` or `"master"`. The default is `"partition_tree"`.
 
 ## Partition tree
 

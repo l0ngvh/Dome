@@ -256,6 +256,187 @@ fn matchers_on_partition_tree_variant() {
     ");
 }
 
+#[test]
+fn global_float_matcher_floats_on_current_workspace() {
+    let mut hub = hub_with_global_float();
+    hub.insert_window(process_meta("calc.exe"), SCREEN, WindowRestrictions::None);
+    // Window stays on workspace "0" (current), not routed anywhere.
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=800.00 h=600.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=800.00, h=600.00, float, highlighted)
+      )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *
+    ");
+}
+
+#[test]
+fn global_fullscreen_matcher_fullscreens_on_current_workspace() {
+    let mut hub = hub_with_global_fullscreen();
+    hub.insert_window(process_meta("slides.exe"), SCREEN, WindowRestrictions::None);
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=800.00 h=600.00),
+        Fullscreen(id=WindowId(0))
+      )
+
+    +-----------------------------------------------------------------------------------------------------------------------------------------------------
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |                                                                                                                                                     
+    |
+    ");
+}
+
+#[test]
+fn per_workspace_override_beats_global() {
+    let mut hub = hub_with_per_workspace_and_global();
+    // "calc.exe" matches both per-workspace float on ws "3" and global float.
+    // Per-workspace wins — routes to workspace "3" as float.
+    hub.insert_window(process_meta("calc.exe"), SCREEN, WindowRestrictions::None);
+    hub.focus_workspace("3");
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=800.00 h=600.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=800.00, h=600.00, float, highlighted)
+      )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *
+    ");
+}
+
+#[test]
+fn no_match_uses_global_matcher() {
+    let mut hub = hub_with_global_float();
+    // "unknown.exe" matches nothing — tiles on current workspace.
+    hub.insert_window(
+        process_meta("unknown.exe"),
+        SCREEN,
+        WindowRestrictions::None,
+    );
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=800.00 h=600.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=800.00, h=600.00, highlighted, spawn=right)
+      )
+
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *                                                                                                                                                     
+    *
+    ");
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 
@@ -306,6 +487,63 @@ fn hub_with_conflicting_matchers() -> Hub {
                     title: Some("matchme".into()),
                     ..Default::default()
                 }],
+            }],
+            ..Default::default()
+        },
+    )
+}
+
+/// Hub with global float matcher only (no per-workspace matchers).
+fn hub_with_global_float() -> Hub {
+    Hub::new(
+        SCREEN,
+        1.0,
+        LayoutConfig {
+            float: vec![WindowMatcher {
+                process: Some("calc.exe".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+}
+
+/// Hub with global fullscreen matcher only.
+fn hub_with_global_fullscreen() -> Hub {
+    Hub::new(
+        SCREEN,
+        1.0,
+        LayoutConfig {
+            fullscreen: vec![WindowMatcher {
+                process: Some("slides.exe".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+}
+
+/// Hub with both global float and per-workspace float on ws "3" for the same process.
+fn hub_with_per_workspace_and_global() -> Hub {
+    Hub::new(
+        SCREEN,
+        1.0,
+        LayoutConfig {
+            float: vec![WindowMatcher {
+                process: Some("calc.exe".into()),
+                ..Default::default()
+            }],
+            workspace: vec![LayoutWorkspaceConfig::Master {
+                name: "3".into(),
+                master_ratio: None,
+                master_count: None,
+                master: Vec::new(),
+                secondary: Vec::new(),
+                float: vec![WindowMatcher {
+                    process: Some("calc.exe".into()),
+                    ..Default::default()
+                }],
+                fullscreen: Vec::new(),
             }],
             ..Default::default()
         },

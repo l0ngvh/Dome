@@ -111,9 +111,12 @@ pub(crate) struct Hub {
     pub(super) strategies: StrategySet,
     pub(super) minimized_windows: Vec<WindowId>,
     /// Flat matcher lists for window-on-open routing (fullscreen, float).
-    /// Filled from LayoutWorkspaceConfig entries. First match wins.
-    pub(super) fullscreen_matchers: Vec<(WindowMatcher, WorkspaceId)>,
-    pub(super) float_matchers: Vec<(WindowMatcher, WorkspaceId)>,
+    /// Per-workspace matchers: filled from LayoutWorkspaceConfig entries. First match wins.
+    pub(super) ws_fullscreen_matchers: Vec<(WindowMatcher, WorkspaceId)>,
+    pub(super) ws_float_matchers: Vec<(WindowMatcher, WorkspaceId)>,
+    /// Global (top-level) matchers: filled from LayoutConfig. No workspace routing.
+    pub(super) fullscreen_matchers: Vec<WindowMatcher>,
+    pub(super) float_matchers: Vec<WindowMatcher>,
 }
 
 impl Hub {
@@ -158,6 +161,8 @@ impl Hub {
             },
             strategies,
             minimized_windows: Vec::new(),
+            ws_fullscreen_matchers: Vec::new(),
+            ws_float_matchers: Vec::new(),
             fullscreen_matchers: Vec::new(),
             float_matchers: Vec::new(),
         };
@@ -472,8 +477,8 @@ impl Hub {
     }
 
     pub(crate) fn rebuild_matchers(&mut self) {
-        self.fullscreen_matchers.clear();
-        self.float_matchers.clear();
+        self.ws_fullscreen_matchers.clear();
+        self.ws_float_matchers.clear();
         // Collect all matchers with workspace names first (to avoid borrowing conflict).
         let entries: Vec<(&[WindowMatcher], &[WindowMatcher], &str)> = self
             .access
@@ -500,12 +505,14 @@ impl Hub {
                 .find(|ws| ws.name == name)
                 .expect("workspace must be pre-allocated before rebuild_matchers");
             for m in fullscreen_slice {
-                self.fullscreen_matchers.push((m.clone(), ws_id));
+                self.ws_fullscreen_matchers.push((m.clone(), ws_id));
             }
             for m in float_slice {
-                self.float_matchers.push((m.clone(), ws_id));
+                self.ws_float_matchers.push((m.clone(), ws_id));
             }
         }
+        self.fullscreen_matchers = self.access.config.fullscreen.clone();
+        self.float_matchers = self.access.config.float.clone();
     }
 
     #[tracing::instrument(skip(self, metadata))]
@@ -517,7 +524,7 @@ impl Hub {
     ) -> (WindowId, DisplayMode) {
         let matcher = self.resolve_matcher(&*metadata);
         let target_ws = matcher
-            .map(|(ws_id, _)| ws_id)
+            .and_then(|(ws_id, _)| ws_id)
             .unwrap_or_else(|| self.current_workspace());
 
         // Restrictions == None: use matcher mode if present, else default to tiling.
@@ -927,15 +934,31 @@ impl Hub {
     }
 
     /// Find workspace + mode via matchers.
-    fn resolve_matcher(&self, metadata: &dyn WindowMetadata) -> Option<(WorkspaceId, WindowMode)> {
-        for (m, ws_id) in &self.fullscreen_matchers {
+    /// Returns (workspace, mode). `None` workspace = stay on current.
+    fn resolve_matcher(
+        &self,
+        metadata: &dyn WindowMetadata,
+    ) -> Option<(Option<WorkspaceId>, WindowMode)> {
+        // Per-workspace matchers first (override global)
+        for (m, ws_id) in &self.ws_fullscreen_matchers {
             if metadata.matches_window_matcher(m) {
-                return Some((*ws_id, WindowMode::Fullscreen));
+                return Some((Some(*ws_id), WindowMode::Fullscreen));
             }
         }
-        for (m, ws_id) in &self.float_matchers {
+        for (m, ws_id) in &self.ws_float_matchers {
             if metadata.matches_window_matcher(m) {
-                return Some((*ws_id, WindowMode::Float));
+                return Some((Some(*ws_id), WindowMode::Float));
+            }
+        }
+        // Global matchers (fallback, no workspace routing)
+        for m in &self.fullscreen_matchers {
+            if metadata.matches_window_matcher(m) {
+                return Some((None, WindowMode::Fullscreen));
+            }
+        }
+        for m in &self.float_matchers {
+            if metadata.matches_window_matcher(m) {
+                return Some((None, WindowMode::Float));
             }
         }
         None
