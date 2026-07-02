@@ -12,7 +12,7 @@ use objc2_app_kit::{
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use objc2_quartz_core::CAMetalLayer;
 
-use super::renderer::{MetalBackend, Renderer};
+use super::renderer::{Renderer, WgpuFactory};
 use crate::action::{Action, Actions};
 use crate::config::Config;
 use crate::core::Dimension;
@@ -128,8 +128,7 @@ const PICKER_WIDTH: f64 = 400.0;
 const PICKER_HEIGHT: f64 = 300.0;
 
 struct PickerViewIvars {
-    // Retained to keep the CAMetalLayer alive for the lifetime of the view;
-    // also read to set corner radius / masksToBounds.
+    #[expect(dead_code, reason = "retains CAMetalLayer to prevent deallocation")]
     layer: Retained<CAMetalLayer>,
     events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<Renderer>,
@@ -209,7 +208,7 @@ define_class!(
 impl PickerView {
     fn new(
         mtm: MainThreadMarker,
-        backend: Rc<MetalBackend>,
+        wgpu_factory: Rc<WgpuFactory>,
         entries: Vec<PickerEntry>,
         render_info: (f64, f64, f64),
         hub_sender: CalloopSender<HubEvent>,
@@ -217,13 +216,13 @@ impl PickerView {
     ) -> Retained<Self> {
         let (scale, width, height) = render_info;
         let renderer = Renderer::new(
-            backend,
+            &wgpu_factory,
             scale,
             width,
             height,
-            false,
             config.theme,
             &config.font,
+            Some(12.0),
         );
         let layer = renderer.layer();
         let ivars = PickerViewIvars {
@@ -350,7 +349,7 @@ impl PickerView {
         ivars.icon_textures.borrow_mut().retain(|_, v| v.is_some());
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
         self.setFrame(frame);
-        ivars.renderer.borrow().resize(width, height, scale);
+        ivars.renderer.borrow_mut().resize(scale, width, height);
     }
 }
 
@@ -362,7 +361,7 @@ pub(super) struct PickerPopup {
 impl PickerPopup {
     pub(super) fn new(
         mtm: MainThreadMarker,
-        backend: Rc<MetalBackend>,
+        wgpu_factory: Rc<WgpuFactory>,
         entries: Vec<PickerEntry>,
         monitor: (Dimension, NSRect, f64),
         hub_sender: CalloopSender<HubEvent>,
@@ -395,9 +394,14 @@ impl PickerPopup {
         unsafe { window.setReleasedWhenClosed(false) };
         window.setAcceptsMouseMovedEvents(true);
 
-        let view = PickerView::new(mtm, backend, entries, (scale, pw, ph), hub_sender, config);
-        view.ivars().layer.setCornerRadius(12.0);
-        view.ivars().layer.setMasksToBounds(true);
+        let view = PickerView::new(
+            mtm,
+            wgpu_factory,
+            entries,
+            (scale, pw, ph),
+            hub_sender,
+            config,
+        );
         window.setContentView(Some(&view));
         *window.ivars().view.borrow_mut() = Some(view.clone());
         super::activate_self();
@@ -420,16 +424,16 @@ impl PickerPopup {
         let view = view.as_ref().expect("view set during new()");
         let prev = view.ivars().config.borrow().clone();
         if prev.theme != config.theme {
-            view.ivars().renderer.borrow().apply_theme(config.theme);
+            view.ivars().renderer.borrow_mut().apply_theme(config.theme);
         }
         if prev.font != config.font {
             if prev.font.family != config.font.family {
                 view.ivars()
                     .renderer
-                    .borrow()
+                    .borrow_mut()
                     .reinstall_fonts(config.font.family.as_deref());
             }
-            view.ivars().renderer.borrow().apply_font(&config.font);
+            view.ivars().renderer.borrow_mut().apply_font(&config.font);
         }
         *view.ivars().config.borrow_mut() = config.clone();
         if self.is_visible() {

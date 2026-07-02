@@ -22,7 +22,7 @@ use objc2_quartz_core::{
 };
 
 use super::super::dome::{ContainerShow, HubEvent};
-use super::renderer::{MetalBackend, Renderer};
+use super::renderer::{Renderer, WgpuFactory};
 use crate::config::Config;
 use crate::core::{
     ContainerId, Dimension, FloatWindowPlacement, Length, Logical, TilingWindowPlacement,
@@ -85,7 +85,7 @@ impl FloatOverlay {
         frame: NSRect,
         cg_id: CGWindowID,
         hub_sender: CalloopSender<HubEvent>,
-        backend: Rc<MetalBackend>,
+        wgpu_factory: Rc<WgpuFactory>,
         config: Config,
         flavor: Flavor,
         font: &FontConfig,
@@ -114,13 +114,13 @@ impl FloatOverlay {
 
         let scale = window.backingScaleFactor();
         let renderer = Renderer::new(
-            backend,
+            &wgpu_factory,
             scale,
             frame.size.width,
             frame.size.height,
-            false,
             flavor,
             font,
+            None,
         );
         let metal_layer = renderer.layer();
 
@@ -169,7 +169,7 @@ impl FloatOverlay {
 
         self.window.setFrame_display(cocoa_frame, true);
         self.renderer
-            .resize(cocoa_frame.size.width, cocoa_frame.size.height, scale);
+            .resize(scale, cocoa_frame.size.width, cocoa_frame.size.height);
         self.mirror_layer.setContentsScale(scale);
 
         if !is_focused {
@@ -284,7 +284,7 @@ pub(super) struct TilingOverlay {
 impl TilingOverlay {
     pub(super) fn new(
         mtm: MainThreadMarker,
-        backend: Rc<MetalBackend>,
+        wgpu_factory: Rc<WgpuFactory>,
         config: Config,
         tab_bar_height: Length<Logical>,
         cocoa_frame: NSRect,
@@ -308,8 +308,15 @@ impl TilingOverlay {
         // which is hosted as a sibling NSWindow at the same level.
         window.setIgnoresMouseEvents(true);
 
-        let view =
-            TilingOverlayView::new(mtm, backend, config, tab_bar_height, scale, flavor, &font);
+        let view = TilingOverlayView::new(
+            mtm,
+            wgpu_factory,
+            config,
+            tab_bar_height,
+            scale,
+            flavor,
+            &font,
+        );
         window.setContentView(Some(&view));
         window.setFrame_display(cocoa_frame, false);
         window.orderFront(None);
@@ -450,14 +457,14 @@ define_class!(
 impl TilingOverlayView {
     fn new(
         mtm: MainThreadMarker,
-        backend: Rc<MetalBackend>,
+        wgpu_factory: Rc<WgpuFactory>,
         config: Config,
         tab_bar_height: Length<Logical>,
         scale: f64,
         flavor: Flavor,
         font: &FontConfig,
     ) -> Retained<Self> {
-        let renderer = Renderer::new(backend, scale, 0.0, 0.0, false, flavor, font);
+        let renderer = Renderer::new(&wgpu_factory, scale, 0.0, 0.0, flavor, font, None);
         let layer = renderer.layer();
         let ivars = TilingOverlayViewIvars {
             layer: layer.clone(),
@@ -489,10 +496,10 @@ impl TilingOverlayView {
         ivars.scale.set(scale);
         *ivars.windows.borrow_mut() = windows.to_vec();
         *ivars.containers.borrow_mut() = containers.to_vec();
-        ivars.renderer.borrow().resize(
+        ivars.renderer.borrow_mut().resize(
+            scale,
             monitor.width.logical() as f64,
             monitor.height.logical() as f64,
-            scale,
         );
         self.render_now();
     }
@@ -506,16 +513,16 @@ impl TilingOverlayView {
     fn set_config(&self, config: &Config) {
         let prev = self.ivars().config.borrow().clone();
         if prev.theme != config.theme {
-            self.ivars().renderer.borrow().apply_theme(config.theme);
+            self.ivars().renderer.borrow_mut().apply_theme(config.theme);
         }
         if prev.font != config.font {
             if prev.font.family != config.font.family {
                 self.ivars()
                     .renderer
-                    .borrow()
+                    .borrow_mut()
                     .reinstall_fonts(config.font.family.as_deref());
             }
-            self.ivars().renderer.borrow().apply_font(&config.font);
+            self.ivars().renderer.borrow_mut().apply_font(&config.font);
         }
         *self.ivars().config.borrow_mut() = config.clone();
         self.render_now();
@@ -591,7 +598,7 @@ pub(super) struct TabBarOverlay {
 impl TabBarOverlay {
     pub(super) fn new(
         mtm: MainThreadMarker,
-        backend: Rc<MetalBackend>,
+        wgpu_factory: Rc<WgpuFactory>,
         config: Config,
         container_id: ContainerId,
         cocoa_frame: NSRect,
@@ -631,7 +638,7 @@ impl TabBarOverlay {
 
         let view = TabBarOverlayView::new(
             mtm,
-            backend,
+            wgpu_factory,
             config,
             container_id,
             scale,
@@ -742,7 +749,7 @@ impl TabBarOverlayView {
     )]
     fn new(
         mtm: MainThreadMarker,
-        backend: Rc<MetalBackend>,
+        wgpu_factory: Rc<WgpuFactory>,
         config: Config,
         container_id: ContainerId,
         scale: f64,
@@ -750,7 +757,7 @@ impl TabBarOverlayView {
         flavor: Flavor,
         font: &FontConfig,
     ) -> Retained<Self> {
-        let renderer = Renderer::new(backend, scale, 0.0, 0.0, false, flavor, font);
+        let renderer = Renderer::new(&wgpu_factory, scale, 0.0, 0.0, flavor, font, None);
         let layer = renderer.layer();
         let ivars = TabBarOverlayViewIvars {
             layer: layer.clone(),
@@ -787,10 +794,10 @@ impl TabBarOverlayView {
         *ivars.titles.borrow_mut() = titles;
         ivars.active_tab_index.set(active_tab_index);
         ivars.is_highlighted.set(is_highlighted);
-        ivars.renderer.borrow().resize(
+        ivars.renderer.borrow_mut().resize(
+            scale,
             bar.width.logical() as f64,
             bar.height.logical() as f64,
-            scale,
         );
         self.render_now();
     }
@@ -798,16 +805,16 @@ impl TabBarOverlayView {
     fn set_config(&self, config: &Config) {
         let prev = self.ivars().config.borrow().clone();
         if prev.theme != config.theme {
-            self.ivars().renderer.borrow().apply_theme(config.theme);
+            self.ivars().renderer.borrow_mut().apply_theme(config.theme);
         }
         if prev.font != config.font {
             if prev.font.family != config.font.family {
                 self.ivars()
                     .renderer
-                    .borrow()
+                    .borrow_mut()
                     .reinstall_fonts(config.font.family.as_deref());
             }
-            self.ivars().renderer.borrow().apply_font(&config.font);
+            self.ivars().renderer.borrow_mut().apply_font(&config.font);
         }
         *self.ivars().config.borrow_mut() = config.clone();
         self.render_now();

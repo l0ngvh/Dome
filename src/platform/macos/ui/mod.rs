@@ -21,7 +21,6 @@ use objc2_core_foundation::{
 };
 use objc2_core_graphics::CGWindowID;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol};
-use objc2_metal::MTLCreateSystemDefaultDevice;
 
 use super::dome::{FrameSender, HubEvent, HubMessage};
 use super::listeners::EventListener;
@@ -31,7 +30,7 @@ use crate::core::{ContainerId, MonitorId, WindowId};
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TabBarOverlay, TilingOverlay};
 use picker::PickerPopup;
-use renderer::MetalBackend;
+use renderer::WgpuFactory;
 
 /// Promote Dome's own process to OS-level frontmost via the AX API.
 ///
@@ -96,14 +95,13 @@ impl Ui {
 
         let (frame_tx, frame_rx) = mpsc::channel();
 
-        let device = MTLCreateSystemDefaultDevice().expect("no Metal device");
-        let backend = MetalBackend::new(&device);
+        let wgpu_factory = Rc::new(WgpuFactory::new().expect("wgpu instance/adapter/device init"));
         let delegate = AppDelegate::new(
             mtm,
             hub_sender.clone(),
             frame_rx,
             event_listener,
-            backend,
+            wgpu_factory,
             config,
         );
         let source = create_frame_source(&delegate);
@@ -164,7 +162,7 @@ struct AppDelegateIvars {
     float_overlays: RefCell<HashMap<CGWindowID, FloatOverlay>>,
     captures: RefCell<HashMap<CGWindowID, WindowCapture>>,
     event_listener: EventListener,
-    backend: Rc<MetalBackend>,
+    wgpu_factory: Rc<WgpuFactory>,
     config: RefCell<Config>,
     last_focused: Cell<Option<WindowId>>,
     last_focused_monitor_id: Cell<Option<MonitorId>>,
@@ -198,7 +196,7 @@ impl AppDelegate {
         hub_sender: calloop::channel::Sender<HubEvent>,
         frame_rx: mpsc::Receiver<HubMessage>,
         event_listener: EventListener,
-        backend: Rc<MetalBackend>,
+        wgpu_factory: Rc<WgpuFactory>,
         config: Config,
     ) -> Retained<Self> {
         let ivars = AppDelegateIvars {
@@ -210,7 +208,7 @@ impl AppDelegate {
             float_overlays: RefCell::new(HashMap::new()),
             captures: RefCell::new(HashMap::new()),
             event_listener,
-            backend,
+            wgpu_factory,
             config: RefCell::new(config),
             last_focused: Cell::new(None),
             last_focused_monitor_id: Cell::new(None),
@@ -232,7 +230,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 let mut captures = delegate.ivars().captures.borrow_mut();
 
                 let config = delegate.ivars().config.borrow().clone();
-                let backend = delegate.ivars().backend.clone();
+                let wgpu_factory = delegate.ivars().wgpu_factory.clone();
                 let hub_sender = delegate.ivars().hub_sender.clone();
 
                 // Tiling overlays: one per monitor
@@ -241,7 +239,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                     let overlay = tiling_overlays.entry(data.monitor_id).or_insert_with(|| {
                         TilingOverlay::new(
                             mtm,
-                            backend.clone(),
+                            wgpu_factory.clone(),
                             config.clone(),
                             frame.tab_bar_height,
                             data.cocoa_frame,
@@ -277,7 +275,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         let entry = tab_bar_overlays.entry(cs.placement.id).or_insert_with(|| {
                             TabBarOverlay::new(
                                 mtm,
-                                backend.clone(),
+                                wgpu_factory.clone(),
                                 config.clone(),
                                 cs.placement.id,
                                 cs.tab_bar_cocoa_frame,
@@ -309,7 +307,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                             show.cocoa_frame,
                             show.cg_id,
                             hub_sender.clone(),
-                            backend.clone(),
+                            wgpu_factory.clone(),
                             config.clone(),
                             config.theme,
                             &config.font,
@@ -406,12 +404,12 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         picker.update_and_show(mtm, entries, monitor_dim, cocoa_frame, scale);
                     }
                     None => {
-                        let backend = delegate.ivars().backend.clone();
+                        let wgpu_factory = delegate.ivars().wgpu_factory.clone();
                         let hub_sender = delegate.ivars().hub_sender.clone();
                         let config = delegate.ivars().config.borrow().clone();
                         let picker = PickerPopup::new(
                             mtm,
-                            backend,
+                            wgpu_factory,
                             entries,
                             (monitor_dim, cocoa_frame, scale),
                             hub_sender,

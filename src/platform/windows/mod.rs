@@ -458,6 +458,7 @@ fn run_dome(
 
     let picker = PickerWindow::new(
         &instance,
+        &adapter,
         Arc::clone(&device),
         Arc::clone(&queue),
         hub_sender.clone(),
@@ -467,6 +468,7 @@ fn run_dome(
 
     let overlays = WgpuOverlayFactory {
         instance,
+        adapter,
         device,
         queue,
         hub_sender: hub_sender.clone(),

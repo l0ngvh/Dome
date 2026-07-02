@@ -38,8 +38,9 @@ use crate::platform::windows::dome::CreateOverlay;
 use crate::platform::windows::external::{HwndId, ZOrder};
 
 /// Owns an HWND and calls `DestroyWindow` on drop.
-/// Fields declared before this in a struct are dropped first,
-/// ensuring renderer resources are cleaned up while the window's HDC is still alive.
+///
+/// Struct fields must be declared before this so their renderer resources
+/// drop before the window's HDC.
 pub(super) struct OwnedHwnd {
     hwnd: HWND,
     is_visible: bool,
@@ -48,10 +49,8 @@ pub(super) struct OwnedHwnd {
 impl OwnedHwnd {
     /// `WS_EX_NOREDIRECTIONBITMAP` is force-OR'd in because every Dome overlay
     /// uses DirectComposition and must suppress the GDI redirection bitmap.
-    /// Click-through (`WS_EX_LAYERED | WS_EX_TRANSPARENT`) is per-call: only
-    /// the tiling overlay and float overlay opt in. Force-OR'ing it here would
-    /// silently route pointer events past the picker (which needs keyboard and
-    /// mouse) and tab bars (which handle clicks).
+    /// Click-through (`WS_EX_LAYERED | WS_EX_TRANSPARENT`) stays per-call so
+    /// the picker and tab bars can receive pointer events.
     pub(super) fn new(
         class: PCWSTR,
         ex_style: WINDOW_EX_STYLE,
@@ -115,8 +114,8 @@ impl Drop for OwnedHwnd {
 
 /// wgpu + DirectComposition renderer for overlay windows.
 ///
-/// Field order matters for drop safety: `surface` must drop before the DComp objects
-/// it references, and `painter` before the device. Rust drops fields in declaration order.
+/// `surface` must drop before the DComp objects it references, and `painter`
+/// before the device. Rust drops fields in declaration order.
 pub(super) struct Renderer {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
@@ -124,10 +123,9 @@ pub(super) struct Renderer {
     queue: Arc<wgpu::Queue>,
     painter: egui_wgpu::Renderer,
     egui_ctx: egui::Context,
-    // DComp objects kept alive for the surface lifetime.
-    // dcomp_device is also used in resize() to commit after reconfiguration.
     _dcomp_visual: IDCompositionVisual,
     _dcomp_target: IDCompositionTarget,
+    // Also used by resize() to Commit after reconfigure.
     dcomp_device: IDCompositionDevice,
 }
 
@@ -135,6 +133,7 @@ impl Renderer {
     #[expect(clippy::too_many_arguments, reason = "TODO: refactor")]
     pub(super) fn new(
         instance: &wgpu::Instance,
+        adapter: &wgpu::Adapter,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         hwnd: HWND,
@@ -143,39 +142,40 @@ impl Renderer {
         flavor: Flavor,
         font: &FontConfig,
     ) -> anyhow::Result<Self> {
-        // DCompositionCreateDevice2 (not v1) accepts None for dxgiDevice, letting wgpu
-        // own its own DXGI device and swap chain internally.
+        // DCompositionCreateDevice2 accepts None so wgpu owns its own DXGI device.
         let dcomp_device: IDCompositionDevice = unsafe { DCompositionCreateDevice2(None)? };
-        // topmost = true is conventional for DComp overlays. With WS_EX_NOREDIRECTIONBITMAP
-        // there is no GDI surface, so the value is irrelevant.
         let dcomp_target = unsafe { dcomp_device.CreateTargetForHwnd(hwnd, true)? };
         let dcomp_visual = unsafe { dcomp_device.CreateVisual()? };
 
-        // SurfaceTargetUnsafe::CompositionVisual is #[cfg(dx12)] in wgpu 25. It does not
-        // appear on docs.rs (Linux build), but compiles on Windows with the dx12 feature.
+        // CompositionVisual is #[cfg(dx12)] in wgpu 29, absent from docs.rs (Linux build).
         let target = wgpu::SurfaceTargetUnsafe::CompositionVisual(dcomp_visual.as_raw() as *mut _);
         let surface = unsafe { instance.create_surface_unsafe(target)? };
 
         unsafe { dcomp_target.SetRoot(&dcomp_visual)? };
 
-        // PreMultiplied maps to DXGI_ALPHA_MODE_PREMULTIPLIED, giving native
-        // per-pixel alpha compositing through DComp without DWM blur-behind hacks.
-        let alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
+        // Prefer PreMultiplied (DXGI_ALPHA_MODE_PREMULTIPLIED) for native DComp
+        // per-pixel alpha. Query so a future backend that drops it fails loudly.
+        let caps = surface.get_capabilities(adapter);
+        let alpha_mode = [
+            wgpu::CompositeAlphaMode::PreMultiplied,
+            wgpu::CompositeAlphaMode::PostMultiplied,
+        ]
+        .into_iter()
+        .find(|m| caps.alpha_modes.contains(m))
+        .expect("surface must support a non-opaque alpha mode for translucent overlays");
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: wgpu::TextureFormat::Bgra8UnormSrgb,
             width: width.max(1),
             height: height.max(1),
-            // Immediate matches the previous SwapInterval::DontWait -- no vsync wait.
-            // Overlays render on-demand, not in a loop.
             present_mode: wgpu::PresentMode::Immediate,
             alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &surface_config);
-        // Commit after configure: wgpu calls SetContent(swap_chain) inside configure(),
-        // so Commit must come after for DWM to see the visual with its content.
+        // configure() calls SetContent(swap_chain). Commit must follow so DWM
+        // sees the visual with content.
         unsafe { dcomp_device.Commit()? };
 
         let painter = egui_wgpu::Renderer::new(
@@ -188,9 +188,8 @@ impl Renderer {
             },
         );
 
-        // Disable selectable labels so clicks on tab bars register as tab switches
-        // instead of triggering egui's text selection behavior.
-        let egui_ctx = egui::Context::default(); // only egui context in this overlay
+        // Clicks on tab bars must switch tabs, not enter egui text selection.
+        let egui_ctx = egui::Context::default();
         egui_ctx.global_style_mut(|s| s.interaction.selectable_labels = false);
         apply_catppuccin(&egui_ctx, flavor);
         if let Some(family) = font.family.as_deref() {
@@ -222,8 +221,7 @@ impl Renderer {
         self.surface_config.width = width.max(1);
         self.surface_config.height = height.max(1);
         self.surface.configure(&self.device, &self.surface_config);
-        // configure() may create a new swap chain and call SetContent again,
-        // which requires a Commit for DWM to pick up the change.
+        // configure() may recreate the swap chain and call SetContent again.
         unsafe { self.dcomp_device.Commit() }.expect("DComp commit after resize");
     }
 
@@ -247,11 +245,8 @@ impl Renderer {
         events: Vec<egui::Event>,
         mut ctx_fn: impl FnMut(&mut egui::Ui) -> R,
     ) -> R {
-        // Acquire the swap-chain texture before running egui so overlays keep
-        // the same present-vs-input ordering as pre-bump wgpu 25. wgpu 29
-        // returns a status enum instead of a Result. Transient variants
-        // (Timeout, Occluded, Outdated) skip only the GPU paint. Unrecoverable
-        // variants (Lost, Validation) panic like the old `.expect(...)` did.
+        // Acquire before running egui so a skipped frame still processes input.
+        // Transient statuses skip only the GPU paint. Lost and Validation panic.
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Some(frame),
@@ -273,18 +268,16 @@ impl Renderer {
                 egui::ViewportId::ROOT,
                 egui::ViewportInfo {
                     native_pixels_per_point: Some(pixels_per_point),
-                    ..Default::default() // remaining ViewportInfo fields not needed for overlay rendering
+                    ..Default::default()
                 },
             ))
             .collect(),
             events,
-            ..Default::default() // remaining RawInput fields (focused, max_texture_side, etc.) not needed for overlay rendering
+            ..Default::default()
         };
 
-        // egui_ctx.run_ui must fire every frame: it drives input handling,
-        // produces R for the caller, and emits textures_delta entries that
-        // the painter's ledger has to see. Skipping it on a frameless call
-        // would desync the painter and corrupt subsequent frames.
+        // run_ui must fire every frame so textures_delta stays in sync with
+        // the painter's ledger, even when the swap chain skipped the frame.
         let mut result = None;
         let output = self.egui_ctx.run_ui(raw_input, |ui| {
             result = Some(ctx_fn(ui));
@@ -298,7 +291,7 @@ impl Renderer {
         if let Some(frame) = frame {
             let view = frame
                 .texture
-                .create_view(&wgpu::TextureViewDescriptor::default()); // default view of the surface texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
             let meshes = self
                 .egui_ctx
                 .tessellate(output.shapes, output.pixels_per_point);
@@ -330,8 +323,6 @@ impl Renderer {
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &view,
                         resolve_target: None,
-                        // 2D overlay renders to a plain color view. No layered / 3D target,
-                        // so no depth slice to select.
                         depth_slice: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(clear_color),
@@ -339,13 +330,11 @@ impl Renderer {
                         },
                     })],
                     depth_stencil_attachment: None,
-                    ..Default::default() // no occlusion query, no timestamp writes
+                    ..Default::default()
                 });
-                // forget_lifetime() is required because egui_wgpu::Renderer::render
-                // needs a RenderPass with 'static lifetime.
+                // egui_wgpu::Renderer::render requires 'static lifetime on the pass.
                 self.painter
                     .render(&mut rpass.forget_lifetime(), &meshes, &screen);
-                // rpass dropped here before encoder.finish()
             }
 
             self.queue.submit(
@@ -387,8 +376,13 @@ pub(in crate::platform::windows) struct TilingOverlay {
 }
 
 impl TilingOverlay {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wgpu handles travel together at construction"
+    )]
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
+        adapter: &wgpu::Adapter,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         config: Config,
@@ -416,7 +410,9 @@ impl TilingOverlay {
             init_h,
         )?;
         let hwnd = window.hwnd();
-        let renderer = Renderer::new(instance, device, queue, hwnd, init_w, init_h, flavor, font)?;
+        let renderer = Renderer::new(
+            instance, adapter, device, queue, hwnd, init_w, init_h, flavor, font,
+        )?;
         window.show();
         // Park the overlay at HWND_BOTTOM immediately after creation. Managed
         // windows created after this (via CreateWindowExW) naturally land above
@@ -688,7 +684,7 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     /// foreground does not take pointer events away from anything below.
     fn focus(&self);
     /// Returns the HWND sitting directly above this overlay in z-order.
-    /// Wraps `GetWindow(GW_HWNDPREV)` in production; used by `show_tiling`
+    /// Wraps `GetWindow(GW_HWNDPREV)` in production. Used by `show_tiling`
     /// to slot tiling windows above the overlay on band transitions.
     fn window_above(&self) -> Option<HwndId>;
     /// Demotes the overlay below `managed` via a z-only `SetWindowPos`.
@@ -725,10 +721,11 @@ pub(in crate::platform::windows) struct FloatOverlay {
 impl FloatOverlay {
     #[expect(
         clippy::too_many_arguments,
-        reason = "x, y added for birth-at-rect invariant; restructuring deferred"
+        reason = "x, y added for birth-at-rect invariant. Restructuring deferred."
     )]
     fn new(
         instance: &wgpu::Instance,
+        adapter: &wgpu::Adapter,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         config: Config,
@@ -748,6 +745,7 @@ impl FloatOverlay {
         let hwnd = window.hwnd();
         let renderer = Renderer::new(
             instance,
+            adapter,
             device,
             queue,
             hwnd,
@@ -866,6 +864,8 @@ impl FloatOverlay {
 
 pub(in crate::platform::windows) struct WgpuOverlayFactory {
     pub(in crate::platform::windows) instance: wgpu::Instance,
+    // Retained so Renderer::new can query surface caps (alpha modes) at construction.
+    pub(in crate::platform::windows) adapter: wgpu::Adapter,
     pub(in crate::platform::windows) device: Arc<wgpu::Device>,
     pub(in crate::platform::windows) queue: Arc<wgpu::Queue>,
     pub(in crate::platform::windows) hub_sender: HubSender,
@@ -881,6 +881,7 @@ impl CreateOverlay for WgpuOverlayFactory {
     ) -> anyhow::Result<Box<dyn TilingOverlayApi>> {
         Ok(TilingOverlay::new(
             &self.instance,
+            &self.adapter,
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
             config,
@@ -898,6 +899,7 @@ impl CreateOverlay for WgpuOverlayFactory {
         let (x_phys, y_phys, w_phys, h_phys) = visible_frame.to_surface_size();
         Ok(FloatOverlay::new(
             &self.instance,
+            &self.adapter,
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
             config,
@@ -916,6 +918,7 @@ impl CreateOverlay for WgpuOverlayFactory {
     ) -> anyhow::Result<Box<dyn TabBarOverlayApi>> {
         Ok(TabBarOverlay::new(
             &self.instance,
+            &self.adapter,
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
             config,
@@ -993,7 +996,7 @@ pub(in crate::platform::windows) struct TabBarOverlay {
     hub_sender: HubSender,
     window: OwnedHwnd,
     scale: f32,
-    // First update positions and shows; later updates skip SWP_SHOWWINDOW so a
+    // First update positions and shows. Later updates skip SWP_SHOWWINDOW so a
     // hide() does not get clobbered by the next paint pass.
     placed: bool,
 }
@@ -1005,6 +1008,7 @@ impl TabBarOverlay {
     )]
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
+        adapter: &wgpu::Adapter,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         config: Config,
@@ -1027,6 +1031,7 @@ impl TabBarOverlay {
         let hwnd = window.hwnd();
         let renderer = Renderer::new(
             instance,
+            adapter,
             device,
             queue,
             hwnd,
@@ -1068,7 +1073,7 @@ impl TabBarOverlay {
         let config = &self.config;
         let theme = config.theme();
         // Canvas is the full bar, so paint_tab_bar's own height drives the
-        // metric; otherwise the highlight underline math would diverge from
+        // metric. Otherwise the highlight underline math would diverge from
         // the bar's actual logical height.
         let bar_h_logical = Length::<Logical>::new(h_phys as f32 / scale);
         let bar_w_logical = Length::<Logical>::new(w_phys as f32 / scale);
@@ -1166,8 +1171,8 @@ pub(in crate::platform::windows) unsafe extern "system" fn tab_bar_overlay_wnd_p
     if let Some(lr) = crate::platform::windows::dome_wnd_proc_common(hwnd, msg, wparam, lparam) {
         return lr;
     }
-    // The bar must not raise itself on click. Tab clicks dispatch a hub event;
-    // foreground stays with whatever managed window owned it.
+    // The bar must not raise itself on click. Tab clicks dispatch a hub event.
+    // Foreground stays with whatever managed window owned it.
     if msg == WM_MOUSEACTIVATE {
         return LRESULT(MA_NOACTIVATE as isize);
     }
@@ -1180,7 +1185,7 @@ pub(in crate::platform::windows) unsafe extern "system" fn tab_bar_overlay_wnd_p
         WM_MOUSEMOVE => {
             let x = (lparam.0 & 0xFFFF) as i16 as f32;
             let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
-            // Bar pixels are the canvas; coords in window-local physical pixels
+            // Bar pixels are the canvas. Coords in window-local physical pixels
             // map directly to egui logical points after Renderer::render's
             // pixels_per_point = scale rescale.
             let scale = overlay.scale;

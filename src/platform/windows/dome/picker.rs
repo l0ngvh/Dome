@@ -102,6 +102,7 @@ impl PickerWindow {
     /// position, size, and reveal it with entries.
     pub(in crate::platform::windows) fn new(
         instance: &wgpu::Instance,
+        adapter: &wgpu::Adapter,
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         hub_sender: HubSender,
@@ -125,6 +126,7 @@ impl PickerWindow {
         configure_picker_dwm(hwnd);
         let renderer = Renderer::new(
             instance,
+            adapter,
             device,
             queue,
             hwnd,
