@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crate::core::{Dimension, Length, MonitorId, Unit, WindowId, WindowRestrictions, WorkspaceId};
+use crate::core::{Dimension, Length, MonitorId, Unit, WindowId, WindowRestrictions};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 
@@ -332,15 +332,16 @@ fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
 
 impl Dome {
     #[tracing::instrument(skip_all, fields(window = %new))]
-    pub(super) fn add_native_fullscreen_window(
-        &mut self,
-        new: NewWindow,
-        target_ws: WorkspaceId,
-    ) -> WindowId {
-        let window_id = self.hub.insert_fullscreen(
-            target_ws,
-            WindowRestrictions::ProtectFullscreen,
+    pub(super) fn add_native_fullscreen_window(&mut self, new: NewWindow) -> WindowId {
+        let (window_id, _) = self.hub.insert_window(
             Box::new(new.metadata.clone()),
+            Dimension::new(
+                Length::new(0.0),
+                Length::new(0.0),
+                Length::new(1.0),
+                Length::new(1.0),
+            ),
+            WindowRestrictions::ProtectFullscreen,
         );
         self.finalize_added_window(new, window_id, WindowState::NativeFullscreen);
         tracing::info!(%window_id, "New native fullscreen window");

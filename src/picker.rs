@@ -159,7 +159,7 @@ pub(crate) fn paint_picker(
 mod tests {
     use super::*;
     use crate::config::LayoutConfig;
-    use crate::core::{Dimension, Hub, Length, WindowMetadata};
+    use crate::core::{Dimension, Hub, Length, WindowMetadata, WindowRestrictions};
 
     fn titled(t: &str) -> Box<dyn WindowMetadata> {
         #[derive(Debug, Clone, Default)]
@@ -187,7 +187,7 @@ mod tests {
             fn clone_box(&self) -> Box<dyn WindowMetadata> {
                 Box::new(self.clone())
             }
-            fn matches_on_open_rule(&self, _rule: &crate::core::OnOpenRule) -> bool {
+            fn matches_window_matcher(&self, _matcher: &crate::config::WindowMatcher) -> bool {
                 false
             }
         }
@@ -213,9 +213,21 @@ mod tests {
     #[test]
     fn build_entries_resolves_app_id() {
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling(hub.current_workspace(), titled("Window One"));
-        let w2 = hub.insert_tiling(hub.current_workspace(), titled("Window Two"));
-        let w3 = hub.insert_tiling(hub.current_workspace(), titled("Window Three"));
+        let dim = Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(100.0),
+        );
+        let w1 = hub
+            .insert_window(titled("Window One"), dim, WindowRestrictions::None)
+            .0;
+        let w2 = hub
+            .insert_window(titled("Window Two"), dim, WindowRestrictions::None)
+            .0;
+        let w3 = hub
+            .insert_window(titled("Window Three"), dim, WindowRestrictions::None)
+            .0;
         hub.minimize_window(w1);
         hub.minimize_window(w2);
         hub.minimize_window(w3);
@@ -238,8 +250,18 @@ mod tests {
     #[test]
     fn build_entries_duplicate_app_id() {
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling(hub.current_workspace(), titled("Chrome 1"));
-        let w2 = hub.insert_tiling(hub.current_workspace(), titled("Chrome 2"));
+        let dim = Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(100.0),
+        );
+        let w1 = hub
+            .insert_window(titled("Chrome 1"), dim, WindowRestrictions::None)
+            .0;
+        let w2 = hub
+            .insert_window(titled("Chrome 2"), dim, WindowRestrictions::None)
+            .0;
         hub.minimize_window(w1);
         hub.minimize_window(w2);
         let entries = build_picker_entries(&hub.minimized_window_entries());
@@ -261,9 +283,21 @@ mod tests {
         let theme = Theme::from_flavor(Flavor::Mocha);
 
         let mut hub = test_hub();
-        let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
-        let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
-        let w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
+        let dim = Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(100.0),
+        );
+        let w1 = hub
+            .insert_window(titled("w1"), dim, WindowRestrictions::None)
+            .0;
+        let w2 = hub
+            .insert_window(titled("w2"), dim, WindowRestrictions::None)
+            .0;
+        let w3 = hub
+            .insert_window(titled("w3"), dim, WindowRestrictions::None)
+            .0;
         let entries = vec![
             PickerEntry {
                 id: w1,

@@ -2,8 +2,8 @@ use std::iter::Sum;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
+use crate::config::WindowMatcher;
 use crate::core::allocator::{Node, NodeId};
-pub(crate) use crate::core::strategy::OnOpenRule;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MonitorId(usize);
@@ -145,7 +145,7 @@ pub(crate) trait WindowMetadata:
     /// Clone into a boxed trait object.
     fn clone_box(&self) -> Box<dyn WindowMetadata>;
 
-    fn matches_on_open_rule(&self, rule: &OnOpenRule) -> bool;
+    fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool;
 }
 
 /// Represents a single application window

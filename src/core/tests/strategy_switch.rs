@@ -14,7 +14,6 @@ fn layout(strategy: Strategy, ratio: f32, count: usize) -> LayoutConfig {
         master: MasterConfig {
             master_ratio: ratio,
             master_count: count,
-            workspace: vec![],
         },
         ..default_layout_for_tests()
     }
@@ -61,7 +60,6 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
         master: MasterConfig {
             master_ratio: 0.3,
             master_count: 2,
-            workspace: vec![],
         },
         ..default_layout_for_tests()
     });
@@ -501,9 +499,14 @@ fn sync_config_swap_preserves_float_focus() {
 #[test]
 fn per_workspace_switch_leaves_sibling_unchanged() {
     let mut hub = setup_hub_with_layout(LayoutConfig {
-        workspace: vec![LayoutWorkspaceConfig {
+        workspace: vec![LayoutWorkspaceConfig::Master {
             name: "1".to_string(),
-            strategy: Strategy::Master,
+            master_ratio: None,
+            master_count: None,
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
         }],
         ..default_layout_for_tests()
     });
@@ -517,9 +520,14 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
 
     // Reload with same config: workspace "1" stays master, "0" stays partition-tree.
     hub.sync_config(LayoutConfig {
-        workspace: vec![LayoutWorkspaceConfig {
+        workspace: vec![LayoutWorkspaceConfig::Master {
             name: "1".to_string(),
-            strategy: Strategy::Master,
+            master_ratio: None,
+            master_count: None,
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
         }],
         ..default_layout_for_tests()
     });
@@ -632,9 +640,14 @@ fn override_added_via_reload_rebuilds_only_target() {
 
     // Reload with override on workspace "1" to master.
     hub.sync_config(LayoutConfig {
-        workspace: vec![LayoutWorkspaceConfig {
+        workspace: vec![LayoutWorkspaceConfig::Master {
             name: "1".to_string(),
-            strategy: Strategy::Master,
+            master_ratio: None,
+            master_count: None,
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
         }],
         ..default_layout_for_tests()
     });
@@ -691,9 +704,14 @@ fn override_added_via_reload_rebuilds_only_target() {
 fn override_removed_via_reload_falls_back_to_global() {
     // Start with workspace "1" overridden to master.
     let mut hub = setup_hub_with_layout(LayoutConfig {
-        workspace: vec![LayoutWorkspaceConfig {
+        workspace: vec![LayoutWorkspaceConfig::Master {
             name: "1".to_string(),
-            strategy: Strategy::Master,
+            master_ratio: None,
+            master_count: None,
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
         }],
         ..default_layout_for_tests()
     });

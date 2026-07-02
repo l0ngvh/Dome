@@ -1,18 +1,12 @@
 # Layout
 
 Layout settings live in `layout.toml`, a sibling of `config.toml` in the same
-directory. Dome hot-reloads the file on save.
+directory. Dome hot-reloads the layout config on save.
 
 Default paths:
 
 - macOS: `~/.config/dome/layout.toml` (or `$XDG_CONFIG_HOME/dome/layout.toml`).
 - Windows: `%APPDATA%\dome\layout.toml`.
-
-The schema is flat. `strategy` and four window-size constraint fields sit at
-the file root, alongside `[partition_tree]` and `[master]` sub-tables for
-strategy-specific options. Within `[master]`, an optional `[[master.workspace]]`
-array sets per-workspace master defaults. A separate `[[workspace]]` array
-overrides the strategy on a per-workspace basis.
 
 ```toml
 strategy = "partition_tree"
@@ -30,27 +24,58 @@ automatic_tiling = true
 master_ratio = 0.5
 master_count = 1
 
-[[master.workspace]]
-name = "1"
-master_count = 3
-
 [[workspace]]
 name = "3"
 strategy = "master"
 ```
 
+
+## Window size constraints
+
+At the top level, we can set the desired minimum/maximum width/height for all
+windows. Windows can override these with their own native minimum/maximum size
+however.
+
+Each constraint is a number for logical pixels, a `%` string for percentage of
+screen, or `0` for no limit.
+
+```toml
+min_width = "5%"
+min_height = 200
+max_width = "100%"
+max_height = 0
+```
+
+## Forcing display mode
+
+Matcher fields are the same cross-platform set:
+
+- `app`: macOS application name.
+- `bundle_id`: macOS bundle identifier.
+- `title`: window title (both platforms).
+- `process`: Windows executable name.
+- `class`: Win32 window class name.
+- `aumid`: AppUserModelID.
+
+Wrap a value in forward slashes (`/pattern/`) for regex matching. Without
+slashes, strings match exactly. An empty matcher never matches.
+
+```toml
+[[workspace]]
+name = "3"
+float = [
+  { process = "calculator.exe" },
+  { app = "Calculator" },
+]
+fullscreen = [
+  { process = "slides.exe" },
+]
+```
+
+## Tiling strategy
+
 `strategy` selects the active tiling strategy, either `"partition_tree"` or
 `"master"`. The default is `"partition_tree"`.
-
-## Per-workspace overrides
-
-The optional `[[workspace]]` array overrides the global strategy for individual
-workspaces. Each entry needs a `name` (the workspace identifier) and a
-`strategy` (same values as the global field). Workspaces without a matching
-entry use the global `strategy`.
-
-If the same `name` appears more than once, the last entry wins. Entries with
-an empty `name` or an unrecognized `strategy` are dropped.
 
 ## Partition tree
 
@@ -76,68 +101,40 @@ right.
 of the workspace width, constrained to `[0.1, 0.9]`. `master_count` (default
 `1`) sets how many windows go in the master pane and must be at least 1.
 
-Both values seed new workspaces on first attach. A reload does not push them
-into existing workspaces. Runtime tuning via `master grow/shrink/more/fewer`
-persists across reloads.
+These values can be overridden at runtime via `master grow/shrink/more/fewer`,
+which persists even after config reloads.
 
-Both panes honor the global window-size constraints, and per-window constraints
-reported by the OS take precedence. Each pane scrolls vertically when
-per-window min heights push its content past the screen height, with focus
-movement as the sole trigger.
+Each pane scrolls vertically when per-window min heights push its content past
+the screen height, with focus movement as the sole trigger.
 
-### Per-workspace master overrides
+`master_ratio` (in `[0.1, 0.9]`) and `master_count` (>= 1) seed the workspace
+on first attach only. Omitted fields fall back to the global `[master]`
+defaults. Workspaces without a matching entry use the global `strategy`.
 
-The optional `[[master.workspace]]` array sets different seed values for
-individual workspaces by name.
+## Per-workspace override
+
+The global configuration can be overridden per workspace using the
+`[[workspace]]`. Here, we can instruct Dome to float windows matching
+pre-defined predicates, or force the tiling strategy to place windows in the
+specified layout.
 
 ```toml
-[master]
+[[workspace]]
+name = "3"
+strategy = "master"
 master_ratio = 0.5
-master_count = 1
-
-[[master.workspace]]
-name = "1"
 master_count = 3
-
-[[master.workspace]]
-name = "code"
-master_ratio = 0.7
+float = [
+  { process = "calculator.exe" },
+  { app = "Calculator" },
+]
+fullscreen = [
+  { process = "slides.exe" },
+]
+master = [
+  { process = "code.exe" },
+]
+secondary = [
+  { process = "browser.exe" },
+]
 ```
-
-Each entry requires a `name` matching a workspace identifier. `master_count`
-and `master_ratio` are both optional. Omitted fields fall back to the global
-`[master]` defaults.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | yes | Workspace name to match. |
-| `master_ratio` | float | no | Initial master-pane width fraction, in `[0.1, 0.9]`. |
-| `master_count` | integer | no | Initial master-pane window count, >= 1. |
-
-Overrides apply only on first attach. Config reloads do not push new values
-into workspaces that already have master state.
-
-An entry referencing a workspace name that never materializes is harmless and
-sits unused. Out-of-range values are dropped with a warning, falling back to
-the global default for that field. If the same name appears more than once,
-the last entry wins.
-
-## Window size constraints
-
-Both strategies enforce four global size constraints. A size value is either a
-number (logical pixels) or a string ending in `%` (percentage of the screen
-dimension). Per-window constraints reported by the OS always take precedence
-over these globals.
-
-`min_width` and `min_height` (both default `"5%"`) set the floor. `max_width`
-and `max_height` (both default `0`) set the ceiling, where `0` means no limit.
-
-## Error handling
-
-One cross-field rule applies. `min_width` must not exceed `max_width`, and
-`min_height` must not exceed `max_height`, when both sides are pixel values
-and `max` is greater than 0. A violation makes `layout.toml` fail to load
-entirely and Dome falls back to layout defaults.
-
-Field-level recovery follows the same rules as
-[`config.toml`](configuration.md#error-handling).

@@ -3,10 +3,10 @@ use std::time::Instant;
 
 use super::Dome;
 use super::display_from_process;
-use crate::config::pattern_matches;
+use crate::config::{WindowMatcher, pattern_matches};
 use crate::core::{
-    Dimension, FloatWindowPlacement, Length, MonitorId, OnOpenRule, Physical,
-    TilingWindowPlacement, WindowId, WindowRestrictions,
+    Dimension, FloatWindowPlacement, Length, MonitorId, Physical, TilingWindowPlacement, WindowId,
+    WindowRestrictions,
 };
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
@@ -75,35 +75,35 @@ impl crate::core::WindowMetadata for WindowsMetadata {
         Box::new(self.clone())
     }
 
-    fn matches_on_open_rule(&self, rule: &OnOpenRule) -> bool {
+    fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool {
         let title = self.title.as_deref();
         let class = self.class.as_deref();
         let aumid = self.aumid.as_deref();
 
-        if let Some(p) = rule.process.as_deref()
+        if let Some(p) = matcher.process.as_deref()
             && !pattern_matches(p, &self.process)
         {
             return false;
         }
-        if let Some(p) = rule.title.as_deref()
+        if let Some(p) = matcher.title.as_deref()
             && !title.is_some_and(|t| pattern_matches(p, t))
         {
             return false;
         }
-        if let Some(p) = rule.class.as_deref()
+        if let Some(p) = matcher.class.as_deref()
             && !class.is_some_and(|c| pattern_matches(p, c))
         {
             return false;
         }
-        if let Some(p) = rule.aumid.as_deref()
+        if let Some(p) = matcher.aumid.as_deref()
             && !aumid.is_some_and(|a| pattern_matches(p, a))
         {
             return false;
         }
-        rule.process.is_some()
-            || rule.title.is_some()
-            || rule.class.is_some()
-            || rule.aumid.is_some()
+        matcher.process.is_some()
+            || matcher.title.is_some()
+            || matcher.class.is_some()
+            || matcher.aumid.is_some()
     }
 }
 

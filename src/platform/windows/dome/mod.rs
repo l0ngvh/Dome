@@ -19,8 +19,8 @@ use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection
 use crate::config::{Config, LayoutConfig};
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, DisplayMode, FloatWindowPlacement, Hub,
-    Length, Logical, MonitorId, MonitorLayout, OnOpenRule, Physical, TilingAction,
-    TilingWindowPlacement, WindowId, WindowRestrictions,
+    Length, Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement,
+    WindowId, WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 
@@ -145,7 +145,6 @@ impl Dome {
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
         let mut hub = Hub::new(primary.dimension, primary.scale, layout.clone());
-        hub.set_on_open_rules(convert_windows_on_open_rules(&config.windows.on_open));
         let primary_monitor_id = hub.focused_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
@@ -215,8 +214,6 @@ impl Dome {
     pub(super) fn config_changed(&mut self, new_config: Config) {
         self.hub.sync_config(self.layout.clone());
         self.config = new_config;
-        self.hub
-            .set_on_open_rules(convert_windows_on_open_rules(&self.config.windows.on_open));
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_config(&self.config);
         }
@@ -344,12 +341,9 @@ impl Dome {
         } else {
             WindowRestrictions::None
         };
-        let (id, mode) = self.hub.insert_window(
-            Box::new(metadata.clone()),
-            rect,
-            borderless_fs,
-            restrictions,
-        );
+        let (id, mode) = self
+            .hub
+            .insert_window(Box::new(metadata.clone()), rect, restrictions);
         tracing::info!(%id, ?mode, "New window");
         let state = match mode {
             DisplayMode::Tiling => WindowState::Positioned(PositionedState::Offscreen {
@@ -922,24 +916,6 @@ impl Dome {
     pub(super) fn monitor_dpi_changed(&mut self, handle: isize, dpi: u32) {
         self.monitors.apply_dpi_change(handle, dpi, &mut self.hub);
     }
-}
-
-pub(super) fn convert_windows_on_open_rules(
-    rules: &[crate::config::WindowsOnOpenRule],
-) -> Vec<OnOpenRule> {
-    rules
-        .iter()
-        .map(|r| OnOpenRule {
-            mode: r.mode,
-            workspace: r.workspace.clone(),
-            app: None,
-            bundle_id: None,
-            title: r.title.clone(),
-            process: r.process.clone(),
-            class: r.class.clone(),
-            aumid: r.aumid.clone(),
-        })
-        .collect()
 }
 
 // Fallback display string derived from the executable name. Prefer

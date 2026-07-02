@@ -23,10 +23,10 @@ pub(crate) use node::Physical;
 #[cfg_attr(target_os = "windows", expect(unused_imports))]
 pub(crate) use node::{
     ContainerId, Dimension, Length, Logical, MonitorId, PickerEntry, Unit, WindowId,
-    WindowMetadata, WindowRestrictions, WorkspaceId,
+    WindowMetadata, WindowRestrictions,
 };
 pub(crate) use node::{Direction, DisplayMode};
-pub(crate) use strategy::{OnOpenRule, TilingAction};
+pub(crate) use strategy::TilingAction;
 
 pub(crate) use dto::WorkspaceInfo;
 

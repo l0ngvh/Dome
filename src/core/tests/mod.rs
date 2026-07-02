@@ -6,6 +6,7 @@ mod minimize;
 mod monitor;
 mod move_to_workspace;
 mod partition_tree;
+mod preferred_layout;
 mod query;
 mod set_focus;
 mod smoke;
@@ -703,7 +704,6 @@ pub(super) fn default_master_config_for_tests() -> MasterConfig {
     MasterConfig {
         master_ratio: 0.5,
         master_count: 1,
-        workspace: vec![],
     }
 }
 pub(super) fn default_layout_for_tests() -> LayoutConfig {
@@ -762,6 +762,7 @@ pub(super) fn setup_with_automatic_tiling() -> Hub {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TestMetadata {
     pub title: Option<String>,
+    pub process: Option<String>,
 }
 
 impl std::fmt::Display for TestMetadata {
@@ -787,7 +788,19 @@ impl WindowMetadata for TestMetadata {
         Box::new(self.clone())
     }
 
-    fn matches_on_open_rule(&self, _rule: &crate::core::OnOpenRule) -> bool {
+    fn matches_window_matcher(&self, matcher: &crate::config::WindowMatcher) -> bool {
+        if let Some(ref title) = self.title
+            && let Some(ref mtitle) = matcher.title
+            && title == mtitle
+        {
+            return true;
+        }
+        if let Some(ref process) = self.process
+            && let Some(ref mproc) = matcher.process
+            && process == mproc
+        {
+            return true;
+        }
         false
     }
 }
@@ -796,5 +809,6 @@ impl WindowMetadata for TestMetadata {
 pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         title: Some(t.to_owned()),
+        ..Default::default()
     })
 }

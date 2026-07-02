@@ -83,10 +83,9 @@ subtext_size = 12.0
 # "k" = ["master fewer"]
 # "escape" = ["mode default"]
 
-# Window rules to ignore windows or run actions on open
-# All specified fields must match (AND logic)
-# First matching rule wins
-# Use /pattern/ for regex matching on app/process and title
+# Window rules to ignore windows
+# All specified fields must match (AND logic). First matching rule wins.
+# Use /pattern/ for regex matching on app/process and title.
 
 # macOS rules
 # [macos]
@@ -94,10 +93,6 @@ subtext_size = 12.0
 #   { app = "System Preferences" },
 #   { app = "/.*Preferences/" },
 #   { bundle_id = "com.apple.finder", title = "Trash" },
-# ]
-# on_open = [
-#   { app = "Slack", mode = "float", workspace = "3" },
-#   { app = "Safari", mode = "fullscreen" },
 # ]
 
 # Windows rules
@@ -108,7 +103,3 @@ ignore = [
   # { title = "Task Manager" },
   # { class = "Chrome_WidgetWin_1" },
 ]
-# on_open = [
-#   { process = "slack.exe", mode = "float", workspace = "3" },
-#   { aumid = "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", mode = "float" },
-# ]
