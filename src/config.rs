@@ -413,49 +413,99 @@ impl RawConfig {
             border_size: w.field("border_size", default_border_size()),
             theme: w.field("theme", Flavor::default()),
             font: w.nested_or("font", FontConfig::default()),
-            macos: w.nested_or("macos", default_macos()),
-            windows: w.nested_or("windows", default_windows()),
+            ignore: {
+                let mut ignore = w.rule_vec::<WindowMatcher>("ignore");
+                ignore.extend(default_ignore());
+                ignore
+            },
             log_level: w.field("log_level", LogLevel::default()),
             start_at_login: w.field("start_at_login", false),
         }
     }
 }
 
-fn default_macos_ignore() -> Vec<MacosWindow> {
+#[cfg(target_os = "macos")]
+fn default_ignore() -> Vec<WindowMatcher> {
     vec![
-        MacosWindow {
-            app: None,
+        WindowMatcher {
             bundle_id: Some("com.apple.dock".into()),
-            title: None,
+            ..Default::default()
         },
-        MacosWindow {
-            app: None,
+        WindowMatcher {
             bundle_id: Some("com.apple.controlcenter".into()),
-            title: None,
+            ..Default::default()
         },
-        MacosWindow {
-            app: None,
+        WindowMatcher {
             bundle_id: Some("com.apple.notificationcenterui".into()),
-            title: None,
+            ..Default::default()
         },
-        MacosWindow {
-            app: None,
+        WindowMatcher {
             bundle_id: Some("com.apple.loginwindow".into()),
-            title: None,
+            ..Default::default()
         },
     ]
 }
 
-fn default_macos() -> MacosConfig {
-    let mut config = MacosConfig::default();
-    config.ignore.extend(default_macos_ignore());
-    config
-}
-
-fn default_windows() -> WindowsConfig {
-    let mut config = WindowsConfig::default();
-    config.ignore.extend(default_windows_ignore());
-    config
+#[cfg(target_os = "windows")]
+fn default_ignore() -> Vec<WindowMatcher> {
+    vec![
+        WindowMatcher {
+            process: Some("LockApp.exe".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            process: Some("SearchHost.exe".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            process: Some("StartMenuExperienceHost.exe".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            title: Some("MSCTFIME UI".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            title: Some("OLEChannelWnd".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            class: Some("Shell_TrayWnd".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            class: Some("Shell_SecondaryTrayWnd".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            class: Some("Progman".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            class: Some("WorkerW".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            class: Some("TaskListThumbnailWnd".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            class: Some("MultitaskingViewFrame".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            class: Some("Xaml_WindowedPopupClass".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            class: Some("TaskManagerWindow".into()),
+            ..Default::default()
+        },
+        WindowMatcher {
+            class: Some("Windows.UI.Core.CoreWindow".into()),
+            ..Default::default()
+        },
+    ]
 }
 
 impl WalkRecover for LayoutConfig {
@@ -566,22 +616,6 @@ impl WalkRecover for FontConfig {
             subtext_size,
             family,
         }
-    }
-}
-
-impl WalkRecover for MacosConfig {
-    fn walk(w: &mut Walker) -> Self {
-        let mut ignore = w.rule_vec::<MacosWindow>("ignore");
-        ignore.extend(default_macos_ignore());
-        MacosConfig { ignore }
-    }
-}
-
-impl WalkRecover for WindowsConfig {
-    fn walk(w: &mut Walker) -> Self {
-        let mut ignore = w.rule_vec::<WindowsWindow>("ignore");
-        ignore.extend(default_windows_ignore());
-        WindowsConfig { ignore }
     }
 }
 
@@ -977,104 +1011,6 @@ impl WalkRule for LayoutWorkspaceConfig {
     ];
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct MacosWindow {
-    #[serde(default)]
-    pub(crate) app: Option<String>,
-    #[serde(default)]
-    pub(crate) bundle_id: Option<String>,
-    #[serde(default)]
-    pub(crate) title: Option<String>,
-}
-
-#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
-impl MacosWindow {
-    pub(crate) fn matches(
-        &self,
-        app: Option<&str>,
-        bundle_id: Option<&str>,
-        title: Option<&str>,
-    ) -> bool {
-        if let Some(p) = self.app.as_deref()
-            && !app.is_some_and(|a| pattern_matches(p, a))
-        {
-            return false;
-        }
-        // bundle_id matches by exact equality, not pattern_matches.
-        if let Some(b) = self.bundle_id.as_deref()
-            && bundle_id != Some(b)
-        {
-            return false;
-        }
-        if let Some(p) = self.title.as_deref()
-            && !title.is_some_and(|t| pattern_matches(p, t))
-        {
-            return false;
-        }
-        // Reject when all window metadata is absent.
-        if app.is_none() && bundle_id.is_none() && title.is_none() {
-            return false;
-        }
-        self.app.is_some() || self.bundle_id.is_some() || self.title.is_some()
-    }
-}
-
-impl WalkRule for MacosWindow {
-    const KNOWN: &'static [&'static str] = &["app", "bundle_id", "title"];
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct WindowsWindow {
-    #[serde(default)]
-    pub(crate) process: Option<String>,
-    #[serde(default)]
-    pub(crate) title: Option<String>,
-    #[serde(default)]
-    pub(crate) class: Option<String>,
-    #[serde(default)]
-    pub(crate) aumid: Option<String>,
-}
-
-#[cfg_attr(not(target_os = "windows"), expect(dead_code))]
-impl WindowsWindow {
-    pub(crate) fn matches(
-        &self,
-        process: &str,
-        title: Option<&str>,
-        class: Option<&str>,
-        aumid: Option<&str>,
-    ) -> bool {
-        if let Some(p) = self.process.as_deref()
-            && !pattern_matches(p, process)
-        {
-            return false;
-        }
-        if let Some(p) = self.title.as_deref()
-            && !title.is_some_and(|t| pattern_matches(p, t))
-        {
-            return false;
-        }
-        if let Some(p) = self.class.as_deref()
-            && !class.is_some_and(|c| pattern_matches(p, c))
-        {
-            return false;
-        }
-        if let Some(p) = self.aumid.as_deref()
-            && !aumid.is_some_and(|a| pattern_matches(p, a))
-        {
-            return false;
-        }
-        self.process.is_some()
-            || self.title.is_some()
-            || self.class.is_some()
-            || self.aumid.is_some()
-    }
-}
-
-impl WalkRule for WindowsWindow {
-    const KNOWN: &'static [&'static str] = &["process", "title", "class", "aumid"];
-}
-
 pub(crate) fn pattern_matches(pattern: &str, text: &str) -> bool {
     if let Some(regex) = pattern.strip_prefix('/').and_then(|p| p.strip_suffix('/')) {
         regex::Regex::new(regex)
@@ -1093,110 +1029,6 @@ pub(crate) enum WindowMode {
     Fullscreen,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct MacosConfig {
-    #[serde(default)]
-    pub(crate) ignore: Vec<MacosWindow>,
-}
-
-fn default_windows_ignore() -> Vec<WindowsWindow> {
-    vec![
-        WindowsWindow {
-            process: Some("LockApp.exe".into()),
-            title: None,
-            class: None,
-            aumid: None,
-        },
-        WindowsWindow {
-            process: Some("SearchHost.exe".into()),
-            title: None,
-            class: None,
-            aumid: None,
-        },
-        WindowsWindow {
-            process: Some("StartMenuExperienceHost.exe".into()),
-            title: None,
-            class: None,
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: Some("MSCTFIME UI".into()),
-            class: None,
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: Some("OLEChannelWnd".into()),
-            class: None,
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: None,
-            class: Some("Shell_TrayWnd".into()),
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: None,
-            class: Some("Shell_SecondaryTrayWnd".into()),
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: None,
-            class: Some("Progman".into()),
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: None,
-            class: Some("WorkerW".into()),
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: None,
-            class: Some("TaskListThumbnailWnd".into()),
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: None,
-            class: Some("MultitaskingViewFrame".into()),
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: None,
-            class: Some("Xaml_WindowedPopupClass".into()),
-            aumid: None,
-        },
-        WindowsWindow {
-            process: None,
-            title: None,
-            class: Some("TaskManagerWindow".into()),
-            aumid: None,
-        },
-        // Top-level CoreWindow HWNDs are exclusively shell surfaces on modern
-        // Windows (lock screen, sign-in UI, Start, Search/Cortana flyout,
-        // Action Center). UWP apps surface as ApplicationFrameWindow.
-        WindowsWindow {
-            process: None,
-            title: None,
-            class: Some("Windows.UI.Core.CoreWindow".into()),
-            aumid: None,
-        },
-    ]
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct WindowsConfig {
-    #[serde(default)]
-    pub(crate) ignore: Vec<WindowsWindow>,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Config {
     #[serde(skip_deserializing, default = "default_keymaps")]
@@ -1208,14 +1040,7 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) font: FontConfig,
     #[serde(default)]
-    #[cfg_attr(
-        not(target_os = "macos"),
-        expect(dead_code, reason = "only read by macOS platform code")
-    )]
-    pub(crate) macos: MacosConfig,
-    #[serde(default)]
-    #[cfg_attr(not(target_os = "windows"), expect(dead_code))]
-    pub(crate) windows: WindowsConfig,
+    pub(crate) ignore: Vec<WindowMatcher>,
     #[serde(default)]
     pub(crate) log_level: LogLevel,
     #[serde(default)]
@@ -1261,8 +1086,7 @@ impl Default for Config {
             // Mocha is the darkest flavour and matches Dome's pre-theme default palette.
             theme: Flavor::default(),
             font: FontConfig::default(),
-            macos: MacosConfig::default(),
-            windows: WindowsConfig::default(),
+            ignore: default_ignore(),
             log_level: LogLevel::default(),
             start_at_login: false,
         }
@@ -2020,8 +1844,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
-    #[test]
     #[cfg(windows)]
     fn default_windows_ignore_contains_shell_tray() {
         let nanos = std::time::SystemTime::now()
@@ -2034,7 +1856,6 @@ mod tests {
         let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert!(
             config
-                .windows
                 .ignore
                 .iter()
                 .any(|r| r.class.as_deref() == Some("Shell_TrayWnd"))
@@ -2053,7 +1874,6 @@ mod tests {
         let _cleanup = CleanupFile(path.clone());
         let config = load_or_default(path.to_str().unwrap(), Config::load);
         let entry = config
-            .windows
             .ignore
             .iter()
             .find(|r| r.class.as_deref() == Some("Windows.UI.Core.CoreWindow"));
@@ -2076,7 +1896,6 @@ mod tests {
         let config = load_or_default(path.to_str().unwrap(), Config::load);
         assert!(
             config
-                .macos
                 .ignore
                 .iter()
                 .any(|r| r.bundle_id.as_deref() == Some("com.apple.dock"))

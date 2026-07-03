@@ -25,7 +25,6 @@ pub(crate) enum RejectionReason {
     PopupNoFrame,
     OwnedNoAppWindow,
     ZeroDim,
-    IgnoredByRule,
 }
 
 pub(crate) struct RejectionLogFilter {

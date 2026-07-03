@@ -731,6 +731,7 @@ pub(super) fn setup_hub() -> Hub {
         ),
         1.0,
         default_layout_for_tests(),
+        Vec::new(),
     )
 }
 
@@ -756,6 +757,7 @@ pub(super) fn setup_with_automatic_tiling() -> Hub {
             },
             ..default_layout_for_tests()
         },
+        Vec::new(),
     )
 }
 

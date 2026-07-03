@@ -22,13 +22,14 @@ use std::time::Instant;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, LayoutConfig, MacosWindow, WindowMatcher, pattern_matches};
+use crate::config::{Config, LayoutConfig, WindowMatcher, pattern_matches};
 use crate::core::{
     ContainerId, Direction, DisplayMode, Hub, Length, Logical, TilingAction, WindowId,
     WindowMetadata, WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 use crate::platform::macos::accessibility::ExternalWindow;
+use crate::platform::macos::accessibility::RejectionReason;
 
 use monitor::MonitorRegistry;
 use recovery::Recovery;
@@ -180,7 +181,12 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.work_area, 1.0, layout.clone());
+        let mut hub = Hub::new(
+            primary.work_area,
+            1.0,
+            layout.clone(),
+            config.ignore.clone(),
+        );
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
@@ -255,11 +261,23 @@ impl Dome {
                     } else {
                         WindowRestrictions::None
                     };
-                    let (id, display_mode) = self.hub.insert_window(
+                    let Some((id, display_mode)) = self.hub.insert_window(
                         Box::new(new.metadata.clone()),
                         dim.to_dimension(),
                         restrictions,
-                    );
+                    ) else {
+                        let cg_id = new.ax.cg_id();
+                        let pid = new.ax.pid();
+                        if self.log_filter.record_and_should_log(
+                            cg_id,
+                            pid,
+                            RejectionReason::IgnoredByRule,
+                            Instant::now(),
+                        ) {
+                            tracing::trace!(%cg_id, %pid, %new, "Window ignored");
+                        }
+                        continue;
+                    };
                     tracing::info!(%id, ?display_mode, %new, "New window");
                     let state = match display_mode {
                         DisplayMode::Tiling => {
@@ -330,6 +348,7 @@ impl Dome {
 
     pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
         self.hub.sync_config(self.layout.clone());
+        self.hub.set_ignore_rules(new_config.ignore.clone());
         self.sender
             .send(HubMessage::ConfigChanged(Box::new(new_config.clone())));
         self.config = new_config;
@@ -483,10 +502,6 @@ impl Dome {
             .iter()
             .map(|(id, e)| (id, e.clone()))
             .collect()
-    }
-
-    pub(in crate::platform::macos) fn ignore_rules(&self) -> Vec<MacosWindow> {
-        self.config.macos.ignore.clone()
     }
 
     pub(in crate::platform::macos) fn observed_pids(&self) -> HashSet<i32> {

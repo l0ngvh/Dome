@@ -332,7 +332,7 @@ fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
 
 impl Dome {
     #[tracing::instrument(skip_all, fields(window = %new))]
-    pub(super) fn add_native_fullscreen_window(&mut self, new: NewWindow) -> WindowId {
+    pub(super) fn add_native_fullscreen_window(&mut self, new: NewWindow) -> Option<WindowId> {
         let (window_id, _) = self.hub.insert_window(
             Box::new(new.metadata.clone()),
             Dimension::new(
@@ -342,10 +342,10 @@ impl Dome {
                 Length::new(1.0),
             ),
             WindowRestrictions::ProtectFullscreen,
-        );
+        )?;
         self.finalize_added_window(new, window_id, WindowState::NativeFullscreen);
         tracing::info!(%window_id, "New native fullscreen window");
-        window_id
+        Some(window_id)
     }
 
     pub(super) fn finalize_added_window(

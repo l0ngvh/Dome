@@ -117,10 +117,16 @@ pub(crate) struct Hub {
     /// Global (top-level) matchers: filled from LayoutConfig. No workspace routing.
     pub(super) fullscreen_matchers: Vec<WindowMatcher>,
     pub(super) float_matchers: Vec<WindowMatcher>,
+    ignore_rules: Vec<WindowMatcher>,
 }
 
 impl Hub {
-    pub(crate) fn new(primary_screen: Dimension, primary_scale: f32, config: LayoutConfig) -> Self {
+    pub(crate) fn new(
+        primary_screen: Dimension,
+        primary_scale: f32,
+        config: LayoutConfig,
+        ignore_rules: Vec<WindowMatcher>,
+    ) -> Self {
         let mut monitors: Allocator<Monitor> = Allocator::new();
         let mut workspaces: Allocator<Workspace> = Allocator::new();
 
@@ -165,6 +171,7 @@ impl Hub {
             ws_float_matchers: Vec::new(),
             fullscreen_matchers: Vec::new(),
             float_matchers: Vec::new(),
+            ignore_rules,
         };
         hub.rebuild_matchers();
         hub
@@ -515,13 +522,25 @@ impl Hub {
         self.float_matchers = self.access.config.float.clone();
     }
 
+    pub(crate) fn set_ignore_rules(&mut self, rules: Vec<WindowMatcher>) {
+        self.ignore_rules = rules;
+    }
+
     #[tracing::instrument(skip(self, metadata))]
     pub(crate) fn insert_window(
         &mut self,
         metadata: Box<dyn WindowMetadata>,
         dimension: Dimension,
         restrictions: WindowRestrictions,
-    ) -> (WindowId, DisplayMode) {
+    ) -> Option<(WindowId, DisplayMode)> {
+        if let Some(r) = self
+            .ignore_rules
+            .iter()
+            .find(|r| metadata.matches_window_matcher(r))
+        {
+            tracing::debug!("Window ignored by rule {r:?}");
+            return None;
+        }
         let matcher = self.resolve_matcher(&*metadata);
         let target_ws = matcher
             .and_then(|(ws_id, _)| ws_id)
@@ -538,13 +557,13 @@ impl Hub {
                     WindowMode::Float => self.insert_float(target_ws, dimension, metadata),
                     _ => unreachable!(),
                 };
-                return (id, self.access.windows.get(id).mode);
+                return Some((id, self.access.windows.get(id).mode));
             }
             let id = self.insert_tiling(target_ws, metadata);
-            return (id, self.access.windows.get(id).mode);
+            return Some((id, self.access.windows.get(id).mode));
         }
         let id = self.insert_fullscreen(target_ws, restrictions, metadata);
-        (id, self.access.windows.get(id).mode)
+        Some((id, self.access.windows.get(id).mode))
     }
 
     pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) -> bool {

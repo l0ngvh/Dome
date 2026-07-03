@@ -86,20 +86,17 @@ subtext_size = 12.0
 # Window rules to ignore windows
 # All specified fields must match (AND logic). First matching rule wins.
 # Use /pattern/ for regex matching on app/process and title.
+#
+# macOS fields:  app  bundle_id  title
+# Windows fields: process  class  aumid  title
 
-# macOS rules
-# [macos]
-# ignore = [
-#   { app = "System Preferences" },
-#   { app = "/.*Preferences/" },
-#   { bundle_id = "com.apple.finder", title = "Trash" },
-# ]
-
-# Windows rules
-[windows]
-ignore = [
-  # { process = "SystemSettings.exe" },
-  # { process = "/.*Settings.*/" },
-  # { title = "Task Manager" },
-  # { class = "Chrome_WidgetWin_1" },
-]
+# [[ignore]]
+# app = "System Preferences"          # macOS
+# [[ignore]]
+# bundle_id = "com.apple.finder"      # macOS
+# [[ignore]]
+# process = "/.*Settings.*/"          # Windows
+# [[ignore]]
+# class = "Chrome_WidgetWin_1"        # Windows
+# [[ignore]]
+# title = "Task Manager"              # both platforms

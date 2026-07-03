@@ -474,6 +474,7 @@ mod tests {
             ),
             1.0,
             LayoutConfig::default(),
+            Vec::new(),
         )
     }
 
@@ -488,15 +489,19 @@ mod tests {
         );
         let w1 = hub
             .insert_window(titled("w1"), dim, WindowRestrictions::None)
+            .unwrap()
             .0;
         let w2 = hub
             .insert_window(titled("w2"), dim, WindowRestrictions::None)
+            .unwrap()
             .0;
         let w3 = hub
             .insert_window(titled("w3"), dim, WindowRestrictions::None)
+            .unwrap()
             .0;
         let w4 = hub
             .insert_window(titled("w4"), dim, WindowRestrictions::None)
+            .unwrap()
             .0;
         let entries = vec![
             PickerEntry {

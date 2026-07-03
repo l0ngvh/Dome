@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessage
 use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
-use crate::platform::windows::dome::rejection_log_filter::{RejectionLogFilter, RejectionReason};
+use crate::platform::windows::dome::rejection_log_filter::RejectionLogFilter;
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow, WindowsMetadata};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
@@ -211,7 +211,6 @@ impl Runner {
         let inspect: Arc<dyn InspectExternalWindow> = ext.clone();
         let manage: Arc<dyn ManageExternalWindow> = ext;
         let log_filter = Arc::clone(&self.rejection_log_filter);
-        let ignore_rules = self.dome.ignore_rules().to_vec();
         self.dispatcher.dispatch(
             move || {
                 if let Some(reason) = inspect.check_unmanageable() {
@@ -231,25 +230,6 @@ impl Runner {
                 let aumid = inspect.get_aumid();
                 let process = inspect.get_process_name().unwrap_or_default();
                 let title = inspect.get_window_title();
-                let matched = ignore_rules.iter().find(|r| {
-                    r.matches(
-                        &process,
-                        title.as_deref(),
-                        class.as_deref(),
-                        aumid.as_deref(),
-                    )
-                });
-                if let Some(_rule) = matched {
-                    let pid = manage.pid();
-                    let reason = RejectionReason::IgnoredByRule;
-                    if pid == 0 {
-                        tracing::trace!(?hwnd_id, ?reason, "not manageable");
-                    } else if log_filter.record_and_should_log(hwnd_id, pid, reason, Instant::now())
-                    {
-                        tracing::trace!(?hwnd_id, ?reason, "not manageable");
-                    }
-                    return None;
-                }
                 Some((
                     NewWindow {
                         ext: manage,

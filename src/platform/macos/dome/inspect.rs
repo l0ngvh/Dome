@@ -4,8 +4,7 @@ use std::time::Instant;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::config::MacosWindow;
-use crate::platform::macos::accessibility::{AXApp, ExternalWindow, RejectionReason};
+use crate::platform::macos::accessibility::{AXApp, ExternalWindow};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::registry::ManagedWindow;
 use crate::platform::macos::dome::rejection_log_filter::RejectionLogFilter;
@@ -59,7 +58,6 @@ pub(in crate::platform::macos) struct ExtRefresh {
 pub(in crate::platform::macos) fn compute_reconciliation(
     app: &Arc<AXApp>,
     tracked: &HashMap<CGWindowID, ManagedWindow>,
-    ignore_rules: &[MacosWindow],
     log_filter: &RejectionLogFilter,
     marker: &DispatcherMarker,
 ) -> ReconcileResult {
@@ -174,9 +172,6 @@ pub(in crate::platform::macos) fn compute_reconciliation(
                 bundle_id,
             },
         };
-        if should_ignore(&new, ignore_rules, cg_id, pid, log_filter) {
-            continue;
-        }
         if new.ax.is_native_fullscreen(marker) {
             to_add.push(PendingAdd::NativeFullscreen { new });
             continue;
@@ -260,7 +255,6 @@ fn read_existing_window(
 pub(in crate::platform::macos) fn compute_reconcile_all(
     observed_pids: HashSet<i32>,
     tracked: HashMap<CGWindowID, ManagedWindow>,
-    ignore_rules: Vec<MacosWindow>,
     log_filter: Arc<RejectionLogFilter>,
     marker: &DispatcherMarker,
 ) -> ReconcileAllResult {
@@ -287,8 +281,7 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
             hidden_pids.push(app.pid());
         } else {
             let ax_app = app.ax_app();
-            let result =
-                compute_reconciliation(&ax_app, &tracked, &ignore_rules, &log_filter, marker);
+            let result = compute_reconciliation(&ax_app, &tracked, &log_filter, marker);
             to_remove.extend(result.to_remove);
             to_minimize.extend(result.to_minimize);
             to_add.extend(result.to_add);
@@ -317,32 +310,4 @@ pub(in crate::platform::macos) fn compute_reconcile_all(
         to_exit_native_fullscreen,
         refresh,
     }
-}
-
-fn should_ignore(
-    new: &NewWindow,
-    rules: &[MacosWindow],
-    cg_id: CGWindowID,
-    pid: i32,
-    log_filter: &RejectionLogFilter,
-) -> bool {
-    let matched = rules.iter().find(|r| {
-        r.matches(
-            new.metadata.app_name.as_deref(),
-            new.metadata.bundle_id.as_deref(),
-            new.metadata.title.as_deref(),
-        )
-    });
-    if matched.is_some() {
-        if log_filter.record_and_should_log(
-            cg_id,
-            pid,
-            RejectionReason::IgnoredByRule,
-            Instant::now(),
-        ) {
-            tracing::trace!(%cg_id, %pid, "not manageable");
-        }
-        return true;
-    }
-    false
 }

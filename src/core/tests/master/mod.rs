@@ -26,5 +26,6 @@ pub(super) fn setup_master() -> Hub {
         ),
         1.0,
         config,
+        Vec::new(),
     )
 }

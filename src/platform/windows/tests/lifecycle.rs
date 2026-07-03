@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::config::{Config, LayoutConfig, PartitionTreeConfig, WindowsWindow};
+use crate::config::{Config, LayoutConfig, PartitionTreeConfig, WindowMatcher};
 
 #[test]
 fn window_destroyed_fills_screen() {
@@ -144,11 +144,9 @@ fn unmanageable_window_is_ignored() {
 #[test]
 fn ignored_window_rule_prevents_insertion() {
     let mut config = Config::default();
-    config.windows.ignore.push(WindowsWindow {
+    config.ignore.push(WindowMatcher {
         process: Some("bloat.exe".to_string()),
-        title: None,
-        class: None,
-        aumid: None,
+        ..Default::default()
     });
     let mut env = TestEnv::new_with_config(config);
 
@@ -160,11 +158,9 @@ fn ignored_window_rule_prevents_insertion() {
 #[test]
 fn ignored_window_rule_by_class_prevents_insertion() {
     let mut config = Config::default();
-    config.windows.ignore.push(WindowsWindow {
-        process: None,
-        title: None,
+    config.ignore.push(WindowMatcher {
         class: Some("Shell_TrayWnd".to_string()),
-        aumid: None,
+        ..Default::default()
     });
     let mut env = TestEnv::new_with_config(config);
 

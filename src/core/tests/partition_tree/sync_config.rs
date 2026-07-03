@@ -21,6 +21,7 @@ fn sync_config_updates_tab_bar_height() {
             },
             ..default_layout_for_tests()
         },
+        Vec::new(),
     );
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();
@@ -60,6 +61,7 @@ fn sync_config_recalculates_all_workspaces() {
             },
             ..default_layout_for_tests()
         },
+        Vec::new(),
     );
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();

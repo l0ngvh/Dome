@@ -29,6 +29,7 @@ fn setup_hub_with_layout(layout_cfg: LayoutConfig) -> Hub {
         ),
         1.0,
         layout_cfg,
+        Vec::new(),
     )
 }
 

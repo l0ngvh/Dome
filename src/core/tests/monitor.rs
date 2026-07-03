@@ -522,6 +522,7 @@ fn monitor_scale_multiplies_config_lengths() {
             },
             ..default_layout_for_tests()
         },
+        Vec::new(),
     );
     hub.insert_tiling(hub.current_workspace(), titled("w16"));
     hub.insert_tiling(hub.current_workspace(), titled("w17"));
@@ -588,6 +589,7 @@ fn monitor_scale_multiplies_config_lengths() {
             min_width: SizeConstraint::Pixels(Length::new(100.0)),
             ..default_layout_for_tests()
         },
+        Vec::new(),
     );
     for _ in 0..6 {
         hub2.insert_tiling(hub2.current_workspace(), titled("w18"));

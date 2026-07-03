@@ -214,6 +214,7 @@ fn matchers_on_partition_tree_variant() {
             }],
             ..Default::default()
         },
+        Vec::new(),
     );
     hub.insert_window(process_meta("float.exe"), SCREEN, WindowRestrictions::None);
     hub.focus_workspace("ws2");
@@ -464,6 +465,7 @@ fn hub_with_matchers() -> Hub {
             }],
             ..Default::default()
         },
+        Vec::new(),
     )
 }
 
@@ -490,6 +492,7 @@ fn hub_with_conflicting_matchers() -> Hub {
             }],
             ..Default::default()
         },
+        Vec::new(),
     )
 }
 
@@ -505,6 +508,7 @@ fn hub_with_global_float() -> Hub {
             }],
             ..Default::default()
         },
+        Vec::new(),
     )
 }
 
@@ -520,6 +524,7 @@ fn hub_with_global_fullscreen() -> Hub {
             }],
             ..Default::default()
         },
+        Vec::new(),
     )
 }
 
@@ -547,6 +552,7 @@ fn hub_with_per_workspace_and_global() -> Hub {
             }],
             ..Default::default()
         },
+        Vec::new(),
     )
 }
 

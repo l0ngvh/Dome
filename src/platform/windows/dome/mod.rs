@@ -144,7 +144,12 @@ impl Dome {
             .iter()
             .find(|s| s.is_primary)
             .unwrap_or(&monitors[0]);
-        let mut hub = Hub::new(primary.dimension, primary.scale, layout.clone());
+        let mut hub = Hub::new(
+            primary.dimension,
+            primary.scale,
+            layout.clone(),
+            config.ignore.clone(),
+        );
         let primary_monitor_id = hub.focused_monitor();
         let mut monitors_reg = MonitorRegistry::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
@@ -213,6 +218,7 @@ impl Dome {
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
         self.hub.sync_config(self.layout.clone());
+        self.hub.set_ignore_rules(new_config.ignore.clone());
         self.config = new_config;
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_config(&self.config);
@@ -316,10 +322,6 @@ impl Dome {
         to_refresh
     }
 
-    pub(super) fn ignore_rules(&self) -> &[crate::config::WindowsWindow] {
-        &self.config.windows.ignore
-    }
-
     /// Adding a manageable window.
     #[tracing::instrument(skip_all, fields(pid = ext.pid(), hwnd = %ext.id(), metadata = %metadata))]
     pub(super) fn add_window(
@@ -341,9 +343,13 @@ impl Dome {
         } else {
             WindowRestrictions::None
         };
-        let (id, mode) = self
-            .hub
-            .insert_window(Box::new(metadata.clone()), rect, restrictions);
+        let Some((id, mode)) =
+            self.hub
+                .insert_window(Box::new(metadata.clone()), rect, restrictions)
+        else {
+            tracing::trace!(hwnd = %ext.id(), pid = ext.pid(), "ignored by rule");
+            return;
+        };
         tracing::info!(%id, ?mode, "New window");
         let state = match mode {
             DisplayMode::Tiling => WindowState::Positioned(PositionedState::Offscreen {

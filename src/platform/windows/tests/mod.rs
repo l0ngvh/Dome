@@ -296,17 +296,6 @@ impl TestEnv {
                 ext.max_size.1,
             ),
         };
-        let ignored = self.dome.ignore_rules().iter().any(|r| {
-            r.matches(
-                &new.metadata.process,
-                new.metadata.title.as_deref(),
-                new.metadata.class.as_deref(),
-                new.metadata.aumid.as_deref(),
-            )
-        });
-        if ignored {
-            return hwnd_id;
-        }
         let dim = ext.get_dim();
         self.dome.add_window(new, dim, 1);
         hwnd_id
