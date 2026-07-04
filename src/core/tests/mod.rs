@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use crate::config::{
     LayoutConfig, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint,
-    Strategy, WindowMatcher,
+    Strategy, TreeLayoutNode, WindowMatcher,
 };
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
@@ -861,6 +861,7 @@ struct LayoutWorkspaceConfigBuilder {
     master_count: Option<usize>,
     master: Vec<WindowMatcher>,
     secondary: Vec<WindowMatcher>,
+    tree: Option<TreeLayoutNode>,
     float: Vec<WindowMatcher>,
     fullscreen: Vec<WindowMatcher>,
 }
@@ -874,6 +875,7 @@ impl LayoutWorkspaceConfigBuilder {
             master_count: None,
             master: vec![],
             secondary: vec![],
+            tree: None,
             float: vec![],
             fullscreen: vec![],
         }
@@ -906,6 +908,14 @@ impl LayoutWorkspaceConfigBuilder {
         Self { fullscreen, ..self }
     }
 
+    #[allow(dead_code)]
+    fn with_tree(self, tree: TreeLayoutNode) -> Self {
+        Self {
+            tree: Some(tree),
+            ..self
+        }
+    }
+
     fn build(self) -> LayoutWorkspaceConfig {
         match self.strategy {
             Strategy::Master => LayoutWorkspaceConfig::Master {
@@ -919,6 +929,7 @@ impl LayoutWorkspaceConfigBuilder {
             },
             Strategy::PartitionTree => LayoutWorkspaceConfig::PartitionTree {
                 name: self.name,
+                tree: self.tree,
                 float: self.float,
                 fullscreen: self.fullscreen,
             },

@@ -39,11 +39,17 @@ master_count = 3
 float = [
   { process = "calculator.exe" },
 ]
-
-[[workspace]]
-name = "code"
-strategy = "master"
-master_ratio = 0.7
 fullscreen = [
   { process = "slides.exe" },
 ]
+
+[[workspace]]
+name = "code"
+strategy = "partition-tree"
+tree = { split = "horizontal", children = [
+  { process = "editor.exe" },
+  { split = "vertical", children = [
+    { process = "terminal.exe" },
+    { process = "logs.exe" },
+  ]},
+]}

@@ -835,6 +835,97 @@ impl WalkRule for WindowMatcher {
         &["app", "bundle_id", "title", "process", "class", "aumid"];
 }
 
+/// Split mode for a `TreeLayoutNode::Container`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SplitMode {
+    Horizontal,
+    Vertical,
+    Tabbed,
+}
+
+/// A node in the preferred tree layout for partition-tree workspaces.
+/// Either a single window matcher (leaf) or a container with nested children.
+///
+/// TOML shapes:
+///   Leaf:            `{ process = "editor.exe" }`
+///   Array container:  `[{ process = "a" }, { process = "b" }]`
+///   Split container:  `{ split = "horizontal", children = [...] }`
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum TreeLayoutNode {
+    Leaf(WindowMatcher),
+    Container {
+        /// `None` means the split mode is unspecified — the runtime
+        /// will pick based on context when materializing the tree.
+        split: Option<SplitMode>,
+        children: Vec<TreeLayoutNode>,
+    },
+}
+
+/// Helper struct for deserializing the container variant of `TreeLayoutNode`.
+#[derive(Deserialize)]
+struct TreeContainer {
+    #[serde(default)]
+    split: Option<SplitMode>,
+    children: Vec<TreeLayoutNode>,
+}
+
+impl From<TreeContainer> for TreeLayoutNode {
+    fn from(c: TreeContainer) -> Self {
+        TreeLayoutNode::Container {
+            split: c.split,
+            children: c.children,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TreeLayoutNode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = TreeLayoutNode;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a window matcher table, an array of children, or a container table with split and children")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let children = Vec::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(TreeLayoutNode::Container {
+                    split: None,
+                    children,
+                })
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                map: M,
+            ) -> Result<Self::Value, M::Error> {
+                use serde::de::Error;
+                let value: toml::Value =
+                    toml::Value::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                        .map_err(|e| M::Error::custom(&e))?;
+                if value
+                    .as_table()
+                    .is_some_and(|t| t.contains_key("split") || t.contains_key("children"))
+                {
+                    TreeContainer::deserialize(value)
+                        .map(Into::into)
+                        .map_err(|e| M::Error::custom(&e))
+                } else {
+                    WindowMatcher::deserialize(value)
+                        .map(TreeLayoutNode::Leaf)
+                        .map_err(|e| M::Error::custom(&e))
+                }
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub(crate) struct LayoutConfig {
     #[serde(default = "default_strategy")]
@@ -967,6 +1058,8 @@ pub(crate) enum LayoutWorkspaceConfig {
     PartitionTree {
         name: String,
         #[serde(default)]
+        tree: Option<TreeLayoutNode>,
+        #[serde(default)]
         float: Vec<WindowMatcher>,
         #[serde(default)]
         fullscreen: Vec<WindowMatcher>,
@@ -1008,6 +1101,7 @@ impl WalkRule for LayoutWorkspaceConfig {
         "secondary",
         "float",
         "fullscreen",
+        "tree",
     ];
 }
 
@@ -2224,5 +2318,161 @@ mod tests {
             layout.workspace[0],
             LayoutWorkspaceConfig::Master { .. }
         ));
+    }
+
+    #[test]
+    fn tree_leaf_parses() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "dev"
+strategy = "partition_tree"
+tree = { process = "editor.exe" }
+"#,
+        )
+        .unwrap();
+        assert_eq!(ws.name(), "dev");
+        match ws {
+            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+                assert!(matches!(tree, Some(TreeLayoutNode::Leaf(..))));
+            }
+            _ => panic!("expected PartitionTree variant"),
+        }
+    }
+
+    #[test]
+    fn tree_array_container_parses() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "dev"
+strategy = "partition_tree"
+tree = [
+  { process = "editor.exe" },
+  { process = "terminal.exe" },
+]
+"#,
+        )
+        .unwrap();
+        match ws {
+            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+                let Some(TreeLayoutNode::Container { split, children }) = tree else {
+                    panic!("expected Container");
+                };
+                assert!(split.is_none());
+                assert_eq!(children.len(), 2);
+                assert!(matches!(children[0], TreeLayoutNode::Leaf(..)));
+                assert!(matches!(children[1], TreeLayoutNode::Leaf(..)));
+            }
+            _ => panic!("expected PartitionTree variant"),
+        }
+    }
+
+    #[test]
+    fn tree_split_container_parses() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "dev"
+strategy = "partition_tree"
+tree = { split = "horizontal", children = [
+  { process = "a.exe" },
+  { process = "b.exe" },
+]}
+"#,
+        )
+        .unwrap();
+        match ws {
+            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+                let Some(TreeLayoutNode::Container { split, children }) = tree else {
+                    panic!("expected Container");
+                };
+                assert_eq!(split, Some(SplitMode::Horizontal));
+                assert_eq!(children.len(), 2);
+            }
+            _ => panic!("expected PartitionTree variant"),
+        }
+    }
+
+    #[test]
+    fn tree_tabbed_parses() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "dev"
+strategy = "partition_tree"
+tree = { split = "tabbed", children = [
+  { process = "browser.exe" },
+  { process = "editor.exe" },
+]}
+"#,
+        )
+        .unwrap();
+        match ws {
+            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+                let Some(TreeLayoutNode::Container { split, children }) = tree else {
+                    panic!("expected Container");
+                };
+                assert_eq!(split, Some(SplitMode::Tabbed));
+                assert_eq!(children.len(), 2);
+            }
+            _ => panic!("expected PartitionTree variant"),
+        }
+    }
+
+    #[test]
+    fn tree_nested_parses() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "dev"
+strategy = "partition_tree"
+tree = { split = "horizontal", children = [
+  { process = "editor.exe" },
+  { split = "vertical", children = [
+    { process = "terminal.exe" },
+    { process = "logs.exe" },
+  ]},
+]}
+"#,
+        )
+        .unwrap();
+        match ws {
+            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+                let Some(TreeLayoutNode::Container { split, children }) = tree else {
+                    panic!("expected outer Container");
+                };
+                assert_eq!(split, Some(SplitMode::Horizontal));
+                assert_eq!(children.len(), 2);
+                assert!(matches!(children[0], TreeLayoutNode::Leaf(..)));
+                assert!(matches!(
+                    children[1],
+                    TreeLayoutNode::Container {
+                        split: Some(SplitMode::Vertical),
+                        ..
+                    }
+                ));
+            }
+            _ => panic!("expected PartitionTree variant"),
+        }
+    }
+
+    #[test]
+    fn tree_default_none() {
+        let ws: LayoutWorkspaceConfig = toml::from_str(
+            r#"name = "dev"
+strategy = "partition_tree"
+"#,
+        )
+        .unwrap();
+        match ws {
+            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+                assert!(tree.is_none());
+            }
+            _ => panic!("expected PartitionTree variant"),
+        }
+    }
+
+    #[test]
+    fn tree_invalid_split_warns() {
+        assert!(
+            toml::from_str::<LayoutWorkspaceConfig>(
+                r#"name = "dev"
+strategy = "partition_tree"
+tree = { split = "diagonal", children = []}
+"#,
+            )
+            .is_err()
+        );
     }
 }
