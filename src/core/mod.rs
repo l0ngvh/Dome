@@ -18,13 +18,13 @@ pub(crate) use hub::MonitorPlacements;
 pub(crate) use hub::{
     ContainerPlacement, FloatWindowPlacement, MonitorLayout, SpawnIndicator, TilingWindowPlacement,
 };
+pub(crate) use node::Direction;
 #[cfg(target_os = "windows")]
 pub(crate) use node::Physical;
 pub(crate) use node::{
     ContainerId, Dimension, Length, Logical, MonitorId, PickerEntry, Unit, WindowId,
     WindowMetadata, WindowRestrictions,
 };
-pub(crate) use node::{Direction, DisplayMode};
 pub(crate) use strategy::TilingAction;
 
 pub(crate) use dto::WorkspaceInfo;

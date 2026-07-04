@@ -564,7 +564,7 @@ impl Hub {
         metadata: Box<dyn WindowMetadata>,
         dimension: Dimension,
         restrictions: WindowRestrictions,
-    ) -> Option<(WindowId, DisplayMode)> {
+    ) -> Option<WindowId> {
         if let Some(r) = self
             .ignore_rules
             .iter()
@@ -589,13 +589,13 @@ impl Hub {
                     WindowMode::Float => self.insert_float(target_ws, dimension, metadata),
                     WindowMode::Tiling => self.insert_tiling(target_ws, metadata),
                 };
-                return Some((id, self.access.windows.get(id).mode));
+                return Some(id);
             }
             let id = self.insert_tiling(target_ws, metadata);
-            return Some((id, self.access.windows.get(id).mode));
+            return Some(id);
         }
         let id = self.insert_fullscreen(target_ws, restrictions, metadata);
-        Some((id, self.access.windows.get(id).mode))
+        Some(id)
     }
 
     pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) -> bool {

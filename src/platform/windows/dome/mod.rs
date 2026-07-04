@@ -18,9 +18,9 @@ use crate::action::Query;
 use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
 use crate::config::{Config, LayoutConfig};
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, Direction, DisplayMode, FloatWindowPlacement, Hub,
-    Length, Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement,
-    WindowId, WindowRestrictions,
+    ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
+    Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId,
+    WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 
@@ -343,24 +343,21 @@ impl Dome {
         } else {
             WindowRestrictions::None
         };
-        let Some((id, mode)) =
-            self.hub
-                .insert_window(Box::new(metadata.clone()), rect, restrictions)
+        let Some(id) = self
+            .hub
+            .insert_window(Box::new(metadata.clone()), rect, restrictions)
         else {
             tracing::trace!(hwnd = %ext.id(), pid = ext.pid(), "ignored by rule");
             return;
         };
-        tracing::info!(%id, ?mode, "New window");
-        let state = match mode {
-            DisplayMode::Tiling => WindowState::Positioned(PositionedState::Offscreen {
+        tracing::info!(%id, "New window");
+        let state = if borderless_fs {
+            WindowState::BorderlessFullscreen
+        } else {
+            WindowState::Positioned(PositionedState::Offscreen {
                 retries: 0,
                 actual: rect,
-            }),
-            DisplayMode::Float { .. } => WindowState::Positioned(PositionedState::Offscreen {
-                retries: 0,
-                actual: rect,
-            }),
-            DisplayMode::Fullscreen => WindowState::BorderlessFullscreen,
+            })
         };
         let id_key = ext.id();
         self.set_constraints(id, constraints);

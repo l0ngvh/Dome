@@ -226,16 +226,13 @@ mod tests {
         );
         let w1 = hub
             .insert_window(titled("Window One"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let w2 = hub
             .insert_window(titled("Window Two"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let w3 = hub
             .insert_window(titled("Window Three"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         hub.minimize_window(w1);
         hub.minimize_window(w2);
         hub.minimize_window(w3);
@@ -266,12 +263,10 @@ mod tests {
         );
         let w1 = hub
             .insert_window(titled("Chrome 1"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let w2 = hub
             .insert_window(titled("Chrome 2"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         hub.minimize_window(w1);
         hub.minimize_window(w2);
         let entries = build_picker_entries(&hub.minimized_window_entries());
@@ -301,16 +296,13 @@ mod tests {
         );
         let w1 = hub
             .insert_window(titled("w1"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let w2 = hub
             .insert_window(titled("w2"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let w3 = hub
             .insert_window(titled("w3"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let entries = vec![
             PickerEntry {
                 id: w1,

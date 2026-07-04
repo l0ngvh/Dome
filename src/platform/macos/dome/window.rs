@@ -333,7 +333,7 @@ fn hidden_position(monitors: &[MonitorInfo]) -> (Length, Length) {
 impl Dome {
     #[tracing::instrument(skip_all, fields(window = %new))]
     pub(super) fn add_native_fullscreen_window(&mut self, new: NewWindow) -> Option<WindowId> {
-        let (window_id, _) = self.hub.insert_window(
+        let window_id = self.hub.insert_window(
             Box::new(new.metadata.clone()),
             Dimension::new(
                 Length::new(0.0),

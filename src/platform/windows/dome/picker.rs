@@ -489,20 +489,16 @@ mod tests {
         );
         let w1 = hub
             .insert_window(titled("w1"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let w2 = hub
             .insert_window(titled("w2"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let w3 = hub
             .insert_window(titled("w3"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let w4 = hub
             .insert_window(titled("w4"), dim, WindowRestrictions::None)
-            .unwrap()
-            .0;
+            .unwrap();
         let entries = vec![
             PickerEntry {
                 id: w1,

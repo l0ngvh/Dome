@@ -24,8 +24,8 @@ use objc2_core_graphics::CGWindowID;
 use crate::action::{FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
 use crate::config::{Config, LayoutConfig, WindowMatcher, pattern_matches};
 use crate::core::{
-    ContainerId, Direction, DisplayMode, Hub, Length, Logical, TilingAction, WindowId,
-    WindowMetadata, WindowRestrictions,
+    ContainerId, Direction, Hub, Length, Logical, TilingAction, WindowId, WindowMetadata,
+    WindowRestrictions,
 };
 use crate::picker::build_picker_entries;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -261,7 +261,7 @@ impl Dome {
                     } else {
                         WindowRestrictions::None
                     };
-                    let Some((id, display_mode)) = self.hub.insert_window(
+                    let Some(id) = self.hub.insert_window(
                         Box::new(new.metadata.clone()),
                         dim.to_dimension(),
                         restrictions,
@@ -278,17 +278,13 @@ impl Dome {
                         }
                         continue;
                     };
-                    tracing::info!(%id, ?display_mode, %new, "New window");
-                    let state = match display_mode {
-                        DisplayMode::Tiling => {
-                            WindowState::Positioned(window::PositionedState::Offscreen(
-                                window::OffscreenPlacement::new(dim),
-                            ))
-                        }
-                        DisplayMode::Float { .. } => WindowState::Positioned(
-                            window::PositionedState::Float(window::FloatPlacement::new(dim)),
-                        ),
-                        DisplayMode::Fullscreen => WindowState::BorderlessFullscreen,
+                    tracing::info!(%id, %new, "New window");
+                    let state = if borderless_fs {
+                        WindowState::BorderlessFullscreen
+                    } else {
+                        WindowState::Positioned(window::PositionedState::Offscreen(
+                            window::OffscreenPlacement::new(dim),
+                        ))
                     };
                     self.finalize_added_window(new, id, state);
                     self.recovery.track(
