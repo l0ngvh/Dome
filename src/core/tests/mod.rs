@@ -14,12 +14,17 @@ mod strategy_switch;
 
 use std::collections::HashSet;
 
-use crate::config::{LayoutConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, Strategy};
-use crate::core::WindowMetadata;
+use crate::config::{
+    LayoutConfig, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint,
+    Strategy, WindowMatcher,
+};
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Dimension, Direction, Length, Logical, WindowId};
 use crate::core::strategy::TilingAction;
+use crate::core::{
+    ContainerPlacement, FloatWindowPlacement, TilingWindowPlacement, WindowMetadata,
+};
 
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
@@ -250,7 +255,7 @@ fn fmt_spawn(indicator: &SpawnIndicator) -> String {
     dirs.join("+")
 }
 
-fn fmt_tiling_placement(wp: &crate::core::hub::TilingWindowPlacement) -> String {
+fn fmt_tiling_placement(wp: &TilingWindowPlacement) -> String {
     let d = wp.visible_frame;
     let mut parts = format!(
         "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
@@ -266,7 +271,7 @@ fn fmt_tiling_placement(wp: &crate::core::hub::TilingWindowPlacement) -> String 
     parts
 }
 
-fn fmt_float_placement(wp: &crate::core::hub::FloatWindowPlacement) -> String {
+fn fmt_float_placement(wp: &FloatWindowPlacement) -> String {
     let d = wp.visible_frame;
     let mut parts = format!(
         "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
@@ -280,7 +285,7 @@ fn fmt_float_placement(wp: &crate::core::hub::FloatWindowPlacement) -> String {
     parts
 }
 
-fn fmt_container_placement(cp: &crate::core::hub::ContainerPlacement) -> String {
+fn fmt_container_placement(cp: &ContainerPlacement) -> String {
     let d = cp.visible_frame;
     let mut parts = format!(
         "    Container(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
@@ -587,10 +592,6 @@ fn validate_minimized(hub: &Hub) {
     }
 }
 
-fn setup_logger() {
-    setup_logger_with_level("warn");
-}
-
 /// Test convenience methods that wrap handle_tiling_action with the appropriate
 /// TilingAction variant. Keeps test call sites readable (e.g. hub.focus_left()
 /// instead of hub.handle_tiling_action(TilingAction::FocusDirection { ... })).
@@ -694,71 +695,244 @@ pub(super) fn setup_logger_with_level(level: &str) {
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
 
-pub(super) fn default_partition_tree_config_for_tests() -> PartitionTreeConfig {
-    PartitionTreeConfig {
-        tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
-        automatic_tiling: false,
+#[derive(Clone)]
+struct TestHubBuilder {
+    layout: LayoutConfig,
+}
+
+impl TestHubBuilder {
+    fn new() -> Self {
+        Self {
+            layout: LayoutConfigBuilder::new().build(),
+        }
+    }
+
+    fn with_layout(self, layout: LayoutConfig) -> Self {
+        Self { layout }
+    }
+
+    fn build(self) -> Hub {
+        Hub::new(
+            Dimension::new(
+                Length::new(0.0),
+                Length::new(0.0),
+                Length::new(ASCII_WIDTH as f32),
+                Length::new(ASCII_HEIGHT as f32),
+            ),
+            1.0,
+            self.layout,
+            Vec::new(),
+        )
     }
 }
-pub(super) fn default_master_config_for_tests() -> MasterConfig {
-    MasterConfig {
-        master_ratio: 0.5,
-        master_count: 1,
+
+struct LayoutConfigBuilder {
+    strategy: Strategy,
+    master: MasterConfig,
+    partition_tree: PartitionTreeConfig,
+    workspace: Vec<LayoutWorkspaceConfig>,
+    min_width: SizeConstraint,
+    min_height: SizeConstraint,
+    max_width: SizeConstraint,
+    max_height: SizeConstraint,
+    float: Vec<WindowMatcher>,
+    fullscreen: Vec<WindowMatcher>,
+}
+
+impl LayoutConfigBuilder {
+    fn new() -> Self {
+        Self {
+            strategy: Strategy::PartitionTree,
+            master: MasterConfig {
+                master_ratio: 0.5,
+                master_count: 1,
+            },
+            partition_tree: PartitionTreeConfig {
+                tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
+                automatic_tiling: false,
+            },
+            workspace: vec![],
+            min_width: SizeConstraint::Pixels(Length::new(1.0)),
+            min_height: SizeConstraint::Pixels(Length::new(1.0)),
+            max_width: SizeConstraint::Pixels(Length::new(0.0)),
+            max_height: SizeConstraint::Pixels(Length::new(0.0)),
+            float: vec![],
+            fullscreen: vec![],
+        }
+    }
+    fn with_strategy(self, strategy: Strategy) -> Self {
+        Self { strategy, ..self }
+    }
+
+    fn with_master_config(self, master: MasterConfig) -> Self {
+        Self { master, ..self }
+    }
+
+    fn with_workspace(self, workspace: Vec<LayoutWorkspaceConfig>) -> Self {
+        Self { workspace, ..self }
+    }
+
+    fn with_min_width(self, min_width: SizeConstraint) -> Self {
+        Self { min_width, ..self }
+    }
+
+    fn with_min_height(self, min_height: SizeConstraint) -> Self {
+        Self { min_height, ..self }
+    }
+
+    fn with_partition_tree_config(self, partition_tree: PartitionTreeConfig) -> Self {
+        Self {
+            partition_tree,
+            ..self
+        }
+    }
+
+    fn with_max_width(self, max_width: SizeConstraint) -> Self {
+        Self { max_width, ..self }
+    }
+
+    fn with_max_height(self, max_height: SizeConstraint) -> Self {
+        Self { max_height, ..self }
+    }
+
+    fn with_float(self, float: Vec<WindowMatcher>) -> Self {
+        Self { float, ..self }
+    }
+
+    fn with_fullscreen(self, fullscreen: Vec<WindowMatcher>) -> Self {
+        Self { fullscreen, ..self }
+    }
+
+    fn build(self) -> LayoutConfig {
+        LayoutConfig {
+            strategy: self.strategy,
+            partition_tree: self.partition_tree,
+            master: self.master,
+            min_width: self.min_width,
+            min_height: self.min_height,
+            max_width: self.max_width,
+            max_height: self.max_height,
+            workspace: self.workspace,
+            float: self.float,
+            fullscreen: self.fullscreen,
+        }
     }
 }
-pub(super) fn default_layout_for_tests() -> LayoutConfig {
-    LayoutConfig {
-        strategy: Strategy::PartitionTree,
-        partition_tree: default_partition_tree_config_for_tests(),
-        master: default_master_config_for_tests(),
-        min_width: SizeConstraint::Pixels(Length::new(0.0)),
-        min_height: SizeConstraint::Pixels(Length::new(0.0)),
-        max_width: SizeConstraint::Pixels(Length::new(0.0)),
-        max_height: SizeConstraint::Pixels(Length::new(0.0)),
-        workspace: vec![],
-        float: vec![],
-        fullscreen: vec![],
+
+struct PartitionTreeConfigBuilder {
+    tab_bar_height: Length<Logical>,
+    automatic_tiling: bool,
+}
+
+impl PartitionTreeConfigBuilder {
+    fn new() -> Self {
+        Self {
+            tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
+            automatic_tiling: false,
+        }
+    }
+
+    fn with_tab_bar_height(self, tab_bar_height: Length<Logical>) -> Self {
+        Self {
+            tab_bar_height,
+            ..self
+        }
+    }
+
+    fn with_automatic_tiling(self, automatic_tiling: bool) -> Self {
+        Self {
+            automatic_tiling,
+            ..self
+        }
+    }
+
+    fn build(self) -> PartitionTreeConfig {
+        PartitionTreeConfig {
+            tab_bar_height: self.tab_bar_height,
+            automatic_tiling: self.automatic_tiling,
+        }
+    }
+}
+
+struct LayoutWorkspaceConfigBuilder {
+    strategy: Strategy,
+    name: String,
+    master_ratio: Option<f32>,
+    master_count: Option<usize>,
+    master: Vec<WindowMatcher>,
+    secondary: Vec<WindowMatcher>,
+    float: Vec<WindowMatcher>,
+    fullscreen: Vec<WindowMatcher>,
+}
+
+impl LayoutWorkspaceConfigBuilder {
+    fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            strategy: Strategy::PartitionTree,
+            master_ratio: None,
+            master_count: None,
+            master: vec![],
+            secondary: vec![],
+            float: vec![],
+            fullscreen: vec![],
+        }
+    }
+
+    fn with_strategy(self, strategy: Strategy) -> Self {
+        Self { strategy, ..self }
+    }
+
+    fn with_master_count(self, master_count: usize) -> Self {
+        Self {
+            master_count: Some(master_count),
+            ..self
+        }
+    }
+
+    fn with_master(self, master: Vec<WindowMatcher>) -> Self {
+        Self { master, ..self }
+    }
+
+    fn with_secondary(self, secondary: Vec<WindowMatcher>) -> Self {
+        Self { secondary, ..self }
+    }
+
+    fn with_float(self, float: Vec<WindowMatcher>) -> Self {
+        Self { float, ..self }
+    }
+
+    fn with_fullscreen(self, fullscreen: Vec<WindowMatcher>) -> Self {
+        Self { fullscreen, ..self }
+    }
+
+    fn build(self) -> LayoutWorkspaceConfig {
+        match self.strategy {
+            Strategy::Master => LayoutWorkspaceConfig::Master {
+                name: self.name,
+                master_count: self.master_count,
+                master_ratio: self.master_ratio,
+                master: self.master,
+                secondary: self.secondary,
+                float: self.float,
+                fullscreen: self.fullscreen,
+            },
+            Strategy::PartitionTree => LayoutWorkspaceConfig::PartitionTree {
+                name: self.name,
+                float: self.float,
+                fullscreen: self.fullscreen,
+            },
+        }
     }
 }
 
 pub(super) fn setup_hub() -> Hub {
-    Hub::new(
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(ASCII_WIDTH as f32),
-            Length::new(ASCII_HEIGHT as f32),
-        ),
-        1.0,
-        default_layout_for_tests(),
-        Vec::new(),
-    )
+    TestHubBuilder::new().build()
 }
 
 pub(super) fn setup() -> Hub {
-    setup_logger();
+    setup_logger_with_level("warn");
     setup_hub()
-}
-
-pub(super) fn setup_with_automatic_tiling() -> Hub {
-    setup_logger();
-    Hub::new(
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(ASCII_WIDTH as f32),
-            Length::new(ASCII_HEIGHT as f32),
-        ),
-        1.0,
-        crate::config::LayoutConfig {
-            partition_tree: crate::config::PartitionTreeConfig {
-                automatic_tiling: true,
-                ..default_partition_tree_config_for_tests()
-            },
-            ..default_layout_for_tests()
-        },
-        Vec::new(),
-    )
 }
 
 /// Minimal test metadata with no structure — title set via `titled` or

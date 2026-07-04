@@ -1,7 +1,7 @@
 use insta::assert_snapshot;
 
 #[cfg(target_os = "windows")]
-use super::default_layout_for_tests;
+use super::{LayoutConfigBuilder, PartitionTreeConfigBuilder};
 #[cfg(target_os = "windows")]
 use crate::config::SizeConstraint;
 #[cfg(target_os = "windows")]
@@ -515,13 +515,14 @@ fn monitor_scale_multiplies_config_lengths() {
             Length::new(1000.0),
         ),
         2.0,
-        crate::config::LayoutConfig {
-            partition_tree: crate::config::PartitionTreeConfig {
-                tab_bar_height: Length::<Logical>::new(20.0),
-                automatic_tiling: true,
-            },
-            ..default_layout_for_tests()
-        },
+        LayoutConfigBuilder::new()
+            .with_partition_tree_config(
+                PartitionTreeConfigBuilder::new()
+                    .with_tab_bar_height(Length::<Logical>::new(20.0))
+                    .with_automatic_tiling(true)
+                    .build(),
+            )
+            .build(),
         Vec::new(),
     );
     hub.insert_tiling(hub.current_workspace(), titled("w16"));
@@ -581,14 +582,15 @@ fn monitor_scale_multiplies_config_lengths() {
             Length::new(1000.0),
         ),
         2.0,
-        crate::config::LayoutConfig {
-            partition_tree: crate::config::PartitionTreeConfig {
-                tab_bar_height: Length::<Logical>::new(20.0),
-                automatic_tiling: true,
-            },
-            min_width: SizeConstraint::Pixels(Length::new(100.0)),
-            ..default_layout_for_tests()
-        },
+        LayoutConfigBuilder::new()
+            .with_partition_tree_config(
+                PartitionTreeConfigBuilder::new()
+                    .with_tab_bar_height(Length::<Logical>::new(20.0))
+                    .with_automatic_tiling(true)
+                    .build(),
+            )
+            .with_min_width(SizeConstraint::Pixels(Length::new(100.0)))
+            .build(),
         Vec::new(),
     );
     for _ in 0..6 {

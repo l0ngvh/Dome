@@ -1,9 +1,21 @@
-use crate::core::tests::{setup_with_automatic_tiling, snapshot, titled};
+use crate::core::tests::{
+    LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, snapshot, titled,
+};
 use insta::assert_snapshot;
 
 #[test]
 fn auto_tile_sets_horizontal_spawn_mode_when_width_greater_than_height() {
-    let mut hub = setup_with_automatic_tiling();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_automatic_tiling(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w0"));
     hub.insert_tiling(hub.current_workspace(), titled("w1"));
     hub.insert_tiling(hub.current_workspace(), titled("w2"));
@@ -51,7 +63,17 @@ fn auto_tile_sets_horizontal_spawn_mode_when_width_greater_than_height() {
 
 #[test]
 fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
-    let mut hub = setup_with_automatic_tiling();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_automatic_tiling(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
     // Going on a round trip to ensure that we can always create a horizontal container with 6
     // direct children, as the auto tile logic can get confused when width is approximately equal
     // to height, due to floating precision lost
@@ -119,7 +141,17 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
 
 #[test]
 fn auto_tile_preserves_tab_spawn_mode() {
-    let mut hub = setup_with_automatic_tiling();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_automatic_tiling(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
@@ -169,7 +201,17 @@ fn auto_tile_preserves_tab_spawn_mode() {
 
 #[test]
 fn auto_tile_adjusts_after_toggle_direction() {
-    let mut hub = setup_with_automatic_tiling();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_automatic_tiling(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w10"));
     hub.insert_tiling(hub.current_workspace(), titled("w11"));
     hub.insert_tiling(hub.current_workspace(), titled("w12"));
@@ -222,7 +264,17 @@ fn auto_tile_adjusts_after_toggle_direction() {
 
 #[test]
 fn auto_tile_with_tab_spawn_mode() {
-    let mut hub = setup_with_automatic_tiling();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_automatic_tiling(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
     hub.insert_tiling_titled();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
@@ -270,7 +322,17 @@ fn auto_tile_with_tab_spawn_mode() {
 
 #[test]
 fn auto_tile_preserves_tab_spawn_mode_on_nested_container_on_delete() {
-    let mut hub = setup_with_automatic_tiling();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_automatic_tiling(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();
     let w2 = hub.insert_tiling_titled();

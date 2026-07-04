@@ -114,6 +114,7 @@ pub(crate) struct Hub {
     /// Per-workspace matchers: filled from LayoutWorkspaceConfig entries. First match wins.
     pub(super) ws_fullscreen_matchers: Vec<(WindowMatcher, WorkspaceId)>,
     pub(super) ws_float_matchers: Vec<(WindowMatcher, WorkspaceId)>,
+    pub(super) ws_tiling_matchers: Vec<(WindowMatcher, WorkspaceId)>,
     /// Global (top-level) matchers: filled from LayoutConfig. No workspace routing.
     pub(super) fullscreen_matchers: Vec<WindowMatcher>,
     pub(super) float_matchers: Vec<WindowMatcher>,
@@ -169,6 +170,7 @@ impl Hub {
             minimized_windows: Vec::new(),
             ws_fullscreen_matchers: Vec::new(),
             ws_float_matchers: Vec::new(),
+            ws_tiling_matchers: Vec::new(),
             fullscreen_matchers: Vec::new(),
             float_matchers: Vec::new(),
             ignore_rules,
@@ -486,36 +488,63 @@ impl Hub {
     pub(crate) fn rebuild_matchers(&mut self) {
         self.ws_fullscreen_matchers.clear();
         self.ws_float_matchers.clear();
+        self.ws_tiling_matchers.clear();
         // Collect all matchers with workspace names first (to avoid borrowing conflict).
-        let entries: Vec<(&[WindowMatcher], &[WindowMatcher], &str)> = self
+        struct Entry<'a> {
+            fullscreen: &'a [WindowMatcher],
+            float: &'a [WindowMatcher],
+            tiling: Vec<WindowMatcher>,
+            name: &'a str,
+        }
+        let entries: Vec<Entry<'_>> = self
             .access
             .config
             .workspace
             .iter()
             .map(|entry| {
                 use LayoutWorkspaceConfig::*;
-                let (fullscreen_slice, float_slice) = match entry {
+                match entry {
                     PartitionTree {
-                        fullscreen, float, ..
-                    }
-                    | Master {
-                        fullscreen, float, ..
-                    } => (fullscreen.as_slice(), float.as_slice()),
-                };
-                (fullscreen_slice, float_slice, entry.name())
+                        fullscreen,
+                        float,
+                        name,
+                        ..
+                    } => Entry {
+                        fullscreen: fullscreen.as_slice(),
+                        float: float.as_slice(),
+                        tiling: Vec::new(),
+                        name,
+                    },
+                    Master {
+                        fullscreen,
+                        float,
+                        master,
+                        secondary,
+                        name,
+                        ..
+                    } => Entry {
+                        fullscreen: fullscreen.as_slice(),
+                        float: float.as_slice(),
+                        tiling: master.iter().chain(secondary.iter()).cloned().collect(),
+                        name,
+                    },
+                }
             })
             .collect();
-        for (fullscreen_slice, float_slice, name) in entries {
+        for entry in entries {
             let ws_id = self
                 .access
                 .workspaces
-                .find(|ws| ws.name == name)
+                .find(|ws| ws.name == entry.name)
                 .expect("workspace must be pre-allocated before rebuild_matchers");
-            for m in fullscreen_slice {
+            for m in entry.fullscreen {
                 self.ws_fullscreen_matchers.push((m.clone(), ws_id));
             }
-            for m in float_slice {
+            for m in entry.float {
                 self.ws_float_matchers.push((m.clone(), ws_id));
+            }
+            for m in entry.tiling {
+                self.ws_tiling_matchers.push((m, ws_id));
             }
         }
         self.fullscreen_matchers = self.access.config.fullscreen.clone();
@@ -555,7 +584,7 @@ impl Hub {
                         self.insert_fullscreen(target_ws, WindowRestrictions::None, metadata)
                     }
                     WindowMode::Float => self.insert_float(target_ws, dimension, metadata),
-                    _ => unreachable!(),
+                    WindowMode::Tiling => self.insert_tiling(target_ws, metadata),
                 };
                 return Some((id, self.access.windows.get(id).mode));
             }
@@ -967,6 +996,11 @@ impl Hub {
         for (m, ws_id) in &self.ws_float_matchers {
             if metadata.matches_window_matcher(m) {
                 return Some((Some(*ws_id), WindowMode::Float));
+            }
+        }
+        for (m, ws_id) in &self.ws_tiling_matchers {
+            if metadata.matches_window_matcher(m) {
+                return Some((Some(*ws_id), WindowMode::Tiling));
             }
         }
         // Global matchers (fallback, no workspace routing)

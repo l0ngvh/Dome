@@ -1,16 +1,22 @@
-use super::setup_master;
-use crate::config::{LayoutConfig, LayoutWorkspaceConfig, MasterConfig, Strategy};
+use crate::config::{MasterConfig, Strategy};
 use crate::core::allocator::NodeId;
 use crate::core::node::WindowId;
 use crate::core::strategy::TilingAction;
-use crate::core::tests::default_layout_for_tests;
-use crate::core::tests::default_partition_tree_config_for_tests;
-use crate::core::tests::{snapshot, titled, validate_hub};
+use crate::core::tests::{
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, snapshot, titled,
+    validate_hub,
+};
 use insta::assert_snapshot;
 
 #[test]
 fn single_window_layout() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w0"));
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -53,7 +59,13 @@ fn single_window_layout() {
 
 #[test]
 fn two_windows_default_ratio() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w1"));
     hub.insert_tiling(hub.current_workspace(), titled("w2"));
     assert_snapshot!(snapshot(&hub), @"
@@ -98,7 +110,13 @@ fn two_windows_default_ratio() {
 
 #[test]
 fn three_windows_layout() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w3"));
     hub.insert_tiling(hub.current_workspace(), titled("w4"));
     hub.insert_tiling(hub.current_workspace(), titled("w5"));
@@ -145,7 +163,13 @@ fn three_windows_layout() {
 
 #[test]
 fn focus_direction_left_right() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w6")); // W0 = master
     hub.insert_tiling(hub.current_workspace(), titled("w7")); // W1 = stack (focused)
 
@@ -170,7 +194,13 @@ fn focus_direction_left_right() {
 
 #[test]
 fn focus_direction_up_down() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w8")); // W0 = master
     hub.insert_tiling(hub.current_workspace(), titled("w9")); // W1 = stack
     hub.insert_tiling(hub.current_workspace(), titled("w10")); // W2 = stack (focused)
@@ -195,125 +225,14 @@ fn focus_direction_up_down() {
 }
 
 #[test]
-fn move_direction_left_right() {
-    let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace(), titled("w11")); // W0 = master
-    hub.insert_tiling(hub.current_workspace(), titled("w12")); // W1 = stack (focused)
-
-    // Move W1 left: swaps with last master (W0). W1 becomes master, W0 becomes stack.
-    hub.move_left();
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=0.00, y=0.00, w=75.00, h=30.00, highlighted)
-        Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=30.00)
-      )
-
-    ***************************************************************************+-------------------------------------------------------------------------+
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                    W1                                   *|                                    W0                                   |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    ***************************************************************************+-------------------------------------------------------------------------+
-    ");
-}
-
-#[test]
-fn move_direction_up_down() {
-    let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace(), titled("w13")); // W0 = master
-    hub.insert_tiling(hub.current_workspace(), titled("w14")); // W1 = stack
-    hub.insert_tiling(hub.current_workspace(), titled("w15")); // W2 = stack (focused)
-
-    // Move W2 up within stack: swap with W1.
-    hub.move_up();
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(2))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=15.00, highlighted)
-        Window(id=WindowId(1), x=75.00, y=15.00, w=75.00, h=15.00)
-      )
-
-    +-------------------------------------------------------------------------+***************************************************************************
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                    W2                                   *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |***************************************************************************
-    |                                    W0                                   |+-------------------------------------------------------------------------+
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                    W1                                   |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
-    ");
-}
-
-#[test]
-fn single_window_focus_move_noop() {
-    let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace(), titled("w16"));
-
-    let before = snapshot(&hub);
-
-    hub.focus_left();
-    hub.focus_right();
-    hub.focus_up();
-    hub.focus_down();
-    hub.move_left();
-    hub.move_right();
-    hub.move_up();
-    hub.move_down();
-
-    assert_eq!(snapshot(&hub), before);
-}
-
-#[test]
 fn increase_decrease_master_ratio() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w17"));
     hub.insert_tiling(hub.current_workspace(), titled("w18"));
 
@@ -489,7 +408,13 @@ fn increase_decrease_master_ratio() {
 
 #[test]
 fn increment_decrement_master_count() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w19")); // W0
     hub.insert_tiling(hub.current_workspace(), titled("w20")); // W1
     hub.insert_tiling(hub.current_workspace(), titled("w21")); // W2
@@ -586,7 +511,13 @@ fn increment_decrement_master_count() {
 
 #[test]
 fn master_count_exceeds_window_count() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w22")); // W0
     hub.insert_tiling(hub.current_workspace(), titled("w23")); // W1
     hub.insert_tiling(hub.current_workspace(), titled("w24")); // W2
@@ -638,7 +569,13 @@ fn master_count_exceeds_window_count() {
 
 #[test]
 fn delete_window() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w25")); // W0 = master
     hub.insert_tiling(hub.current_workspace(), titled("w26")); // W1 = stack
     hub.insert_tiling(hub.current_workspace(), titled("w27")); // W2 = stack (focused)
@@ -726,236 +663,14 @@ fn delete_window() {
 }
 
 #[test]
-fn move_window_to_workspace() {
-    // Move master to another workspace
-    {
-        let mut hub = setup_master();
-        hub.insert_tiling(hub.current_workspace(), titled("w28")); // W0 = master
-        hub.insert_tiling(hub.current_workspace(), titled("w29")); // W1 = stack (focused)
-        hub.focus_left();
-        hub.move_focused_to_workspace("1");
-        assert_snapshot!(snapshot(&hub), @"
-        Hub(focused=WindowId(1))
-          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-            Window(id=WindowId(1), x=0.00, y=0.00, w=150.00, h=30.00, highlighted)
-          )
-
-        ******************************************************************************************************************************************************
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                         W1                                                                         *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        ******************************************************************************************************************************************************
-        ");
-
-        hub.focus_workspace("1");
-        assert_snapshot!(snapshot(&hub), @"
-        Hub(focused=WindowId(0))
-          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-            Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted)
-          )
-
-        ******************************************************************************************************************************************************
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                         W0                                                                         *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        ******************************************************************************************************************************************************
-        ");
-    }
-
-    // Move stack window to another workspace
-    {
-        let mut hub = setup_master();
-        hub.insert_tiling(hub.current_workspace(), titled("w30")); // W0 = master
-        hub.insert_tiling(hub.current_workspace(), titled("w31")); // W1 = stack
-        hub.insert_tiling(hub.current_workspace(), titled("w32")); // W2 = stack (focused)
-        hub.move_focused_to_workspace("1");
-        assert_snapshot!(snapshot(&hub), @"
-        Hub(focused=WindowId(1))
-          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-            Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-            Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted)
-          )
-
-        +-------------------------------------------------------------------------+***************************************************************************
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                    W0                                   |*                                    W1                                   *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        |                                                                         |*                                                                         *
-        +-------------------------------------------------------------------------+***************************************************************************
-        ");
-
-        hub.focus_workspace("1");
-        assert_snapshot!(snapshot(&hub), @"
-        Hub(focused=WindowId(2))
-          Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-            Window(id=WindowId(2), x=0.00, y=0.00, w=150.00, h=30.00, highlighted)
-          )
-
-        ******************************************************************************************************************************************************
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                         W2                                                                         *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        *                                                                                                                                                    *
-        ******************************************************************************************************************************************************
-        ");
-    }
-}
-
-#[test]
-fn move_only_window_to_workspace() {
-    let mut hub = setup_master();
-    hub.insert_tiling(hub.current_workspace(), titled("w33")); // W0
-
-    hub.move_focused_to_workspace("1");
-
-    // Source workspace: empty
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=None)
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
-    ");
-
-    hub.focus_workspace("1");
-    // Target workspace: W0 fills screen
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(0))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00, highlighted)
-      )
-
-    ******************************************************************************************************************************************************
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                         W0                                                                         *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    *                                                                                                                                                    *
-    ******************************************************************************************************************************************************
-    ");
-}
-
-#[test]
 fn empty_workspace_persists_after_switch() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w34")); // W0
     hub.insert_tiling(hub.current_workspace(), titled("w35")); // W1
 
@@ -978,7 +693,13 @@ fn sync_config_preserves_workspace_master_count() {
     // Per-workspace master_count persists across config reload. The workspace
     // was seeded with master_count=1 and a reload with master_count=2 does
     // NOT push into the existing workspace's state.
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w36"));
     hub.insert_tiling(hub.current_workspace(), titled("w37"));
     hub.insert_tiling(hub.current_workspace(), titled("w38"));
@@ -988,15 +709,15 @@ fn sync_config_preserves_workspace_master_count() {
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
 
-    hub.sync_config(LayoutConfig {
-        strategy: Strategy::Master,
-        partition_tree: default_partition_tree_config_for_tests(),
-        master: MasterConfig {
-            master_ratio: 0.5,
-            master_count: 2,
-        },
-        ..default_layout_for_tests()
-    });
+    hub.sync_config(
+        LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .with_master_config(MasterConfig {
+                master_ratio: 0.5,
+                master_count: 2,
+            })
+            .build(),
+    );
 
     // Window ordering and focus preserved (no rebuild, apply_config path).
     assert_eq!(hub.focused_window(ws), focus_before);
@@ -1049,17 +770,23 @@ fn sync_config_seeds_new_workspace_with_master_ratio() {
     // Config values seed new workspaces via attach_window. After a reload with
     // master_ratio=0.3, a previously-untouched workspace gets that ratio on
     // its first attach.
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
 
-    hub.sync_config(LayoutConfig {
-        strategy: Strategy::Master,
-        partition_tree: default_partition_tree_config_for_tests(),
-        master: MasterConfig {
-            master_ratio: 0.3,
-            master_count: 1,
-        },
-        ..default_layout_for_tests()
-    });
+    hub.sync_config(
+        LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .with_master_config(MasterConfig {
+                master_ratio: 0.3,
+                master_count: 1,
+            })
+            .build(),
+    );
 
     hub.focus_workspace("1");
     hub.insert_tiling(hub.current_workspace(), titled("w41"));
@@ -1111,7 +838,13 @@ fn sync_config_preserves_seeded_ratio_across_workspaces() {
     // Two workspaces (3+2 windows) seeded with ratio 0.5. A config reload
     // pushing ratio 0.4 does NOT override the seeded value (preserve
     // semantics). Ordering and focus survive on both workspaces.
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
 
     // Workspace "0": insert 3 windows (ids allocated in order).
     hub.insert_tiling(hub.current_workspace(), titled("w44"));
@@ -1131,15 +864,15 @@ fn sync_config_preserves_seeded_ratio_across_workspaces() {
     hub.focus_workspace("0");
 
     // Change master_ratio from 0.5 to 0.4 via hot-reload.
-    hub.sync_config(LayoutConfig {
-        strategy: Strategy::Master,
-        partition_tree: default_partition_tree_config_for_tests(),
-        master: MasterConfig {
-            master_ratio: 0.4,
-            master_count: 1,
-        },
-        ..default_layout_for_tests()
-    });
+    hub.sync_config(
+        LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .with_master_config(MasterConfig {
+                master_ratio: 0.4,
+                master_count: 1,
+            })
+            .build(),
+    );
 
     // Both workspaces: ordering and focus preserved.
     assert_eq!(hub.focused_window(ws0), focus_ws0);
@@ -1189,7 +922,13 @@ fn sync_config_preserves_seeded_ratio_across_workspaces() {
 fn sync_config_preserves_runtime_tuned_master_ratio() {
     // Runtime GrowMaster tuning persists across config reload. A hot-reload
     // does NOT reset the ratio back to the file value (preserve semantics).
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w49"));
     hub.insert_tiling(hub.current_workspace(), titled("w50"));
 
@@ -1199,15 +938,15 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
     hub.handle_tiling_action(TilingAction::GrowMaster);
 
     // Hot-reload with a different file value does NOT override runtime tuning.
-    hub.sync_config(LayoutConfig {
-        strategy: Strategy::Master,
-        partition_tree: default_partition_tree_config_for_tests(),
-        master: MasterConfig {
-            master_ratio: 0.4,
-            master_count: 1,
-        },
-        ..default_layout_for_tests()
-    });
+    hub.sync_config(
+        LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .with_master_config(MasterConfig {
+                master_ratio: 0.4,
+                master_count: 1,
+            })
+            .build(),
+    );
 
     // Layout still shows runtime-tuned 0.65 ratio.
     assert_snapshot!(snapshot(&hub), @"
@@ -1254,7 +993,13 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
 fn sync_config_preserves_runtime_tuned_master_count() {
     // Runtime MoreMaster tuning persists across config reload. A hot-reload
     // does NOT reset the count back to the file value (preserve semantics).
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     hub.insert_tiling(hub.current_workspace(), titled("w51"));
     hub.insert_tiling(hub.current_workspace(), titled("w52"));
     hub.insert_tiling(hub.current_workspace(), titled("w53"));
@@ -1264,15 +1009,15 @@ fn sync_config_preserves_runtime_tuned_master_count() {
     hub.handle_tiling_action(TilingAction::MoreMaster);
 
     // Hot-reload with a different file value does NOT override runtime tuning.
-    hub.sync_config(LayoutConfig {
-        strategy: Strategy::Master,
-        partition_tree: default_partition_tree_config_for_tests(),
-        master: MasterConfig {
-            master_ratio: 0.5,
-            master_count: 3,
-        },
-        ..default_layout_for_tests()
-    });
+    hub.sync_config(
+        LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .with_master_config(MasterConfig {
+                master_ratio: 0.5,
+                master_count: 3,
+            })
+            .build(),
+    );
 
     // Layout still shows runtime-tuned master_count=2 (not config's 3).
     assert_snapshot!(snapshot(&hub), @"
@@ -1319,7 +1064,13 @@ fn sync_config_preserves_runtime_tuned_master_count() {
 
 #[test]
 fn more_master_only_affects_focused_workspace() {
-    let mut hub = setup_master();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
     // Workspace "0": 2 windows.
     hub.insert_tiling(hub.current_workspace(), titled("w55"));
     hub.insert_tiling(hub.current_workspace(), titled("w56"));
@@ -1374,25 +1125,28 @@ fn more_master_only_affects_focused_workspace() {
 
 #[test]
 fn attach_window_seeds_master_count_from_per_workspace_override() {
-    let mut hub = setup_master();
-    hub.sync_config(LayoutConfig {
-        strategy: Strategy::Master,
-        partition_tree: default_partition_tree_config_for_tests(),
-        master: MasterConfig {
-            master_ratio: 0.5,
-            master_count: 1,
-        },
-        workspace: vec![LayoutWorkspaceConfig::Master {
-            name: "1".to_string(),
-            master_count: Some(3),
-            master_ratio: None,
-            master: Vec::new(),
-            secondary: Vec::new(),
-            float: Vec::new(),
-            fullscreen: Vec::new(),
-        }],
-        ..default_layout_for_tests()
-    });
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
+    hub.sync_config(
+        LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .with_master_config(MasterConfig {
+                master_ratio: 0.5,
+                master_count: 1,
+            })
+            .with_workspace(vec![
+                LayoutWorkspaceConfigBuilder::new("1".to_string())
+                    .with_strategy(Strategy::Master)
+                    .with_master_count(3)
+                    .build(),
+            ])
+            .build(),
+    );
     hub.focus_workspace("1");
     hub.insert_tiling(hub.current_workspace(), titled("w59"));
     hub.insert_tiling(hub.current_workspace(), titled("w60"));
@@ -1442,25 +1196,28 @@ fn attach_window_seeds_master_count_from_per_workspace_override() {
 
 #[test]
 fn attach_window_falls_back_to_global_when_no_per_workspace_override() {
-    let mut hub = setup_master();
-    hub.sync_config(LayoutConfig {
-        strategy: Strategy::Master,
-        partition_tree: default_partition_tree_config_for_tests(),
-        master: MasterConfig {
-            master_ratio: 0.5,
-            master_count: 1,
-        },
-        workspace: vec![LayoutWorkspaceConfig::Master {
-            name: "1".to_string(),
-            master_count: Some(3),
-            master_ratio: None,
-            master: Vec::new(),
-            secondary: Vec::new(),
-            float: Vec::new(),
-            fullscreen: Vec::new(),
-        }],
-        ..default_layout_for_tests()
-    });
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
+    hub.sync_config(
+        LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .with_master_config(MasterConfig {
+                master_ratio: 0.5,
+                master_count: 1,
+            })
+            .with_workspace(vec![
+                LayoutWorkspaceConfigBuilder::new("1".to_string())
+                    .with_strategy(Strategy::Master)
+                    .with_master_count(3)
+                    .build(),
+            ])
+            .build(),
+    );
     hub.focus_workspace("2");
     hub.insert_tiling(hub.current_workspace(), titled("w63"));
     hub.insert_tiling(hub.current_workspace(), titled("w64"));

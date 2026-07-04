@@ -1,7 +1,7 @@
 use insta::assert_snapshot;
 
 use crate::core::node::{Length, Logical};
-use crate::core::tests::default_layout_for_tests;
+use crate::core::tests::{LayoutConfigBuilder, PartitionTreeConfigBuilder};
 use crate::core::{Dimension, Hub, tests::snapshot_text};
 
 #[test]
@@ -14,26 +14,30 @@ fn sync_config_updates_tab_bar_height() {
             Length::new(50.0),
         ),
         1.0,
-        crate::config::LayoutConfig {
-            partition_tree: crate::config::PartitionTreeConfig {
-                tab_bar_height: Length::<Logical>::new(10.0),
-                automatic_tiling: true,
-            },
-            ..default_layout_for_tests()
-        },
+        LayoutConfigBuilder::new()
+            .with_partition_tree_config(
+                PartitionTreeConfigBuilder::new()
+                    .with_tab_bar_height(Length::<Logical>::new(10.0))
+                    .with_automatic_tiling(true)
+                    .build(),
+            )
+            .build(),
         Vec::new(),
     );
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();
     hub.toggle_container_layout();
 
-    hub.sync_config(crate::config::LayoutConfig {
-        partition_tree: crate::config::PartitionTreeConfig {
-            tab_bar_height: Length::<Logical>::new(10.0),
-            automatic_tiling: true,
-        },
-        ..default_layout_for_tests()
-    });
+    hub.sync_config(
+        LayoutConfigBuilder::new()
+            .with_partition_tree_config(
+                PartitionTreeConfigBuilder::new()
+                    .with_tab_bar_height(Length::<Logical>::new(10.0))
+                    .with_automatic_tiling(true)
+                    .build(),
+            )
+            .build(),
+    );
 
     assert_snapshot!(snapshot_text(&hub), @"
     Hub(focused=WindowId(1))
@@ -54,13 +58,14 @@ fn sync_config_recalculates_all_workspaces() {
             Length::new(50.0),
         ),
         1.0,
-        crate::config::LayoutConfig {
-            partition_tree: crate::config::PartitionTreeConfig {
-                tab_bar_height: Length::<Logical>::new(10.0),
-                automatic_tiling: true,
-            },
-            ..default_layout_for_tests()
-        },
+        LayoutConfigBuilder::new()
+            .with_partition_tree_config(
+                PartitionTreeConfigBuilder::new()
+                    .with_tab_bar_height(Length::<Logical>::new(10.0))
+                    .with_automatic_tiling(true)
+                    .build(),
+            )
+            .build(),
         Vec::new(),
     );
     hub.insert_tiling_titled();
@@ -72,13 +77,16 @@ fn sync_config_recalculates_all_workspaces() {
     hub.insert_tiling_titled();
     hub.toggle_container_layout();
 
-    hub.sync_config(crate::config::LayoutConfig {
-        partition_tree: crate::config::PartitionTreeConfig {
-            tab_bar_height: Length::<Logical>::new(5.0),
-            automatic_tiling: true,
-        },
-        ..default_layout_for_tests()
-    });
+    hub.sync_config(
+        LayoutConfigBuilder::new()
+            .with_partition_tree_config(
+                PartitionTreeConfigBuilder::new()
+                    .with_tab_bar_height(Length::<Logical>::new(5.0))
+                    .with_automatic_tiling(true)
+                    .build(),
+            )
+            .build(),
+    );
 
     hub.focus_workspace("0");
     assert_snapshot!(snapshot_text(&hub), @"

@@ -1,4 +1,6 @@
-use crate::core::tests::{setup, setup_with_automatic_tiling, snapshot, titled};
+use crate::core::tests::{
+    LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, setup, snapshot, titled,
+};
 use insta::assert_snapshot;
 
 #[test]
@@ -417,7 +419,17 @@ fn move_container_to_tabbed_workspace() {
 
 #[test]
 fn move_to_empty_workspace_resets_spawn_mode() {
-    let mut hub = setup_with_automatic_tiling();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_automatic_tiling(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
 
     hub.insert_tiling(hub.current_workspace(), titled("w17"));
     hub.toggle_spawn_mode();
@@ -468,7 +480,17 @@ fn move_to_empty_workspace_resets_spawn_mode() {
     ");
 
     // Move a container (not just a window) to verify spawn mode resets for containers too
-    let mut hub = setup_with_automatic_tiling();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_automatic_tiling(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
 
     hub.insert_tiling(hub.current_workspace(), titled("w20"));
     hub.toggle_spawn_mode();
@@ -524,7 +546,17 @@ fn move_to_empty_workspace_resets_spawn_mode() {
 
 #[test]
 fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
-    let mut hub = setup_with_automatic_tiling();
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_automatic_tiling(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
 
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w23"));
     hub.focus_workspace("1");

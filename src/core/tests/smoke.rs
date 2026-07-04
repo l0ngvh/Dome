@@ -2,14 +2,27 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use super::{setup_hub, setup_logger_with_level, titled, validate_hub};
+use super::{
+    LayoutConfigBuilder, TestHubBuilder, setup_hub, setup_logger_with_level, titled, validate_hub,
+};
 use crate::action::MonitorTarget;
+use crate::config::Strategy;
 use crate::core::hub::Hub;
 use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
 use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
+
+fn setup_master_for_smoke() -> Hub {
+    TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build()
+}
 
 #[test]
 fn smoke_test() {
@@ -98,7 +111,7 @@ fn master_smoke_test() {
         run_smoke_iteration(
             seed.wrapping_add(run as u64),
             ops_per_run,
-            super::master::setup_master,
+            setup_master_for_smoke,
             &abort,
             "reproduce_master_smoke_failure",
             "reduce_master_smoke_failure",
@@ -138,7 +151,7 @@ fn reproduce_master_smoke_failure() {
     run_smoke_iteration(
         seed,
         10000,
-        super::master::setup_master,
+        setup_master_for_smoke,
         &abort,
         "reproduce_master_smoke_failure",
         "reduce_master_smoke_failure",
@@ -164,10 +177,10 @@ fn reduce_smoke_failure() {
 fn reduce_master_smoke_failure() {
     setup_logger_with_level("info");
     let seed = smoke_seed_from_env("reduce_master_smoke_failure");
-    let (recorded, signature) = record(seed, 10000, super::master::setup_master);
+    let (recorded, signature) = record(seed, 10000, setup_master_for_smoke);
     tracing::info!(recorded = recorded.len(), ?signature, "captured failure");
     let reduced = ddmin(recorded, |c| {
-        reproduces_signature(c, &signature, super::master::setup_master)
+        reproduces_signature(c, &signature, setup_master_for_smoke)
     });
     tracing::error!("=== REDUCED OPERATIONS ({}) ===", reduced.len());
     for (i, op) in reduced.iter().enumerate() {
