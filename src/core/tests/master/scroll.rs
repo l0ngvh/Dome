@@ -9,18 +9,13 @@ fn min_height_master_pane_overflows_and_scrolls_to_focus() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
+                .with_master_config(MasterConfig {
+                    master_ratio: 0.5,
+                    master_count: 4,
+                })
                 .build(),
         )
         .build();
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_strategy(Strategy::Master)
-            .with_master_config(MasterConfig {
-                master_ratio: 0.5,
-                master_count: 4,
-            })
-            .build(),
-    );
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
     let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
     let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
@@ -76,18 +71,13 @@ fn min_height_stack_pane_overflows_independently_of_master() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
+                .with_master_config(MasterConfig {
+                    master_ratio: 0.5,
+                    master_count: 2,
+                })
                 .build(),
         )
         .build();
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_strategy(Strategy::Master)
-            .with_master_config(MasterConfig {
-                master_ratio: 0.5,
-                master_count: 2,
-            })
-            .build(),
-    );
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("w5"));
     let w2 = hub.insert_tiling(hub.current_workspace(), titled("w6"));
@@ -147,18 +137,13 @@ fn both_panes_scroll_independently() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
+                .with_master_config(MasterConfig {
+                    master_ratio: 0.5,
+                    master_count: 4,
+                })
                 .build(),
         )
         .build();
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_strategy(Strategy::Master)
-            .with_master_config(MasterConfig {
-                master_ratio: 0.5,
-                master_count: 4,
-            })
-            .build(),
-    );
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w10"));
     let w1 = hub.insert_tiling(hub.current_workspace(), titled("w11"));
     let w2 = hub.insert_tiling(hub.current_workspace(), titled("w12"));
@@ -605,18 +590,13 @@ fn master_count_decrement_clamps_master_scroll() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
+                .with_master_config(MasterConfig {
+                    master_ratio: 0.5,
+                    master_count: 4,
+                })
                 .build(),
         )
         .build();
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_strategy(Strategy::Master)
-            .with_master_config(MasterConfig {
-                master_ratio: 0.5,
-                master_count: 4,
-            })
-            .build(),
-    );
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w35"));
     let w1 = hub.insert_tiling(hub.current_workspace(), titled("w36"));
     let w2 = hub.insert_tiling(hub.current_workspace(), titled("w37"));
@@ -681,18 +661,13 @@ fn detach_clamps_scroll() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
+                .with_master_config(MasterConfig {
+                    master_ratio: 0.5,
+                    master_count: 4,
+                })
                 .build(),
         )
         .build();
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_strategy(Strategy::Master)
-            .with_master_config(MasterConfig {
-                master_ratio: 0.5,
-                master_count: 4,
-            })
-            .build(),
-    );
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w40"));
     let w1 = hub.insert_tiling(hub.current_workspace(), titled("w41"));
     let w2 = hub.insert_tiling(hub.current_workspace(), titled("w42"));

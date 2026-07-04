@@ -9,6 +9,7 @@ pub(crate) use types::*;
 
 use std::collections::HashMap;
 
+use crate::config::LayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, SpawnIndicator, TilingWindowPlacement};
 use crate::core::node::{Dimension, Length, Logical, WindowId, WorkspaceId};
@@ -49,10 +50,6 @@ impl PartitionTreeStrategy {
             .unwrap_or_else(|| panic!("no WorkspaceTilingState for {ws_id}"))
     }
 
-    fn ws_state_or_default(&mut self, ws_id: WorkspaceId) -> &mut WorkspaceTilingState {
-        self.workspaces.entry(ws_id).or_default()
-    }
-
     fn tiling_data(&self, id: WindowId) -> &TilingWindowData {
         self.tiling_windows
             .get(&id)
@@ -80,10 +77,10 @@ impl PartitionTreeStrategy {
                 },
             );
         }
-        let state = self.ws_state_or_default(ws_id);
+        let state = self.ws_state_mut(ws_id);
         let insert_anchor = state.focused_tiling.or(state.root);
         let Some(insert_anchor) = insert_anchor else {
-            self.ws_state_or_default(ws_id).root = Some(child);
+            self.ws_state_mut(ws_id).root = Some(child);
             self.set_parent(child, Parent::Workspace(ws_id));
             self.set_focus_child(hub, child);
             self.layout_workspace(hub, ws_id);
@@ -172,13 +169,17 @@ impl PartitionTreeStrategy {
         let Parent::Workspace(ws) = self.parent(ws_child) else {
             panic!("set_focus_child: top of ancestor path has no workspace parent");
         };
-        self.ws_state_or_default(ws).focused_tiling = Some(child);
+        self.ws_state_mut(ws).focused_tiling = Some(child);
         hub.workspaces.get_mut(ws).is_float_focused = false;
         self.scroll_into_view(hub, ws);
     }
 }
 
 impl TilingStrategy for PartitionTreeStrategy {
+    fn prepare_workspace(&mut self, ws_id: WorkspaceId, _ws_name: &str, _config: &LayoutConfig) {
+        self.workspaces.entry(ws_id).or_default();
+    }
+
     fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId) {
         self.attach_child(hub, Child::Window(window_id), ws_id);
     }

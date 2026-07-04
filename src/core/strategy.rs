@@ -53,6 +53,9 @@ pub(crate) struct TilingPlacements {
 /// This solves the split-borrow problem: `self` (the strategy) and `hub`
 /// (the access struct) are disjoint fields on Hub.
 pub(crate) trait TilingStrategy: std::fmt::Debug {
+    /// Pre-allocate per-workspace state, no-op when the state already exists.
+    fn prepare_workspace(&mut self, ws_id: WorkspaceId, ws_name: &str, config: &LayoutConfig);
+
     /// Insert a window into the tiling tree for the given workspace.
     fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId);
 
@@ -236,6 +239,18 @@ impl StrategySet {
 
     pub(super) fn register(&mut self, ws_id: WorkspaceId, name: &str, config: &LayoutConfig) {
         self.kinds.insert(ws_id, kind_for(name, config));
+        self.get_mut(self.kind_of(ws_id))
+            .prepare_workspace(ws_id, name, config);
+    }
+
+    pub(super) fn prepare_workspace(
+        &mut self,
+        ws_id: WorkspaceId,
+        name: &str,
+        config: &LayoutConfig,
+    ) {
+        self.get_mut(self.kind_of(ws_id))
+            .prepare_workspace(ws_id, name, config);
     }
 
     pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {

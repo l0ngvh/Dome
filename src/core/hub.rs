@@ -475,6 +475,9 @@ impl Hub {
             self.strategies
                 .get_mut(change.old)
                 .prune_workspace(change.ws_id);
+            let ws_name = &self.access.workspaces.get(change.ws_id).name;
+            self.strategies
+                .prepare_workspace(change.ws_id, ws_name, &self.access.config);
             self.reattach_workspace_after_rebuild(change.ws_id, snapshot);
         }
         self.rebuild_matchers();

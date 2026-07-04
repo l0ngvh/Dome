@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::config::{LayoutWorkspaceConfig, WindowMatcher};
+use crate::config::{LayoutConfig, LayoutWorkspaceConfig, WindowMatcher};
 use crate::core::WindowMetadata;
 use crate::core::hub::{HubAccess, TilingWindowPlacement};
 use crate::core::node::{Child, Dimension, Direction, Length, WindowId, WorkspaceId};
@@ -18,10 +18,8 @@ pub(crate) struct MasterStrategy {
     window_dimensions: HashMap<WindowId, Dimension>,
 }
 impl TilingStrategy for MasterStrategy {
-    fn attach_window(&mut self, hub: &mut HubAccess, id: WindowId, ws_id: WorkspaceId) {
-        hub.windows.get_mut(id).set_workspace(Some(ws_id));
-        let ws_name = hub.workspaces.get(ws_id).name.clone();
-        let override_block = hub.config.workspace.iter().find_map(|w| match w {
+    fn prepare_workspace(&mut self, ws_id: WorkspaceId, ws_name: &str, config: &LayoutConfig) {
+        let override_block = config.workspace.iter().find_map(|w| match w {
             LayoutWorkspaceConfig::Master {
                 name,
                 master_ratio,
@@ -35,21 +33,27 @@ impl TilingStrategy for MasterStrategy {
         let initial_master_count = override_block
             .as_ref()
             .and_then(|(_, count, _, _)| *count)
-            .unwrap_or(hub.config.master.master_count);
+            .unwrap_or(config.master.master_count);
         let initial_master_ratio = override_block
             .as_ref()
             .and_then(|(ratio, _, _, _)| *ratio)
-            .unwrap_or(hub.config.master.master_ratio);
-
-        let state = self.workspaces.entry(ws_id).or_insert_with(|| MasterState {
+            .unwrap_or(config.master.master_ratio);
+        self.workspaces.entry(ws_id).or_insert_with(|| MasterState {
             master: Vec::new(),
             stack: Vec::new(),
-            matchers: build_matchers_from_config(&hub.config, &ws_name),
+            matchers: build_matchers_from_config(config, ws_name),
             focus: None,
             master_y_offset: Length::ZERO,
             stack_y_offset: Length::ZERO,
             master_count: initial_master_count,
             master_ratio: initial_master_ratio,
+        });
+    }
+
+    fn attach_window(&mut self, hub: &mut HubAccess, id: WindowId, ws_id: WorkspaceId) {
+        hub.windows.get_mut(id).set_workspace(Some(ws_id));
+        let state = self.workspaces.get_mut(&ws_id).unwrap_or_else(|| {
+            panic!("MasterStrategy: attach_window called for unprepared workspace {ws_id}")
         });
         let metadata = hub.windows.get(id).metadata.as_ref();
         let (pane, ins, tag) = Self::place(state, metadata);
