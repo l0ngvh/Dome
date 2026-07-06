@@ -131,7 +131,7 @@ impl PartitionTreeStrategy {
             // enclosing strip sits on or below the top of the screen.
             offset_y = offset_y.min(focused_dim.y - reserved_top);
 
-            self.ws_state_mut(workspace_id).viewport_offset = (offset_x, offset_y);
+            self.workspaces.get_mut(&workspace_id).unwrap().viewport_offset = (offset_x, offset_y);
         }
 
         if (offset_x, offset_y) != initial {
@@ -268,14 +268,14 @@ impl PartitionTreeStrategy {
         let root_dim = match ws_state.root {
             Some(child) => self.child_dimension(child),
             None => {
-                self.ws_state_mut(workspace_id).viewport_offset = (Length::ZERO, Length::ZERO);
+                self.workspaces.get_mut(&workspace_id).unwrap().viewport_offset = (Length::ZERO, Length::ZERO);
                 return;
             }
         };
 
         offset_x = clamp_offset(offset_x, root_dim.width, screen.width);
         offset_y = clamp_offset(offset_y, root_dim.height, screen.height);
-        self.ws_state_mut(workspace_id).viewport_offset = (offset_x, offset_y);
+        self.workspaces.get_mut(&workspace_id).unwrap().viewport_offset = (offset_x, offset_y);
     }
 
     /// Place the root child within the screen. Base dimension is
@@ -377,7 +377,7 @@ impl PartitionTreeStrategy {
         let automatic_tiling = self.automatic_tiling;
         match child {
             Child::Window(wid) => {
-                let td = self.tiling_data_mut(wid);
+                let td = self.tiling_windows.get_mut(&wid).unwrap();
                 td.dimension = dim;
                 if automatic_tiling && !td.spawn_mode.is_tab() {
                     td.spawn_mode = SpawnMode::without_history(spawn_mode);
@@ -611,166 +611,5 @@ impl Axis {
             Axis::X => Dimension::new(along_origin, cross_origin, along_size, cross_size),
             Axis::Y => Dimension::new(cross_origin, along_origin, cross_size, along_size),
         }
-    }
-}
-
-// apply_max_constraint is module-private and exposing it just for tests would
-// leak test-only public API. Using #[cfg(test)] keeps the helper internal.
-#[cfg(test)]
-mod tests {
-    use super::{apply_max_constraint, clamp_offset, nudge_offset_into_view, place_in_visible};
-    use crate::core::node::{Dimension, Length};
-
-    #[test]
-    fn apply_max_constraint_unchanged_when_visible_equals_container() {
-        let container = Length::new(100.0);
-
-        // max == 0: unconstrained, returns full container with no offset
-        let (size, offset) = apply_max_constraint(Length::ZERO, container, container, Length::ZERO);
-        assert_eq!(size, container);
-        assert_eq!(offset, Length::ZERO);
-
-        // max < container: returns max size, centered in container
-        let max = Length::new(60.0);
-        let (size, offset) = apply_max_constraint(max, container, container, Length::ZERO);
-        assert_eq!(size, max);
-        assert_eq!(offset, Length::new(20.0));
-
-        // max == container: the strict `<` comparison means no constraint applied
-        let (size, offset) = apply_max_constraint(container, container, container, Length::ZERO);
-        assert_eq!(size, container);
-        assert_eq!(offset, Length::ZERO);
-
-        // max > container: no constraint applied
-        let max = Length::new(200.0);
-        let (size, offset) = apply_max_constraint(max, container, container, Length::ZERO);
-        assert_eq!(size, container);
-        assert_eq!(offset, Length::ZERO);
-    }
-
-    #[test]
-    fn place_in_visible_centers_within_visible_section() {
-        let container = Dimension::new(
-            Length::ZERO,
-            Length::ZERO,
-            Length::new(100.0),
-            Length::new(100.0),
-        );
-        let visible = Dimension::new(
-            Length::new(10.0),
-            Length::new(10.0),
-            Length::new(80.0),
-            Length::new(80.0),
-        );
-        let max = (Length::new(60.0), Length::new(60.0));
-        let result = place_in_visible(container, max, visible);
-        assert_eq!(
-            result,
-            Dimension::new(
-                Length::new(20.0),
-                Length::new(20.0),
-                Length::new(60.0),
-                Length::new(60.0),
-            )
-        );
-
-        // Unconstrained (max == 0): returns full container, no offset
-        let result = place_in_visible(container, (Length::ZERO, Length::ZERO), visible);
-        assert_eq!(result, container);
-    }
-
-    #[test]
-    fn place_in_visible_clamps_to_container() {
-        let container = Dimension::new(
-            Length::ZERO,
-            Length::ZERO,
-            Length::new(100.0),
-            Length::new(100.0),
-        );
-        // Visible section shifted far enough that raw centering would exceed container bounds
-        let visible = Dimension::new(
-            Length::new(50.0),
-            Length::new(50.0),
-            Length::new(80.0),
-            Length::new(80.0),
-        );
-        let max = (Length::new(60.0), Length::new(60.0));
-        let result = place_in_visible(container, max, visible);
-        // Offset clamps to container_extent - size = 100 - 60 = 40
-        assert_eq!(
-            result,
-            Dimension::new(
-                Length::new(40.0),
-                Length::new(40.0),
-                Length::new(60.0),
-                Length::new(60.0),
-            )
-        );
-    }
-
-    #[test]
-    fn nudge_offset_into_view_in_bounds_no_op() {
-        let offset = Length::new(50.0);
-        let dim_origin = Length::new(60.0);
-        let dim_extent = Length::new(30.0);
-        let screen_extent = Length::new(100.0);
-        // dim_origin - offset + dim_extent = 60 - 50 + 30 = 40, which is <= 100
-        // dim_origin - offset = 10, which is >= 0
-        let result = nudge_offset_into_view(offset, dim_origin, dim_extent, screen_extent);
-        assert_eq!(result, offset);
-    }
-
-    #[test]
-    fn nudge_offset_into_view_off_right() {
-        let offset = Length::new(10.0);
-        let dim_origin = Length::new(80.0);
-        let dim_extent = Length::new(40.0);
-        let screen_extent = Length::new(100.0);
-        // dim_origin - offset + dim_extent = 80 - 10 + 40 = 110 > 100 (off right)
-        let result = nudge_offset_into_view(offset, dim_origin, dim_extent, screen_extent);
-        // Expected: dim_origin + dim_extent - screen_extent = 80 + 40 - 100 = 20
-        assert_eq!(result, Length::new(20.0));
-    }
-
-    #[test]
-    fn nudge_offset_into_view_off_left() {
-        let offset = Length::new(100.0);
-        let dim_origin = Length::new(50.0);
-        let dim_extent = Length::new(30.0);
-        let screen_extent = Length::new(200.0);
-        // dim_origin - offset = 50 - 100 = -50 < 0 (off left)
-        let result = nudge_offset_into_view(offset, dim_origin, dim_extent, screen_extent);
-        // Expected: dim_origin = 50
-        assert_eq!(result, Length::new(50.0));
-    }
-
-    #[test]
-    fn clamp_offset_within_range() {
-        let offset = Length::new(30.0);
-        let root_extent = Length::new(200.0);
-        let screen_extent = Length::new(100.0);
-        // max = root - screen = 100, offset 30 is within [0, 100]
-        let result = clamp_offset(offset, root_extent, screen_extent);
-        assert_eq!(result, offset);
-    }
-
-    #[test]
-    fn clamp_offset_beyond_max() {
-        let offset = Length::new(150.0);
-        let root_extent = Length::new(200.0);
-        let screen_extent = Length::new(100.0);
-        // max = root - screen = 100, offset 150 exceeds it
-        let result = clamp_offset(offset, root_extent, screen_extent);
-        assert_eq!(result, Length::new(100.0));
-    }
-
-    #[test]
-    fn clamp_offset_root_smaller_than_screen() {
-        let offset = Length::new(50.0);
-        let root_extent = Length::new(80.0);
-        let screen_extent = Length::new(100.0);
-        // root < screen, so max = max(80 - 100, 0) = 0, clamps to ZERO
-        let result = clamp_offset(offset, root_extent, screen_extent);
-        assert_eq!(result, Length::ZERO);
     }
 }

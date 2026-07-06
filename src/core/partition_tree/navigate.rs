@@ -1,6 +1,6 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Direction, WorkspaceId};
-use crate::core::partition_tree::{Child, Parent, SpawnMode};
+use crate::core::partition_tree::{Child, Container, Parent, SpawnMode};
 use crate::core::strategy::TilingStrategy;
 
 use super::PartitionTreeStrategy;
@@ -72,25 +72,44 @@ impl PartitionTreeStrategy {
                 ?child, from = %direct_parent_id, to = %container_id, insert_pos, "Moving child to ancestor"
             );
             self.detach_child_from_container(direct_parent_id, child);
-            self.attach_child_to_container(hub, child, container_id, Some(insert_pos));
+            self.attach_child_to_container(child, container_id, Some(insert_pos));
             self.layout_workspace(hub, current_ws);
             self.set_focus_child(hub, child);
         } else {
             tracing::debug!(?child, %current_ws, "Moving child to new root container");
             self.detach_child_from_container(direct_parent_id, child);
-            let root = self.ws_state(current_ws).root.unwrap();
+            let root = self.workspaces.get(&current_ws).unwrap().root.unwrap();
             let children = if forward {
                 vec![root, child]
             } else {
                 vec![child, root]
             };
-            let new_root_id = self.replace_anchor_with_container(
-                hub,
-                children,
+            let spawn_mode = SpawnMode::from_direction(direction);
+            let parent = self.parent(root);
+            let ws_id = self.child_workspace(hub, root);
+            let new_root_id = self.containers.allocate(Container::new(
+                parent,
+                ws_id,
+                children.clone(),
                 root,
-                SpawnMode::from_direction(direction),
-            );
-            self.ws_state_mut(current_ws).root = Some(Child::Container(new_root_id));
+                spawn_mode.into(),
+            ));
+            for &c in &children {
+                match c {
+                    Child::Window(wid) => {
+                        self.tiling_windows.get_mut(&wid).unwrap().spawn_mode =
+                            SpawnMode::without_history(spawn_mode);
+                    }
+                    Child::Container(cid) => {
+                        self.containers.get_mut(cid).set_spawn_mode_reset(spawn_mode);
+                    }
+                }
+            }
+            for &c in &children {
+                self.set_parent(c, Parent::Container(new_root_id));
+            }
+            self.maintain_direction_invariance(Parent::Container(new_root_id));
+            self.workspaces.get_mut(&current_ws).unwrap().root = Some(Child::Container(new_root_id));
             self.layout_workspace(hub, current_ws);
             self.set_focus_child(hub, child);
         }
@@ -203,7 +222,7 @@ impl PartitionTreeStrategy {
                 if w.is_float() || w.is_fullscreen() {
                     return;
                 }
-                self.tiling_data(id).spawn_mode
+                self.tiling_windows.get(&id).unwrap().spawn_mode
             }
         };
         let new_mode = current_mode.toggle();
@@ -214,7 +233,7 @@ impl PartitionTreeStrategy {
                 .get_mut(id)
                 .set_spawn_mode_keep_history(new_mode),
             Child::Window(id) => {
-                let td = self.tiling_data_mut(id);
+                let td = self.tiling_windows.get_mut(&id).unwrap();
                 td.spawn_mode = td.spawn_mode.switch_to(new_mode);
             }
         }

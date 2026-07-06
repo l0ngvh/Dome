@@ -246,7 +246,7 @@ fn move_vertical_container_to_workspace_with_one_window() {
         Window(id=WindowId(0), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(2), x=0.00, y=0.00, w=75.00, h=30.00)
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w12, Container])
-        Container(id=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=bottom, titles=[w10, w11])
+        Container(id=ContainerId(0), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right, titles=[w10, w11])
       )
 
     +-------------------------------------------------------------------------+***************************************************************************

@@ -143,29 +143,33 @@ impl PartitionTreeStrategy {
 
     fn child_constraints(&self, hub: &HubAccess, child: Child) -> (Dimension, Constraints) {
         let dim = self.child_dimension(child);
-        let (min_w, min_h) = self.child_min_size(hub, child);
+
         match child {
             Child::Window(wid) => {
+                let (min_w, min_h) = hub.windows.get(wid).min_size();
                 let (max_w, max_h) = hub.windows.get(wid).max_size();
                 (
                     dim,
                     Constraints {
-                        min_width: min_w,
-                        min_height: min_h,
+                        min_width: Length::new(min_w),
+                        min_height: Length::new(min_h),
                         max_width: Length::new(max_w),
                         max_height: Length::new(max_h),
                     },
                 )
             }
-            Child::Container(_) => (
-                dim,
-                Constraints {
-                    min_width: min_w,
-                    min_height: min_h,
-                    max_width: Length::ZERO,
-                    max_height: Length::ZERO,
-                },
-            ),
+            Child::Container(id) => {
+                let (min_w, min_h) = self.containers.get(id).min_size();
+                (
+                    dim,
+                    Constraints {
+                        min_width: min_w,
+                        min_height: min_h,
+                        max_width: Length::ZERO,
+                        max_height: Length::ZERO,
+                    },
+                )
+            }
         }
     }
 
@@ -309,15 +313,14 @@ impl PartitionTreeStrategy {
             "Window {wid} in tree but mode is Minimized"
         );
 
-        let td = self.tiling_data(wid);
-        assert_eq!(td.parent, expected_parent, "Window {wid} has wrong parent");
+        assert_eq!(self.tiling_windows.get(&wid).unwrap().parent, expected_parent, "Window {wid} has wrong parent");
         assert_eq!(
             window.workspace(),
             Some(workspace_id),
             "Window {wid} has wrong workspace"
         );
 
-        let dim = td.dimension;
+        let dim = self.tiling_windows.get(&wid).unwrap().dimension;
         let (min_w, min_h) = window.min_size();
         let (max_w, max_h) = window.max_size();
 

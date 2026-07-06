@@ -1,4 +1,7 @@
-use crate::core::allocator::Node;
+use super::preferred_layout::{PreferredLayout, PreferredWindowSlotId, PreferredSlot};
+use crate::config::SplitMode;
+use crate::core::hub::SpawnIndicator;
+use crate::core::node::Child;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 
 /// Effective per-child layout constraints in the tree's `Length` unit.
@@ -14,234 +17,8 @@ pub(crate) struct Constraints {
     pub(crate) max_height: Length,
 }
 
-/// Internal node of the partition tree. Holds an ordered list of `Child`
-/// nodes (windows or sub-containers) and either a split direction or the
-/// tabbed flag.
-///
-/// Invariants:
-/// 1. `children.len() >= 2`. Containers with one or zero children are
-///    collapsed by `tree.rs` on detach.
-/// 2. A non-tabbed container's `direction` differs from its non-tabbed
-///    parent's direction. A tabbed container is exempt: `direction()`
-///    returns `None` for it, so the alternation rule does not apply
-///    across a tabbed boundary. `validate_container_direction`
-///    (`validate.rs`) enforces this.
-/// 3. Focus-chain invariant: every container on the path from workspace
-///    root to the focused leaf has `focused` set to the same `Child`
-///    value (the focused leaf, or a `Child::Container` after
-///    `focus_parent`). See `WorkspaceTilingState::focused_tiling`
-///    (`mod.rs`) for the workspace-level pointer that anchors this
-///    chain.
-#[derive(Debug, Clone)]
-pub(crate) struct Container {
-    pub(super) parent: Parent,
-    pub(super) workspace: WorkspaceId,
-    pub(super) children: Vec<Child>,
-    /// The focused descendant per invariant 3 above. Not necessarily a
-    /// direct child: in a chain `root -> A -> B -> W`, all of
-    /// `root.focused`, `A.focused`, `B.focused` equal `Child::Window(W)`.
-    pub(super) focused: Child,
-    pub(super) dimension: Dimension,
-    /// Split axis. Read through `direction()`, which returns `None` when
-    /// `is_tabbed` is set. A value is stored while tabbed to keep the field
-    /// initialised, but it is unused until the container converts back to split.
-    direction: Direction,
-    /// Spawn mode for new children inserted under this container. Mutate via
-    /// `set_spawn_mode_reset` (drops history) or `set_spawn_mode_keep_history`
-    /// (preserves history). Direct field write would lose the `H <-> V <-> Tab`
-    /// rotation state.
-    spawn_mode: SpawnMode,
-    pub(super) is_tabbed: bool,
-    pub(super) active_tab_index: usize,
-    pub(super) min_width: Length,
-    pub(super) min_height: Length,
-}
-
-impl Node for Container {
-    type Id = ContainerId;
-}
-
-impl Container {
-    /// Build a split container. `focused` must be one of `children` (or a
-    /// descendant under one of them) so invariant 3 holds at construction.
-    /// `direction` seeds `spawn_mode` to match.
-    pub(super) fn split(
-        parent: Parent,
-        workspace: WorkspaceId,
-        children: Vec<Child>,
-        focused: Child,
-        dimension: Dimension,
-        direction: Direction,
-    ) -> Self {
-        let spawn_mode = match direction {
-            Direction::Horizontal => SpawnMode::horizontal(),
-            Direction::Vertical => SpawnMode::vertical(),
-        };
-        Self {
-            children,
-            focused,
-            parent,
-            workspace,
-            dimension,
-            direction,
-            spawn_mode,
-            is_tabbed: false,
-            active_tab_index: 0,
-            min_width: Length::ZERO,
-            min_height: Length::ZERO,
-        }
-    }
-
-    /// Build a tabbed container. Same `focused` precondition as `split`.
-    /// `direction` is stored as `Horizontal` for layout fallback but is
-    /// hidden by `direction()` while `is_tabbed` is set.
-    pub(super) fn tabbed(
-        parent: Parent,
-        workspace: WorkspaceId,
-        children: Vec<Child>,
-        focused: Child,
-        dimension: Dimension,
-    ) -> Self {
-        Self {
-            children,
-            focused,
-            parent,
-            workspace,
-            dimension,
-            direction: Direction::Horizontal,
-            spawn_mode: SpawnMode::tabbed(),
-            is_tabbed: true,
-            active_tab_index: 0,
-            min_width: Length::ZERO,
-            min_height: Length::ZERO,
-        }
-    }
-
-    pub(crate) fn is_tabbed(&self) -> bool {
-        self.is_tabbed
-    }
-
-    pub(crate) fn active_tab_index(&self) -> usize {
-        self.active_tab_index
-    }
-
-    pub(crate) fn active_tab(&self) -> Option<Child> {
-        if self.is_tabbed {
-            Some(self.children[self.active_tab_index])
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn set_active_tab_to_child(&mut self, child: Child) {
-        if !self.is_tabbed {
-            panic!("Calling set_active_tab_to_child on split container");
-        }
-        self.active_tab_index = self.children.iter().position(|c| *c == child).unwrap();
-    }
-
-    pub(super) fn switch_tab(&mut self, forward: bool) -> Option<Child> {
-        if !self.is_tabbed {
-            return None;
-        }
-        let len = self.children.len();
-        let current = self.active_tab_index;
-        let new_tab = if forward {
-            (current + 1) % len
-        } else {
-            (current + len - 1) % len
-        };
-        self.active_tab_index = new_tab;
-        Some(self.children[new_tab])
-    }
-
-    pub(super) fn set_active_tab_by_index(&mut self, index: usize) -> Option<Child> {
-        if !self.is_tabbed || index >= self.children.len() {
-            return None;
-        }
-        self.active_tab_index = index;
-        Some(self.children[index])
-    }
-
-    pub(crate) fn children(&self) -> &[Child] {
-        &self.children
-    }
-
-    pub(crate) fn min_size(&self) -> (Length, Length) {
-        (self.min_width, self.min_height)
-    }
-
-    pub(super) fn direction(&self) -> Option<Direction> {
-        if self.is_tabbed {
-            None
-        } else {
-            Some(self.direction)
-        }
-    }
-
-    pub(super) fn can_accommodate(&self, spawn_mode: SpawnMode) -> bool {
-        spawn_mode
-            .as_direction()
-            .is_some_and(|d| self.has_direction(d))
-            || (spawn_mode.is_tab() && self.is_tabbed())
-    }
-
-    pub(super) fn has_direction(&self, direction: Direction) -> bool {
-        if self.is_tabbed {
-            false
-        } else {
-            self.direction == direction
-        }
-    }
-
-    pub(crate) fn spawn_mode(&self) -> SpawnMode {
-        self.spawn_mode
-    }
-
-    pub(super) fn set_spawn_mode_reset(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = SpawnMode::without_history(spawn_mode)
-    }
-
-    pub(crate) fn set_spawn_mode_keep_history(&mut self, spawn_mode: SpawnMode) {
-        self.spawn_mode = self.spawn_mode.switch_to(spawn_mode)
-    }
-
-    pub(super) fn position_of(&self, child: Child) -> usize {
-        self.children.iter().position(|c| *c == child).unwrap()
-    }
-
-    pub(super) fn remove_child(&mut self, child: Child) {
-        let pos = self.children.iter().position(|c| *c == child).unwrap();
-        self.children.remove(pos);
-        if self.is_tabbed && pos <= self.active_tab_index {
-            self.active_tab_index = self.active_tab_index.saturating_sub(1);
-        }
-    }
-
-    pub(super) fn replace_child_if_present(&mut self, old: Child, new: Child) {
-        if let Some(pos) = self.children.iter().position(|c| *c == old) {
-            self.children[pos] = new;
-        }
-    }
-
-    pub(super) fn toggle_direction(&mut self) -> Direction {
-        self.direction = match self.direction {
-            Direction::Horizontal => Direction::Vertical,
-            Direction::Vertical => Direction::Horizontal,
-        };
-        self.direction
-    }
-}
-
 /// Spawn mode of a container or window: where the next sibling will be
-/// inserted relative to it. The two-field model (`current`, `previous`)
-/// enables `toggle` to implement a three-cycle: toggling twice from the same
-/// axis visits Tab, while a single toggle just flips H <-> V.
-///
-/// `set_spawn_mode_reset` collapses history (calls `without_history`).
-/// `set_spawn_mode_keep_history` preserves it. The history-aware path is what
-/// lets alternating toggles (`H -> V -> H -> V`) eventually reach Tab, while a
-/// fresh assignment (`H -> V`) does not.
+/// inserted relative to it.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SpawnMode {
     current: SpawnState,
@@ -358,6 +135,16 @@ impl SpawnMode {
     }
 }
 
+impl From<crate::config::SplitMode> for SpawnMode {
+    fn from(split: crate::config::SplitMode) -> Self {
+        match split {
+            crate::config::SplitMode::Horizontal => SpawnMode::horizontal(),
+            crate::config::SplitMode::Vertical => SpawnMode::vertical(),
+            crate::config::SplitMode::Tabbed => SpawnMode::tabbed(),
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SpawnState {
     #[default]
@@ -384,5 +171,65 @@ impl std::fmt::Display for Parent {
     }
 }
 
-/// Re-export shared `Child` enum from `core::node`.
-pub(crate) use crate::core::node::Child;
+/// Per-window tiling state.
+#[derive(Debug)]
+pub(super) struct TilingWindowData {
+    pub(super) parent: Parent,
+    pub(super) dimension: Dimension,
+    pub(super) spawn_mode: SpawnMode,
+    pub(super) occupy: Option<PreferredWindowSlotId>,
+}
+
+impl TilingWindowData {
+    pub(super) fn new(workspace: WorkspaceId) -> Self {
+        TilingWindowData {
+            parent: Parent::Workspace(workspace),
+            // Zero placeholder -- layout_workspace at the end of this function
+            // computes the real rect before any reader observes this entry.
+            dimension: Dimension::default(),
+            spawn_mode: SpawnMode::default(),
+            occupy: None,
+        }
+    }
+}
+
+/// Per-workspace tiling state owned by the strategy.
+#[derive(Debug, Default)]
+pub(super) struct WorkspaceTilingState {
+    pub(super) root: Option<Child>,
+    /// The preferred layout tree for this workspace, if one is configured.
+    pub(super) preferred_layout: Option<PreferredLayout>,
+    /// Tiling focus pointer. Usually a `Child::Window` (the focused window). Can be
+    /// `Child::Container` for container-highlight mode, where
+    /// `focused_tiling_window()` returns `None`. Can only be None in an empty workspace.
+    ///
+    /// Anchors invariant 3 of `Container`: when this is `Some(X)`, every ancestor
+    /// container of X has `focused == X`. Established by `set_focus_child`,
+    /// preserved by `replace_child_focus`.
+    pub(super) focused_tiling: Option<Child>,
+    /// The highest occupied node in the preferred layout tree. `None` when no
+    /// matched window has been placed.
+    pub(super) occupied_preferred_root: Option<PreferredSlot>,
+    pub(super) viewport_offset: (Length, Length),
+}
+
+impl From<SpawnMode> for SpawnIndicator {
+    fn from(mode: SpawnMode) -> Self {
+        Self {
+            top: mode.is_tab(),
+            right: mode.is_horizontal(),
+            bottom: mode.is_vertical(),
+            left: false,
+        }
+    }
+}
+
+impl From<SpawnMode> for SplitMode {
+    fn from(mode: SpawnMode) -> Self {
+        match mode.current {
+            SpawnState::Horizontal => SplitMode::Horizontal,
+            SpawnState::Vertical => SplitMode::Vertical,
+            SpawnState::Tab => SplitMode::Tabbed,
+        }
+    }
+}
