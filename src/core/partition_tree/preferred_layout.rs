@@ -289,6 +289,27 @@ impl PreferredLayout {
         ancestors
     }
 
+    /// Check whether `descendant` is a proper descendant of `ancestor` (not
+    /// equal). Both must be container slots.
+    pub(super) fn is_proper_descendant_of(
+        &self,
+        descendant: PreferredContainerSlotId,
+        ancestor: PreferredContainerSlotId,
+    ) -> bool {
+        if descendant == ancestor {
+            return false;
+        }
+        let mut current = descendant;
+        for _ in crate::core::bounded_loop() {
+            match self.container_slots.get(current).parent {
+                Some(p) if p == ancestor => return true,
+                Some(p) => current = p,
+                None => return false,
+            }
+        }
+        false
+    }
+
     fn build_subtree(
         &mut self,
         node: &TreeLayoutNode,

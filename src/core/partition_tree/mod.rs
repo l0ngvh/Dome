@@ -12,6 +12,7 @@ pub(crate) use crate::core::node::Child;
 pub(crate) use container::Container;
 pub(crate) use types::*;
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::config::{LayoutConfig, LayoutWorkspaceConfig};
@@ -226,8 +227,78 @@ impl TilingStrategy for PartitionTreeStrategy {
             self.attach_child_according_to_spawn_mode(hub, Child::Window(window_id), ws_id);
             return;
         };
-        if layout.first_occupied_ancestor(slot_id).is_some() {
-            // TODO: insert to the same container
+        if let Some(ancestor_slot) = layout.first_occupied_ancestor(slot_id) {
+            let container_id = layout.occupied_container(ancestor_slot).unwrap();
+            let live_children = self.containers.get(container_id).children.clone();
+
+            let mut insert_pos = 0;
+
+            for (i, child) in live_children.iter().enumerate() {
+                let child_slot = match child {
+                    Child::Window(wid) => {
+                        let Some(slot) = self.tiling_windows.get(wid).unwrap().occupy else {
+                            continue;
+                        };
+                        PreferredSlot::Window(slot)
+                    }
+                    Child::Container(cid) => {
+                        let Some(slot) = self.containers.get(*cid).occupy else {
+                            continue;
+                        };
+                        PreferredSlot::Container(slot)
+                    }
+                };
+
+                let (lca, ordering) =
+                    layout.lowest_common_ancestor(PreferredSlot::Window(slot_id), child_slot);
+
+                if layout.is_proper_descendant_of(lca, ancestor_slot) {
+                    let children = if ordering == Ordering::Less {
+                        vec![Child::Window(window_id), *child]
+                    } else {
+                        vec![*child, Child::Window(window_id)]
+                    };
+
+                    let new_container_id = self.replace_anchor_with_container(
+                        hub,
+                        *child,
+                        children,
+                        layout.container_slot_split(lca),
+                    );
+
+                    let ws_state = self.workspaces.get_mut(&ws_id).unwrap();
+                    let layout = ws_state.preferred_layout.as_mut().unwrap();
+                    layout.occupy_container_slot(lca, new_container_id);
+                    layout.occupy_window_slot(slot_id, window_id);
+                    self.tiling_windows.get_mut(&window_id).unwrap().occupy = Some(slot_id);
+                    self.containers.get_mut(new_container_id).occupy = Some(lca);
+
+                    self.layout_workspace(hub, ws_id);
+                    self.set_focus_child(hub, Child::Window(window_id));
+                    return;
+                }
+
+                if ordering == Ordering::Less {
+                    insert_pos = i;
+                    break;
+                }
+                insert_pos = i + 1;
+            }
+
+            // No deeper LCA — insert window at the correct position
+            self.attach_child_to_container(
+                Child::Window(window_id),
+                container_id,
+                Some(insert_pos),
+            );
+
+            let ws_state = self.workspaces.get_mut(&ws_id).unwrap();
+            let layout = ws_state.preferred_layout.as_mut().unwrap();
+            layout.occupy_window_slot(slot_id, window_id);
+            self.tiling_windows.get_mut(&window_id).unwrap().occupy = Some(slot_id);
+
+            self.layout_workspace(hub, ws_id);
+            self.set_focus_child(hub, Child::Window(window_id));
             return;
         }
 
