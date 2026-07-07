@@ -313,7 +313,11 @@ impl PartitionTreeStrategy {
             "Window {wid} in tree but mode is Minimized"
         );
 
-        assert_eq!(self.tiling_windows.get(&wid).unwrap().parent, expected_parent, "Window {wid} has wrong parent");
+        assert_eq!(
+            self.tiling_windows.get(&wid).unwrap().parent,
+            expected_parent,
+            "Window {wid} has wrong parent"
+        );
         assert_eq!(
             window.workspace(),
             Some(workspace_id),

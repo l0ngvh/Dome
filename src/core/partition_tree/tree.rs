@@ -1,3 +1,4 @@
+use super::preferred_layout::PreferredSlot;
 use crate::config::SplitMode;
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Dimension, WorkspaceId};
@@ -163,16 +164,15 @@ impl PartitionTreeStrategy {
         }
     }
 
-    /// Replace anchor with a new container containing `anchor` and `other`.
+    /// Replace anchor with a new container containing the given `children`.
     pub(super) fn replace_anchor_with_container(
         &mut self,
         hub: &mut HubAccess,
         anchor: Child,
-        other: Child,
+        children: Vec<Child>,
         split_mode: SplitMode,
     ) -> ContainerId {
         let spawn_mode = SpawnMode::from(split_mode);
-        let children = vec![anchor, other];
         let parent = self.parent(anchor);
         let workspace_id = self.child_workspace(hub, anchor);
         let container_id = self.containers.allocate(Container::new(
@@ -338,6 +338,19 @@ impl PartitionTreeStrategy {
         }
 
         self.replace_child_focus(Child::Container(container_id), last_child);
+
+        if let Some(slot_id) = self.containers.get(container_id).occupy {
+            let ws_id = self.containers.get(container_id).workspace;
+            if let Some(ws_state) = self.workspaces.get_mut(&ws_id)
+                && let Some(layout) = ws_state.preferred_layout.as_mut()
+            {
+                layout.clear_container_slot(slot_id);
+                if ws_state.occupied_preferred_root == Some(PreferredSlot::Container(slot_id)) {
+                    ws_state.occupied_preferred_root = layout.top_occupied_in(slot_id);
+                }
+            }
+            self.containers.get_mut(container_id).occupy = None;
+        }
 
         self.containers.delete(container_id);
         self.maintain_direction_invariance(grandparent);

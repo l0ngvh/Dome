@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::config::{SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::WindowMetadata;
 use crate::core::allocator::{Allocator, Node, NodeId};
@@ -156,6 +158,58 @@ impl PreferredLayout {
         self.window_slots.get(slot).occupied
     }
 
+    /// Clear a window slot's occupation.
+    pub(super) fn clear_window_slot(&mut self, slot: PreferredWindowSlotId) {
+        self.window_slots.get_mut(slot).occupied = None;
+    }
+
+    /// Clear a container slot's occupation.
+    pub(super) fn clear_container_slot(&mut self, slot: PreferredContainerSlotId) {
+        self.container_slots.get_mut(slot).occupied = None;
+    }
+
+    /// When a container is cleared, return the first highest occupied node, if any remaining.
+    ///
+    /// Removing a container can create a situation where multiple occupied children are still
+    /// present but their lowest common ancestor isn't manifested, so we must not make any
+    /// assumption about the existence of a lowest common ancestor. This, however, can only happen
+    /// when users move the occupied children out of this container, causing the container to be
+    /// cleaned up while their occupied children are still present.
+    ///
+    /// Since the return might not be lowest common ancestor of all the remaining occupied
+    /// children/descendants, we can't no longer guarantee that all subsequent matched windows will
+    /// be inserted forming the intended layout tree.
+    ///
+    /// This function can return none if all occupied children are removed, leaving only non
+    /// preferred children in this container
+    pub(super) fn top_occupied_in(
+        &self,
+        container_id: PreferredContainerSlotId,
+    ) -> Option<PreferredSlot> {
+        let cs = self.container_slots.get(container_id);
+        let mut stack: Vec<PreferredSlot> = cs.children.iter().rev().copied().collect();
+        for _ in crate::core::bounded_loop() {
+            let slot = stack.pop()?;
+            match slot {
+                PreferredSlot::Window(wid) => {
+                    if self.window_slots.get(wid).occupied.is_some() {
+                        return Some(PreferredSlot::Window(wid));
+                    }
+                }
+                PreferredSlot::Container(cid) => {
+                    let child_cs = self.container_slots.get(cid);
+                    if child_cs.occupied.is_some() {
+                        return Some(PreferredSlot::Container(cid));
+                    }
+                    for &child in child_cs.children.iter().rev() {
+                        stack.push(child);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Return the configured split for a container slot.
     pub(super) fn container_slot_split(&self, slot: PreferredContainerSlotId) -> SplitMode {
         self.container_slots
@@ -178,18 +232,40 @@ impl PreferredLayout {
         self.container_slots.get(slot).occupied
     }
 
-    /// Lowest common ancestor of two slots in the preferred layout. Both must
-    /// belong to this preferred layout.
+    /// Lowest common ancestor of two slots in the preferred layout, and
+    /// whether `a` comes before `b` in the LCA's children order. Both
+    /// slots must belong to this preferred layout.
     pub(super) fn lowest_common_ancestor(
         &self,
         a: PreferredSlot,
         b: PreferredSlot,
-    ) -> PreferredContainerSlotId {
+    ) -> (PreferredContainerSlotId, Ordering) {
         let ancestors_a = self.slot_parents(a);
         let ancestors_b = self.slot_parents(b);
-        for pa in &ancestors_a {
-            if ancestors_b.contains(pa) {
-                return *pa;
+        for (i, pa) in ancestors_a.iter().enumerate() {
+            if let Some(j) = ancestors_b.iter().position(|pb| pb == pa) {
+                let lca = *pa;
+                let child_a = if i == 0 {
+                    a
+                } else {
+                    PreferredSlot::Container(ancestors_a[i - 1])
+                };
+                let child_b = if j == 0 {
+                    b
+                } else {
+                    PreferredSlot::Container(ancestors_b[j - 1])
+                };
+                let lca_children = &self.container_slots.get(lca).children;
+                let pos_a = lca_children.iter().position(|c| *c == child_a).unwrap();
+                let pos_b = lca_children.iter().position(|c| *c == child_b).unwrap();
+                return (
+                    lca,
+                    if pos_a < pos_b {
+                        Ordering::Less
+                    } else {
+                        Ordering::Greater
+                    },
+                );
             }
         }
         unreachable!()

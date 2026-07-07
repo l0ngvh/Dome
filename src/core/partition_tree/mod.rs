@@ -93,7 +93,7 @@ impl PartitionTreeStrategy {
                         self.replace_anchor_with_container(
                             hub,
                             insert_anchor,
-                            child,
+                            vec![insert_anchor, child],
                             spawn_mode.into(),
                         );
                     }
@@ -102,7 +102,7 @@ impl PartitionTreeStrategy {
                     self.replace_anchor_with_container(
                         hub,
                         insert_anchor,
-                        child,
+                        vec![insert_anchor, child],
                         spawn_mode.into(),
                     );
                 }
@@ -134,6 +134,33 @@ impl PartitionTreeStrategy {
                 ws.is_float_focused = !ws.float_windows.is_empty();
 
                 self.layout_workspace(hub, workspace_id);
+            }
+        }
+
+        let workspace = self.workspaces.get_mut(&workspace_id).unwrap();
+        if let Some(layout) = workspace.preferred_layout.as_mut() {
+            match child {
+                Child::Window(wid) => {
+                    if let Some(slot_id) = self.tiling_windows.get(&wid).unwrap().occupy {
+                        layout.clear_window_slot(slot_id);
+                        if workspace.occupied_preferred_root == Some(PreferredSlot::Window(slot_id))
+                        {
+                            workspace.occupied_preferred_root = None;
+                        }
+                        self.tiling_windows.get_mut(&wid).unwrap().occupy = None;
+                    }
+                }
+                Child::Container(cid) => {
+                    if let Some(slot_id) = self.containers.get(cid).occupy {
+                        layout.clear_container_slot(slot_id);
+                        if workspace.occupied_preferred_root
+                            == Some(PreferredSlot::Container(slot_id))
+                        {
+                            workspace.occupied_preferred_root = layout.top_occupied_in(slot_id);
+                        }
+                        self.containers.get_mut(cid).occupy = None;
+                    }
+                }
             }
         }
     }
@@ -220,7 +247,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         };
 
         // Matched window with existing preferred root, materialize the lowest common ancestor
-        let lowest_common_ancestor =
+        let (lowest_common_ancestor, ordering) =
             layout.lowest_common_ancestor(PreferredSlot::Window(slot_id), root_slot);
         let anchor = match root_slot {
             PreferredSlot::Window(root_slot_id) => {
@@ -233,10 +260,16 @@ impl TilingStrategy for PartitionTreeStrategy {
             }
         };
 
+        let children = if ordering == std::cmp::Ordering::Less {
+            vec![Child::Window(window_id), anchor]
+        } else {
+            vec![anchor, Child::Window(window_id)]
+        };
+
         let new_container_id = self.replace_anchor_with_container(
             hub,
             anchor,
-            Child::Window(window_id),
+            children,
             layout.container_slot_split(lowest_common_ancestor),
         );
 
@@ -245,6 +278,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         layout.occupy_container_slot(lowest_common_ancestor, new_container_id);
         layout.occupy_window_slot(slot_id, window_id);
         self.tiling_windows.get_mut(&window_id).unwrap().occupy = Some(slot_id);
+        self.containers.get_mut(new_container_id).occupy = Some(lowest_common_ancestor);
         ws_state.occupied_preferred_root = Some(PreferredSlot::Container(lowest_common_ancestor));
 
         self.layout_workspace(hub, ws_id);

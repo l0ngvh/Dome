@@ -85,31 +85,7 @@ impl PartitionTreeStrategy {
                 vec![child, root]
             };
             let spawn_mode = SpawnMode::from_direction(direction);
-            let parent = self.parent(root);
-            let ws_id = self.child_workspace(hub, root);
-            let new_root_id = self.containers.allocate(Container::new(
-                parent,
-                ws_id,
-                children.clone(),
-                root,
-                spawn_mode.into(),
-            ));
-            for &c in &children {
-                match c {
-                    Child::Window(wid) => {
-                        self.tiling_windows.get_mut(&wid).unwrap().spawn_mode =
-                            SpawnMode::without_history(spawn_mode);
-                    }
-                    Child::Container(cid) => {
-                        self.containers.get_mut(cid).set_spawn_mode_reset(spawn_mode);
-                    }
-                }
-            }
-            for &c in &children {
-                self.set_parent(c, Parent::Container(new_root_id));
-            }
-            self.maintain_direction_invariance(Parent::Container(new_root_id));
-            self.workspaces.get_mut(&current_ws).unwrap().root = Some(Child::Container(new_root_id));
+            self.replace_anchor_with_container(hub, root, children, spawn_mode.into());
             self.layout_workspace(hub, current_ws);
             self.set_focus_child(hub, child);
         }

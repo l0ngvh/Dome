@@ -131,7 +131,10 @@ impl PartitionTreeStrategy {
             // enclosing strip sits on or below the top of the screen.
             offset_y = offset_y.min(focused_dim.y - reserved_top);
 
-            self.workspaces.get_mut(&workspace_id).unwrap().viewport_offset = (offset_x, offset_y);
+            self.workspaces
+                .get_mut(&workspace_id)
+                .unwrap()
+                .viewport_offset = (offset_x, offset_y);
         }
 
         if (offset_x, offset_y) != initial {
@@ -268,14 +271,20 @@ impl PartitionTreeStrategy {
         let root_dim = match ws_state.root {
             Some(child) => self.child_dimension(child),
             None => {
-                self.workspaces.get_mut(&workspace_id).unwrap().viewport_offset = (Length::ZERO, Length::ZERO);
+                self.workspaces
+                    .get_mut(&workspace_id)
+                    .unwrap()
+                    .viewport_offset = (Length::ZERO, Length::ZERO);
                 return;
             }
         };
 
         offset_x = clamp_offset(offset_x, root_dim.width, screen.width);
         offset_y = clamp_offset(offset_y, root_dim.height, screen.height);
-        self.workspaces.get_mut(&workspace_id).unwrap().viewport_offset = (offset_x, offset_y);
+        self.workspaces
+            .get_mut(&workspace_id)
+            .unwrap()
+            .viewport_offset = (offset_x, offset_y);
     }
 
     /// Place the root child within the screen. Base dimension is

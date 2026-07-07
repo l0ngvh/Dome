@@ -1,4 +1,4 @@
-use super::preferred_layout::{PreferredLayout, PreferredWindowSlotId, PreferredSlot};
+use super::preferred_layout::{PreferredLayout, PreferredSlot, PreferredWindowSlotId};
 use crate::config::SplitMode;
 use crate::core::hub::SpawnIndicator;
 use crate::core::node::Child;

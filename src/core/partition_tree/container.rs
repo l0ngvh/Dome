@@ -44,7 +44,7 @@ pub(crate) struct Container {
     pub(super) active_tab_index: usize,
     pub(super) min_width: Length,
     pub(super) min_height: Length,
-    /// Blueprint container slot this live container materializes, if any.
+    /// Preferred container slot this live container materializes, if any.
     pub(super) occupy: Option<PreferredContainerSlotId>,
 }
 
