@@ -1,18 +1,27 @@
 //! Smoke tests and delta-debugging reducer for the Hub.
 
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{
-    LayoutConfigBuilder, TestHubBuilder, setup_hub, setup_logger_with_level, titled, validate_hub,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, setup_hub,
+    setup_logger_with_level, titled, validate_hub,
 };
 use crate::action::MonitorTarget;
-use crate::config::Strategy;
+use crate::config::{SplitMode, Strategy, TreeLayoutNode, WindowMatcher};
 use crate::core::hub::Hub;
 use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
 use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
+
+const RUNS: usize = 200;
+const OPS_PER_RUN: usize = 10000;
+const SEED: u64 = 42u64;
+const PREF_TREE_MAX_LEAVES: usize = 30;
+const CONTAINER_BASE: usize = 1_000_000;
 
 fn setup_master_for_smoke() -> Hub {
     TestHubBuilder::new()
@@ -28,19 +37,16 @@ fn setup_master_for_smoke() -> Hub {
 fn smoke_test() {
     setup_logger_with_level("info");
 
-    let seed = 42u64;
-    let runs = 200;
-    let ops_per_run = 10000;
     let completed = AtomicUsize::new(0);
     let abort = AtomicBool::new(false);
 
-    (0..runs).into_par_iter().for_each(|run| {
+    (0..RUNS).into_par_iter().for_each(|run| {
         if abort.load(Ordering::Relaxed) {
             return;
         }
         run_smoke_iteration(
-            seed.wrapping_add(run as u64),
-            ops_per_run,
+            SEED.wrapping_add(run as u64),
+            OPS_PER_RUN,
             setup_hub,
             &abort,
             "reproduce_smoke_failure",
@@ -51,66 +57,25 @@ fn smoke_test() {
         }
         let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
         if done.is_multiple_of(10) {
-            tracing::info!("Completed {done}/{runs}");
+            tracing::info!("Completed {done}/{RUNS}");
         }
     });
-}
-
-/// Confirms trait dispatch and placement collection work end-to-end:
-/// insert a tiling window, get placements, verify the window appears
-/// with correct dimensions.
-#[test]
-fn strategy_smoke_test() {
-    use super::setup;
-    use crate::core::hub::MonitorLayout;
-
-    let mut hub = setup();
-    let id = hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    let placements = hub.get_visible_placements();
-
-    assert_eq!(placements.monitors.len(), 1);
-    let mp = &placements.monitors[0];
-    let MonitorLayout::Normal {
-        tiling_windows,
-        float_windows,
-        containers,
-    } = &mp.layout
-    else {
-        panic!("expected Normal layout, got Fullscreen");
-    };
-
-    assert_eq!(tiling_windows.len(), 1);
-    assert!(float_windows.is_empty());
-    assert!(containers.is_empty());
-
-    let wp = &tiling_windows[0];
-    assert_eq!(wp.id, id);
-    assert!(wp.is_highlighted);
-    // Single tiling window fills the 150x30 screen
-    assert_eq!(wp.frame.width, Length::new(150.0));
-    assert_eq!(wp.frame.height, Length::new(30.0));
-
-    let ws = hub.current_workspace();
-    assert_eq!(hub.focused_window(ws), Some(id));
 }
 
 #[test]
 fn master_smoke_test() {
     setup_logger_with_level("info");
 
-    let seed = 42u64;
-    let runs = 200;
-    let ops_per_run = 10000;
     let completed = AtomicUsize::new(0);
     let abort = AtomicBool::new(false);
 
-    (0..runs).into_par_iter().for_each(|run| {
+    (0..RUNS).into_par_iter().for_each(|run| {
         if abort.load(Ordering::Relaxed) {
             return;
         }
         run_smoke_iteration(
-            seed.wrapping_add(run as u64),
-            ops_per_run,
+            SEED.wrapping_add(run as u64),
+            OPS_PER_RUN,
             setup_master_for_smoke,
             &abort,
             "reproduce_master_smoke_failure",
@@ -121,7 +86,7 @@ fn master_smoke_test() {
         }
         let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
         if done.is_multiple_of(10) {
-            tracing::info!("Completed master-stack {done}/{runs}");
+            tracing::info!("Completed master-stack {done}/{RUNS}");
         }
     });
 }
@@ -188,7 +153,7 @@ fn reduce_master_smoke_failure() {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum OpKind {
     InsertTiling,
     InsertFloat,
@@ -275,6 +240,7 @@ const ALL_OP_KINDS: &[OpKind] = &[
 enum RecordedOp {
     InsertTiling {
         producer_id: usize,
+        title: Option<String>,
     },
     InsertFloat {
         producer_id: usize,
@@ -484,6 +450,7 @@ fn build_op(
     match kind {
         OpKind::InsertTiling => Some(RecordedOp::InsertTiling {
             producer_id: next_op_index,
+            title: None,
         }),
         OpKind::InsertFloat => {
             let dim = Dimension::new(
@@ -696,8 +663,9 @@ fn apply_op(
     monitor_origin: &mut Vec<usize>,
 ) {
     match op {
-        RecordedOp::InsertTiling { producer_id } => {
-            let id = hub.insert_tiling(hub.current_workspace(), titled("w1"));
+        RecordedOp::InsertTiling { producer_id, title } => {
+            let window_title = title.as_deref().unwrap_or("w1");
+            let id = hub.insert_tiling(hub.current_workspace(), titled(window_title));
             windows.push(id);
             window_origin.push(*producer_id);
             window_minimized.push(false);
@@ -947,9 +915,9 @@ fn normalize_digits(s: &str) -> String {
     clippy::mut_range_bound,
     reason = "granularity is modified then we break immediately, so the loop bound is unaffected"
 )]
-fn ddmin<P>(mut ops: Vec<RecordedOp>, mut reproduces: P) -> Vec<RecordedOp>
+fn ddmin<T: Clone, P>(mut ops: Vec<T>, mut reproduces: P) -> Vec<T>
 where
-    P: FnMut(&[RecordedOp]) -> bool,
+    P: FnMut(&[T]) -> bool,
 {
     let mut granularity: usize = 2;
     let max_outer_iterations = ops.len().saturating_mul(2).saturating_add(8);
@@ -969,7 +937,7 @@ where
             } else {
                 start + chunk
             };
-            let candidate: Vec<RecordedOp> = ops[..start]
+            let candidate: Vec<T> = ops[..start]
                 .iter()
                 .chain(ops[end..].iter())
                 .cloned()
@@ -991,7 +959,7 @@ where
 fn max_producer_id(ops: &[RecordedOp]) -> Option<usize> {
     ops.iter()
         .filter_map(|op| match op {
-            RecordedOp::InsertTiling { producer_id }
+            RecordedOp::InsertTiling { producer_id, .. }
             | RecordedOp::InsertFloat { producer_id, .. }
             | RecordedOp::InsertFullscreen { producer_id, .. }
             | RecordedOp::AddMonitor { producer_id, .. } => Some(*producer_id),
@@ -1019,158 +987,161 @@ fn record(
     )
 }
 
-fn replay(ops: &[RecordedOp], make_hub: fn() -> Hub) -> Option<FailureSignature> {
-    capture_panic(|| {
-        let mut hub = make_hub();
-        let table_size = max_producer_id(ops).map(|m| m + 1).unwrap_or(0);
-        let mut live_window: Vec<Option<WindowId>> = vec![None; table_size];
-        let mut live_monitor: Vec<Option<MonitorId>> = vec![None; table_size];
-        let primary = hub.focused_monitor();
+fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
+    let mut hub = make_hub();
+    let table_size = max_producer_id(ops).map(|m| m + 1).unwrap_or(0);
+    let mut live_window: Vec<Option<WindowId>> = vec![None; table_size];
+    let mut live_monitor: Vec<Option<MonitorId>> = vec![None; table_size];
+    let primary = hub.focused_monitor();
 
-        for op in ops {
-            match op {
-                RecordedOp::InsertTiling { producer_id } => {
-                    let id = hub.insert_tiling(hub.current_workspace(), titled("w4"));
-                    live_window[*producer_id] = Some(id);
-                }
-                RecordedOp::InsertFloat { producer_id, dim } => {
-                    let id = hub.insert_float(hub.current_workspace(), *dim, titled("w5"));
-                    live_window[*producer_id] = Some(id);
-                }
-                RecordedOp::InsertFullscreen {
-                    producer_id,
-                    restrictions,
-                } => {
-                    let id =
-                        hub.insert_fullscreen(hub.current_workspace(), *restrictions, titled("w6"));
-                    live_window[*producer_id] = Some(id);
-                }
-                RecordedOp::AddMonitor {
-                    producer_id,
-                    name,
-                    dim,
-                    scale,
-                } => {
-                    let id = hub.add_monitor(name.clone(), *dim, *scale);
-                    live_monitor[*producer_id] = Some(id);
-                }
-                RecordedOp::DeleteWindow { window } => {
-                    let Some(id) = live_window.get(window.0).copied().flatten() else {
-                        continue;
-                    };
-                    hub.delete_window(id);
-                    live_window[window.0] = None;
-                }
-                RecordedOp::RemoveMonitor { monitor, fallback } => {
-                    let Some(mon_id) = resolve_monitor(monitor, &live_monitor, primary) else {
-                        continue;
-                    };
-                    let Some(fb_id) = resolve_monitor(fallback, &live_monitor, primary) else {
-                        continue;
-                    };
-                    if let Some(pos) = live_monitor.iter().position(|m| *m == Some(mon_id)) {
-                        live_monitor[pos] = None;
-                    }
-                    hub.remove_monitor(mon_id, fb_id);
-                }
-                RecordedOp::SetFullscreen {
-                    window,
-                    restrictions,
-                } => {
-                    let Some(id) = live_window.get(window.0).copied().flatten() else {
-                        continue;
-                    };
-                    hub.set_fullscreen(id, *restrictions);
-                }
-                RecordedOp::UnsetFullscreen { window } => {
-                    let Some(id) = live_window.get(window.0).copied().flatten() else {
-                        continue;
-                    };
-                    hub.unset_fullscreen(id);
-                }
-                RecordedOp::SetFocus { window } => {
-                    let Some(id) = live_window.get(window.0).copied().flatten() else {
-                        continue;
-                    };
-                    hub.set_focus(id);
-                }
-                RecordedOp::SetWindowConstraint {
-                    window,
-                    min_w,
-                    min_h,
-                    max_w,
-                    max_h,
-                } => {
-                    let Some(id) = live_window.get(window.0).copied().flatten() else {
-                        continue;
-                    };
-                    hub.set_window_constraint(id, *min_w, *min_h, *max_w, *max_h);
-                }
-                RecordedOp::SetWindowTitle { window, title } => {
-                    let Some(id) = live_window.get(window.0).copied().flatten() else {
-                        continue;
-                    };
-                    hub.set_window_title(id, title.clone());
-                }
-                RecordedOp::MinimizeWindow { window } => {
-                    let Some(id) = live_window.get(window.0).copied().flatten() else {
-                        continue;
-                    };
-                    hub.minimize_window(id);
-                }
-                RecordedOp::UnminimizeWindow { window } => {
-                    let Some(id) = live_window.get(window.0).copied().flatten() else {
-                        continue;
-                    };
-                    hub.unminimize_window(id);
-                }
-                RecordedOp::MoveToWorkspace { name } => {
-                    hub.move_focused_to_workspace(name);
-                }
-                RecordedOp::FocusWorkspace { name } => {
-                    hub.focus_workspace(name);
-                }
-                RecordedOp::FocusMonitor { target } => {
-                    hub.focus_monitor(target);
-                }
-                RecordedOp::MoveToMonitor { target } => {
-                    hub.move_focused_to_monitor(target);
-                }
-                RecordedOp::FocusLeft => hub.focus_left(),
-                RecordedOp::FocusRight => hub.focus_right(),
-                RecordedOp::FocusUp => hub.focus_up(),
-                RecordedOp::FocusDown => hub.focus_down(),
-                RecordedOp::MoveLeft => hub.move_left(),
-                RecordedOp::MoveRight => hub.move_right(),
-                RecordedOp::MoveUp => hub.move_up(),
-                RecordedOp::MoveDown => hub.move_down(),
-                RecordedOp::ToggleSpawnMode => hub.toggle_spawn_mode(),
-                RecordedOp::ToggleDirection => hub.toggle_direction(),
-                RecordedOp::FocusParent => hub.focus_parent(),
-                RecordedOp::ToggleContainerLayout => hub.toggle_container_layout(),
-                RecordedOp::FocusNextTab => hub.focus_next_tab(),
-                RecordedOp::FocusPrevTab => hub.focus_prev_tab(),
-                RecordedOp::ToggleFloat => hub.toggle_float(),
-                RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
-                RecordedOp::IncreaseMasterRatio => {
-                    hub.handle_tiling_action(TilingAction::GrowMaster);
-                }
-                RecordedOp::DecreaseMasterRatio => {
-                    hub.handle_tiling_action(TilingAction::ShrinkMaster);
-                }
-                RecordedOp::IncrementMasterCount => {
-                    hub.handle_tiling_action(TilingAction::MoreMaster);
-                }
-                RecordedOp::DecrementMasterCount => {
-                    hub.handle_tiling_action(TilingAction::FewerMaster);
-                }
-                RecordedOp::QueryWorkspaces => {
-                    hub.query_workspaces();
-                }
+    for op in ops {
+        match op {
+            RecordedOp::InsertTiling { producer_id, title } => {
+                let window_title = title.as_deref().unwrap_or("w4");
+                let id = hub.insert_tiling(hub.current_workspace(), titled(window_title));
+                live_window[*producer_id] = Some(id);
             }
-            validate_hub(&hub);
+            RecordedOp::InsertFloat { producer_id, dim } => {
+                let id = hub.insert_float(hub.current_workspace(), *dim, titled("w5"));
+                live_window[*producer_id] = Some(id);
+            }
+            RecordedOp::InsertFullscreen {
+                producer_id,
+                restrictions,
+            } => {
+                let id =
+                    hub.insert_fullscreen(hub.current_workspace(), *restrictions, titled("w6"));
+                live_window[*producer_id] = Some(id);
+            }
+            RecordedOp::AddMonitor {
+                producer_id,
+                name,
+                dim,
+                scale,
+            } => {
+                let id = hub.add_monitor(name.clone(), *dim, *scale);
+                live_monitor[*producer_id] = Some(id);
+            }
+            RecordedOp::DeleteWindow { window } => {
+                let Some(id) = live_window.get(window.0).copied().flatten() else {
+                    continue;
+                };
+                hub.delete_window(id);
+                live_window[window.0] = None;
+            }
+            RecordedOp::RemoveMonitor { monitor, fallback } => {
+                let Some(mon_id) = resolve_monitor(monitor, &live_monitor, primary) else {
+                    continue;
+                };
+                let Some(fb_id) = resolve_monitor(fallback, &live_monitor, primary) else {
+                    continue;
+                };
+                if let Some(pos) = live_monitor.iter().position(|m| *m == Some(mon_id)) {
+                    live_monitor[pos] = None;
+                }
+                hub.remove_monitor(mon_id, fb_id);
+            }
+            RecordedOp::SetFullscreen {
+                window,
+                restrictions,
+            } => {
+                let Some(id) = live_window.get(window.0).copied().flatten() else {
+                    continue;
+                };
+                hub.set_fullscreen(id, *restrictions);
+            }
+            RecordedOp::UnsetFullscreen { window } => {
+                let Some(id) = live_window.get(window.0).copied().flatten() else {
+                    continue;
+                };
+                hub.unset_fullscreen(id);
+            }
+            RecordedOp::SetFocus { window } => {
+                let Some(id) = live_window.get(window.0).copied().flatten() else {
+                    continue;
+                };
+                hub.set_focus(id);
+            }
+            RecordedOp::SetWindowConstraint {
+                window,
+                min_w,
+                min_h,
+                max_w,
+                max_h,
+            } => {
+                let Some(id) = live_window.get(window.0).copied().flatten() else {
+                    continue;
+                };
+                hub.set_window_constraint(id, *min_w, *min_h, *max_w, *max_h);
+            }
+            RecordedOp::SetWindowTitle { window, title } => {
+                let Some(id) = live_window.get(window.0).copied().flatten() else {
+                    continue;
+                };
+                hub.set_window_title(id, title.clone());
+            }
+            RecordedOp::MinimizeWindow { window } => {
+                let Some(id) = live_window.get(window.0).copied().flatten() else {
+                    continue;
+                };
+                hub.minimize_window(id);
+            }
+            RecordedOp::UnminimizeWindow { window } => {
+                let Some(id) = live_window.get(window.0).copied().flatten() else {
+                    continue;
+                };
+                hub.unminimize_window(id);
+            }
+            RecordedOp::MoveToWorkspace { name } => {
+                hub.move_focused_to_workspace(name);
+            }
+            RecordedOp::FocusWorkspace { name } => {
+                hub.focus_workspace(name);
+            }
+            RecordedOp::FocusMonitor { target } => {
+                hub.focus_monitor(target);
+            }
+            RecordedOp::MoveToMonitor { target } => {
+                hub.move_focused_to_monitor(target);
+            }
+            RecordedOp::FocusLeft => hub.focus_left(),
+            RecordedOp::FocusRight => hub.focus_right(),
+            RecordedOp::FocusUp => hub.focus_up(),
+            RecordedOp::FocusDown => hub.focus_down(),
+            RecordedOp::MoveLeft => hub.move_left(),
+            RecordedOp::MoveRight => hub.move_right(),
+            RecordedOp::MoveUp => hub.move_up(),
+            RecordedOp::MoveDown => hub.move_down(),
+            RecordedOp::ToggleSpawnMode => hub.toggle_spawn_mode(),
+            RecordedOp::ToggleDirection => hub.toggle_direction(),
+            RecordedOp::FocusParent => hub.focus_parent(),
+            RecordedOp::ToggleContainerLayout => hub.toggle_container_layout(),
+            RecordedOp::FocusNextTab => hub.focus_next_tab(),
+            RecordedOp::FocusPrevTab => hub.focus_prev_tab(),
+            RecordedOp::ToggleFloat => hub.toggle_float(),
+            RecordedOp::ToggleFullscreen => hub.toggle_fullscreen(),
+            RecordedOp::IncreaseMasterRatio => {
+                hub.handle_tiling_action(TilingAction::GrowMaster);
+            }
+            RecordedOp::DecreaseMasterRatio => {
+                hub.handle_tiling_action(TilingAction::ShrinkMaster);
+            }
+            RecordedOp::IncrementMasterCount => {
+                hub.handle_tiling_action(TilingAction::MoreMaster);
+            }
+            RecordedOp::DecrementMasterCount => {
+                hub.handle_tiling_action(TilingAction::FewerMaster);
+            }
+            RecordedOp::QueryWorkspaces => {
+                hub.query_workspaces();
+            }
         }
-    })
+        validate_hub(&hub);
+    }
+}
+
+fn replay(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) -> Option<FailureSignature> {
+    capture_panic(|| replay_without_capture(ops, make_hub))
 }
 
 fn resolve_monitor(
@@ -1191,6 +1162,456 @@ fn reproduces_signature(
 ) -> bool {
     matches!(replay(candidate, make_hub), Some(ref sig) if sig == target)
 }
+
+#[derive(Debug, Clone)]
+enum PrefTreeBuildOp {
+    InsertLeaf {
+        leaf_id: usize,
+        title: String,
+        anchor: Option<usize>,
+        split: SplitMode,
+    },
+}
+
+fn random_split(rng: &mut ChaCha8Rng) -> SplitMode {
+    match rng.random_range(0..3u8) {
+        0 => SplitMode::Horizontal,
+        1 => SplitMode::Vertical,
+        _ => SplitMode::Tabbed,
+    }
+}
+
+fn generate_tree_ops(
+    rng: &mut ChaCha8Rng,
+    abort: &AtomicBool,
+) -> (Vec<PrefTreeBuildOp>, Vec<String>) {
+    let mut ops = Vec::new();
+    let mut titles = Vec::new();
+    let leaf_target = rng.random_range(2..=PREF_TREE_MAX_LEAVES);
+
+    if abort.load(Ordering::Relaxed) {
+        return (ops, titles);
+    }
+
+    // First leaf is the implicit root.
+    let root_id = 0usize;
+    let title = format!("pref-{}", root_id);
+    titles.push(title.clone());
+    ops.push(PrefTreeBuildOp::InsertLeaf {
+        leaf_id: root_id,
+        title,
+        anchor: None,
+        split: random_split(rng),
+    });
+
+    let mut next_leaf_id = 1usize;
+    let mut container_ids: HashSet<usize> = HashSet::new();
+    let mut container_counter: usize = 0;
+    let mut leaves_created = 1usize;
+
+    while leaves_created < leaf_target {
+        if abort.load(Ordering::Relaxed) {
+            break;
+        }
+
+        // Pick an anchor from among all existing tree nodes.
+        let leaf_count = next_leaf_id;
+        let total_nodes = leaf_count + container_ids.len();
+        let pick = rng.random_range(0..total_nodes);
+        let anchor = if pick < leaf_count {
+            pick
+        } else {
+            let ci = pick - leaf_count;
+            *container_ids.iter().nth(ci).unwrap()
+        };
+
+        let leaf_id = next_leaf_id;
+        next_leaf_id += 1;
+        let title = format!("pref-{}", leaf_id);
+        titles.push(title.clone());
+
+        let split = random_split(rng);
+        ops.push(PrefTreeBuildOp::InsertLeaf {
+            leaf_id,
+            title,
+            anchor: Some(anchor),
+            split,
+        });
+
+        if container_ids.contains(&anchor) {
+            // Anchor is a container: new leaf becomes a child of that container.
+        } else {
+            // Anchor is a leaf: wrapping creates a new container.
+            let container_id = CONTAINER_BASE + container_counter;
+            container_counter += 1;
+            container_ids.insert(container_id);
+        }
+
+        leaves_created += 1;
+    }
+
+    (ops, titles)
+}
+
+struct ReconContainer {
+    split: SplitMode,
+    children: Vec<usize>,
+}
+
+fn build_node_recursive(
+    id: usize,
+    leaves: &HashMap<usize, String>,
+    containers: &HashMap<usize, ReconContainer>,
+) -> Option<TreeLayoutNode> {
+    if let Some(title) = leaves.get(&id) {
+        return Some(TreeLayoutNode::Leaf(WindowMatcher {
+            title: Some(title.clone()),
+            ..Default::default()
+        }));
+    }
+    if let Some(c) = containers.get(&id) {
+        let children = c
+            .children
+            .iter()
+            .filter_map(|cid| build_node_recursive(*cid, leaves, containers))
+            .collect::<Vec<_>>();
+        if children.is_empty() {
+            return None;
+        }
+        return Some(TreeLayoutNode::Container {
+            split: Some(c.split),
+            children,
+        });
+    }
+    None
+}
+
+fn reconstruct_tree(ops: &[PrefTreeBuildOp]) -> Option<TreeLayoutNode> {
+    let mut leaves: HashMap<usize, String> = HashMap::new();
+    let mut containers: HashMap<usize, ReconContainer> = HashMap::new();
+    let mut parent: HashMap<usize, Option<usize>> = HashMap::new();
+    let mut root: Option<usize> = None;
+    let mut container_counter: usize = 0;
+
+    for op in ops {
+        let PrefTreeBuildOp::InsertLeaf {
+            leaf_id,
+            title,
+            anchor,
+            split,
+        } = op;
+
+        match anchor {
+            None => {
+                if root.is_none() {
+                    leaves.insert(*leaf_id, title.clone());
+                    parent.insert(*leaf_id, None);
+                    root = Some(*leaf_id);
+                }
+            }
+            Some(anchor_id) => {
+                let aid = *anchor_id;
+                if containers.contains_key(&aid) {
+                    leaves.insert(*leaf_id, title.clone());
+                    containers.get_mut(&aid).unwrap().children.push(*leaf_id);
+                    parent.insert(*leaf_id, Some(aid));
+                } else if leaves.contains_key(&aid) {
+                    let container_id = CONTAINER_BASE + container_counter;
+                    container_counter += 1;
+                    containers.insert(
+                        container_id,
+                        ReconContainer {
+                            split: *split,
+                            children: vec![aid, *leaf_id],
+                        },
+                    );
+                    leaves.insert(*leaf_id, title.clone());
+                    let anchor_parent = parent.get(&aid).copied().unwrap();
+                    parent.insert(container_id, anchor_parent);
+                    match anchor_parent {
+                        None => root = Some(container_id),
+                        Some(pid) => {
+                            if let Some(p) = containers.get_mut(&pid)
+                                && let Some(pos) = p.children.iter().position(|c| *c == aid)
+                            {
+                                p.children[pos] = container_id;
+                            }
+                        }
+                    }
+                    parent.insert(aid, Some(container_id));
+                    parent.insert(*leaf_id, Some(container_id));
+                }
+            }
+        }
+    }
+
+    let root_id = root?;
+    build_node_recursive(root_id, &leaves, &containers)
+}
+
+fn make_pref_tree_hub(tree: Option<TreeLayoutNode>) -> Hub {
+    let mut ws_builder =
+        LayoutWorkspaceConfigBuilder::new("1").with_strategy(Strategy::PartitionTree);
+    if let Some(t) = tree {
+        ws_builder = ws_builder.with_tree(t);
+    }
+    TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_workspace(vec![ws_builder.build()])
+                .build(),
+        )
+        .build()
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "single-call-site test helper threading full smoke state"
+)]
+fn pref_tree_build_op(
+    kind: OpKind,
+    rng: &mut ChaCha8Rng,
+    windows: &[WindowId],
+    window_origin: &[usize],
+    window_minimized: &[bool],
+    monitors: &[MonitorId],
+    monitor_origin: &[usize],
+    next_op_index: usize,
+    free_titles: &mut Vec<String>,
+) -> Option<RecordedOp> {
+    if kind == OpKind::InsertTiling {
+        if rng.random_bool(0.5) && !free_titles.is_empty() {
+            let title = free_titles.pop().unwrap();
+            return Some(RecordedOp::InsertTiling {
+                producer_id: next_op_index,
+                title: Some(title),
+            });
+        }
+        return Some(RecordedOp::InsertTiling {
+            producer_id: next_op_index,
+            title: None,
+        });
+    }
+    build_op(
+        kind,
+        rng,
+        windows,
+        window_origin,
+        window_minimized,
+        monitors,
+        monitor_origin,
+        next_op_index,
+    )
+}
+
+fn pref_tree_run_iteration<F1, F2>(
+    seed: u64,
+    ops_per_run: usize,
+    abort: &AtomicBool,
+    mut tree_observer: F1,
+    mut window_observer: F2,
+) where
+    F1: FnMut(&PrefTreeBuildOp),
+    F2: FnMut(&RecordedOp),
+{
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+
+    // Phase 1: generate and observe tree ops
+    let (tree_ops, preferred_titles) = generate_tree_ops(&mut rng, abort);
+    for op in &tree_ops {
+        tree_observer(op);
+    }
+
+    // Build hub from the tree
+    let tree_node = reconstruct_tree(&tree_ops);
+    let mut hub = make_pref_tree_hub(tree_node);
+
+    // Phase 2: interleave gen + apply window ops
+    let mut windows: Vec<WindowId> = Vec::new();
+    let mut window_origin: Vec<usize> = Vec::new();
+    let mut window_minimized: Vec<bool> = Vec::new();
+    let mut monitors: Vec<MonitorId> = vec![hub.focused_monitor()];
+    let mut monitor_origin: Vec<usize> = vec![usize::MAX];
+    let mut free_titles = preferred_titles.clone();
+    let mut next_op_index: usize = 0;
+
+    for _ in 0..ops_per_run {
+        if abort.load(Ordering::Relaxed) {
+            return;
+        }
+        let kind = ALL_OP_KINDS[rng.random_range(0..ALL_OP_KINDS.len())];
+        let Some(op) = pref_tree_build_op(
+            kind,
+            &mut rng,
+            &windows,
+            &window_origin,
+            &window_minimized,
+            &monitors,
+            &monitor_origin,
+            next_op_index,
+            &mut free_titles,
+        ) else {
+            continue;
+        };
+        window_observer(&op);
+        apply_op(
+            &mut hub,
+            &op,
+            &mut windows,
+            &mut window_origin,
+            &mut window_minimized,
+            &mut monitors,
+            &mut monitor_origin,
+        );
+        next_op_index += 1;
+        validate_hub(&hub);
+    }
+
+    // Clean up all remaining windows
+    while !windows.is_empty() {
+        if abort.load(Ordering::Relaxed) {
+            return;
+        }
+        let producer_id = window_origin.remove(0);
+        let op = RecordedOp::DeleteWindow {
+            window: RecordedWindow(producer_id),
+        };
+        window_observer(&op);
+        let id = windows.remove(0);
+        hub.delete_window(id);
+        validate_hub(&hub);
+    }
+}
+
+fn pref_tree_record(
+    seed: u64,
+    ops_per_run: usize,
+) -> (Vec<PrefTreeBuildOp>, Vec<RecordedOp>, FailureSignature) {
+    let abort = AtomicBool::new(false);
+    let tree_ops: RefCell<Vec<PrefTreeBuildOp>> = RefCell::new(Vec::new());
+    let window_ops: RefCell<Vec<RecordedOp>> = RefCell::new(Vec::new());
+    let signature = capture_panic(|| {
+        pref_tree_run_iteration(
+            seed,
+            ops_per_run,
+            &abort,
+            |op| tree_ops.borrow_mut().push(op.clone()),
+            |op| window_ops.borrow_mut().push(op.clone()),
+        );
+    });
+    (
+        tree_ops.into_inner(),
+        window_ops.into_inner(),
+        signature.expect("seed did not panic, nothing to reduce"),
+    )
+}
+
+fn pref_tree_reproduces_signature(
+    tree_ops: &[PrefTreeBuildOp],
+    window_ops: &[RecordedOp],
+    target: &FailureSignature,
+) -> bool {
+    let tree = reconstruct_tree(tree_ops);
+    matches!(
+        replay(window_ops, || make_pref_tree_hub(tree)),
+        Some(ref sig) if sig == target
+    )
+}
+
+fn pref_tree_shrink(
+    tree_ops: Vec<PrefTreeBuildOp>,
+    window_ops: Vec<RecordedOp>,
+    target: &FailureSignature,
+) -> (Vec<PrefTreeBuildOp>, Vec<RecordedOp>) {
+    let mut tree = tree_ops;
+    let mut window = window_ops;
+    let target = target.clone();
+    loop {
+        let new_tree = ddmin(tree.clone(), |t| {
+            pref_tree_reproduces_signature(t, &window, &target)
+        });
+        let new_window = ddmin(window.clone(), |w| {
+            pref_tree_reproduces_signature(&new_tree, w, &target)
+        });
+        if new_tree.len() == tree.len() && new_window.len() == window.len() {
+            return (tree, new_window);
+        }
+        tree = new_tree;
+        window = new_window;
+        tracing::info!(tree = tree.len(), window = window.len(), "shrink iteration");
+    }
+}
+
+#[test]
+fn pref_tree_smoke_test() {
+    setup_logger_with_level("info");
+
+    let seed = 42u64;
+    let runs = RUNS;
+    let ops_per_run = OPS_PER_RUN;
+    let completed = AtomicUsize::new(0);
+    let abort = AtomicBool::new(false);
+
+    (0..runs).into_par_iter().for_each(|run| {
+        if abort.load(Ordering::Relaxed) {
+            return;
+        }
+        let run_seed = seed.wrapping_add(run as u64);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pref_tree_run_iteration(run_seed, ops_per_run, &abort, |_| {}, |_| {});
+        }));
+
+        if let Err(e) = result {
+            abort.store(true, Ordering::Relaxed);
+            tracing::error!(
+                "To reproduce: DOME_SMOKE_SEED={run_seed} cargo test --lib \
+                 reproduce_pref_tree_smoke_failure -- --ignored --nocapture",
+            );
+            tracing::error!(
+                "To reduce:    DOME_SMOKE_SEED={run_seed} cargo test --lib \
+                 reduce_pref_tree_smoke_failure -- --ignored --nocapture",
+            );
+            std::panic::resume_unwind(e);
+        }
+        let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+        if done.is_multiple_of(10) {
+            tracing::info!("Completed preferred-tree {done}/{runs}");
+        }
+    });
+}
+
+#[test]
+#[ignore = "manual: set DOME_SMOKE_SEED to a failing seed and run with --ignored"]
+fn reproduce_pref_tree_smoke_failure() {
+    setup_logger_with_level("info");
+    let seed = smoke_seed_from_env("reproduce_pref_tree_smoke_failure");
+    let abort = AtomicBool::new(false);
+    pref_tree_run_iteration(seed, OPS_PER_RUN, &abort, |_| {}, |_| {});
+}
+
+#[test]
+#[ignore = "manual: set DOME_SMOKE_SEED to a failing seed and run with --ignored"]
+fn reduce_pref_tree_smoke_failure() {
+    setup_logger_with_level("info");
+    let seed = smoke_seed_from_env("reduce_pref_tree_smoke_failure");
+    let (tree_ops, window_ops, signature) = pref_tree_record(seed, OPS_PER_RUN);
+    tracing::info!(
+        tree_ops = tree_ops.len(),
+        window_ops = window_ops.len(),
+        ?signature,
+        "captured failure",
+    );
+    let (reduced_tree, reduced_window) = pref_tree_shrink(tree_ops, window_ops, &signature);
+    tracing::error!("=== REDUCED TREE OPS ({}) ===", reduced_tree.len());
+    for (i, op) in reduced_tree.iter().enumerate() {
+        tracing::error!("  {i}: {op:?}");
+    }
+    tracing::error!("=== REDUCED WINDOW OPS ({}) ===", reduced_window.len());
+    for (i, op) in reduced_window.iter().enumerate() {
+        tracing::error!("  {i}: {op:?}");
+    }
+}
+
 mod tests {
     use super::*;
 

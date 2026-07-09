@@ -908,7 +908,6 @@ impl LayoutWorkspaceConfigBuilder {
         Self { fullscreen, ..self }
     }
 
-    #[allow(dead_code)]
     fn with_tree(self, tree: TreeLayoutNode) -> Self {
         Self {
             tree: Some(tree),
