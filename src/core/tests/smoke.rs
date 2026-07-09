@@ -1,6 +1,5 @@
 //! Smoke tests and delta-debugging reducer for the Hub.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -23,19 +22,90 @@ const SEED: u64 = 42u64;
 const PREF_TREE_MAX_LEAVES: usize = 30;
 const CONTAINER_BASE: usize = 1_000_000;
 
-fn setup_master_for_smoke() -> Hub {
-    TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .with_strategy(Strategy::Master)
-                .build(),
-        )
-        .build()
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SmokeStrategy {
+    PartitionTree,
+    Master,
+    PreferredTree,
+}
+
+impl SmokeStrategy {
+    fn all() -> &'static [SmokeStrategy] {
+        &[
+            SmokeStrategy::PartitionTree,
+            SmokeStrategy::Master,
+            SmokeStrategy::PreferredTree,
+        ]
+    }
+
+    fn test_name(self) -> &'static str {
+        match self {
+            SmokeStrategy::PartitionTree => "partition-tree",
+            SmokeStrategy::Master => "master",
+            SmokeStrategy::PreferredTree => "pref-tree",
+        }
+    }
+
+    /// Build a hub from this strategy. Returns the hub, the list of preferred
+    /// titles (empty for non-preferred-tree strategies), and the tree ops used
+    /// (empty for non-preferred-tree strategies; needed by the reducer).
+    fn build_hub(
+        self,
+        rng: &mut ChaCha8Rng,
+        abort: &AtomicBool,
+    ) -> (Hub, Vec<String>, Vec<PrefTreeBuildOp>) {
+        match self {
+            SmokeStrategy::PartitionTree => (setup_hub(), Vec::new(), Vec::new()),
+            SmokeStrategy::Master => (
+                TestHubBuilder::new()
+                    .with_layout(
+                        LayoutConfigBuilder::new()
+                            .with_strategy(Strategy::Master)
+                            .build(),
+                    )
+                    .build(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            SmokeStrategy::PreferredTree => {
+                let (tree_ops, preferred_titles) = generate_tree_ops(rng, abort);
+                let tree_node = reconstruct_tree(&tree_ops);
+                let hub = make_pref_tree_hub(tree_node);
+                (hub, preferred_titles, tree_ops)
+            }
+        }
+    }
+
+    /// Return a plain `fn() -> Hub` for this strategy. Only valid for
+    /// non-preferred-tree strategies (used by the reducer's `ddmin` loop).
+    fn make_simple_hub(self) -> fn() -> Hub {
+        match self {
+            SmokeStrategy::PartitionTree => setup_hub,
+            SmokeStrategy::Master => || {
+                TestHubBuilder::new()
+                    .with_layout(
+                        LayoutConfigBuilder::new()
+                            .with_strategy(Strategy::Master)
+                            .build(),
+                    )
+                    .build()
+            },
+            SmokeStrategy::PreferredTree => {
+                panic!("PreferredTree reduce uses pref_tree_shrink, not make_simple_hub")
+            }
+        }
+    }
+}
+
+fn strategy_for_seed(seed: u64) -> SmokeStrategy {
+    let all = SmokeStrategy::all();
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    all[rng.random_range(0..all.len())]
 }
 
 #[test]
 fn smoke_test() {
-    setup_logger_with_level("info");
+    setup_logger_with_level("warn");
 
     let completed = AtomicUsize::new(0);
     let abort = AtomicBool::new(false);
@@ -44,14 +114,9 @@ fn smoke_test() {
         if abort.load(Ordering::Relaxed) {
             return;
         }
-        run_smoke_iteration(
-            SEED.wrapping_add(run as u64),
-            OPS_PER_RUN,
-            setup_hub,
-            &abort,
-            "reproduce_smoke_failure",
-            "reduce_smoke_failure",
-        );
+        let strategy_seed = SEED.wrapping_add(run as u64);
+        let strategy = strategy_for_seed(strategy_seed);
+        run_smoke_iteration(strategy_seed, OPS_PER_RUN, strategy, &abort);
         if abort.load(Ordering::Relaxed) {
             return;
         }
@@ -63,93 +128,52 @@ fn smoke_test() {
 }
 
 #[test]
-fn master_smoke_test() {
-    setup_logger_with_level("info");
-
-    let completed = AtomicUsize::new(0);
-    let abort = AtomicBool::new(false);
-
-    (0..RUNS).into_par_iter().for_each(|run| {
-        if abort.load(Ordering::Relaxed) {
-            return;
-        }
-        run_smoke_iteration(
-            SEED.wrapping_add(run as u64),
-            OPS_PER_RUN,
-            setup_master_for_smoke,
-            &abort,
-            "reproduce_master_smoke_failure",
-            "reduce_master_smoke_failure",
-        );
-        if abort.load(Ordering::Relaxed) {
-            return;
-        }
-        let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-        if done.is_multiple_of(10) {
-            tracing::info!("Completed master-stack {done}/{RUNS}");
-        }
-    });
-}
-
-#[test]
 #[ignore = "manual: set DOME_SMOKE_SEED to a failing seed and run with --ignored"]
 fn reproduce_smoke_failure() {
     setup_logger_with_level("info");
-    let seed = smoke_seed_from_env("reproduce_smoke_failure");
+    let seed = smoke_seed_from_env();
+    let strategy = strategy_for_seed(seed);
     let abort = AtomicBool::new(false);
-    run_smoke_iteration(
-        seed,
-        10000,
-        setup_hub,
-        &abort,
-        "reproduce_smoke_failure",
-        "reduce_smoke_failure",
-    );
-}
-
-#[test]
-#[ignore = "manual: set DOME_SMOKE_SEED to a failing seed and run with --ignored"]
-fn reproduce_master_smoke_failure() {
-    setup_logger_with_level("info");
-    let seed = smoke_seed_from_env("reproduce_master_smoke_failure");
-    let abort = AtomicBool::new(false);
-    run_smoke_iteration(
-        seed,
-        10000,
-        setup_master_for_smoke,
-        &abort,
-        "reproduce_master_smoke_failure",
-        "reduce_master_smoke_failure",
-    );
+    run_smoke_iteration(seed, OPS_PER_RUN, strategy, &abort);
 }
 
 #[test]
 #[ignore = "manual: set DOME_SMOKE_SEED to a failing seed and run with --ignored"]
 fn reduce_smoke_failure() {
     setup_logger_with_level("info");
-    let seed = smoke_seed_from_env("reduce_smoke_failure");
-    let (recorded, signature) = record(seed, 10000, setup_hub);
-    tracing::info!(recorded = recorded.len(), ?signature, "captured failure");
-    let reduced = ddmin(recorded, |c| reproduces_signature(c, &signature, setup_hub));
-    tracing::error!("=== REDUCED OPERATIONS ({}) ===", reduced.len());
-    for (i, op) in reduced.iter().enumerate() {
-        tracing::error!("  {i}: {op:?}");
-    }
-}
+    let seed = smoke_seed_from_env();
+    let strategy = strategy_for_seed(seed);
+    let (tree_ops, window_ops, signature) = record(seed, OPS_PER_RUN, strategy);
 
-#[test]
-#[ignore = "manual: set DOME_SMOKE_SEED to a failing seed and run with --ignored"]
-fn reduce_master_smoke_failure() {
-    setup_logger_with_level("info");
-    let seed = smoke_seed_from_env("reduce_master_smoke_failure");
-    let (recorded, signature) = record(seed, 10000, setup_master_for_smoke);
-    tracing::info!(recorded = recorded.len(), ?signature, "captured failure");
-    let reduced = ddmin(recorded, |c| {
-        reproduces_signature(c, &signature, setup_master_for_smoke)
-    });
-    tracing::error!("=== REDUCED OPERATIONS ({}) ===", reduced.len());
-    for (i, op) in reduced.iter().enumerate() {
-        tracing::error!("  {i}: {op:?}");
+    match strategy {
+        SmokeStrategy::PreferredTree => {
+            tracing::info!(
+                tree_ops = tree_ops.len(),
+                window_ops = window_ops.len(),
+                ?signature,
+                "captured failure",
+            );
+            let (reduced_tree, reduced_window) = pref_tree_shrink(tree_ops, window_ops, &signature);
+            tracing::error!("=== REDUCED TREE OPS ({}) ===", reduced_tree.len());
+            for (i, op) in reduced_tree.iter().enumerate() {
+                tracing::error!("  {i}: {op:?}");
+            }
+            tracing::error!("=== REDUCED WINDOW OPS ({}) ===", reduced_window.len());
+            for (i, op) in reduced_window.iter().enumerate() {
+                tracing::error!("  {i}: {op:?}");
+            }
+        }
+        _ => {
+            tracing::info!(recorded = window_ops.len(), ?signature, "captured failure");
+            let make_hub = strategy.make_simple_hub();
+            let reduced = ddmin(window_ops, |c| {
+                reproduces_signature(c, &signature, make_hub)
+            });
+            tracing::error!("=== REDUCED OPERATIONS ({}) ===", reduced.len());
+            for (i, op) in reduced.iter().enumerate() {
+                tracing::error!("  {i}: {op:?}");
+            }
+        }
     }
 }
 
@@ -331,32 +355,30 @@ struct RecordedWindow(usize);
 #[derive(Debug, Clone, Copy)]
 struct RecordedMonitor(usize);
 
-fn run_smoke_iteration(
-    seed: u64,
-    ops_per_run: usize,
-    make_hub: fn() -> Hub,
-    abort: &AtomicBool,
-    reproduce_test_name: &'static str,
-    reduce_test_name: &'static str,
-) {
+fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, abort: &AtomicBool) {
     if abort.load(Ordering::Relaxed) {
         return;
     }
-    let mut hub = make_hub();
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let (mut hub, free_titles, _tree_ops) = strategy.build_hub(&mut rng, abort);
+    if abort.load(Ordering::Relaxed) {
+        return;
+    }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_iteration(seed, ops_per_run, &mut hub, abort, |_| {});
+        run_iteration(&mut hub, abort, |_| {}, &mut rng, ops_per_run, &free_titles);
     }));
 
     if let Err(e) = result {
         abort.store(true, Ordering::Relaxed);
+        let name = strategy.test_name();
         tracing::error!(
-            "To reproduce: DOME_SMOKE_SEED={seed} cargo test --lib \
-             {reproduce_test_name} -- --ignored --nocapture",
+            "To reproduce: DOME_SMOKE_STRATEGY={name} DOME_SMOKE_SEED={seed} cargo test --lib \
+             reproduce_smoke_failure -- --ignored --nocapture",
         );
         tracing::error!(
-            "To reduce:    DOME_SMOKE_SEED={seed} cargo test --lib \
-             {reduce_test_name} -- --ignored --nocapture",
+            "To reduce:    DOME_SMOKE_STRATEGY={name} DOME_SMOKE_SEED={seed} cargo test --lib \
+             reduce_smoke_failure -- --ignored --nocapture",
         );
         std::panic::resume_unwind(e);
     }
@@ -371,15 +393,16 @@ fn pick_non_minimized(rng: &mut ChaCha8Rng, minimized: &[bool]) -> Option<usize>
 }
 
 fn run_iteration<F>(
-    seed: u64,
-    ops_per_run: usize,
     hub: &mut Hub,
     abort: &AtomicBool,
     mut observer: F,
+    rng: &mut ChaCha8Rng,
+    ops_per_run: usize,
+    free_titles: &[String],
 ) where
     F: FnMut(&RecordedOp),
 {
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut free_titles: Vec<String> = free_titles.to_vec();
     let mut windows: Vec<WindowId> = Vec::new();
     let mut window_origin: Vec<usize> = Vec::new();
     let mut window_minimized: Vec<bool> = Vec::new();
@@ -394,13 +417,14 @@ fn run_iteration<F>(
         let kind = ALL_OP_KINDS[rng.random_range(0..ALL_OP_KINDS.len())];
         let Some(op) = build_op(
             kind,
-            &mut rng,
+            rng,
             &windows,
             &window_origin,
             &window_minimized,
             &monitors,
             &monitor_origin,
             next_op_index,
+            &mut free_titles,
         ) else {
             continue;
         };
@@ -446,12 +470,23 @@ fn build_op(
     monitors: &[MonitorId],
     monitor_origin: &[usize],
     next_op_index: usize,
+    free_titles: &mut Vec<String>,
 ) -> Option<RecordedOp> {
     match kind {
-        OpKind::InsertTiling => Some(RecordedOp::InsertTiling {
-            producer_id: next_op_index,
-            title: None,
-        }),
+        OpKind::InsertTiling => {
+            if rng.random_bool(0.5)
+                && let Some(title) = free_titles.pop()
+            {
+                return Some(RecordedOp::InsertTiling {
+                    producer_id: next_op_index,
+                    title: Some(title),
+                });
+            }
+            Some(RecordedOp::InsertTiling {
+                producer_id: next_op_index,
+                title: None,
+            })
+        }
         OpKind::InsertFloat => {
             let dim = Dimension::new(
                 Length::new(rng.random_range(0.0f32..100.0)),
@@ -825,19 +860,19 @@ fn apply_op(
     }
 }
 
-fn smoke_seed_from_env(test_name: &'static str) -> u64 {
+fn smoke_seed_from_env() -> u64 {
     match std::env::var("DOME_SMOKE_SEED") {
         Ok(value) => match value.parse::<u64>() {
             Ok(seed) => seed,
             Err(_) => panic!(
                 "DOME_SMOKE_SEED='{value}' is not a valid u64.\n\
-                 example: DOME_SMOKE_SEED=167 cargo test --lib {test_name} \
+                 example: DOME_SMOKE_SEED=167 cargo test --lib reproduce_smoke_failure \
                  -- --ignored --nocapture"
             ),
         },
         Err(_) => panic!(
             "DOME_SMOKE_SEED not set.\n\
-             example: DOME_SMOKE_SEED=167 cargo test --lib {test_name} \
+             example: DOME_SMOKE_SEED=167 cargo test --lib reproduce_smoke_failure \
              -- --ignored --nocapture"
         ),
     }
@@ -971,17 +1006,24 @@ fn max_producer_id(ops: &[RecordedOp]) -> Option<usize> {
 fn record(
     seed: u64,
     ops_per_run: usize,
-    make_hub: fn() -> Hub,
-) -> (Vec<RecordedOp>, FailureSignature) {
-    let mut hub = make_hub();
-    let mut ops: Vec<RecordedOp> = Vec::new();
+    strategy: SmokeStrategy,
+) -> (Vec<PrefTreeBuildOp>, Vec<RecordedOp>, FailureSignature) {
     let abort = AtomicBool::new(false);
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let (mut hub, free_titles, tree_ops) = strategy.build_hub(&mut rng, &abort);
+    let mut ops: Vec<RecordedOp> = Vec::new();
     let signature = capture_panic(|| {
-        run_iteration(seed, ops_per_run, &mut hub, &abort, |op| {
-            ops.push(op.clone());
-        });
+        run_iteration(
+            &mut hub,
+            &abort,
+            |op| ops.push(op.clone()),
+            &mut rng,
+            ops_per_run,
+            &free_titles,
+        );
     });
     (
+        tree_ops,
         ops,
         signature.expect("seed did not panic, nothing to reduce"),
     )
@@ -1364,148 +1406,6 @@ fn make_pref_tree_hub(tree: Option<TreeLayoutNode>) -> Hub {
         .build()
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "single-call-site test helper threading full smoke state"
-)]
-fn pref_tree_build_op(
-    kind: OpKind,
-    rng: &mut ChaCha8Rng,
-    windows: &[WindowId],
-    window_origin: &[usize],
-    window_minimized: &[bool],
-    monitors: &[MonitorId],
-    monitor_origin: &[usize],
-    next_op_index: usize,
-    free_titles: &mut Vec<String>,
-) -> Option<RecordedOp> {
-    if kind == OpKind::InsertTiling {
-        if rng.random_bool(0.5) && !free_titles.is_empty() {
-            let title = free_titles.pop().unwrap();
-            return Some(RecordedOp::InsertTiling {
-                producer_id: next_op_index,
-                title: Some(title),
-            });
-        }
-        return Some(RecordedOp::InsertTiling {
-            producer_id: next_op_index,
-            title: None,
-        });
-    }
-    build_op(
-        kind,
-        rng,
-        windows,
-        window_origin,
-        window_minimized,
-        monitors,
-        monitor_origin,
-        next_op_index,
-    )
-}
-
-fn pref_tree_run_iteration<F1, F2>(
-    seed: u64,
-    ops_per_run: usize,
-    abort: &AtomicBool,
-    mut tree_observer: F1,
-    mut window_observer: F2,
-) where
-    F1: FnMut(&PrefTreeBuildOp),
-    F2: FnMut(&RecordedOp),
-{
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
-
-    // Phase 1: generate and observe tree ops
-    let (tree_ops, preferred_titles) = generate_tree_ops(&mut rng, abort);
-    for op in &tree_ops {
-        tree_observer(op);
-    }
-
-    // Build hub from the tree
-    let tree_node = reconstruct_tree(&tree_ops);
-    let mut hub = make_pref_tree_hub(tree_node);
-
-    // Phase 2: interleave gen + apply window ops
-    let mut windows: Vec<WindowId> = Vec::new();
-    let mut window_origin: Vec<usize> = Vec::new();
-    let mut window_minimized: Vec<bool> = Vec::new();
-    let mut monitors: Vec<MonitorId> = vec![hub.focused_monitor()];
-    let mut monitor_origin: Vec<usize> = vec![usize::MAX];
-    let mut free_titles = preferred_titles.clone();
-    let mut next_op_index: usize = 0;
-
-    for _ in 0..ops_per_run {
-        if abort.load(Ordering::Relaxed) {
-            return;
-        }
-        let kind = ALL_OP_KINDS[rng.random_range(0..ALL_OP_KINDS.len())];
-        let Some(op) = pref_tree_build_op(
-            kind,
-            &mut rng,
-            &windows,
-            &window_origin,
-            &window_minimized,
-            &monitors,
-            &monitor_origin,
-            next_op_index,
-            &mut free_titles,
-        ) else {
-            continue;
-        };
-        window_observer(&op);
-        apply_op(
-            &mut hub,
-            &op,
-            &mut windows,
-            &mut window_origin,
-            &mut window_minimized,
-            &mut monitors,
-            &mut monitor_origin,
-        );
-        next_op_index += 1;
-        validate_hub(&hub);
-    }
-
-    // Clean up all remaining windows
-    while !windows.is_empty() {
-        if abort.load(Ordering::Relaxed) {
-            return;
-        }
-        let producer_id = window_origin.remove(0);
-        let op = RecordedOp::DeleteWindow {
-            window: RecordedWindow(producer_id),
-        };
-        window_observer(&op);
-        let id = windows.remove(0);
-        hub.delete_window(id);
-        validate_hub(&hub);
-    }
-}
-
-fn pref_tree_record(
-    seed: u64,
-    ops_per_run: usize,
-) -> (Vec<PrefTreeBuildOp>, Vec<RecordedOp>, FailureSignature) {
-    let abort = AtomicBool::new(false);
-    let tree_ops: RefCell<Vec<PrefTreeBuildOp>> = RefCell::new(Vec::new());
-    let window_ops: RefCell<Vec<RecordedOp>> = RefCell::new(Vec::new());
-    let signature = capture_panic(|| {
-        pref_tree_run_iteration(
-            seed,
-            ops_per_run,
-            &abort,
-            |op| tree_ops.borrow_mut().push(op.clone()),
-            |op| window_ops.borrow_mut().push(op.clone()),
-        );
-    });
-    (
-        tree_ops.into_inner(),
-        window_ops.into_inner(),
-        signature.expect("seed did not panic, nothing to reduce"),
-    )
-}
-
 fn pref_tree_reproduces_signature(
     tree_ops: &[PrefTreeBuildOp],
     window_ops: &[RecordedOp],
@@ -1539,76 +1439,6 @@ fn pref_tree_shrink(
         tree = new_tree;
         window = new_window;
         tracing::info!(tree = tree.len(), window = window.len(), "shrink iteration");
-    }
-}
-
-#[test]
-fn pref_tree_smoke_test() {
-    setup_logger_with_level("info");
-
-    let seed = 42u64;
-    let runs = RUNS;
-    let ops_per_run = OPS_PER_RUN;
-    let completed = AtomicUsize::new(0);
-    let abort = AtomicBool::new(false);
-
-    (0..runs).into_par_iter().for_each(|run| {
-        if abort.load(Ordering::Relaxed) {
-            return;
-        }
-        let run_seed = seed.wrapping_add(run as u64);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            pref_tree_run_iteration(run_seed, ops_per_run, &abort, |_| {}, |_| {});
-        }));
-
-        if let Err(e) = result {
-            abort.store(true, Ordering::Relaxed);
-            tracing::error!(
-                "To reproduce: DOME_SMOKE_SEED={run_seed} cargo test --lib \
-                 reproduce_pref_tree_smoke_failure -- --ignored --nocapture",
-            );
-            tracing::error!(
-                "To reduce:    DOME_SMOKE_SEED={run_seed} cargo test --lib \
-                 reduce_pref_tree_smoke_failure -- --ignored --nocapture",
-            );
-            std::panic::resume_unwind(e);
-        }
-        let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-        if done.is_multiple_of(10) {
-            tracing::info!("Completed preferred-tree {done}/{runs}");
-        }
-    });
-}
-
-#[test]
-#[ignore = "manual: set DOME_SMOKE_SEED to a failing seed and run with --ignored"]
-fn reproduce_pref_tree_smoke_failure() {
-    setup_logger_with_level("info");
-    let seed = smoke_seed_from_env("reproduce_pref_tree_smoke_failure");
-    let abort = AtomicBool::new(false);
-    pref_tree_run_iteration(seed, OPS_PER_RUN, &abort, |_| {}, |_| {});
-}
-
-#[test]
-#[ignore = "manual: set DOME_SMOKE_SEED to a failing seed and run with --ignored"]
-fn reduce_pref_tree_smoke_failure() {
-    setup_logger_with_level("info");
-    let seed = smoke_seed_from_env("reduce_pref_tree_smoke_failure");
-    let (tree_ops, window_ops, signature) = pref_tree_record(seed, OPS_PER_RUN);
-    tracing::info!(
-        tree_ops = tree_ops.len(),
-        window_ops = window_ops.len(),
-        ?signature,
-        "captured failure",
-    );
-    let (reduced_tree, reduced_window) = pref_tree_shrink(tree_ops, window_ops, &signature);
-    tracing::error!("=== REDUCED TREE OPS ({}) ===", reduced_tree.len());
-    for (i, op) in reduced_tree.iter().enumerate() {
-        tracing::error!("  {i}: {op:?}");
-    }
-    tracing::error!("=== REDUCED WINDOW OPS ({}) ===", reduced_window.len());
-    for (i, op) in reduced_window.iter().enumerate() {
-        tracing::error!("  {i}: {op:?}");
     }
 }
 
