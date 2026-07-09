@@ -89,7 +89,7 @@ impl PartitionTreeStrategy {
                 .windows
                 .get(id)
                 .workspace()
-                .expect("tiling window has a workspace"),
+                .expect("tiling window must have a workspace"),
             Child::Container(id) => self.containers.get(id).workspace,
         }
     }
@@ -182,6 +182,7 @@ impl PartitionTreeStrategy {
             anchor,
             split_mode,
         ));
+        tracing::debug!("Forming container {container_id} to replace {anchor}");
         for &c in &children {
             match c {
                 Child::Window(wid) => {

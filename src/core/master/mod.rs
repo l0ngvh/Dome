@@ -305,12 +305,6 @@ impl TilingStrategy for MasterStrategy {
                         if f.pane == Pane::Secondary {
                             let moved = state.stack.remove(f.index);
                             if state.master.len() >= state.master_count && master_len > 0 {
-                                tracing::warn!(
-                                    "huh {} {} {}",
-                                    state.master.len(),
-                                    state.master_count,
-                                    master_len
-                                );
                                 let swapped = state.master.pop().unwrap();
                                 state.master.push(moved);
                                 state.stack.push(swapped);

@@ -826,3 +826,179 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
     +------------------------------------------------+**************************************************+------------------------------------------------+
     ");
 }
+
+#[test]
+fn move_preferred_root_to_another_workspace() {
+    setup_logger_with_level("trace");
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_workspace(vec![
+                    LayoutWorkspaceConfigBuilder::new("1")
+                        .with_tree(TreeLayoutNode::Container {
+                            split: Some(SplitMode::Horizontal),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("AAA".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("DDD".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("CCC".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        })
+                        .build(),
+                ])
+                .build(),
+        )
+        .build();
+    hub.focus_workspace("1");
+
+    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
+    hub.focus_parent();
+    hub.move_focused_to_workspace("10");
+    let _w2 = hub.insert_tiling(hub.current_workspace(), titled("CCC"));
+    let _w3 = hub.insert_tiling(hub.current_workspace(), titled("DDD"));
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(3))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(3), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
+        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[DDD, CCC])
+      )
+
+    ***************************************************************************+-------------------------------------------------------------------------+
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                    W3                                   *|                                    W2                                   |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    *                                                                         *|                                                                         |
+    ***************************************************************************+-------------------------------------------------------------------------+
+    ");
+}
+
+#[test]
+fn move_preferred_container_to_another_workspace() {
+    setup_logger_with_level("trace");
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_workspace(vec![
+                    LayoutWorkspaceConfigBuilder::new("1")
+                        .with_tree(TreeLayoutNode::Container {
+                            split: Some(SplitMode::Horizontal),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("AAA".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("DDD".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Container {
+                                    split: Some(SplitMode::Horizontal),
+                                    children: vec![
+                                        TreeLayoutNode::Leaf(WindowMatcher {
+                                            title: Some("TTT".into()),
+                                            ..Default::default()
+                                        }),
+                                        TreeLayoutNode::Leaf(WindowMatcher {
+                                            title: Some("YYY".into()),
+                                            ..Default::default()
+                                        }),
+                                        TreeLayoutNode::Leaf(WindowMatcher {
+                                            title: Some("CCC".into()),
+                                            ..Default::default()
+                                        }),
+                                    ],
+                                },
+                            ],
+                        })
+                        .build(),
+                ])
+                .build(),
+        )
+        .build();
+    hub.focus_workspace("1");
+
+    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
+    let _w2 = hub.insert_tiling(hub.current_workspace(), titled("DDD"));
+    let _w3 = hub.insert_tiling(hub.current_workspace(), titled("YYY"));
+    let _w4 = hub.insert_tiling(hub.current_workspace(), titled("TTT"));
+    hub.focus_parent();
+    hub.move_focused_to_workspace("10");
+    let _w5 = hub.insert_tiling(hub.current_workspace(), titled("CCC"));
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(5))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(5), x=75.00, y=20.00, w=75.00, h=10.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=75.00, y=10.00, w=75.00, h=10.00)
+        Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=10.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, Container])
+        Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, titles=[AAA, DDD, CCC])
+      )
+
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                    W1                                   |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         |+-------------------------------------------------------------------------+
+    |                                                                         |+-------------------------------------------------------------------------+
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                    W0                                   ||                                    W2                                   |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         |+-------------------------------------------------------------------------+
+    |                                                                         |***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                    W5                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
