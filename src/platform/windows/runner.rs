@@ -285,6 +285,14 @@ impl Runner {
         self.dome.apply_layout();
     }
 
+    pub(super) fn handle_work_area_change(&mut self) {
+        let to_refresh = self.dome.handle_work_area_change();
+        for hwnd_id in to_refresh {
+            self.dispatch_constraint_read(hwnd_id);
+        }
+        self.dome.apply_layout();
+    }
+
     pub(super) fn handle_dpi_change(&mut self, handle: isize, dpi: u32) {
         self.dome.monitor_dpi_changed(handle, dpi);
         // apply_layout is idempotent: runs even when monitor_dpi_changed

@@ -322,6 +322,19 @@ impl Dome {
         to_refresh
     }
 
+    pub(super) fn handle_work_area_change(&mut self) -> Vec<HwndId> {
+        match self.display.get_all_monitors() {
+            Ok(monitors) => {
+                tracing::info!("Work area changed, refreshing monitor geometry");
+                self.monitors_changed(monitors)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to enumerate monitors on work area change: {e}");
+                Vec::new()
+            }
+        }
+    }
+
     /// Adding a manageable window.
     #[tracing::instrument(skip_all, fields(pid = ext.pid(), hwnd = %ext.id(), metadata = %metadata))]
     pub(super) fn add_window(

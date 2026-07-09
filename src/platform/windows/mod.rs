@@ -38,8 +38,9 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, IDC_ARROW, LoadCursorW,
-    MA_NOACTIVATE, MSG, PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW,
+    MA_NOACTIVATE, MSG, PostThreadMessageW, RegisterClassW, SPI_SETWORKAREA, TranslateMessage,
+    WM_APP, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WM_QUIT, WM_SETTINGCHANGE,
+    WM_TIMER, WNDCLASSW,
 };
 use windows::core::BOOL;
 
@@ -112,6 +113,7 @@ pub(super) const WM_APP_DISPATCH_RESULT: u32 = WM_APP + 2;
 /// LPARAM = HMONITOR handle (isize). Posted by every Dome-owned wnd-proc
 /// on WM_DPICHANGED; decoded by the dome-thread message loop.
 pub(super) const WM_APP_DPI_CHANGE: u32 = WM_APP + 3;
+pub(super) const WM_APP_WORKAREA_CHANGE: u32 = WM_APP + 4;
 /// Not exported by the `windows` crate as of v0.62. Defined in WinUser.h.
 /// Sent before WM_DPICHANGED; the handler writes the desired scaled window
 /// size into the SIZE* at lparam and returns TRUE.
@@ -344,6 +346,20 @@ pub(super) fn dome_wnd_proc_common(
             };
             Some(LRESULT(0))
         }
+        WM_SETTINGCHANGE => {
+            if wparam.0 == SPI_SETWORKAREA.0 as usize {
+                unsafe {
+                    PostThreadMessageW(
+                        GetCurrentThreadId(),
+                        WM_APP_WORKAREA_CHANGE,
+                        WPARAM(0),
+                        LPARAM(0),
+                    )
+                    .ok()
+                };
+            }
+            Some(LRESULT(0))
+        }
         WM_GETDPISCALEDSIZE => {
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect).ok() };
@@ -517,6 +533,9 @@ fn run_dome(
                     let dpi = msg.wParam.0 as u32;
                     let handle = msg.lParam.0;
                     runner.handle_dpi_change(handle, dpi);
+                }
+                WM_APP_WORKAREA_CHANGE => {
+                    runner.handle_work_area_change();
                 }
                 WM_APP_DISPATCH_RESULT => {
                     let apply = *Box::from_raw(msg.wParam.0 as *mut runner::ApplyFn);
