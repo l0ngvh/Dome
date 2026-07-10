@@ -1,7 +1,141 @@
 use super::preferred_layout::PreferredContainerSlotId;
 use crate::core::allocator::Node;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
-use crate::core::partition_tree::{Child, Parent, SpawnMode};
+use crate::core::partition_tree::{Child, Parent, PartitionTreeStrategy, SpawnMode};
+
+impl PartitionTreeStrategy {
+    /// Delete a container with exactly one child remaining. Promotes the last
+    /// child to grandparent.
+    pub(super) fn delete_container(&mut self, container_id: ContainerId) {
+        debug_assert_eq!(self.containers.get(container_id).children.len(), 1);
+        let grandparent = self.containers.get(container_id).parent;
+        let last_child = self
+            .containers
+            .get_mut(container_id)
+            .children
+            .pop()
+            .unwrap();
+
+        tracing::debug!(%container_id, %last_child, "Container has one child left, cleaning up");
+        self.set_parent(last_child, grandparent);
+        match grandparent {
+            Parent::Container(gp) => self
+                .containers
+                .get_mut(gp)
+                .replace_child_if_present(Child::Container(container_id), last_child),
+            Parent::Workspace(ws) => self.workspaces.get_mut(&ws).unwrap().root = Some(last_child),
+        }
+
+        self.replace_child_focus(Child::Container(container_id), last_child);
+
+        self.clean_up_occupied_container(container_id);
+        self.containers.delete(container_id);
+        self.maintain_direction_invariance(grandparent);
+    }
+
+    /// Attach child to existing container. Does not change focus.
+    pub(super) fn attach_child_to_container(
+        &mut self,
+        child: Child,
+        container_id: ContainerId,
+        insert_pos: Option<usize>,
+    ) {
+        let parent = self.containers.get_mut(container_id);
+        if let Some(pos) = insert_pos {
+            parent.children.insert(pos, child);
+        } else {
+            parent.children.push(child);
+        }
+        let container_spawn_mode = self.containers.get(container_id).spawn_mode();
+        if let Child::Window(wid) = child {
+            self.tiling_windows.get_mut(&wid).unwrap().spawn_mode =
+                SpawnMode::without_history(container_spawn_mode);
+        }
+        self.set_parent(child, Parent::Container(container_id));
+        self.maintain_direction_invariance(Parent::Container(container_id));
+    }
+
+    /// Detach child from container and replace focus to sibling.
+    /// Deletes container if only one child remains.
+    pub(super) fn detach_child_from_container(&mut self, container_id: ContainerId, child: Child) {
+        tracing::debug!(%child, %container_id, "Detaching child from container");
+        let children = &self.containers.get(container_id).children;
+        let pos = children.iter().position(|c| *c == child).unwrap();
+        let sibling = if pos > 0 {
+            children[pos - 1]
+        } else {
+            children[pos + 1]
+        };
+        let new_focus = self.descend_to_focused(sibling);
+        self.replace_child_focus(child, new_focus);
+
+        self.containers.get_mut(container_id).remove_child(child);
+        if self.containers.get(container_id).children.len() == 1 {
+            self.delete_container(container_id);
+        }
+    }
+
+    /// Maintain invariant 3 of `Container` after replacing `old_child` with
+    /// `new_child` in the tree. Two-walk algorithm:
+    ///
+    /// Walk 1 (scope): from `old_child`, find the highest ancestor still
+    /// focusing `old_child`. Stops at the first ancestor that does not focus
+    /// `old_child`. If the walk reaches the workspace, scope is the entire
+    /// path (and `focused_tiling` is also checked in walk 2).
+    ///
+    /// Walk 2 (replace): from `new_child`, rewrite `focused = new_child` and
+    /// update active tabs on every ancestor that still has `focused ==
+    /// old_child`. Stops at the scope boundary from walk 1. If scope reached
+    /// the workspace, also replaces `focused_tiling` if it pointed to
+    /// `old_child`.
+    fn replace_child_focus(&mut self, old_child: Child, new_child: Child) {
+        // Walk 1 (scope): find how far up old_child's focus extends.
+        // focus_chain_top = None means scope reaches the workspace.
+        let mut focus_chain_top = None;
+        let mut reached_workspace = true;
+        for (_, parent_id) in self.ancestors_of(old_child) {
+            if self.containers.get(parent_id).focused == old_child {
+                focus_chain_top = Some(parent_id);
+            } else {
+                reached_workspace = false;
+                break;
+            }
+        }
+        if reached_workspace {
+            focus_chain_top = None;
+        }
+
+        // Walk 2 (replace): walk up from new_child, replacing focus references.
+        let path: Vec<_> = self.ancestors_of(new_child).collect();
+        let mut hit_boundary = false;
+        for (walk_pos, parent_id) in &path {
+            let container = self.containers.get_mut(*parent_id);
+            if container.focused == old_child {
+                if container.is_tabbed {
+                    container.set_active_tab_to_child(*walk_pos);
+                }
+                container.focused = new_child;
+            }
+            if focus_chain_top.is_some_and(|c| c == *parent_id) {
+                hit_boundary = true;
+                break;
+            }
+        }
+        // If scope reached workspace and walk 2 didn't hit a boundary, update workspace focus.
+        if !hit_boundary {
+            let ws_child = match path.last() {
+                Some((_, last_pid)) => Child::Container(*last_pid),
+                None => new_child,
+            };
+            if let Parent::Workspace(ws) = self.parent(ws_child)
+                && self.workspaces.get(&ws).unwrap().focused_tiling == Some(old_child)
+            {
+                self.workspaces.get_mut(&ws).unwrap().focused_tiling = Some(new_child);
+                tracing::debug!(?old_child, ?new_child, "Workspace focus replaced");
+            }
+        }
+    }
+}
 
 /// Internal node of the partition tree. Holds an ordered list of `Child`
 /// nodes (windows or sub-containers) and either a split direction or the

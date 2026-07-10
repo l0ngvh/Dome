@@ -3,10 +3,169 @@ use crate::config::SplitMode;
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Dimension, WorkspaceId};
 use crate::core::partition_tree::{Child, Container, Parent, SpawnMode};
+use crate::core::strategy::TilingStrategy;
 
 use super::PartitionTreeStrategy;
 
 impl PartitionTreeStrategy {
+    /// Attach a `Child` (window or container) to a workspace. If the spawn mode is horizontal or
+    /// vertical then try to insert the child next to the focused child. if it's tabbed then try to
+    /// insert it into the closest tabbed container
+    pub(super) fn attach_child_according_to_spawn_mode(
+        &mut self,
+        hub: &mut HubAccess,
+        child: Child,
+        ws_id: WorkspaceId,
+    ) {
+        self.assign_subtree_to_workspace(hub, child, ws_id);
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        let insert_anchor = state.focused_tiling.or(state.root);
+        let Some(insert_anchor) = insert_anchor else {
+            self.workspaces.get_mut(&ws_id).unwrap().root = Some(child);
+            self.set_parent(child, Parent::Workspace(ws_id));
+            self.set_focus_child(hub, child);
+            self.layout_workspace(hub, ws_id);
+            return;
+        };
+
+        let spawn_mode = self.child_spawn_mode(insert_anchor);
+
+        if spawn_mode.is_tab()
+            && let Some(tabbed_self_or_ancestor) = self.find_tabbed_self_or_ancestor(insert_anchor)
+        {
+            let container = self.containers.get(tabbed_self_or_ancestor);
+            self.attach_child_to_container(
+                child,
+                tabbed_self_or_ancestor,
+                Some(container.active_tab_index() + 1),
+            );
+        } else if let Child::Container(cid) = insert_anchor
+            && self.containers.get(cid).can_accommodate(spawn_mode)
+        {
+            self.attach_child_to_container(child, cid, None);
+        } else {
+            match self.parent(insert_anchor) {
+                Parent::Container(container_id) => {
+                    if self
+                        .containers
+                        .get(container_id)
+                        .can_accommodate(spawn_mode)
+                    {
+                        let anchor_index =
+                            self.containers.get(container_id).position_of(insert_anchor);
+                        self.attach_child_to_container(child, container_id, Some(anchor_index + 1));
+                    } else {
+                        self.replace_anchor_with_container(
+                            hub,
+                            insert_anchor,
+                            vec![insert_anchor, child],
+                            spawn_mode.into(),
+                        );
+                    }
+                }
+                Parent::Workspace(_) => {
+                    self.replace_anchor_with_container(
+                        hub,
+                        insert_anchor,
+                        vec![insert_anchor, child],
+                        spawn_mode.into(),
+                    );
+                }
+            }
+        }
+
+        self.layout_workspace(hub, ws_id);
+        self.set_focus_child(hub, child);
+    }
+
+    /// Detach a `Child` (window or container) from its workspace.
+    pub(super) fn detach_child(&mut self, hub: &mut HubAccess, child: Child) {
+        let workspace_id = self.child_workspace(hub, child);
+
+        let parent = self.parent(child);
+        match parent {
+            Parent::Container(parent_id) => {
+                self.detach_child_from_container(parent_id, child);
+                self.layout_workspace(hub, workspace_id);
+            }
+            Parent::Workspace(workspace_id) => {
+                self.workspaces.get_mut(&workspace_id).unwrap().root = None;
+                self.workspaces
+                    .get_mut(&workspace_id)
+                    .unwrap()
+                    .focused_tiling = None;
+
+                let ws = hub.workspaces.get_mut(workspace_id);
+                ws.is_float_focused = !ws.float_windows.is_empty();
+
+                self.layout_workspace(hub, workspace_id);
+            }
+        }
+
+        let children: Vec<_> = self.children_dfs(child).collect();
+        for child in children {
+            let workspace = self.workspaces.get_mut(&workspace_id).unwrap();
+            if let Some(layout) = workspace.preferred_layout.as_mut() {
+                match child {
+                    Child::Window(wid) => {
+                        let window = self.tiling_windows.get_mut(&wid).unwrap();
+                        if let Some(slot_id) = window.occupy {
+                            layout.clear_window_slot(slot_id);
+                            window.occupy = None;
+                            if workspace.occupied_preferred_root
+                                == Some(PreferredSlot::Window(slot_id))
+                            {
+                                workspace.occupied_preferred_root = None;
+                            }
+                        }
+                    }
+                    Child::Container(cid) => {
+                        let container = self.containers.get_mut(cid);
+                        if let Some(slot_id) = container.occupy {
+                            layout.clear_container_slot(slot_id);
+                            container.occupy = None;
+                            if workspace.occupied_preferred_root
+                                == Some(PreferredSlot::Container(slot_id))
+                            {
+                                workspace.occupied_preferred_root = layout.top_occupied_in(slot_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Internal set_focus that works with `Child` (window or container).
+    ///
+    /// Establish invariant 3 of `Container` for `child`: writes `child` to
+    /// `container.focused` on every ancestor up to the workspace, and updates
+    /// `active_tab` on each tabbed ancestor with the walk position (not
+    /// `child`). At the workspace level, sets `focused_tiling = Some(child)`
+    /// and clears `is_float_focused`.
+    pub(super) fn set_focus_child(&mut self, hub: &mut HubAccess, child: Child) {
+        let path: Vec<_> = self.ancestors_of(child).collect();
+        for (walk_pos, parent_id) in &path {
+            let container = self.containers.get_mut(*parent_id);
+            if container.is_tabbed {
+                container.set_active_tab_to_child(*walk_pos);
+            }
+            container.focused = child;
+        }
+        // Workspace-level focus state lives above the container tree.
+        // ancestors_of terminates at the workspace boundary, so handle it here.
+        let ws_child = match path.last() {
+            Some((_, last_pid)) => Child::Container(*last_pid),
+            None => child,
+        };
+        let Parent::Workspace(ws) = self.parent(ws_child) else {
+            panic!("set_focus_child: top of ancestor path has no workspace parent");
+        };
+        self.workspaces.get_mut(&ws).unwrap().focused_tiling = Some(child);
+        hub.workspaces.get_mut(ws).is_float_focused = false;
+        self.scroll_into_view(hub, ws);
+    }
+
     pub(super) fn ancestors_of(
         &self,
         start: Child,
@@ -211,149 +370,5 @@ impl PartitionTreeStrategy {
         }
         self.maintain_direction_invariance(parent);
         container_id
-    }
-
-    /// Attach child to existing container. Does not change focus.
-    pub(super) fn attach_child_to_container(
-        &mut self,
-        child: Child,
-        container_id: ContainerId,
-        insert_pos: Option<usize>,
-    ) {
-        let parent = self.containers.get_mut(container_id);
-        if let Some(pos) = insert_pos {
-            parent.children.insert(pos, child);
-        } else {
-            parent.children.push(child);
-        }
-        let container_spawn_mode = self.containers.get(container_id).spawn_mode();
-        if let Child::Window(wid) = child {
-            self.tiling_windows.get_mut(&wid).unwrap().spawn_mode =
-                SpawnMode::without_history(container_spawn_mode);
-        }
-        self.set_parent(child, Parent::Container(container_id));
-        self.maintain_direction_invariance(Parent::Container(container_id));
-    }
-
-    /// Maintain invariant 3 of `Container` after replacing `old_child` with
-    /// `new_child` in the tree. Two-walk algorithm:
-    ///
-    /// Walk 1 (scope): from `old_child`, find the highest ancestor still
-    /// focusing `old_child`. Stops at the first ancestor that does not focus
-    /// `old_child`. If the walk reaches the workspace, scope is the entire
-    /// path (and `focused_tiling` is also checked in walk 2).
-    ///
-    /// Walk 2 (replace): from `new_child`, rewrite `focused = new_child` and
-    /// update active tabs on every ancestor that still has `focused ==
-    /// old_child`. Stops at the scope boundary from walk 1. If scope reached
-    /// the workspace, also replaces `focused_tiling` if it pointed to
-    /// `old_child`.
-    fn replace_child_focus(&mut self, old_child: Child, new_child: Child) {
-        // Walk 1 (scope): find how far up old_child's focus extends.
-        // focus_chain_top = None means scope reaches the workspace.
-        let mut focus_chain_top = None;
-        let mut reached_workspace = true;
-        for (_, parent_id) in self.ancestors_of(old_child) {
-            if self.containers.get(parent_id).focused == old_child {
-                focus_chain_top = Some(parent_id);
-            } else {
-                reached_workspace = false;
-                break;
-            }
-        }
-        if reached_workspace {
-            focus_chain_top = None;
-        }
-
-        // Walk 2 (replace): walk up from new_child, replacing focus references.
-        let path: Vec<_> = self.ancestors_of(new_child).collect();
-        let mut hit_boundary = false;
-        for (walk_pos, parent_id) in &path {
-            let container = self.containers.get_mut(*parent_id);
-            if container.focused == old_child {
-                if container.is_tabbed {
-                    container.set_active_tab_to_child(*walk_pos);
-                }
-                container.focused = new_child;
-            }
-            if focus_chain_top.is_some_and(|c| c == *parent_id) {
-                hit_boundary = true;
-                break;
-            }
-        }
-        // If scope reached workspace and walk 2 didn't hit a boundary, update workspace focus.
-        if !hit_boundary {
-            let ws_child = match path.last() {
-                Some((_, last_pid)) => Child::Container(*last_pid),
-                None => new_child,
-            };
-            if let Parent::Workspace(ws) = self.parent(ws_child)
-                && self.workspaces.get(&ws).unwrap().focused_tiling == Some(old_child)
-            {
-                self.workspaces.get_mut(&ws).unwrap().focused_tiling = Some(new_child);
-                tracing::debug!(?old_child, ?new_child, "Workspace focus replaced");
-            }
-        }
-    }
-
-    /// Detach child from container and replace focus to sibling.
-    /// Deletes container if only one child remains.
-    pub(super) fn detach_child_from_container(&mut self, container_id: ContainerId, child: Child) {
-        tracing::debug!(%child, %container_id, "Detaching child from container");
-        let children = &self.containers.get(container_id).children;
-        let pos = children.iter().position(|c| *c == child).unwrap();
-        let sibling = if pos > 0 {
-            children[pos - 1]
-        } else {
-            children[pos + 1]
-        };
-        let new_focus = self.descend_to_focused(sibling);
-        self.replace_child_focus(child, new_focus);
-
-        self.containers.get_mut(container_id).remove_child(child);
-        if self.containers.get(container_id).children.len() == 1 {
-            self.delete_container(container_id);
-        }
-    }
-
-    /// Delete a container with exactly one child remaining. Promotes the last
-    /// child to grandparent.
-    fn delete_container(&mut self, container_id: ContainerId) {
-        debug_assert_eq!(self.containers.get(container_id).children.len(), 1);
-        let grandparent = self.containers.get(container_id).parent;
-        let last_child = self
-            .containers
-            .get_mut(container_id)
-            .children
-            .pop()
-            .unwrap();
-
-        tracing::debug!(%container_id, %last_child, "Container has one child left, cleaning up");
-        self.set_parent(last_child, grandparent);
-        match grandparent {
-            Parent::Container(gp) => self
-                .containers
-                .get_mut(gp)
-                .replace_child_if_present(Child::Container(container_id), last_child),
-            Parent::Workspace(ws) => self.workspaces.get_mut(&ws).unwrap().root = Some(last_child),
-        }
-
-        self.replace_child_focus(Child::Container(container_id), last_child);
-
-        if let Some(slot_id) = self.containers.get(container_id).occupy {
-            let ws_id = self.containers.get(container_id).workspace;
-            if let Some(ws_state) = self.workspaces.get_mut(&ws_id)
-                && let Some(layout) = ws_state.preferred_layout.as_mut()
-            {
-                layout.clear_container_slot(slot_id);
-                if ws_state.occupied_preferred_root == Some(PreferredSlot::Container(slot_id)) {
-                    ws_state.occupied_preferred_root = layout.top_occupied_in(slot_id);
-                }
-            }
-            self.containers.get_mut(container_id).occupy = None;
-        }
-
-        self.containers.delete(container_id);
-        self.maintain_direction_invariance(grandparent);
     }
 }

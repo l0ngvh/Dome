@@ -3,7 +3,174 @@ use std::cmp::Ordering;
 use crate::config::{SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::WindowMetadata;
 use crate::core::allocator::{Allocator, Node, NodeId};
-use crate::core::node::{ContainerId, WindowId};
+use crate::core::hub::HubAccess;
+use crate::core::node::{Child, ContainerId, WindowId, WorkspaceId};
+use crate::core::partition_tree::PartitionTreeStrategy;
+use crate::core::strategy::TilingStrategy;
+
+impl PartitionTreeStrategy {
+    /// Insert a new window matching `slot_id` into the preferred tree when the preferred container
+    /// containing both `slot_id` and the current preferred layout root `root_slot` is not yet
+    /// materialized. In this case, we will materialize the lowest preferred container that houses
+    /// both this new window and the current root
+    pub(super) fn attach_window_to_unoccupied_container(
+        &mut self,
+        hub: &mut HubAccess,
+        window_id: WindowId,
+        ws_id: WorkspaceId,
+        slot_id: PreferredWindowSlotId,
+        root_slot: PreferredSlot,
+    ) {
+        tracing::debug!(%window_id, ?slot_id, ?root_slot, "Joining window to existing preferred root");
+        let ws_state = self.workspaces.get(&ws_id).unwrap();
+        let layout = ws_state.preferred_layout.as_ref().unwrap();
+        let (lowest_common_ancestor, ordering) =
+            layout.lowest_common_ancestor(PreferredSlot::Window(slot_id), root_slot);
+        let anchor = match root_slot {
+            PreferredSlot::Window(root_slot_id) => {
+                let root_window_id = layout.occupied_window(root_slot_id).unwrap();
+                Child::Window(root_window_id)
+            }
+            PreferredSlot::Container(root_container_id) => {
+                let root_container = layout.occupied_container(root_container_id).unwrap();
+                Child::Container(root_container)
+            }
+        };
+
+        let children = if ordering == Ordering::Less {
+            vec![Child::Window(window_id), anchor]
+        } else {
+            vec![anchor, Child::Window(window_id)]
+        };
+
+        let new_container_id = self.replace_anchor_with_container(
+            hub,
+            anchor,
+            children,
+            layout.container_slot_split(lowest_common_ancestor),
+        );
+
+        let ws_state = self.workspaces.get_mut(&ws_id).unwrap();
+        let layout = ws_state.preferred_layout.as_mut().unwrap();
+        layout.occupy_container_slot(lowest_common_ancestor, new_container_id);
+        layout.occupy_window_slot(slot_id, window_id);
+        self.tiling_windows.get_mut(&window_id).unwrap().occupy = Some(slot_id);
+        self.containers.get_mut(new_container_id).occupy = Some(lowest_common_ancestor);
+        ws_state.occupied_preferred_root = Some(PreferredSlot::Container(lowest_common_ancestor));
+
+        self.layout_workspace(hub, ws_id);
+        self.set_focus_child(hub, Child::Window(window_id));
+    }
+
+    /// Insert a window matched to `slot_id` into the subtree rooted at the
+    /// already-occupied `ancestor_slot` container. Walks the container's live
+    /// children, computing the nearest shared ancestor in the preferred layout
+    /// tree, and either creates a new sub-container (when that ancestor is a
+    /// inserts the window at the correct position.
+    pub(super) fn attach_window_into_occupied_ancestor(
+        &mut self,
+        hub: &mut HubAccess,
+        window_id: WindowId,
+        ws_id: WorkspaceId,
+        slot_id: PreferredWindowSlotId,
+        ancestor_slot: PreferredContainerSlotId,
+    ) {
+        let ws_state = self.workspaces.get(&ws_id).unwrap();
+        let layout = ws_state.preferred_layout.as_ref().unwrap();
+        let container_id = layout.occupied_container(ancestor_slot).unwrap();
+        let live_children = self.containers.get(container_id).children.clone();
+
+        let mut insert_pos = 0;
+
+        for (i, child) in live_children.iter().enumerate() {
+            let child_slot = match child {
+                Child::Window(wid) => {
+                    let Some(slot) = self.tiling_windows.get(wid).unwrap().occupy else {
+                        continue;
+                    };
+                    PreferredSlot::Window(slot)
+                }
+                Child::Container(cid) => {
+                    let Some(slot) = self.containers.get(*cid).occupy else {
+                        continue;
+                    };
+                    PreferredSlot::Container(slot)
+                }
+            };
+
+            let (lca, ordering) =
+                layout.lowest_common_ancestor(PreferredSlot::Window(slot_id), child_slot);
+
+            if layout.is_proper_descendant_of(lca, ancestor_slot) {
+                tracing::debug!(%window_id, ?slot_id, ?ancestor_slot, ?lca, ?ordering, "Creating sub-container beneath occupied ancestor");
+                let children = if ordering == Ordering::Less {
+                    vec![Child::Window(window_id), *child]
+                } else {
+                    vec![*child, Child::Window(window_id)]
+                };
+
+                let new_container_id = self.replace_anchor_with_container(
+                    hub,
+                    *child,
+                    children,
+                    layout.container_slot_split(lca),
+                );
+
+                let ws_state = self.workspaces.get_mut(&ws_id).unwrap();
+                let layout = ws_state.preferred_layout.as_mut().unwrap();
+                layout.occupy_container_slot(lca, new_container_id);
+                self.mark_slot_occupied_and_focus(hub, window_id, ws_id, slot_id);
+                self.containers.get_mut(new_container_id).occupy = Some(lca);
+                return;
+            }
+
+            if ordering == Ordering::Less {
+                insert_pos = i;
+                break;
+            }
+            insert_pos = i + 1;
+        }
+
+        tracing::debug!(%window_id, ?slot_id, %container_id, insert_pos, "Inserting window into occupied ancestor container");
+        self.attach_child_to_container(Child::Window(window_id), container_id, Some(insert_pos));
+
+        self.mark_slot_occupied_and_focus(hub, window_id, ws_id, slot_id);
+    }
+
+    pub(super) fn clean_up_occupied_container(&mut self, container_id: ContainerId) {
+        if let Some(slot_id) = self.containers.get(container_id).occupy {
+            let ws_id = self.containers.get(container_id).workspace;
+            if let Some(ws_state) = self.workspaces.get_mut(&ws_id)
+                && let Some(layout) = ws_state.preferred_layout.as_mut()
+            {
+                layout.clear_container_slot(slot_id);
+                if ws_state.occupied_preferred_root == Some(PreferredSlot::Container(slot_id)) {
+                    ws_state.occupied_preferred_root = layout.top_occupied_in(slot_id);
+                }
+            }
+            self.containers.get_mut(container_id).occupy = None;
+        }
+    }
+
+    /// Mark `slot_id` as occupied by `window_id`, trigger layout, and set focus.
+    fn mark_slot_occupied_and_focus(
+        &mut self,
+        hub: &mut HubAccess,
+        window_id: WindowId,
+        ws_id: WorkspaceId,
+        slot_id: PreferredWindowSlotId,
+    ) {
+        let ws_state = self.workspaces.get_mut(&ws_id).unwrap();
+        ws_state
+            .preferred_layout
+            .as_mut()
+            .unwrap()
+            .occupy_window_slot(slot_id, window_id);
+        self.tiling_windows.get_mut(&window_id).unwrap().occupy = Some(slot_id);
+        self.layout_workspace(hub, ws_id);
+        self.set_focus_child(hub, Child::Window(window_id));
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct PreferredWindowSlotId(usize);

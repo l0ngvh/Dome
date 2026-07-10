@@ -1,6 +1,6 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Direction, WorkspaceId};
-use crate::core::partition_tree::{Child, Container, Parent, SpawnMode};
+use crate::core::partition_tree::{Child, Parent, SpawnMode};
 use crate::core::strategy::TilingStrategy;
 
 use super::PartitionTreeStrategy;
