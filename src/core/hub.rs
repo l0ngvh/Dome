@@ -1,11 +1,14 @@
 use crate::action::MonitorTarget;
-use crate::config::{LayoutConfig, LayoutWorkspaceConfig, Strategy, WindowMatcher, WindowMode};
+use crate::config::{
+    Config, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, Strategy,
+    WindowMatcher, WindowMode,
+};
 
 use std::collections::HashSet;
 
 use super::allocator::{Allocator, NodeId};
 use super::node::{
-    ContainerId, Dimension, DisplayMode, Length, Monitor, MonitorId, Window, WindowId,
+    ContainerId, Dimension, DisplayMode, Length, Logical, Monitor, MonitorId, Window, WindowId,
     WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
 };
 use super::strategy::{StrategySet, TilingAction, clip};
@@ -93,6 +96,59 @@ pub(super) enum RestrictedAction {
     MonitorMove,
 }
 
+/// Convenience bundle of the global layout fields from Config.
+/// Hub and strategies use this instead of threading 9 separate fields.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct GlobalLayoutConfig {
+    pub(crate) strategy: Strategy,
+    pub(crate) partition_tree: PartitionTreeConfig,
+    pub(crate) master: MasterConfig,
+    pub(crate) min_width: SizeConstraint,
+    pub(crate) min_height: SizeConstraint,
+    pub(crate) max_width: SizeConstraint,
+    pub(crate) max_height: SizeConstraint,
+    pub(crate) float: Vec<WindowMatcher>,
+    pub(crate) fullscreen: Vec<WindowMatcher>,
+}
+
+impl From<&Config> for GlobalLayoutConfig {
+    fn from(c: &Config) -> Self {
+        Self {
+            strategy: c.strategy,
+            partition_tree: c.partition_tree.clone(),
+            master: c.master.clone(),
+            min_width: c.min_width,
+            min_height: c.min_height,
+            max_width: c.max_width,
+            max_height: c.max_height,
+            float: c.float.clone(),
+            fullscreen: c.fullscreen.clone(),
+        }
+    }
+}
+
+impl Default for GlobalLayoutConfig {
+    fn default() -> Self {
+        Self {
+            strategy: Strategy::PartitionTree,
+            partition_tree: PartitionTreeConfig {
+                tab_bar_height: Length::<Logical>::new(24.0),
+                automatic_tiling: true,
+            },
+            master: MasterConfig {
+                master_ratio: 0.5,
+                master_count: 1,
+            },
+            min_width: SizeConstraint::default_min(),
+            min_height: SizeConstraint::default_min(),
+            max_width: SizeConstraint::default(),
+            max_height: SizeConstraint::default(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }
+    }
+}
+
 /// Non-strategy fields of Hub, extracted so that `TilingStrategy` methods can
 /// receive `&mut HubAccess` while Hub holds `&mut strategy` separately. This
 /// solves the split-borrow problem: strategy and access are disjoint fields.
@@ -100,7 +156,8 @@ pub(super) enum RestrictedAction {
 pub(crate) struct HubAccess {
     pub(super) monitors: Allocator<Monitor>,
     pub(super) focused_monitor: MonitorId,
-    pub(super) config: LayoutConfig,
+    pub(super) layout: GlobalLayoutConfig,
+    pub(super) workspace_overrides: Vec<LayoutWorkspaceConfig>,
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
 }
@@ -125,7 +182,8 @@ impl Hub {
     pub(crate) fn new(
         primary_screen: Dimension,
         primary_scale: f32,
-        config: LayoutConfig,
+        layout: GlobalLayoutConfig,
+        workspace_overrides: Vec<LayoutWorkspaceConfig>,
         ignore_rules: Vec<WindowMatcher>,
     ) -> Self {
         let mut monitors: Allocator<Monitor> = Allocator::new();
@@ -143,26 +201,32 @@ impl Hub {
             workspaces.allocate(Workspace::new(primary_ws_name.clone(), primary_id));
         monitors.get_mut(primary_id).active_workspace = primary_ws_id;
 
-        let mut strategies = StrategySet::new(&config);
-        strategies.register(primary_ws_id, &primary_ws_name, &config);
+        let mut strategies = StrategySet::new(&layout);
+        strategies.register(
+            primary_ws_id,
+            &primary_ws_name,
+            &layout,
+            &workspace_overrides,
+        );
 
-        // Pre-allocate every workspace name listed in [[layout.workspace]]
+        // Pre-allocate every workspace name listed in [[workspace]]
         // (skipping any that collide with the primary workspace's name) so
         // that named workspaces have stable IDs from boot. They live on the
         // primary monitor.
-        for entry in &config.workspace {
+        for entry in &workspace_overrides {
             if entry.name() == primary_ws_name {
                 continue;
             }
             let ws_id = workspaces.allocate(Workspace::new(entry.name().to_string(), primary_id));
-            strategies.register(ws_id, entry.name(), &config);
+            strategies.register(ws_id, entry.name(), &layout, &workspace_overrides);
         }
 
         let mut hub = Self {
             access: HubAccess {
                 monitors,
                 focused_monitor: primary_id,
-                config,
+                layout,
+                workspace_overrides,
                 workspaces,
                 windows: Allocator::new(),
             },
@@ -372,7 +436,12 @@ impl Hub {
             .workspaces
             .allocate(Workspace::new(name.clone(), monitor_id));
         self.access.monitors.get_mut(monitor_id).active_workspace = ws_id;
-        self.strategies.register(ws_id, &name, &self.access.config);
+        self.strategies.register(
+            ws_id,
+            &name,
+            &self.access.layout,
+            &self.access.workspace_overrides,
+        );
         monitor_id
     }
 
@@ -430,24 +499,36 @@ impl Hub {
         }
     }
 
-    pub(crate) fn sync_config(&mut self, config: LayoutConfig) {
-        self.access.config = config;
+    pub(crate) fn sync_config(
+        &mut self,
+        layout: GlobalLayoutConfig,
+        workspace_overrides: Vec<LayoutWorkspaceConfig>,
+    ) {
+        self.access.layout = layout;
+        self.access.workspace_overrides = workspace_overrides;
 
         // Pre-allocate any workspace entries that don't exist yet.
-        for entry in &self.access.config.workspace {
+        for entry in &self.access.workspace_overrides {
             let name = entry.name();
             if self.access.workspaces.find(|ws| ws.name == name).is_none() {
                 let ws_id = self.access.workspaces.allocate(Workspace::new(
                     name.to_string(),
                     self.access.focused_monitor,
                 ));
-                self.strategies.register(ws_id, name, &self.access.config);
+                self.strategies.register(
+                    ws_id,
+                    name,
+                    &self.access.layout,
+                    &self.access.workspace_overrides,
+                );
             }
         }
 
-        let changes = self
-            .strategies
-            .resync(&self.access.workspaces, &self.access.config);
+        let changes = self.strategies.resync(
+            &self.access.workspaces,
+            &self.access.workspace_overrides,
+            &self.access.layout,
+        );
         let changed_ids: HashSet<WorkspaceId> = changes.iter().map(|c| c.ws_id).collect();
 
         let unchanged_ids: Vec<WorkspaceId> = self
@@ -476,8 +557,12 @@ impl Hub {
                 .get_mut(change.old)
                 .prune_workspace(change.ws_id);
             let ws_name = &self.access.workspaces.get(change.ws_id).name;
-            self.strategies
-                .prepare_workspace(change.ws_id, ws_name, &self.access.config);
+            self.strategies.prepare_workspace(
+                change.ws_id,
+                ws_name,
+                &self.access.layout,
+                &self.access.workspace_overrides,
+            );
             self.reattach_workspace_after_rebuild(change.ws_id, snapshot);
         }
         self.rebuild_matchers();
@@ -501,8 +586,7 @@ impl Hub {
         }
         let entries: Vec<Entry<'_>> = self
             .access
-            .config
-            .workspace
+            .workspace_overrides
             .iter()
             .map(|entry| {
                 use LayoutWorkspaceConfig::*;
@@ -550,8 +634,8 @@ impl Hub {
                 self.ws_tiling_matchers.push((m, ws_id));
             }
         }
-        self.fullscreen_matchers = self.access.config.fullscreen.clone();
-        self.float_matchers = self.access.config.float.clone();
+        self.fullscreen_matchers = self.access.layout.fullscreen.clone();
+        self.float_matchers = self.access.layout.float.clone();
     }
 
     pub(crate) fn set_ignore_rules(&mut self, rules: Vec<WindowMatcher>) {
@@ -877,7 +961,12 @@ impl Hub {
             name.to_string(),
             self.access.focused_monitor,
         ));
-        self.strategies.register(ws_id, name, &self.access.config);
+        self.strategies.register(
+            ws_id,
+            name,
+            &self.access.layout,
+            &self.access.workspace_overrides,
+        );
         ws_id
     }
 

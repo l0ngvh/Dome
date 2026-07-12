@@ -11,7 +11,7 @@ Starts Dome. Running `dome` on its own is shorthand for `dome launch`.
 Two flags override the default file paths. `-c <path>` (or `--config <path>`)
 sets the config file, and `-l <path>` (or `--layout <path>`) sets the layout
 file. Without them, Dome reads the platform defaults documented in
-[configuration.md](configuration.md) and [layout.md](layout.md).
+[configuration.md](configuration.md) and [preferred-layout.md](preferred-layout.md).
 
 ## Actions
 

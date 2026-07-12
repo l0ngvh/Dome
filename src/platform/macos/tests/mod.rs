@@ -13,7 +13,7 @@ use anyhow::Result;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::Action;
-use crate::config::{Config, LayoutConfig};
+use crate::config::Config;
 use crate::core::{Dimension, Length, Logical, MonitorId, WindowId};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -438,7 +438,7 @@ impl MacOS {
         Dome::new(
             &[default_monitor()],
             config.clone(),
-            LayoutConfig::default(),
+            Vec::new(),
             Box::new(sender),
         )
     }

@@ -802,15 +802,14 @@ fn apply_config_relayouts_and_clamps_scroll() {
     hub.set_window_constraint(w4, None, Some(20.0), None, None);
     // w4 is already focused (last stack window). Stack scrolled to show it.
     // Apply same config (relayout, clamp is idempotent)
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_strategy(Strategy::Master)
-            .with_master_config(MasterConfig {
-                master_ratio: 0.5,
-                master_count: 1,
-            })
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_strategy(Strategy::Master)
+        .with_master_config(MasterConfig {
+            master_ratio: 0.5,
+            master_count: 1,
+        })
+        .build();
+    hub.sync_config(l, o);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

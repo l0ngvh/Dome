@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::config::{Config, LayoutConfig, PartitionTreeConfig, WindowMatcher};
+use crate::core::GlobalLayoutConfig;
 
 #[test]
 fn window_destroyed_fills_screen() {
@@ -268,15 +269,16 @@ fn focus_parent_focuses_overlay() {
 
 #[test]
 fn focus_child_after_parent_does_not_focus_overlay() {
-    let mut env = TestEnv::new_with_layout(
+    let mut env = TestEnv::new_with_layout_settings(
         Config::default(),
-        LayoutConfig {
+        GlobalLayoutConfig {
             partition_tree: PartitionTreeConfig {
                 automatic_tiling: false,
                 tab_bar_height: Length::new(24.0),
             },
-            ..Default::default()
+            ..GlobalLayoutConfig::default()
         },
+        Vec::new(),
     );
 
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);

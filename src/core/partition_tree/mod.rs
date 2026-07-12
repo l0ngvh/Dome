@@ -14,7 +14,8 @@ pub(crate) use types::*;
 
 use std::collections::HashMap;
 
-use crate::config::{LayoutConfig, LayoutWorkspaceConfig};
+use crate::config::LayoutWorkspaceConfig;
+use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, SpawnIndicator, TilingWindowPlacement};
 use crate::core::node::{Dimension, Length, Logical, WindowId, WorkspaceId};
@@ -33,8 +34,14 @@ pub(crate) struct PartitionTreeStrategy {
 }
 
 impl TilingStrategy for PartitionTreeStrategy {
-    fn prepare_workspace(&mut self, ws_id: WorkspaceId, ws_name: &str, config: &LayoutConfig) {
-        let preferred_layout = config.workspace.iter().find_map(|w| match w {
+    fn prepare_workspace(
+        &mut self,
+        ws_id: WorkspaceId,
+        ws_name: &str,
+        _layout: &GlobalLayoutConfig,
+        workspace_overrides: &[LayoutWorkspaceConfig],
+    ) {
+        let preferred_layout = workspace_overrides.iter().find_map(|w| match w {
             LayoutWorkspaceConfig::PartitionTree { name, tree, .. } if *name == ws_name => {
                 tree.as_ref().map(PreferredLayout::from_tree_layout_node)
             }
@@ -306,8 +313,8 @@ impl TilingStrategy for PartitionTreeStrategy {
     }
 
     fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        self.tab_bar_height = hub.config.partition_tree.tab_bar_height;
-        self.automatic_tiling = hub.config.partition_tree.automatic_tiling;
+        self.tab_bar_height = hub.layout.partition_tree.tab_bar_height;
+        self.automatic_tiling = hub.layout.partition_tree.automatic_tiling;
         self.layout_workspace(hub, ws_id);
     }
 

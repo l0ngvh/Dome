@@ -1,11 +1,16 @@
-use crate::config::{LayoutConfig, LayoutWorkspaceConfig, MasterConfig, Strategy};
+use crate::config::{LayoutWorkspaceConfig, MasterConfig, Strategy};
+use crate::core::GlobalLayoutConfig;
 use crate::core::hub::Hub;
 use crate::core::node::{Dimension, Length, WindowRestrictions};
 
 use super::{LayoutConfigBuilder, setup_hub, snapshot, titled};
 use insta::assert_snapshot;
 
-fn layout(strategy: Strategy, ratio: f32, count: usize) -> LayoutConfig {
+fn layout(
+    strategy: Strategy,
+    ratio: f32,
+    count: usize,
+) -> (GlobalLayoutConfig, Vec<LayoutWorkspaceConfig>) {
     LayoutConfigBuilder::new()
         .with_strategy(strategy)
         .with_master_config(MasterConfig {
@@ -15,7 +20,7 @@ fn layout(strategy: Strategy, ratio: f32, count: usize) -> LayoutConfig {
         .build()
 }
 
-fn setup_hub_with_layout(layout_cfg: LayoutConfig) -> Hub {
+fn setup_hub_with_layout(layout_cfg: (GlobalLayoutConfig, Vec<LayoutWorkspaceConfig>)) -> Hub {
     Hub::new(
         Dimension::new(
             Length::new(0.0),
@@ -24,7 +29,8 @@ fn setup_hub_with_layout(layout_cfg: LayoutConfig) -> Hub {
             Length::new(30.0),
         ),
         1.0,
-        layout_cfg,
+        layout_cfg.0,
+        layout_cfg.1,
         Vec::new(),
     )
 }
@@ -37,7 +43,7 @@ fn sync_config_no_op_when_layout_unchanged() {
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
     let snap_before = snapshot(&hub);
-    hub.sync_config(LayoutConfigBuilder::new().build());
+    hub.sync_config(GlobalLayoutConfig::default(), Vec::new());
     assert_eq!(hub.focused_window(ws), focus_before);
     assert_eq!(snapshot(&hub), snap_before);
 }
@@ -53,14 +59,13 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
     let focus_before = hub.focused_window(ws);
 
     // Change master-stack params while partition-tree is active.
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_master_config(MasterConfig {
-                master_ratio: 0.3,
-                master_count: 2,
-            })
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_master_config(MasterConfig {
+            master_ratio: 0.3,
+            master_count: 2,
+        })
+        .build();
+    hub.sync_config(l, o);
 
     // Tree state (tabbed container) and focus preserved.
     assert_eq!(hub.focused_window(ws), focus_before);
@@ -112,7 +117,8 @@ fn sync_config_switches_partition_tree_to_master() {
     hub.insert_tiling(hub.current_workspace(), titled("w6"));
     hub.insert_tiling(hub.current_workspace(), titled("w7"));
 
-    hub.sync_config(layout(Strategy::Master, 0.5, 1));
+    let (l, o) = layout(Strategy::Master, 0.5, 1);
+    hub.sync_config(l, o);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -164,7 +170,7 @@ fn sync_config_switches_master_to_partition_tree() {
     hub.insert_tiling(hub.current_workspace(), titled("w10"));
     hub.insert_tiling(hub.current_workspace(), titled("w11"));
 
-    hub.sync_config(LayoutConfigBuilder::new().build());
+    hub.sync_config(GlobalLayoutConfig::default(), Vec::new());
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
@@ -265,7 +271,8 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    hub.sync_config(layout(Strategy::Master, 0.5, 1));
+    let (l, o) = layout(Strategy::Master, 0.5, 1);
+    hub.sync_config(l, o);
 
     // Remove fullscreen to expose tiling + float layer.
     hub.delete_window(_fs_id);
@@ -314,7 +321,8 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
 fn sync_config_swap_empty_workspace_no_panic() {
     let mut hub = setup_hub();
     // No windows inserted.
-    hub.sync_config(layout(Strategy::Master, 0.5, 1));
+    let (l, o) = layout(Strategy::Master, 0.5, 1);
+    hub.sync_config(l, o);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
@@ -347,7 +355,8 @@ fn sync_config_swap_iterates_every_active_workspace() {
     // Go back to workspace "0" so post-swap snapshot shows it.
     hub.focus_workspace("0");
 
-    hub.sync_config(layout(Strategy::Master, 0.5, 1));
+    let (l, o) = layout(Strategy::Master, 0.5, 1);
+    hub.sync_config(l, o);
 
     // Workspace "0" re-laid-out by master-stack.
     assert_snapshot!(snapshot(&hub), @"
@@ -489,7 +498,8 @@ fn sync_config_swap_preserves_float_focus() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    hub.sync_config(layout(Strategy::Master, 0.5, 1));
+    let (l, o) = layout(Strategy::Master, 0.5, 1);
+    hub.sync_config(l, o);
 
     assert_eq!(snapshot(&hub), before);
 }
@@ -518,19 +528,18 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
     hub.insert_tiling(hub.current_workspace(), titled("w29"));
 
     // Reload with same config: workspace "1" stays master, "0" stays partition-tree.
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_workspace(vec![LayoutWorkspaceConfig::Master {
-                name: "1".to_string(),
-                master_ratio: None,
-                master_count: None,
-                master: Vec::new(),
-                secondary: Vec::new(),
-                float: Vec::new(),
-                fullscreen: Vec::new(),
-            }])
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_workspace(vec![LayoutWorkspaceConfig::Master {
+            name: "1".to_string(),
+            master_ratio: None,
+            master_count: None,
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }])
+        .build();
+    hub.sync_config(l, o);
 
     // Workspace "1" uses master layout (big left pane + stack).
     assert_snapshot!(snapshot(&hub), @"
@@ -639,19 +648,18 @@ fn override_added_via_reload_rebuilds_only_target() {
     let snap_ws0_before = snapshot(&hub);
 
     // Reload with override on workspace "1" to master.
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_workspace(vec![LayoutWorkspaceConfig::Master {
-                name: "1".to_string(),
-                master_ratio: None,
-                master_count: None,
-                master: Vec::new(),
-                secondary: Vec::new(),
-                float: Vec::new(),
-                fullscreen: Vec::new(),
-            }])
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_workspace(vec![LayoutWorkspaceConfig::Master {
+            name: "1".to_string(),
+            master_ratio: None,
+            master_count: None,
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }])
+        .build();
+    hub.sync_config(l, o);
 
     // Workspace "0" was not rebuilt: same strategy, snapshot unchanged.
     assert_eq!(snapshot(&hub), snap_ws0_before);
@@ -730,7 +738,7 @@ fn override_removed_via_reload_falls_back_to_global() {
     let snap_ws0_before = snapshot(&hub);
 
     // Reload without any overrides: workspace "1" falls back to partition-tree.
-    hub.sync_config(LayoutConfigBuilder::new().build());
+    hub.sync_config(GlobalLayoutConfig::default(), Vec::new());
 
     // Workspace "0": same strategy (partition-tree), no rebuild.
     assert_eq!(snapshot(&hub), snap_ws0_before);

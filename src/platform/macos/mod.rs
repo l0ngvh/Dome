@@ -84,7 +84,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
     let (event_tx, event_rx) = calloop::channel::channel();
 
     let hub_config = config.clone();
-    let hub_layout = layout.clone();
+    let hub_layout = layout.workspace.clone();
     let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
 
     let _config_watcher = start_config_watcher(&config_path, Config::load, {

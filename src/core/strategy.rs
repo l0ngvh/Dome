@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::config::{LayoutConfig, LayoutWorkspaceConfig, Strategy};
+use crate::config::{LayoutWorkspaceConfig, Strategy};
+use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
@@ -54,7 +55,13 @@ pub(crate) struct TilingPlacements {
 /// (the access struct) are disjoint fields on Hub.
 pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Pre-allocate per-workspace state, no-op when the state already exists.
-    fn prepare_workspace(&mut self, ws_id: WorkspaceId, ws_name: &str, config: &LayoutConfig);
+    fn prepare_workspace(
+        &mut self,
+        ws_id: WorkspaceId,
+        ws_name: &str,
+        layout: &GlobalLayoutConfig,
+        workspace_overrides: &[LayoutWorkspaceConfig],
+    );
 
     /// Insert a window into the tiling tree for the given workspace.
     fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId);
@@ -224,10 +231,10 @@ pub(super) struct StrategySet {
 }
 
 impl StrategySet {
-    pub(super) fn new(config: &LayoutConfig) -> Self {
+    pub(super) fn new(layout: &GlobalLayoutConfig) -> Self {
         let partition_tree = PartitionTreeStrategy::new(
-            config.partition_tree.tab_bar_height,
-            config.partition_tree.automatic_tiling,
+            layout.partition_tree.tab_bar_height,
+            layout.partition_tree.automatic_tiling,
         );
         let master = MasterStrategy::new();
         Self {
@@ -237,20 +244,36 @@ impl StrategySet {
         }
     }
 
-    pub(super) fn register(&mut self, ws_id: WorkspaceId, name: &str, config: &LayoutConfig) {
-        self.kinds.insert(ws_id, kind_for(name, config));
-        self.get_mut(self.kind_of(ws_id))
-            .prepare_workspace(ws_id, name, config);
+    pub(super) fn register(
+        &mut self,
+        ws_id: WorkspaceId,
+        name: &str,
+        layout: &GlobalLayoutConfig,
+        workspace_overrides: &[LayoutWorkspaceConfig],
+    ) {
+        self.kinds
+            .insert(ws_id, kind_for(name, workspace_overrides, layout.strategy));
+        self.get_mut(self.kind_of(ws_id)).prepare_workspace(
+            ws_id,
+            name,
+            layout,
+            workspace_overrides,
+        );
     }
 
     pub(super) fn prepare_workspace(
         &mut self,
         ws_id: WorkspaceId,
         name: &str,
-        config: &LayoutConfig,
+        layout: &GlobalLayoutConfig,
+        workspace_overrides: &[LayoutWorkspaceConfig],
     ) {
-        self.get_mut(self.kind_of(ws_id))
-            .prepare_workspace(ws_id, name, config);
+        self.get_mut(self.kind_of(ws_id)).prepare_workspace(
+            ws_id,
+            name,
+            layout,
+            workspace_overrides,
+        );
     }
 
     pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {
@@ -289,7 +312,8 @@ impl StrategySet {
     pub(super) fn resync(
         &mut self,
         workspaces: &Allocator<Workspace>,
-        new_config: &LayoutConfig,
+        workspace_overrides: &[LayoutWorkspaceConfig],
+        layout: &GlobalLayoutConfig,
     ) -> Vec<WorkspaceKindChange> {
         let mut changes = Vec::new();
         for (ws_id, ws) in workspaces.all_active() {
@@ -297,7 +321,7 @@ impl StrategySet {
                 .kinds
                 .get(&ws_id)
                 .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"));
-            let new = kind_for(&ws.name, new_config);
+            let new = kind_for(&ws.name, workspace_overrides, layout.strategy);
             self.kinds.insert(ws_id, new);
             if old != new {
                 changes.push(WorkspaceKindChange { ws_id, old, new });
@@ -313,16 +337,19 @@ impl StrategySet {
     }
 }
 
-fn kind_for(name: &str, config: &LayoutConfig) -> Strategy {
-    config
-        .workspace
+fn kind_for(
+    name: &str,
+    workspace_overrides: &[LayoutWorkspaceConfig],
+    default_strategy: Strategy,
+) -> Strategy {
+    workspace_overrides
         .iter()
         .find(|w| w.name() == name)
         .map(|w| match w {
             LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
             LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
         })
-        .unwrap_or(config.strategy)
+        .unwrap_or(default_strategy)
 }
 
 #[cfg(test)]

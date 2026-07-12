@@ -15,9 +15,10 @@ mod strategy_switch;
 use std::collections::HashSet;
 
 use crate::config::{
-    LayoutConfig, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint,
-    Strategy, TreeLayoutNode, WindowMatcher,
+    LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, Strategy,
+    TreeLayoutNode, WindowMatcher,
 };
+use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
 use crate::core::hub::{Hub, MonitorLayout, SpawnIndicator};
 use crate::core::node::{Dimension, Direction, Length, Logical, WindowId};
@@ -697,18 +698,24 @@ pub(super) fn setup_logger_with_level(level: &str) {
 
 #[derive(Clone)]
 struct TestHubBuilder {
-    layout: LayoutConfig,
+    layout: GlobalLayoutConfig,
+    workspace_overrides: Vec<LayoutWorkspaceConfig>,
 }
 
 impl TestHubBuilder {
     fn new() -> Self {
+        let (layout, workspace_overrides) = LayoutConfigBuilder::new().build();
         Self {
-            layout: LayoutConfigBuilder::new().build(),
+            layout,
+            workspace_overrides,
         }
     }
 
-    fn with_layout(self, layout: LayoutConfig) -> Self {
-        Self { layout }
+    fn with_layout(self, pair: (GlobalLayoutConfig, Vec<LayoutWorkspaceConfig>)) -> Self {
+        Self {
+            layout: pair.0,
+            workspace_overrides: pair.1,
+        }
     }
 
     fn build(self) -> Hub {
@@ -721,6 +728,7 @@ impl TestHubBuilder {
             ),
             1.0,
             self.layout,
+            self.workspace_overrides,
             Vec::new(),
         )
     }
@@ -803,19 +811,21 @@ impl LayoutConfigBuilder {
         Self { fullscreen, ..self }
     }
 
-    fn build(self) -> LayoutConfig {
-        LayoutConfig {
-            strategy: self.strategy,
-            partition_tree: self.partition_tree,
-            master: self.master,
-            min_width: self.min_width,
-            min_height: self.min_height,
-            max_width: self.max_width,
-            max_height: self.max_height,
-            workspace: self.workspace,
-            float: self.float,
-            fullscreen: self.fullscreen,
-        }
+    fn build(self) -> (GlobalLayoutConfig, Vec<LayoutWorkspaceConfig>) {
+        (
+            GlobalLayoutConfig {
+                strategy: self.strategy,
+                partition_tree: self.partition_tree,
+                master: self.master,
+                min_width: self.min_width,
+                min_height: self.min_height,
+                max_width: self.max_width,
+                max_height: self.max_height,
+                float: self.float,
+                fullscreen: self.fullscreen,
+            },
+            self.workspace,
+        )
     }
 }
 

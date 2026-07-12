@@ -864,16 +864,15 @@ fn global_max_applies_to_all_windows() {
     hub.insert_tiling(hub.current_workspace(), titled("w33"));
     hub.insert_tiling(hub.current_workspace(), titled("w34"));
 
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_partition_tree_config(
-                PartitionTreeConfigBuilder::new()
-                    .with_automatic_tiling(true)
-                    .build(),
-            )
-            .with_max_width(SizeConstraint::Pixels(Length::new(60.0)))
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_partition_tree_config(
+            PartitionTreeConfigBuilder::new()
+                .with_automatic_tiling(true)
+                .build(),
+        )
+        .with_max_width(SizeConstraint::Pixels(Length::new(60.0)))
+        .build();
+    hub.sync_config(l, o);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -922,16 +921,15 @@ fn per_window_max_overrides_global() {
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w35"));
     hub.insert_tiling(hub.current_workspace(), titled("w36"));
 
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_partition_tree_config(
-                PartitionTreeConfigBuilder::new()
-                    .with_automatic_tiling(true)
-                    .build(),
-            )
-            .with_max_width(SizeConstraint::Pixels(Length::new(60.0)))
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_partition_tree_config(
+            PartitionTreeConfigBuilder::new()
+                .with_automatic_tiling(true)
+                .build(),
+        )
+        .with_max_width(SizeConstraint::Pixels(Length::new(60.0)))
+        .build();
+    hub.sync_config(l, o);
     hub.set_window_constraint(w0, None, None, Some(30.0), None);
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -1452,11 +1450,10 @@ fn window_max_smaller_than_global_min_width() {
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w49"));
 
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_min_width(SizeConstraint::Pixels(Length::new(300.0)))
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_min_width(SizeConstraint::Pixels(Length::new(300.0)))
+        .build();
+    hub.sync_config(l, o);
 
     // Window max (50) < global min (300) - should not panic, window max takes precedence
     hub.set_window_constraint(w0, None, None, Some(50.0), None);
@@ -1505,11 +1502,10 @@ fn window_max_height_smaller_than_global_min_height() {
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w50"));
 
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_min_height(SizeConstraint::Pixels(Length::new(300.0)))
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_min_height(SizeConstraint::Pixels(Length::new(300.0)))
+        .build();
+    hub.sync_config(l, o);
 
     // Window max (10) < global min (300) - should not panic
     hub.set_window_constraint(w0, None, None, None, Some(10.0));
@@ -1549,11 +1545,10 @@ fn window_max_width_smaller_than_global_min_width() {
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w51"));
     hub.insert_tiling(hub.current_workspace(), titled("w52"));
 
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_min_width(SizeConstraint::Pixels(Length::new(100.0)))
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_min_width(SizeConstraint::Pixels(Length::new(100.0)))
+        .build();
+    hub.sync_config(l, o);
 
     // Window max (50) < global min (100) - should not panic
     hub.set_window_constraint(w0, None, None, Some(50.0), None);

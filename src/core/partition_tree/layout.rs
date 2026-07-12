@@ -416,8 +416,8 @@ impl PartitionTreeStrategy {
         let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
         let screen = monitor.dimension;
         let scale = monitor.scale;
-        let global_min_w = hub.config.min_width.resolve(screen.width, scale);
-        let global_min_h = hub.config.min_height.resolve(screen.height, scale);
+        let global_min_w = hub.layout.min_width.resolve(screen.width, scale);
+        let global_min_h = hub.layout.min_height.resolve(screen.height, scale);
 
         match child {
             Child::Window(id) => {
@@ -430,8 +430,8 @@ impl PartitionTreeStrategy {
                 let win_max_w = Length::new(win_max_w_raw);
                 let win_max_h = Length::new(win_max_h_raw);
 
-                let global_max_w = hub.config.max_width.resolve(screen.width, scale);
-                let global_max_h = hub.config.max_height.resolve(screen.height, scale);
+                let global_max_w = hub.layout.max_width.resolve(screen.width, scale);
+                let global_max_h = hub.layout.max_height.resolve(screen.height, scale);
 
                 let max_w = if win_max_w > Length::ZERO {
                     win_max_w

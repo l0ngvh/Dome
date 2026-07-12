@@ -113,7 +113,7 @@ impl Dome {
             float_shows,
             focused_window,
             focused_monitor_id: focused_monitor,
-            tab_bar_height: self.layout.partition_tree.tab_bar_height,
+            tab_bar_height: self.config.partition_tree.tab_bar_height,
         }));
     }
 
@@ -198,7 +198,7 @@ impl Dome {
                 let mut container_data = Vec::with_capacity(containers.len());
                 for cp in containers {
                     let tab_bar_dim =
-                        tab_bar_dimension(cp.frame, self.layout.partition_tree.tab_bar_height);
+                        tab_bar_dimension(cp.frame, self.config.partition_tree.tab_bar_height);
                     let tab_bar_cocoa_frame = dimension_to_ns_rect_cocoa(
                         Length::new(self.primary_full_height),
                         tab_bar_dim,

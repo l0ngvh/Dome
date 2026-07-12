@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::action::{Action, Actions};
-use crate::config::{Config, LayoutConfig};
+use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
+use crate::core::GlobalLayoutConfig;
 use crate::core::PickerEntry;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Length, Logical, Physical, TilingWindowPlacement,
@@ -190,8 +191,28 @@ impl TestEnv {
         Self::new_with_monitors(config, LayoutConfig::default(), vec![default_monitor()])
     }
 
-    fn new_with_layout(config: Config, layout: LayoutConfig) -> Self {
-        Self::new_with_monitors(config, layout, vec![default_monitor()])
+    fn new_with_layout_settings(
+        config: Config,
+        layout: GlobalLayoutConfig,
+        workspace_overrides: Vec<LayoutWorkspaceConfig>,
+    ) -> Self {
+        let mut config = config;
+        config.strategy = layout.strategy;
+        config.partition_tree = layout.partition_tree;
+        config.master = layout.master;
+        config.min_width = layout.min_width;
+        config.min_height = layout.min_height;
+        config.max_width = layout.max_width;
+        config.max_height = layout.max_height;
+        config.float = layout.float;
+        config.fullscreen = layout.fullscreen;
+        Self::new_with_monitors(
+            config,
+            LayoutConfig {
+                workspace: workspace_overrides,
+            },
+            vec![default_monitor()],
+        )
     }
 
     fn new_with_monitors(config: Config, layout: LayoutConfig, monitors: Vec<MonitorInfo>) -> Self {
@@ -232,7 +253,7 @@ impl TestEnv {
 
         let dome = Dome::new(
             config.clone(),
-            layout,
+            layout.workspace,
             Rc::new(NoopTaskbar),
             Box::new(overlays.clone()),
             Box::new(display),

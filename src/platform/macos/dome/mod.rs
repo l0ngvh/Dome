@@ -22,7 +22,8 @@ use std::time::Instant;
 use objc2_core_graphics::CGWindowID;
 
 use crate::action::{FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, LayoutConfig, WindowMatcher, pattern_matches};
+use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig, WindowMatcher, pattern_matches};
+use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, Direction, Hub, Length, Logical, TilingAction, WindowId, WindowMetadata,
     WindowRestrictions,
@@ -157,7 +158,7 @@ pub(in crate::platform::macos) struct Dome {
     registry: WindowRegistry,
     monitor_registry: MonitorRegistry,
     config: Config,
-    layout: LayoutConfig,
+    workspace_overrides: Vec<LayoutWorkspaceConfig>,
     /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
@@ -174,7 +175,7 @@ impl Dome {
     pub(in crate::platform::macos) fn new(
         monitors: &[MonitorInfo],
         config: Config,
-        layout: LayoutConfig,
+        workspace_overrides: Vec<LayoutWorkspaceConfig>,
         sender: Box<dyn FrameSender>,
     ) -> Self {
         let primary = monitors
@@ -184,7 +185,8 @@ impl Dome {
         let mut hub = Hub::new(
             primary.work_area,
             1.0,
-            layout.clone(),
+            GlobalLayoutConfig::from(&config),
+            workspace_overrides.clone(),
             config.ignore.clone(),
         );
         let primary_monitor_id = hub.focused_monitor();
@@ -200,7 +202,7 @@ impl Dome {
             registry: WindowRegistry::new(),
             monitor_registry,
             config,
-            layout,
+            workspace_overrides,
             primary_full_height: primary.full_height,
             observed_pids: HashSet::new(),
             sender,
@@ -343,7 +345,9 @@ impl Dome {
     }
 
     pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
-        self.hub.sync_config(self.layout.clone());
+        let workspace_overrides = self.workspace_overrides.clone();
+        self.hub
+            .sync_config(GlobalLayoutConfig::from(&new_config), workspace_overrides);
         self.hub.set_ignore_rules(new_config.ignore.clone());
         self.sender
             .send(HubMessage::ConfigChanged(Box::new(new_config.clone())));
@@ -353,8 +357,10 @@ impl Dome {
     }
 
     pub(in crate::platform::macos) fn layout_changed(&mut self, new_layout: LayoutConfig) {
-        self.layout = new_layout;
-        self.hub.sync_config(self.layout.clone());
+        let layout_settings = GlobalLayoutConfig::from(&self.config);
+        self.workspace_overrides = new_layout.workspace;
+        self.hub
+            .sync_config(layout_settings, self.workspace_overrides.clone());
         tracing::info!("Layout reloaded");
         self.flush_layout();
     }

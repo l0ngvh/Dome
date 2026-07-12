@@ -53,7 +53,9 @@ Fullscreen integrates with each platform's native fullscreen behavior: macOS Spa
 
 ## Master area
 
-The master-stack layout reserves a configurable area on one side for `master_count` windows. These actions adjust that area at runtime, and have effect only when the master-stack layout is active. Changes are per-workspace and persist across config reloads. Global `[master]` defaults in `layout.toml` seed new workspaces on first attach only (see [layout.md](layout.md) for the layout reference). Per-window min-width constraints can override the ratio when honoring them requires a wider pane than the ratio would allow.
+The master-stack layout reserves a configurable area on one side for `master_count` windows. These actions adjust that area at runtime, and have effect only when the master-stack layout is active. Changes are per-workspace and persist across config reloads.
+
+Per-window min-width constraints can override the ratio when honoring them requires a wider pane than the ratio would allow.
 
 | Action | Effect |
 |--------|--------|

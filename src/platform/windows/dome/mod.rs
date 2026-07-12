@@ -16,7 +16,8 @@ use std::time::Instant;
 
 use crate::action::Query;
 use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
-use crate::config::{Config, LayoutConfig};
+use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
+use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
     Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId,
@@ -108,7 +109,7 @@ pub(super) struct Dome {
     registry: WindowRegistry,
     monitors: MonitorRegistry,
     config: Config,
-    layout: LayoutConfig,
+    workspace_overrides: Vec<LayoutWorkspaceConfig>,
     taskbar: Rc<dyn ManageTaskbar>,
     overlay_factory: Box<dyn CreateOverlay>,
     display: Box<dyn QueryDisplay>,
@@ -132,7 +133,7 @@ impl Drop for Dome {
 impl Dome {
     pub(super) fn new(
         config: Config,
-        layout: LayoutConfig,
+        workspace_overrides: Vec<LayoutWorkspaceConfig>,
         taskbar: Rc<dyn ManageTaskbar>,
         overlay_factory: Box<dyn CreateOverlay>,
         display: Box<dyn QueryDisplay>,
@@ -147,7 +148,8 @@ impl Dome {
         let mut hub = Hub::new(
             primary.dimension,
             primary.scale,
-            layout.clone(),
+            GlobalLayoutConfig::from(&config),
+            workspace_overrides.clone(),
             config.ignore.clone(),
         );
         let primary_monitor_id = hub.focused_monitor();
@@ -161,7 +163,7 @@ impl Dome {
         );
         if let Ok(overlay) = overlay_factory.create_tiling_overlay(
             config.clone(),
-            layout.partition_tree.tab_bar_height,
+            config.partition_tree.tab_bar_height,
             primary.dimension,
             primary.scale,
         ) {
@@ -180,7 +182,7 @@ impl Dome {
                 monitors_reg.insert(monitor.handle, id, monitor.dimension, monitor.scale);
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
-                    layout.partition_tree.tab_bar_height,
+                    config.partition_tree.tab_bar_height,
                     monitor.dimension,
                     monitor.scale,
                 ) {
@@ -200,7 +202,7 @@ impl Dome {
             registry: WindowRegistry::new(),
             monitors: monitors_reg,
             config,
-            layout,
+            workspace_overrides,
             taskbar: taskbar.clone(),
             overlay_factory,
             display,
@@ -217,11 +219,14 @@ impl Dome {
     }
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
-        self.hub.sync_config(self.layout.clone());
+        let workspace_overrides = self.workspace_overrides.clone();
+        self.hub
+            .sync_config(GlobalLayoutConfig::from(&new_config), workspace_overrides);
         self.hub.set_ignore_rules(new_config.ignore.clone());
         self.config = new_config;
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_config(&self.config);
+            overlay.set_tab_bar_height(self.config.partition_tree.tab_bar_height);
         }
         for overlay in self.float_overlays.values_mut() {
             overlay.set_config(&self.config);
@@ -235,11 +240,10 @@ impl Dome {
     }
 
     pub(super) fn layout_changed(&mut self, new_layout: LayoutConfig) {
-        self.layout = new_layout;
-        self.hub.sync_config(self.layout.clone());
-        for overlay in self.tiling_overlays.values_mut() {
-            overlay.set_tab_bar_height(self.layout.partition_tree.tab_bar_height);
-        }
+        let layout_settings = GlobalLayoutConfig::from(&self.config);
+        self.workspace_overrides = new_layout.workspace;
+        self.hub
+            .sync_config(layout_settings, self.workspace_overrides.clone());
         tracing::info!("Layout reloaded");
         self.apply_layout();
     }
@@ -822,7 +826,7 @@ impl Dome {
                     &data.containers,
                     scale,
                 );
-            let tab_bar_h_logical = self.layout.partition_tree.tab_bar_height;
+            let tab_bar_h_logical = self.config.partition_tree.tab_bar_height;
             for (placement, titles) in data.containers.iter().filter(|(p, _)| p.is_tabbed) {
                 let rect = compute_tab_bar_rect(placement.frame, tab_bar_h_logical, scale);
                 let tab_bar = match self.tab_bars.entry(placement.id) {
@@ -900,7 +904,7 @@ impl Dome {
             let m = self.monitors.monitor(id);
             if let Ok(overlay) = self.overlay_factory.create_tiling_overlay(
                 self.config.clone(),
-                self.layout.partition_tree.tab_bar_height,
+                self.config.partition_tree.tab_bar_height,
                 m.dimension(),
                 m.scale(),
             ) {

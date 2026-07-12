@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{Length, Logical};
+use crate::core::{GlobalLayoutConfig, Length, Logical};
 
 #[test]
 fn single_window_fills_screen() {
@@ -27,9 +27,9 @@ fn two_windows_split_screen() {
 #[test]
 fn three_windows_split_screen() {
     let config = Config::default();
-    let mut layout = LayoutConfig::default();
+    let mut layout = GlobalLayoutConfig::default();
     layout.partition_tree.automatic_tiling = false;
-    let mut env = TestEnv::new_with_layout(config, layout);
+    let mut env = TestEnv::new_with_layout_settings(config, layout, Vec::new());
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
@@ -47,9 +47,9 @@ fn three_windows_split_screen() {
 #[test]
 fn positions_are_rounded_not_truncated() {
     let config = Config::default();
-    let mut layout = LayoutConfig::default();
+    let mut layout = GlobalLayoutConfig::default();
     layout.partition_tree.automatic_tiling = false;
-    let mut env = TestEnv::new_with_layout(config, layout);
+    let mut env = TestEnv::new_with_layout_settings(config, layout, Vec::new());
     let wins: Vec<HwndId> = (1..=7)
         .map(|i| env.open(i, "App", "app.exe", SPAWN_DIM))
         .collect();
@@ -423,9 +423,19 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
         scale: 1.0,
     };
     let config = Config::default();
-    let mut layout = LayoutConfig::default();
+    let mut layout = GlobalLayoutConfig::default();
     layout.partition_tree.tab_bar_height = Length::<Logical>::new(30.0);
-    let mut env = TestEnv::new_with_monitors(config, layout, vec![monitor]);
+    let mut config = config;
+    config.strategy = layout.strategy;
+    config.partition_tree = layout.partition_tree;
+    config.master = layout.master.clone();
+    config.min_width = layout.min_width;
+    config.min_height = layout.min_height;
+    config.max_width = layout.max_width;
+    config.max_height = layout.max_height;
+    config.float = layout.float;
+    config.fullscreen = layout.fullscreen;
+    let mut env = TestEnv::new_with_monitors(config, LayoutConfig::default(), vec![monitor]);
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     // Put into a tabbed container so tab_bar_height participates in layout

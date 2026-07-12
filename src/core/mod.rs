@@ -16,7 +16,8 @@ pub(crate) use hub::Hub;
 #[cfg(target_os = "macos")]
 pub(crate) use hub::MonitorPlacements;
 pub(crate) use hub::{
-    ContainerPlacement, FloatWindowPlacement, MonitorLayout, SpawnIndicator, TilingWindowPlacement,
+    ContainerPlacement, FloatWindowPlacement, GlobalLayoutConfig, MonitorLayout, SpawnIndicator,
+    TilingWindowPlacement,
 };
 pub(crate) use node::Direction;
 #[cfg(target_os = "windows")]

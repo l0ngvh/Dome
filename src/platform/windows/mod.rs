@@ -45,7 +45,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::BOOL;
 
 use crate::config::{
-    Config, LayoutConfig, layout_default_path, load_or_default, start_config_watcher,
+    Config, LayoutConfig, LayoutWorkspaceConfig, layout_default_path, load_or_default,
+    start_config_watcher,
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
@@ -201,7 +202,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     let keymap_state = Arc::new(RwLock::new(KeymapState::new(config.keymaps.clone())));
 
     let config_clone = config.clone();
-    let layout_clone = layout.clone();
+    let layout_clone = layout.workspace.clone();
     let tid = Arc::clone(&dome_thread_id);
     let bar = Arc::clone(&barrier);
     let keymap_clone = Arc::clone(&keymap_state);
@@ -399,7 +400,7 @@ unsafe extern "system" fn float_overlay_wnd_proc(
 
 fn run_dome(
     config: Config,
-    layout: LayoutConfig,
+    workspace_overrides: Vec<LayoutWorkspaceConfig>,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
 ) {
@@ -492,7 +493,7 @@ fn run_dome(
 
     let dome = Dome::new(
         config.clone(),
-        layout,
+        workspace_overrides,
         Rc::new(taskbar),
         Box::new(overlays),
         Box::new(dome::Win32Display),

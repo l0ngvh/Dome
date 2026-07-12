@@ -423,7 +423,7 @@ fn configure_picker_dwm(hwnd: HWND) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::LayoutConfig;
+    use crate::core::GlobalLayoutConfig;
     use crate::core::{
         Dimension, Hub, Length, Physical, WindowId, WindowMetadata, WindowRestrictions,
     };
@@ -473,7 +473,8 @@ mod tests {
                 Length::new(100.0),
             ),
             1.0,
-            LayoutConfig::default(),
+            GlobalLayoutConfig::default(),
+            Vec::new(),
             Vec::new(),
         )
     }

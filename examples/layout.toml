@@ -1,34 +1,5 @@
 # Dome layout configuration file
-# Lives next to config.toml. Changes are automatically reloaded (hot reload).
-
-# Tiling strategy. One of "partition_tree" or "master" (default: "partition_tree").
-strategy = "partition_tree"
-
-# Global float/fullscreen matchers — apply to all workspaces.
-# Per-workspace matchers (below) take priority over these.
-# float = [
-#   { process = "calculator.exe" },
-# ]
-# fullscreen = [
-#   { process = "slides.exe" },
-# ]
-
-# Minimum window size - float for pixels, string for percentage (default: "5%")
-min_width = 200
-min_height = "10%"
-
-# Maximum window size - float for pixels, string for percentage (default: 0 = no limit)
-# Windows that hit max constraints are centered within their allocated space
-max_width = 800
-max_height = "50%"
-
-[partition_tree]
-tab_bar_height = 24.0       # height of the tab bar in tabbed containers, logical pixels
-automatic_tiling = true     # pick split direction based on focused window dimensions
-
-[master]
-master_ratio = 0.5          # width of the master area, in [0.1, 0.9]
-master_count = 1            # number of master windows, >= 1
+# Lives next to config.toml. Contains only per-workspace layout overrides.
 
 # Per-workspace overrides.
 [[workspace]]
@@ -52,4 +23,8 @@ tree = { split = "horizontal", children = [
     { process = "terminal.exe" },
     { process = "logs.exe" },
   ]},
+  [
+    { process = "terminal.exe" },
+    { process = "logs.exe" },
+  ]
 ]}

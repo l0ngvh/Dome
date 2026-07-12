@@ -604,41 +604,40 @@ fn hot_reload_master_and_secondary_preference() {
     let _w3 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
     let _w4 = hub.insert_tiling(hub.current_workspace(), titled_process("D", "D.exe"));
 
-    hub.sync_config(
-        LayoutConfigBuilder::new()
-            .with_strategy(Strategy::Master)
-            .with_workspace(vec![
-                LayoutWorkspaceConfigBuilder::new("0")
-                    .with_strategy(Strategy::Master)
-                    .with_master(vec![
-                        WindowMatcher {
-                            process: Some("D.exe".into()),
-                            ..Default::default()
-                        },
-                        WindowMatcher {
-                            process: Some("C.exe".into()),
-                            ..Default::default()
-                        },
-                        WindowMatcher {
-                            process: Some("A.exe".into()),
-                            ..Default::default()
-                        },
-                    ])
-                    .with_secondary(vec![
-                        WindowMatcher {
-                            process: Some("B.exe".into()),
-                            ..Default::default()
-                        },
-                        WindowMatcher {
-                            process: Some("E.exe".into()),
-                            ..Default::default()
-                        },
-                    ])
-                    .with_master_count(3)
-                    .build(),
-            ])
-            .build(),
-    );
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_strategy(Strategy::Master)
+        .with_workspace(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![
+                    WindowMatcher {
+                        process: Some("D.exe".into()),
+                        ..Default::default()
+                    },
+                    WindowMatcher {
+                        process: Some("C.exe".into()),
+                        ..Default::default()
+                    },
+                    WindowMatcher {
+                        process: Some("A.exe".into()),
+                        ..Default::default()
+                    },
+                ])
+                .with_secondary(vec![
+                    WindowMatcher {
+                        process: Some("B.exe".into()),
+                        ..Default::default()
+                    },
+                    WindowMatcher {
+                        process: Some("E.exe".into()),
+                        ..Default::default()
+                    },
+                ])
+                .with_master_count(3)
+                .build(),
+        ])
+        .build();
+    hub.sync_config(l, o);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(4))

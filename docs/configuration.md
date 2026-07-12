@@ -1,13 +1,13 @@
 # Configuration
 
-Dome reads `config.toml` for general settings (theme, borders, font, keybindings, window rules) and hot-reloads it on save. Layout settings (strategy, window-size constraints, per-strategy parameters) live in a separate file. See [layout.md](layout.md) for the layout reference.
-
-Default path:
+Dome reads `config.toml` from one of these locations:
 
 - macOS: `~/.config/dome/config.toml` (or `$XDG_CONFIG_HOME/dome/config.toml`).
 - Windows: `%APPDATA%\dome\config.toml`.
 
-Pass `dome launch -c <path>` to override (see [cli.md](cli.md)).
+Use `dome launch -c <path>` to point to a different file (see [cli.md](cli.md)).
+
+All settings are hot-reloaded on save.
 
 ## General
 
@@ -25,123 +25,105 @@ start_at_login = false
 | `log_level` | string | `"info"` | Log verbosity. One of `trace`, `debug`, `info`, `warn`, `error`. |
 | `start_at_login` | boolean | `false` | Launch Dome at user login. |
 
-## Font
+## Tiling layout
 
-Dome ships with egui's built-in font stack (Ubuntu-Light proportional, Hack monospace, plus emoji fallbacks). Set `family` to render glyphs that the built-in fonts do not cover (CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, etc.) using a font already installed on the system.
+Controls how windows are tiled on screen.
 
 ```toml
-[font]
-text_size = 14.0     # Body text: tab titles, picker labels.
-subtext_size = 12.0  # Secondary text: picker app-name subtext.
-family = "PingFang SC"            # macOS: render Chinese tab text via PingFang SC.
-# family = "Microsoft YaHei UI"   # Windows: English family name.
-# family = "微软雅黑"              # Windows: localized name also works.
+strategy = "partition_tree"
+min_width = "5%"
+min_height = "5%"
+max_width = 0
+max_height = 0
+
+[partition_tree]
+tab_bar_height = 24.0
+automatic_tiling = true
+
+[master]
+master_ratio = 0.5
+master_count = 1
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `font.text_size` | float | `14.0` | Body text size in points. Must be in `[4.0, 128.0]`. |
-| `font.subtext_size` | float | `12.0` | Secondary text size in points. Must be in `[4.0, 128.0]`. |
-| `font.family` | string (optional) | unset | Optional system-installed proportional font, used as a fallback after egui's built-in Ubuntu-Light. When unset, non-Latin glyphs render as tofu. |
+| `strategy` | string | `"partition_tree"` | Default tiling strategy. One of `"partition_tree"` or `"master"`. Per-workspace preferred layouts in `layout.toml` can set this per workspace. |
+| `min_width` / `min_height` | size | `"5%"` | Minimum window size. Float (e.g. `200`) parses as logical pixels. String with `%` suffix (e.g. `"10%"`) parses as percentage of workspace dimension. Use `0` to disable. |
+| `max_width` / `max_height` | size | `0` | Maximum window size. Same parsing rules as min. `0` means no limit. Windows clamped by max are centered within their allocated space. |
+| `partition_tree.tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, logical pixels. This value does not auto-scale with `font.text_size`, so long tab titles may truncate earlier as the body size grows. |
+| `partition_tree.automatic_tiling` | boolean | `true` | Pick split direction based on the focused window's dimensions. |
+| `master.master_ratio` | float | `0.5` | Width of the master area, in `[0.1, 0.9]`. |
+| `master.master_count` | integer | `1` | Number of master windows, `>= 1`. |
 
-`tab_bar_height` (under `[partition_tree]` in [layout.md](layout.md)) does not auto-scale with `text_size`, so long tab titles may truncate earlier as the body size grows.
+The master strategy splits the screen into a master area (left or top) and
+a secondary stack area (right or bottom). `master.master_ratio` controls the
+master area's width and `master.master_count` sets how many windows go there.
+The rest of the windows stack in the secondary area.
 
-### Caveats
+The partition-tree strategy arranges windows in a tree of nested containers.
+Each container is either a split (horizontal or vertical) or tabbed. Unlike
+i3, Dome automatically removes single-child containers and alternates nested
+split direction, similar to Aerospace's normalized mode.
 
-Dome does not validate the family name. Windows substitutes a lookalike silently on a miss, so a typo or uninstalled name can still render something other than what you intended. Double-check the name in Font Book on macOS or `Settings > Personalization > Fonts` on Windows.
-
-English and localized names both work. `"Microsoft YaHei UI"` and `"微软雅黑"` resolve to the same font on Windows, and macOS behaves the same way.
-
-For fonts that bundle multiple variants in one file (TrueType collections like `msyh.ttc`), Dome picks the regular weight. Selecting a specific weight or italic from a collection is not yet supported.
-
-A small number of third-party commercial fonts are marked non-embeddable in their license metadata, and the OS will not hand their bytes to applications. Dome logs a warning and falls back to its built-in fonts. System fonts (Microsoft, Apple) and Google Noto fonts are always embeddable.
-
-Changing `family` to a different value takes effect on the next render. Removing the line entirely keeps the previously-loaded font active until Dome restarts.
+`partition_tree.automatic_tiling` lets the runtime choose the split direction
+based on the focused window's dimensions.
 
 ## Window rules
 
-`ignore`: do not manage the matching window. Matchers use the same field set as the per-workspace layout matchers (see [layout.md](layout.md)).
+Match windows by their attributes to ignore, float, or fullscreen them.
+All fields in a rule must match (AND) and the first matching rule wins.
+Wrap a value in `/pattern/` for regex matching or leave it bare for exact
+matching. Built-in `ignore` rules are always active and user rules add to
+them.
 
-All fields in a rule must match (AND), and the first matching rule wins. A rule with no fields, or one referencing an unavailable window attribute, never matches.
+| Key | Semantics |
+|-----|-----------|
+| `ignore` | Do not manage matching windows. |
+| `float` | Start matching windows as floating. |
+| `fullscreen` | Start matching windows as fullscreen. |
 
-Wrap values in forward slashes (`/pattern/`) for regex matching, or leave them bare for exact matching.
-
-Both platforms ship built-in `ignore` entries that are always active, and user rules add to the defaults rather than replacing them.
-
-### macOS
-
-macOS rules match on three fields:
-
-- `app`: the application name.
-- `bundle_id`: the CFBundleIdentifier (exact equality only, no regex).
-- `title`: the window title.
-
-The built-in macOS ignore list covers `com.apple.dock`, `com.apple.controlcenter`, `com.apple.notificationcenterui`, and `com.apple.loginwindow`.
+| Platform | Matching fields |
+|----------|-----------------|
+| macOS | `app`, `bundle_id` (exact only), `title` |
+| Windows | `process`, `title`, `class` (Win32), `aumid` |
 
 ```toml
-[macos]
 ignore = [
+  # macOS
   { app = "System Preferences" },
-  { app = "/.*Preferences/" },
   { bundle_id = "com.apple.finder", title = "Trash" },
-]
-```
-
-### Windows
-
-Windows rules match on four fields:
-
-- `process`: the executable name.
-- `title`: the window title.
-- `class`: the Win32 window class name (from `GetClassNameW`).
-- `aumid`: the AppUserModelID.
-
-```toml
-[windows]
-ignore = [
+  # Windows
   { process = "SystemSettings.exe" },
-  { process = "/.*Settings.*/" },
-  { title = "Task Manager" },
   { class = "Shell_TrayWnd" },
-  { aumid = "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App" },
+]
+float = [
+  { process = "calculator.exe" },
+]
+fullscreen = [
+  { process = "slides.exe" },
 ]
 ```
 
 ## Keybindings
 
-Keybindings live in the `[keymaps]` table. The same file works on macOS and Windows without changes. Defining a `[keymaps]` table **replaces the defaults wholesale**, with no merge. To keep any default binding while adding your own, copy the defaults and edit the copy.
-
-### Syntax
-
-Each entry maps a key combination to one or more action strings:
+Keybindings go in the `[keymaps]` table. Defining `[keymaps]` **replaces all
+default bindings** with no merge, so copy any defaults you want to keep if
+you are adding your own.
 
 ```toml
 "mods+...+key" = ["<action>", ...]
 ```
 
-Tokens are lowercase. Accepted modifier tokens: `meta`, `shift`, `alt`, `ctrl`. `cmd` and `win` are platform-flavored aliases for `meta`. Multiple modifiers are joined with `+`. The key is the final segment after all modifiers.
-
-Values are arrays of action strings. Single-element arrays are fine. Multi-action arrays fire in order.
+Modifiers are `meta`, `shift`, `alt`, and `ctrl` (`cmd` and `win` work as
+aliases for `meta`), combined with `+`. A keymap can trigger one or more
+actions that fire in order on a single press.
 
 ```toml
 "meta+h" = ["focus left"]
 "meta+shift+1" = ["move workspace 1", "focus workspace 1"]
 ```
 
-### Modifier mapping
-
-The literal config token is `meta`. `cmd` and `win` are accepted as aliases and behave identically.
-
-| Token | macOS | Windows |
-|-------|-------|---------|
-| `meta` (alias: `cmd`, `win`) | <kbd>Command</kbd> | <kbd>Windows</kbd> |
-| `shift` | <kbd>Shift</kbd> | <kbd>Shift</kbd> |
-| `alt` | <kbd>Option</kbd> | <kbd>Alt</kbd> |
-| `ctrl` | <kbd>Control</kbd> | <kbd>Control</kbd> |
-
 ### Default bindings
-
-Dome ships 44 default bindings.
 
 | Key | Action |
 |-----|--------|
@@ -172,28 +154,11 @@ Dome ships 44 default bindings.
 | <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>l</kbd> | `move monitor right` |
 | <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>q</kbd> | `exit` |
 
-### Customising
-
-Define a `[keymaps]` section to replace the defaults with your own bindings. The entire default set is discarded, so copy any defaults you want to keep.
-
-```toml
-[keymaps]
-"meta+h" = ["focus left"]
-"meta+l" = ["focus right"]
-"meta+return" = ["exec open -a Terminal"]
-```
-
-### Multi-action bindings
-
-A binding's value is an array of action strings. All actions fire in order on a single keypress:
-
-```toml
-"meta+shift+1" = ["move workspace 1", "focus workspace 1"]
-```
-
 ### Modes
 
-Dome supports modal keybindings. The `[keymaps]` section defines the **default** mode. Additional modes are defined with `[keymaps.mode.<name>]` sections. Switch between modes using the `mode <name>` action in a binding or via `dome mode <name>` over CLI/IPC.
+Additional sets of bindings go in `[keymaps.mode.<name>]`. Switch between them
+with the `mode <name>` action or `dome mode <name>`. Unknown mode names are
+rejected.
 
 ```toml
 [keymaps]
@@ -206,36 +171,22 @@ Dome supports modal keybindings. The `[keymaps]` section defines the **default**
 "escape" = ["mode default"]
 ```
 
-Here `meta+r` enters resize mode. Inside resize mode, `h` and `l` adjust the master area without modifiers, and `escape` returns to the default keybindings. The special name `"default"` always refers to the top-level `[keymaps]` table.
+Always include an escape binding (like `"escape" = ["mode default"]`) or
+your keyboard stays in that mode until Dome exits. Config reload preserves
+the active mode, but Dome falls back to defaults on the next keypress if the
+new config removes it.
 
-Mode switching is instant. When a binding contains `mode <name>`, the switch takes effect before the next keypress. A binding can combine a mode switch with other actions:
+## Font
 
 ```toml
-"meta+r" = ["focus left", "mode resize"]
+[font]
+text_size = 14.0       # Body text: tab titles, picker labels.
+subtext_size = 12.0    # Secondary text: picker app-name subtext.
+# family = "PingFang SC"
 ```
 
-This focuses left and enters resize mode in one keypress. If a binding lists multiple `mode` actions, the last one wins.
-
-#### Reserved names
-
-`"default"` refers to the top-level `[keymaps]` section. A `[keymaps.mode.default]` section is dropped with a warning in `dome.log`. Empty string `""` is also dropped with a warning.
-
-#### Gotchas
-
-**No automatic escape binding.** Dome does not enforce that a mode has a binding back to `default`. If you define a mode with no way out, your keyboard will only have the bindings in that mode until config reload or process exit. Always include an escape binding (like `"escape" = ["mode default"]`) in every custom mode.
-
-**Config reload preserves active mode.** If you edit your config while in a non-default mode, hot reload keeps you in that mode as long as it still exists in the new config. If the reloaded config removes the active mode, Dome falls back to the default keybindings on the next keypress and logs a warning on each keystroke until you switch back to an existing mode (for example, `dome mode default`).
-
-**Unknown mode names are rejected.** Running `dome mode typo` or pressing a binding with `mode typo` logs a warning and leaves your current mode unchanged.
-
-**Mode state is global.** Modes are per-process, not per-workspace or per-monitor. Switching workspaces does not change the active mode.
-
-## Error handling
-
-Dome recovers from config errors at field granularity. A wrong type,
-out-of-range value, or unknown field does not invalidate the rest of the
-config. Each broken field falls back to its default, and Dome logs a warning to
-`dome.log` with the dotted field path (for example,
-`field=master.master_ratio`) and the reason for the fallback. Toml syntax
-errors however will cause the entire config to fall back to defaults, or the
-previously successfully parsed values.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `font.text_size` | float | `14.0` | Body text size in points (`4.0` to `128.0`). |
+| `font.subtext_size` | float | `12.0` | Secondary text size in points (`4.0` to `128.0`). |
+| `font.family` | string | unset | System font to use for rendering. When unset, egui's built-in Ubuntu-Light is used. Dome logs a warning and falls back to built-in fonts when a commercial font cannot be used. |

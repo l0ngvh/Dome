@@ -162,7 +162,7 @@ pub(crate) fn paint_picker(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::LayoutConfig;
+    use crate::core::GlobalLayoutConfig;
     use crate::core::{Dimension, Hub, Length, WindowMetadata, WindowRestrictions};
 
     fn titled(t: &str) -> Box<dyn WindowMetadata> {
@@ -201,7 +201,6 @@ mod tests {
     }
 
     fn test_hub() -> Hub {
-        let layout = LayoutConfig::default();
         Hub::new(
             Dimension::new(
                 Length::new(0.0),
@@ -210,7 +209,8 @@ mod tests {
                 Length::new(100.0),
             ),
             1.0,
-            layout,
+            GlobalLayoutConfig::default(),
+            Vec::new(),
             Vec::new(),
         )
     }

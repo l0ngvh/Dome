@@ -507,6 +507,14 @@ fn monitor_scale_multiplies_config_lengths() {
     // Need 2+ windows so insert_tiling creates a split container that
     // toggle_container_layout can convert to Tabbed. A single root-level
     // window has no parent container to toggle.
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_partition_tree_config(
+            PartitionTreeConfigBuilder::new()
+                .with_tab_bar_height(Length::<Logical>::new(20.0))
+                .with_automatic_tiling(true)
+                .build(),
+        )
+        .build();
     let mut hub = Hub::new(
         Dimension::new(
             Length::new(0.0),
@@ -515,14 +523,8 @@ fn monitor_scale_multiplies_config_lengths() {
             Length::new(1000.0),
         ),
         2.0,
-        LayoutConfigBuilder::new()
-            .with_partition_tree_config(
-                PartitionTreeConfigBuilder::new()
-                    .with_tab_bar_height(Length::<Logical>::new(20.0))
-                    .with_automatic_tiling(true)
-                    .build(),
-            )
-            .build(),
+        l,
+        o,
         Vec::new(),
     );
     hub.insert_tiling(hub.current_workspace(), titled("w16"));
@@ -574,6 +576,15 @@ fn monitor_scale_multiplies_config_lengths() {
     // 6 windows, screen 1000px wide, scale=2.0, min_width=Pixels(100).
     // Equal split would give ~166.7px each, but scaled min = 100*2 = 200,
     // so the min-width clamp must apply.
+    let (l, o) = LayoutConfigBuilder::new()
+        .with_partition_tree_config(
+            PartitionTreeConfigBuilder::new()
+                .with_tab_bar_height(Length::<Logical>::new(20.0))
+                .with_automatic_tiling(true)
+                .build(),
+        )
+        .with_min_width(SizeConstraint::Pixels(Length::new(100.0)))
+        .build();
     let mut hub2 = Hub::new(
         Dimension::new(
             Length::new(0.0),
@@ -582,15 +593,8 @@ fn monitor_scale_multiplies_config_lengths() {
             Length::new(1000.0),
         ),
         2.0,
-        LayoutConfigBuilder::new()
-            .with_partition_tree_config(
-                PartitionTreeConfigBuilder::new()
-                    .with_tab_bar_height(Length::<Logical>::new(20.0))
-                    .with_automatic_tiling(true)
-                    .build(),
-            )
-            .with_min_width(SizeConstraint::Pixels(Length::new(100.0)))
-            .build(),
+        l,
+        o,
         Vec::new(),
     );
     for _ in 0..6 {

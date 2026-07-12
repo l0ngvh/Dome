@@ -420,6 +420,15 @@ impl RawConfig {
             },
             log_level: w.field("log_level", LogLevel::default()),
             start_at_login: w.field("start_at_login", false),
+            strategy: w.field("strategy", default_strategy()),
+            partition_tree: w.nested::<PartitionTreeConfig>("partition_tree"),
+            master: w.nested::<MasterConfig>("master"),
+            min_width: w.field("min_width", SizeConstraint::default_min()),
+            min_height: w.field("min_height", SizeConstraint::default_min()),
+            max_width: w.field("max_width", SizeConstraint::default()),
+            max_height: w.field("max_height", SizeConstraint::default()),
+            float: w.rule_vec::<WindowMatcher>("float"),
+            fullscreen: w.rule_vec::<WindowMatcher>("fullscreen"),
         }
     }
 }
@@ -510,29 +519,9 @@ fn default_ignore() -> Vec<WindowMatcher> {
 
 impl WalkRecover for LayoutConfig {
     fn walk(w: &mut Walker) -> Self {
-        let strategy = w.field("strategy", default_strategy());
-        let partition_tree = w.nested::<PartitionTreeConfig>("partition_tree");
-        let master = w.nested::<MasterConfig>("master");
-        let min_width = w.field("min_width", SizeConstraint::default_min());
-        let min_height = w.field("min_height", SizeConstraint::default_min());
-        let max_width = w.field("max_width", SizeConstraint::default());
-        let max_height = w.field("max_height", SizeConstraint::default());
         let raw = w.rule_vec::<LayoutWorkspaceConfig>("workspace");
         let workspace = dedup_workspace_overrides(raw, &w.prefix);
-        let float = w.rule_vec::<WindowMatcher>("float");
-        let fullscreen = w.rule_vec::<WindowMatcher>("fullscreen");
-        LayoutConfig {
-            strategy,
-            partition_tree,
-            master,
-            min_width,
-            min_height,
-            max_width,
-            max_height,
-            workspace,
-            float,
-            fullscreen,
-        }
+        LayoutConfig { workspace }
     }
 }
 
@@ -926,28 +915,10 @@ impl<'de> Deserialize<'de> for TreeLayoutNode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub(crate) struct LayoutConfig {
-    #[serde(default = "default_strategy")]
-    pub(crate) strategy: Strategy,
-    #[serde(default = "default_partition_tree_config")]
-    pub(crate) partition_tree: PartitionTreeConfig,
-    #[serde(default = "default_master_config")]
-    pub(crate) master: MasterConfig,
-    #[serde(default = "SizeConstraint::default_min")]
-    pub(crate) min_width: SizeConstraint,
-    #[serde(default = "SizeConstraint::default_min")]
-    pub(crate) min_height: SizeConstraint,
-    #[serde(default)]
-    pub(crate) max_width: SizeConstraint,
-    #[serde(default)]
-    pub(crate) max_height: SizeConstraint,
     #[serde(default)]
     pub(crate) workspace: Vec<LayoutWorkspaceConfig>,
-    #[serde(default)]
-    pub(crate) float: Vec<WindowMatcher>,
-    #[serde(default)]
-    pub(crate) fullscreen: Vec<WindowMatcher>,
 }
 
 fn default_strategy() -> Strategy {
@@ -1005,49 +976,10 @@ fn dedup_workspace_overrides(
     out
 }
 
-impl Default for LayoutConfig {
-    fn default() -> Self {
-        Self {
-            strategy: default_strategy(),
-            partition_tree: default_partition_tree_config(),
-            master: default_master_config(),
-            min_width: SizeConstraint::default_min(),
-            min_height: SizeConstraint::default_min(),
-            max_width: SizeConstraint::default(),
-            max_height: SizeConstraint::default(),
-            workspace: Vec::new(),
-            float: Vec::new(),
-            fullscreen: Vec::new(),
-        }
-    }
-}
-
 impl LayoutConfig {
     pub(crate) fn load(path: &str) -> anyhow::Result<Self> {
         let layout = load_toml::<LayoutConfig>(path)?;
-        layout.validate()?;
         Ok(layout)
-    }
-
-    fn validate(&self) -> anyhow::Result<()> {
-        // Validation compares config values in logical space directly. No scale
-        // factor exists at validation time, so `.logical()` is the correct escape
-        // hatch here (not `to_unit`).
-        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
-            (self.min_width, self.max_width)
-            && max.logical() > 0.0
-            && min > max
-        {
-            anyhow::bail!("min_width ({min}) cannot be greater than max_width ({max})");
-        }
-        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
-            (self.min_height, self.max_height)
-            && max.logical() > 0.0
-            && min > max
-        {
-            anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
-        }
-        Ok(())
     }
 }
 
@@ -1139,6 +1071,24 @@ pub(crate) struct Config {
     pub(crate) log_level: LogLevel,
     #[serde(default)]
     pub(crate) start_at_login: bool,
+    #[serde(default = "default_strategy")]
+    pub(crate) strategy: Strategy,
+    #[serde(default = "default_partition_tree_config")]
+    pub(crate) partition_tree: PartitionTreeConfig,
+    #[serde(default = "default_master_config")]
+    pub(crate) master: MasterConfig,
+    #[serde(default = "SizeConstraint::default_min")]
+    pub(crate) min_width: SizeConstraint,
+    #[serde(default = "SizeConstraint::default_min")]
+    pub(crate) min_height: SizeConstraint,
+    #[serde(default)]
+    pub(crate) max_width: SizeConstraint,
+    #[serde(default)]
+    pub(crate) max_height: SizeConstraint,
+    #[serde(default)]
+    pub(crate) float: Vec<WindowMatcher>,
+    #[serde(default)]
+    pub(crate) fullscreen: Vec<WindowMatcher>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone, Copy)]
@@ -1183,6 +1133,15 @@ impl Default for Config {
             ignore: default_ignore(),
             log_level: LogLevel::default(),
             start_at_login: false,
+            strategy: default_strategy(),
+            partition_tree: default_partition_tree_config(),
+            master: default_master_config(),
+            min_width: SizeConstraint::default_min(),
+            min_height: SizeConstraint::default_min(),
+            max_width: SizeConstraint::default(),
+            max_height: SizeConstraint::default(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
         }
     }
 }
@@ -1240,10 +1199,32 @@ impl Config {
         format!("{data_dir}/dome")
     }
 
+    fn validate_layout(&self) -> anyhow::Result<()> {
+        // Validation compares config values in logical space directly. No scale
+        // factor exists at validation time, so `.logical()` is the correct escape
+        // hatch here (not `to_unit`).
+        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
+            (self.min_width, self.max_width)
+            && max.logical() > 0.0
+            && min > max
+        {
+            anyhow::bail!("min_width ({min}) cannot be greater than max_width ({max})");
+        }
+        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
+            (self.min_height, self.max_height)
+            && max.logical() > 0.0
+            && min > max
+        {
+            anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
+        }
+        Ok(())
+    }
+
     pub(crate) fn load(path: &str) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let table: toml::Table = toml::from_str(&content)?;
         let config = RawConfig::into_config(table);
+        config.validate_layout()?;
         Ok(config)
     }
 }
@@ -1318,50 +1299,50 @@ mod tests {
 
     #[test]
     fn min_size_default() {
-        let layout: LayoutConfig = toml::from_str("").unwrap();
-        assert_eq!(layout.min_width, SizeConstraint::Percent(5.0));
-        assert_eq!(layout.min_height, SizeConstraint::Percent(5.0));
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.min_width, SizeConstraint::Percent(5.0));
+        assert_eq!(config.min_height, SizeConstraint::Percent(5.0));
     }
 
     #[test]
     fn max_size_default() {
-        let layout: LayoutConfig = toml::from_str("").unwrap();
-        assert_eq!(layout.max_width, SizeConstraint::Pixels(Length::new(0.0)));
-        assert_eq!(layout.max_height, SizeConstraint::Pixels(Length::new(0.0)));
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.max_width, SizeConstraint::Pixels(Length::new(0.0)));
+        assert_eq!(config.max_height, SizeConstraint::Pixels(Length::new(0.0)));
     }
 
     #[test]
     fn size_constraint_parses_float_as_pixels() {
-        let layout: LayoutConfig = toml::from_str("min_width = 200.0").unwrap();
-        assert_eq!(layout.min_width, SizeConstraint::Pixels(Length::new(200.0)));
+        let config: Config = toml::from_str("min_width = 200.0").unwrap();
+        assert_eq!(config.min_width, SizeConstraint::Pixels(Length::new(200.0)));
     }
 
     #[test]
     fn size_constraint_parses_int_as_pixels() {
-        let layout: LayoutConfig = toml::from_str("min_width = 200").unwrap();
-        assert_eq!(layout.min_width, SizeConstraint::Pixels(Length::new(200.0)));
+        let config: Config = toml::from_str("min_width = 200").unwrap();
+        assert_eq!(config.min_width, SizeConstraint::Pixels(Length::new(200.0)));
     }
 
     #[test]
     fn size_constraint_parses_string_percent() {
-        let layout: LayoutConfig = toml::from_str(r#"min_width = "10%""#).unwrap();
-        assert_eq!(layout.min_width, SizeConstraint::Percent(10.0));
+        let config: Config = toml::from_str(r#"min_width = "10%""#).unwrap();
+        assert_eq!(config.min_width, SizeConstraint::Percent(10.0));
     }
 
     #[test]
     fn size_constraint_rejects_invalid_percent() {
-        assert!(toml::from_str::<LayoutConfig>(r#"min_width = "101%""#).is_err());
-        assert!(toml::from_str::<LayoutConfig>(r#"min_width = "-5%""#).is_err());
+        assert!(toml::from_str::<Config>(r#"min_width = "101%""#).is_err());
+        assert!(toml::from_str::<Config>(r#"min_width = "-5%""#).is_err());
     }
 
     #[test]
     fn size_constraint_rejects_negative_pixels() {
-        assert!(toml::from_str::<LayoutConfig>("min_width = -100").is_err());
+        assert!(toml::from_str::<Config>("min_width = -100").is_err());
     }
 
     #[test]
     fn size_constraint_rejects_string_without_percent() {
-        assert!(toml::from_str::<LayoutConfig>(r#"min_width = "200""#).is_err());
+        assert!(toml::from_str::<Config>(r#"min_width = "200""#).is_err());
     }
 
     #[test]
@@ -1411,14 +1392,14 @@ mod tests {
 
     #[test]
     fn layout_validates_min_le_max() {
-        let layout: LayoutConfig = toml::from_str("min_width = 200\nmax_width = 100").unwrap();
-        assert!(layout.validate().is_err());
+        let config: Config = toml::from_str("min_width = 200\nmax_width = 100").unwrap();
+        assert!(config.validate_layout().is_err());
 
-        let layout: LayoutConfig = toml::from_str("min_height = 200\nmax_height = 100").unwrap();
-        assert!(layout.validate().is_err());
+        let config: Config = toml::from_str("min_height = 200\nmax_height = 100").unwrap();
+        assert!(config.validate_layout().is_err());
 
-        let layout: LayoutConfig = toml::from_str("min_width = 200\nmax_width = 0").unwrap();
-        assert!(layout.validate().is_ok());
+        let config: Config = toml::from_str("min_width = 200\nmax_width = 0").unwrap();
+        assert!(config.validate_layout().is_ok());
     }
 
     #[test]
@@ -1689,48 +1670,48 @@ mod tests {
 
     #[test]
     fn partition_tree_config_parses_fields() {
-        let layout: LayoutConfig =
+        let config: Config =
             toml::from_str("[partition_tree]\ntab_bar_height = 30.0\nautomatic_tiling = false")
                 .unwrap();
-        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 30.0);
-        assert!(!layout.partition_tree.automatic_tiling);
+        assert_eq!(config.partition_tree.tab_bar_height.logical(), 30.0);
+        assert!(!config.partition_tree.automatic_tiling);
     }
 
     #[test]
     fn partition_tree_config_defaults() {
-        let layout: LayoutConfig = toml::from_str("").unwrap();
-        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 24.0);
-        assert!(layout.partition_tree.automatic_tiling);
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.partition_tree.tab_bar_height.logical(), 24.0);
+        assert!(config.partition_tree.automatic_tiling);
     }
 
     #[test]
     fn layout_defaults_to_partition_tree() {
-        let layout: LayoutConfig = toml::from_str("").unwrap();
-        assert_eq!(layout.strategy, Strategy::PartitionTree);
-        assert_eq!(layout.master.master_ratio, 0.5);
-        assert_eq!(layout.master.master_count, 1);
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.strategy, Strategy::PartitionTree);
+        assert_eq!(config.master.master_ratio, 0.5);
+        assert_eq!(config.master.master_count, 1);
     }
 
     #[test]
     fn layout_parses_master_strategy() {
-        let layout: LayoutConfig = toml::from_str("strategy = \"master\"\n").unwrap();
-        assert_eq!(layout.strategy, Strategy::Master);
+        let config: Config = toml::from_str("strategy = \"master\"\n").unwrap();
+        assert_eq!(config.strategy, Strategy::Master);
         // Sub-tables still get their defaults
-        assert_eq!(layout.partition_tree.tab_bar_height.logical(), 24.0);
-        assert_eq!(layout.master.master_ratio, 0.5);
+        assert_eq!(config.partition_tree.tab_bar_height.logical(), 24.0);
+        assert_eq!(config.master.master_ratio, 0.5);
     }
 
     #[test]
     fn layout_parses_master_params() {
-        let layout: LayoutConfig =
+        let config: Config =
             toml::from_str("[master]\nmaster_ratio = 0.3\nmaster_count = 2").unwrap();
-        assert_eq!(layout.master.master_ratio, 0.3);
-        assert_eq!(layout.master.master_count, 2);
+        assert_eq!(config.master.master_ratio, 0.3);
+        assert_eq!(config.master.master_count, 2);
     }
 
     #[test]
     fn layout_rejects_unknown_strategy() {
-        assert!(toml::from_str::<LayoutConfig>("strategy = \"floating\"").is_err());
+        assert!(toml::from_str::<Config>("strategy = \"floating\"").is_err());
     }
 
     #[test]
@@ -1742,7 +1723,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_unknown_master_{nanos}.toml"));
         std::fs::write(&path, "[master]\nfoo = 1\nmaster_ratio = 0.6\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        let layout = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(layout.master.master_ratio, 0.6);
     }
 
@@ -1755,7 +1736,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_unknown_pt_{nanos}.toml"));
         std::fs::write(&path, "[partition_tree]\nfoo = 1\ntab_bar_height = 30.0\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        let layout = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(layout.partition_tree.tab_bar_height.logical(), 30.0);
     }
 
@@ -1786,7 +1767,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        let layout = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(layout.master.master_ratio, default_master_ratio());
         assert_eq!(layout.master.master_count, 3);
         assert_eq!(layout.strategy, default_strategy());
@@ -1815,7 +1796,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        let layout = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(layout.strategy, default_strategy());
         assert_eq!(layout.master.master_ratio, 0.6);
         assert_eq!(layout.master.master_count, default_master_count());
@@ -1844,7 +1825,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_unknown_nested_{nanos}.toml"));
         std::fs::write(&path, "[master]\nunknown = 1\nmaster_ratio = 0.7\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        let layout = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(layout.master.master_ratio, 0.7);
     }
 
@@ -1857,9 +1838,11 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_layout_validate_fail_{nanos}.toml"));
         std::fs::write(&path, "min_width = 100\nmax_width = 50\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        assert!(LayoutConfig::load(path.to_str().unwrap()).is_err());
-        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
-        assert_eq!(layout, LayoutConfig::default());
+        assert!(Config::load(path.to_str().unwrap()).is_err());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
+        assert_eq!(config.strategy, Config::default().strategy);
+        assert_eq!(config.partition_tree, Config::default().partition_tree);
+        assert_eq!(config.master, Config::default().master);
     }
 
     #[test]
@@ -1871,7 +1854,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_config_ratio_range_{nanos}.toml"));
         std::fs::write(&path, "[master]\nmaster_ratio = 1.5\nmaster_count = 3\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        let layout = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(layout.master.master_ratio, default_master_ratio());
         assert_eq!(layout.master.master_count, 3);
     }
@@ -2003,7 +1986,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!("dome_layout_does_not_exist_{nanos}.toml"));
-        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        let layout = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(layout.strategy, default_strategy());
         assert_eq!(layout.partition_tree, default_partition_tree_config());
         assert_eq!(layout.master, default_master_config());
@@ -2018,7 +2001,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_layout_malformed_{nanos}.toml"));
         std::fs::write(&path, "this is = = not valid toml\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
+        let layout = load_or_default(path.to_str().unwrap(), Config::load);
         assert_eq!(layout.strategy, default_strategy());
         assert_eq!(layout.partition_tree, default_partition_tree_config());
         assert_eq!(layout.master, default_master_config());
@@ -2046,7 +2029,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let layout = LayoutConfig::load(path.to_str().unwrap()).unwrap();
+        let layout = Config::load(path.to_str().unwrap()).unwrap();
         assert_eq!(layout.strategy, Strategy::Master);
         assert_eq!(layout.partition_tree.tab_bar_height.logical(), 32.0);
         assert_eq!(layout.master.master_ratio, 0.6);
@@ -2066,7 +2049,7 @@ mod tests {
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
-        let layout = LayoutConfig::load(path.to_str().unwrap()).unwrap();
+        let layout = Config::load(path.to_str().unwrap()).unwrap();
         assert_eq!(layout.min_width, SizeConstraint::Pixels(Length::new(200.0)));
         assert_eq!(layout.max_width, SizeConstraint::Percent(50.0));
         assert_eq!(
@@ -2165,7 +2148,6 @@ mod tests {
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
         assert_eq!(layout.workspace.len(), 1);
         assert_eq!(layout.workspace[0].name(), "good");
-        assert_eq!(layout.strategy, default_strategy());
     }
 
     #[test]
@@ -2311,7 +2293,6 @@ mod tests {
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
         let layout = load_or_default(path.to_str().unwrap(), LayoutConfig::load);
-        assert_eq!(layout.master.master_ratio, default_master_ratio());
         assert_eq!(layout.workspace.len(), 1);
         assert_eq!(layout.workspace[0].name(), "1");
         assert!(matches!(
