@@ -541,8 +541,30 @@ impl Hub {
         self.rebuild_matchers();
     }
 
-    pub(crate) fn sync_preferred_layout(&mut self) {
-        // No-op for now. In future, will update and rebuild matchers.
+    pub(crate) fn sync_preferred_layout(
+        &mut self,
+        workspace_overrides: Vec<LayoutWorkspaceConfig>,
+    ) {
+        self.access.preferred_layouts = workspace_overrides;
+
+        // Iterate all existing workspaces so that removals are detected.
+        for (ws_id, ws) in self.access.workspaces.all_active() {
+            let incoming = self
+                .access
+                .preferred_layouts
+                .iter()
+                .find(|o| o.name() == ws.name.as_str())
+                .cloned();
+
+            let kind = self.strategies.kind_of(ws_id);
+            self.strategies.get_mut(kind).sync_preferred_layout(
+                &mut self.access,
+                ws_id,
+                incoming.as_ref(),
+            );
+        }
+
+        self.rebuild_matchers();
     }
 
     #[cfg(test)]

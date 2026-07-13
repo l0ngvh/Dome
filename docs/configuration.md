@@ -60,10 +60,10 @@ a secondary stack area (right or bottom). `master.master_ratio` controls the
 master area's width and `master.master_count` sets how many windows go there.
 The rest of the windows stack in the secondary area.
 
-The partition-tree strategy arranges windows in a tree of nested containers.
-Each container is either a split (horizontal or vertical) or tabbed. Unlike
-i3, Dome automatically removes single-child containers and alternates nested
-split direction, similar to Aerospace's normalized mode.
+The partition-tree strategy fills the screen by arranging windows in a tree of
+nested containers. Each container is either a split (horizontal or vertical) or
+tabbed. Unlike i3, Dome automatically removes single-child containers and
+alternates nested split direction, similar to Aerospace's normalized mode.
 
 `partition_tree.automatic_tiling` lets the runtime choose the split direction
 based on the focused window's dimensions.

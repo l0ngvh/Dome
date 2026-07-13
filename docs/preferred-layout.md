@@ -1,13 +1,15 @@
 # Preferred layout
 
-The preferred layout lets you define how windows are arranged on each
-workspace.
+The preferred layout defines how windows are arranged on each workspace
+when they first appear. Once placed, you can still move and resize them
+with normal tiling actions.
 
-Path on each platform:
+Dome reads the layout from:
 - macOS: `~/.config/dome/layout.toml` (or `$XDG_CONFIG_HOME/dome/layout.toml`).
 - Windows: `%APPDATA%\dome\layout.toml`.
 
-Like `config.toml`, Dome reloads it on save.
+The file is hot reloaded on save. Currently, only moving windows within
+a workspace is supported during hot reload.
 
 ## Defining a workspace
 

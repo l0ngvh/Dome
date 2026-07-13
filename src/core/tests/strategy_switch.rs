@@ -16,10 +16,7 @@ fn layout(strategy: Strategy, ratio: f32, count: usize) -> GlobalLayoutConfig {
         .build()
 }
 
-fn setup_hub_with_layout(
-    layout: GlobalLayoutConfig,
-    overrides: Vec<LayoutWorkspaceConfig>,
-) -> Hub {
+fn setup_hub_with_layout(layout: GlobalLayoutConfig, overrides: Vec<LayoutWorkspaceConfig>) -> Hub {
     Hub::new(
         Dimension::new(
             Length::new(0.0),
@@ -611,10 +608,6 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
     +-------------------------------------------------------------------------+***************************************************************************
     ");
 }
-
-
-
-
 
 #[test]
 fn same_kind_cross_workspace_move_preserves_container() {

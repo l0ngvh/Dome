@@ -2,9 +2,7 @@ use crate::config::{MasterConfig, Strategy};
 use crate::core::allocator::NodeId;
 use crate::core::node::WindowId;
 use crate::core::strategy::TilingAction;
-use crate::core::tests::{
-    LayoutConfigBuilder, TestHubBuilder, snapshot, titled, validate_hub,
-};
+use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, snapshot, titled, validate_hub};
 use insta::assert_snapshot;
 
 #[test]
@@ -1116,8 +1114,6 @@ fn more_master_only_affects_focused_workspace() {
     +-------------------------------------------------------------------------+***************************************************************************
     ");
 }
-
-
 
 #[test]
 fn attach_window_falls_back_to_global_when_no_per_workspace_override() {

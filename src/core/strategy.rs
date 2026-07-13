@@ -115,6 +115,20 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Remove all per-workspace state for a workspace being deleted.
     fn prune_workspace(&mut self, ws_id: WorkspaceId);
 
+    /// Synchronize the preferred layout for a single workspace from an incoming
+    /// workspace override. No return value — each strategy logs its own
+    /// change via `tracing::debug!` when a rebuild occurs.
+    ///
+    /// `incoming` is `None` when the workspace no longer has an override
+    /// in the new config — the strategy should clear its per-workspace
+    /// state and fall back to global defaults.
+    fn sync_preferred_layout(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        incoming: Option<&LayoutWorkspaceConfig>,
+    );
+
     /// Refresh config-derived internal state and relayout the given workspace.
     fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId);
 

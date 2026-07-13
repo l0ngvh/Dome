@@ -343,7 +343,8 @@ impl Dome {
     }
 
     pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
-        self.hub.sync_configuration(GlobalLayoutConfig::from(&new_config));
+        self.hub
+            .sync_configuration(GlobalLayoutConfig::from(&new_config));
         self.hub.set_ignore_rules(new_config.ignore.clone());
         self.sender
             .send(HubMessage::ConfigChanged(Box::new(new_config.clone())));
@@ -352,8 +353,8 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn layout_changed(&mut self, _new_layout: LayoutConfig) {
-        self.hub.sync_preferred_layout();
+    pub(in crate::platform::macos) fn layout_changed(&mut self, new_layout: LayoutConfig) {
+        self.hub.sync_preferred_layout(new_layout.workspace);
         tracing::info!("Layout reloaded");
         self.flush_layout();
     }

@@ -217,7 +217,8 @@ impl Dome {
     }
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
-        self.hub.sync_configuration(GlobalLayoutConfig::from(&new_config));
+        self.hub
+            .sync_configuration(GlobalLayoutConfig::from(&new_config));
         self.hub.set_ignore_rules(new_config.ignore.clone());
         self.config = new_config;
         for overlay in self.tiling_overlays.values_mut() {
@@ -235,8 +236,8 @@ impl Dome {
         self.apply_layout();
     }
 
-    pub(super) fn layout_changed(&mut self, _new_layout: LayoutConfig) {
-        self.hub.sync_preferred_layout();
+    pub(super) fn layout_changed(&mut self, new_layout: LayoutConfig) {
+        self.hub.sync_preferred_layout(new_layout.workspace);
         tracing::info!("Layout reloaded");
         self.apply_layout();
     }

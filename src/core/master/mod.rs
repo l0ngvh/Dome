@@ -533,6 +533,97 @@ impl TilingStrategy for MasterStrategy {
         }
     }
 
+    fn sync_preferred_layout(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        incoming: Option<&LayoutWorkspaceConfig>,
+    ) {
+        let Some(state) = self.workspaces.get(&ws_id) else {
+            return;
+        };
+
+        let (new_count, new_ratio, incoming_matchers) = match incoming {
+            Some(LayoutWorkspaceConfig::Master {
+                master_count: incoming_count,
+                master_ratio: incoming_ratio,
+                master,
+                secondary,
+                ..
+            }) => {
+                let count = incoming_count.unwrap_or(hub.layout.master.master_count);
+                let ratio = incoming_ratio.unwrap_or(hub.layout.master.master_ratio);
+                let matchers: Vec<PaneMatcher> = master
+                    .iter()
+                    .map(|m| PaneMatcher {
+                        pane: Pane::Master,
+                        matcher: m.clone(),
+                    })
+                    .chain(secondary.iter().map(|m| PaneMatcher {
+                        pane: Pane::Secondary,
+                        matcher: m.clone(),
+                    }))
+                    .collect();
+                (count, ratio, matchers)
+            }
+            _ => {
+                // No override — fall back to global defaults.
+                (
+                    hub.layout.master.master_count,
+                    hub.layout.master.master_ratio,
+                    Vec::new(),
+                )
+            }
+        };
+
+        let matchers_changed = incoming_matchers != state.matchers;
+        let count_changed = new_count != state.master_count;
+        let ratio_changed = (new_ratio - state.master_ratio).abs() > f32::EPSILON;
+
+        if !matchers_changed && !count_changed && !ratio_changed {
+            return;
+        }
+
+        tracing::debug!(%ws_id, "Master preferred layout changed, reloading");
+
+        if matchers_changed {
+            // Collect windows via immutable borrow, then reset in place.
+            let tiling_windows: Vec<WindowId> = state
+                .master
+                .iter()
+                .chain(state.stack.iter())
+                .map(|(id, _)| *id)
+                .collect();
+
+            let focused = self.focused_tiling_window(hub, ws_id);
+
+            let state = self.workspaces.get_mut(&ws_id).unwrap();
+            state.master.clear();
+            state.stack.clear();
+            state.focus = None;
+            state.matchers = incoming_matchers;
+            state.master_count = new_count;
+            state.master_ratio = new_ratio;
+
+            for &wid in &tiling_windows {
+                self.attach_window(hub, wid, ws_id);
+            }
+            if let Some(f) = focused {
+                self.set_focus(hub, f);
+            }
+        } else {
+            // Only count/ratio changed — update in place.
+            let state = self.workspaces.get_mut(&ws_id).unwrap();
+            if count_changed {
+                state.master_count = new_count;
+            }
+            if ratio_changed {
+                state.master_ratio = new_ratio;
+            }
+            self.layout_workspace(hub, ws_id);
+        }
+    }
+
     fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
         // Refresh matchers from config.
         let new_matchers: Vec<PaneMatcher> =
@@ -1203,7 +1294,7 @@ struct Focus {
 }
 
 /// One config matcher plus which pane it targets.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct PaneMatcher {
     pane: Pane,
     matcher: WindowMatcher,

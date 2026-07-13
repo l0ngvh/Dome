@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::config::{SplitMode, TreeLayoutNode, WindowMatcher};
+use crate::config::{LayoutWorkspaceConfig, SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::WindowMetadata;
 use crate::core::allocator::{Allocator, Node, NodeId};
 use crate::core::hub::HubAccess;
@@ -477,6 +477,53 @@ impl PreferredLayout {
         false
     }
 
+    /// Structural equality: true when `incoming` describes the same tree
+    /// shape, splits, and matchers. Runtime occupation state is ignored.
+    pub(super) fn structurally_eq(&self, incoming: &LayoutWorkspaceConfig) -> bool {
+        let LayoutWorkspaceConfig::PartitionTree { tree, .. } = incoming else {
+            return false;
+        };
+        let Some(tree) = tree else {
+            return self.root.is_none();
+        };
+        let other = PreferredLayout::from_tree_layout_node(tree);
+        match (self.root, other.root) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                let mut stack = vec![(a, b)];
+                for _ in crate::core::bounded_loop() {
+                    let Some((sa, sb)) = stack.pop() else {
+                        return true;
+                    };
+                    match (sa, sb) {
+                        (PreferredSlot::Window(a_id), PreferredSlot::Window(b_id)) => {
+                            if self.window_slots.get(a_id).matcher
+                                != other.window_slots.get(b_id).matcher
+                            {
+                                return false;
+                            }
+                        }
+                        (PreferredSlot::Container(a_id), PreferredSlot::Container(b_id)) => {
+                            let ca = self.container_slots.get(a_id);
+                            let cb = other.container_slots.get(b_id);
+                            if ca.split != cb.split || ca.children.len() != cb.children.len() {
+                                return false;
+                            }
+                            for (ac, bc) in ca.children.iter().zip(cb.children.iter()).rev() {
+                                stack.push((*ac, *bc));
+                            }
+                        }
+                        _ => return false,
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    // It should be fine to build a subtree recursively, since the tree layout is parsed from config
+    // file, so it should be a standard tree with no loop
     fn build_subtree(
         &mut self,
         node: &TreeLayoutNode,

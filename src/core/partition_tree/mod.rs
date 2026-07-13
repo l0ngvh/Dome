@@ -312,6 +312,77 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.workspaces.remove(&ws_id);
     }
 
+    fn sync_preferred_layout(
+        &mut self,
+        hub: &mut HubAccess,
+        ws_id: WorkspaceId,
+        incoming: Option<&LayoutWorkspaceConfig>,
+    ) {
+        let changed = match self.workspaces.get(&ws_id) {
+            Some(ws) => match ws.preferred_layout.as_ref() {
+                Some(current) => match incoming {
+                    Some(cfg) => !current.structurally_eq(cfg),
+                    None => true,
+                },
+                None => matches!(
+                    incoming,
+                    Some(LayoutWorkspaceConfig::PartitionTree { tree: Some(_), .. })
+                ),
+            },
+            None => incoming.is_some(),
+        };
+
+        if !changed {
+            return;
+        }
+
+        tracing::debug!(%ws_id, "PartitionTree preferred layout changed, reloading");
+
+        // Phase: immutable snapshot — collect windows, old root, and focus.
+        // Mutable work (detach_child, container deletion) happens below.
+        let (tiling_windows, old_root) = {
+            let state = self.workspaces.get(&ws_id).unwrap();
+            let windows: Vec<WindowId> = state
+                .root
+                .map(|r| {
+                    self.children_dfs(r)
+                        .filter_map(|c| match c {
+                            Child::Window(id) => Some(id),
+                            Child::Container(_) => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            (windows, state.root)
+        };
+
+        let focused = self.focused_tiling_window(hub, ws_id);
+
+        // Phase: mutable — detach root (clears bookmarks + occupation,
+        // triggers one layout on the now-empty workspace).
+        if let Some(root) = old_root {
+            self.detach_child(hub, root);
+        }
+
+        // Set the new preferred layout.
+        let new_layout = incoming.and_then(|w| match w {
+            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
+                tree.as_ref().map(PreferredLayout::from_tree_layout_node)
+            }
+            _ => None,
+        });
+        self.workspaces.get_mut(&ws_id).unwrap().preferred_layout = new_layout;
+
+        // Reattach windows under the new layout.
+        for &wid in &tiling_windows {
+            self.attach_window(hub, wid, ws_id);
+        }
+
+        if let Some(f) = focused {
+            self.set_focus(hub, f);
+        }
+    }
+
     fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
         self.tab_bar_height = hub.layout.partition_tree.tab_bar_height;
         self.automatic_tiling = hub.layout.partition_tree.automatic_tiling;
