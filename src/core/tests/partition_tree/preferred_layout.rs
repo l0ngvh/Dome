@@ -9,11 +9,8 @@ use crate::core::tests::{
 #[test]
 fn insert_first_preferred_window_next_to_focused_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
                     split: Some(SplitMode::Tabbed),
@@ -90,11 +87,8 @@ fn insert_first_preferred_window_next_to_focused_window() {
 #[test]
 fn insert_second_preferred_window_forming_lowest_common_ancestor() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
                     split: Some(SplitMode::Horizontal),
@@ -194,11 +188,8 @@ fn insert_second_preferred_window_forming_lowest_common_ancestor() {
 #[test]
 fn insert_three_preferred_window_to_lowest_common_ancestor() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
                     split: Some(SplitMode::Horizontal),
@@ -288,11 +279,8 @@ fn insert_three_preferred_window_to_lowest_common_ancestor() {
 #[test]
 fn insert_nested_preferred_layout_tree() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
                     split: Some(SplitMode::Horizontal),
@@ -388,11 +376,8 @@ fn insert_nested_preferred_layout_tree() {
 #[test]
 fn delete_and_reinsert_the_same_matching_window() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
                     split: Some(SplitMode::Horizontal),
@@ -536,11 +521,8 @@ fn delete_and_reinsert_the_same_matching_window() {
 #[test]
 fn clean_up_and_reforming_preferred_contaner() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
                     split: Some(SplitMode::Horizontal),
@@ -687,11 +669,8 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
  {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
                     split: Some(SplitMode::Tabbed),
@@ -831,11 +810,8 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
 fn move_preferred_root_to_another_workspace() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
                     split: Some(SplitMode::Horizontal),
@@ -910,11 +886,8 @@ fn move_preferred_root_to_another_workspace() {
 fn move_preferred_container_to_another_workspace() {
     setup_logger_with_level("trace");
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("1")
                 .with_tree(TreeLayoutNode::Container {
                     split: Some(SplitMode::Horizontal),

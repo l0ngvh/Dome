@@ -1398,11 +1398,8 @@ fn make_pref_tree_hub(tree: Option<TreeLayoutNode>) -> Hub {
         ws_builder = ws_builder.with_tree(t);
     }
     TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![ws_builder.build()])
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![ws_builder.build()])
         .build()
 }
 

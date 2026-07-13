@@ -699,14 +699,14 @@ pub(super) fn setup_logger_with_level(level: &str) {
 #[derive(Clone)]
 struct TestHubBuilder {
     layout: GlobalLayoutConfig,
-    workspace_overrides: Vec<LayoutWorkspaceConfig>,
+    preferred_layout: Vec<LayoutWorkspaceConfig>,
 }
 
 impl TestHubBuilder {
     fn new() -> Self {
         Self {
             layout: LayoutConfigBuilder::new().build(),
-            workspace_overrides: Vec::new(),
+            preferred_layout: Vec::new(),
         }
     }
 
@@ -714,12 +714,9 @@ impl TestHubBuilder {
         Self { layout, ..self }
     }
 
-    fn with_workspace_overrides(
-        self,
-        workspace_overrides: Vec<LayoutWorkspaceConfig>,
-    ) -> Self {
+    fn with_preferred_layout(self, preferred_layout: Vec<LayoutWorkspaceConfig>) -> Self {
         Self {
-            workspace_overrides,
+            preferred_layout,
             ..self
         }
     }
@@ -734,7 +731,7 @@ impl TestHubBuilder {
             ),
             1.0,
             self.layout,
-            self.workspace_overrides,
+            self.preferred_layout,
             Vec::new(),
         )
     }

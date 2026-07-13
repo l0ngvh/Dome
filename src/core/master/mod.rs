@@ -24,9 +24,9 @@ impl TilingStrategy for MasterStrategy {
         ws_id: WorkspaceId,
         ws_name: &str,
         layout: &GlobalLayoutConfig,
-        workspace_overrides: &[LayoutWorkspaceConfig],
+        preferred_layouts: &[LayoutWorkspaceConfig],
     ) {
-        let override_block = workspace_overrides.iter().find_map(|w| match w {
+        let preferred_layout = preferred_layouts.iter().find_map(|w| match w {
             LayoutWorkspaceConfig::Master {
                 name,
                 master_ratio,
@@ -37,18 +37,18 @@ impl TilingStrategy for MasterStrategy {
             } if *name == ws_name => Some((*master_ratio, *master_count, master, secondary)),
             _ => None,
         });
-        let initial_master_count = override_block
+        let initial_master_count = preferred_layout
             .as_ref()
             .and_then(|(_, count, _, _)| *count)
             .unwrap_or(layout.master.master_count);
-        let initial_master_ratio = override_block
+        let initial_master_ratio = preferred_layout
             .as_ref()
             .and_then(|(ratio, _, _, _)| *ratio)
             .unwrap_or(layout.master.master_ratio);
         self.workspaces.entry(ws_id).or_insert_with(|| MasterState {
             master: Vec::new(),
             stack: Vec::new(),
-            matchers: build_matchers_from_config(layout, workspace_overrides, ws_name),
+            matchers: build_matchers_from(preferred_layouts, ws_name),
             focus: None,
             master_y_offset: Length::ZERO,
             stack_y_offset: Length::ZERO,
@@ -535,11 +535,8 @@ impl TilingStrategy for MasterStrategy {
 
     fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
         // Refresh matchers from config.
-        let new_matchers: Vec<PaneMatcher> = build_matchers_from_config(
-            &hub.layout,
-            &hub.workspace_overrides,
-            &hub.workspaces.get(ws_id).name,
-        );
+        let new_matchers: Vec<PaneMatcher> =
+            build_matchers_from(&hub.preferred_layouts, &hub.workspaces.get(ws_id).name);
 
         let Some(state) = self.workspaces.get_mut(&ws_id) else {
             return;
@@ -1213,12 +1210,11 @@ struct PaneMatcher {
 }
 
 /// Build the matcher list from config for a given workspace.
-fn build_matchers_from_config(
-    _layout: &GlobalLayoutConfig,
-    workspace_overrides: &[LayoutWorkspaceConfig],
+fn build_matchers_from(
+    preferred_layouts: &[LayoutWorkspaceConfig],
     ws_name: &str,
 ) -> Vec<PaneMatcher> {
-    workspace_overrides
+    preferred_layouts
         .iter()
         .find_map(|w| match w {
             LayoutWorkspaceConfig::Master {

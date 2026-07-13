@@ -7,21 +7,18 @@ use insta::assert_snapshot;
 #[test]
 fn float_matcher_routes_to_float() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("3")
                 .with_strategy(Strategy::Master)
                 .with_float(vec![WindowMatcher {
-                process: Some("float.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("float.exe".into()),
+                    ..Default::default()
+                }])
                 .with_fullscreen(vec![WindowMatcher {
-                process: Some("fullscreen.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("fullscreen.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -73,21 +70,18 @@ fn float_matcher_routes_to_float() {
 #[test]
 fn fullscreen_matcher_routes_to_fullscreen() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("3")
                 .with_strategy(Strategy::Master)
                 .with_float(vec![WindowMatcher {
-                process: Some("float.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("float.exe".into()),
+                    ..Default::default()
+                }])
                 .with_fullscreen(vec![WindowMatcher {
-                process: Some("fullscreen.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("fullscreen.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -144,21 +138,18 @@ fn fullscreen_matcher_routes_to_fullscreen() {
 #[test]
 fn fullscreen_beats_float_when_both_match() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("3")
                 .with_strategy(Strategy::Master)
                 .with_float(vec![WindowMatcher {
-                title: Some("matchme".into()),
-                ..Default::default()
-            }])
+                    title: Some("matchme".into()),
+                    ..Default::default()
+                }])
                 .with_fullscreen(vec![WindowMatcher {
-                title: Some("matchme".into()),
-                ..Default::default()
-            }])
+                    title: Some("matchme".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -215,21 +206,18 @@ fn fullscreen_beats_float_when_both_match() {
 #[test]
 fn no_match_tiles_on_current_workspace() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("3")
                 .with_strategy(Strategy::Master)
                 .with_float(vec![WindowMatcher {
-                process: Some("float.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("float.exe".into()),
+                    ..Default::default()
+                }])
                 .with_fullscreen(vec![WindowMatcher {
-                process: Some("fullscreen.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("fullscreen.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -290,16 +278,16 @@ fn matchers_on_partition_tree_variant() {
                 .with_strategy(Strategy::PartitionTree)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("ws2")
                 .with_float(vec![WindowMatcher {
-                process: Some("float.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("float.exe".into()),
+                    ..Default::default()
+                }])
                 .with_fullscreen(vec![WindowMatcher {
-                process: Some("fullscreen.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("fullscreen.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -477,13 +465,13 @@ fn per_workspace_override_beats_global() {
                 }])
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("3")
                 .with_strategy(Strategy::Master)
                 .with_float(vec![WindowMatcher {
-                process: Some("calc.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("calc.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -604,13 +592,13 @@ fn tiling_matcher_routes_to_workspace() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("dev")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![WindowMatcher {
-                process: Some("editor.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -674,17 +662,17 @@ fn float_beats_tiling() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("dev")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![WindowMatcher {
-                process: Some("popup.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("popup.exe".into()),
+                    ..Default::default()
+                }])
                 .with_float(vec![WindowMatcher {
-                process: Some("popup.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("popup.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -742,20 +730,20 @@ fn config_order_first_match_wins() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("code")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![WindowMatcher {
-                process: Some("editor.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
             LayoutWorkspaceConfigBuilder::new("chat")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![WindowMatcher {
-                process: Some("editor.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -818,13 +806,13 @@ fn no_tiling_match_falls_back_to_current() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("dev")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![WindowMatcher {
-                process: Some("editor.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();

@@ -15,13 +15,13 @@ fn secondary_matched_goes_to_stack() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_secondary(vec![WindowMatcher {
-                process: Some("terminal.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("terminal.exe".into()),
+                    ..Default::default()
+                }])
                 .with_master_count(2)
                 .build(),
         ])
@@ -82,17 +82,17 @@ fn master_matched_goes_to_master_pane() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![WindowMatcher {
-                process: Some("browser.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("browser.exe".into()),
+                    ..Default::default()
+                }])
                 .with_secondary(vec![WindowMatcher {
-                process: Some("editor.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -152,13 +152,13 @@ fn master_full_cascades_to_secondary() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![WindowMatcher {
-                process: Some("editor.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
                 .build(),
         ])
         .build();
@@ -218,18 +218,18 @@ fn slot_occupied_skip() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![
                     WindowMatcher {
-                    process: Some("browser.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("browser.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("browser.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("browser.exe".into()),
+                        ..Default::default()
+                    },
                 ])
                 .build(),
         ])
@@ -284,13 +284,13 @@ fn unmatched_fills_master_room() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![WindowMatcher {
-                process: Some("editor.exe".into()),
-                ..Default::default()
-            }])
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
                 .with_master_count(2)
                 .build(),
         ])
@@ -351,22 +351,22 @@ fn mixed_matched_and_unmatched_order() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![
                     WindowMatcher {
-                    process: Some("C.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("C.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("A.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("A.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("B.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("B.exe".into()),
+                        ..Default::default()
+                    },
                 ])
                 .with_master_count(3)
                 .build(),
@@ -424,7 +424,7 @@ fn unmatched_goes_to_stack_when_master_full() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .build(),
@@ -480,32 +480,32 @@ fn matched_order_on_both_lanes() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![
                     WindowMatcher {
-                    process: Some("A.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("A.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("B.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("B.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("C.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("C.exe".into()),
+                        ..Default::default()
+                    },
                 ])
                 .with_secondary(vec![
                     WindowMatcher {
-                    process: Some("D.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("D.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("E.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("E.exe".into()),
+                        ..Default::default()
+                    },
                 ])
                 .with_master_count(3)
                 .build(),
@@ -559,8 +559,6 @@ fn matched_order_on_both_lanes() {
     ");
 }
 
-
-
 #[test]
 fn decrease_master_count_drop_matched_master() {
     let mut hub = TestHubBuilder::new()
@@ -569,18 +567,18 @@ fn decrease_master_count_drop_matched_master() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![
                     WindowMatcher {
-                    process: Some("A.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("A.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("B.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("B.exe".into()),
+                        ..Default::default()
+                    },
                 ])
                 .with_master_count(2)
                 .build(),
@@ -641,22 +639,22 @@ fn reordering_matched_windows_doesnt_guarrantee_next_match() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_master(vec![
                     WindowMatcher {
-                    process: Some("A.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("A.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("B.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("B.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("C.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("C.exe".into()),
+                        ..Default::default()
+                    },
                 ])
                 .with_master_count(3)
                 .build(),
@@ -713,22 +711,19 @@ fn reordering_matched_windows_doesnt_guarrantee_next_match() {
 #[test]
 fn swapping_secondary_window_doesnt_guarrantee_next_match() {
     let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .build(),
-        )
-        .with_workspace_overrides(vec![
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_secondary(vec![
                     WindowMatcher {
-                    process: Some("A.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("A.exe".into()),
+                        ..Default::default()
+                    },
                     WindowMatcher {
-                    process: Some("B.exe".into()),
-                    ..Default::default()
-                },
+                        process: Some("B.exe".into()),
+                        ..Default::default()
+                    },
                 ])
                 .build(),
         ])

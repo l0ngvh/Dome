@@ -520,7 +520,7 @@ fn default_ignore() -> Vec<WindowMatcher> {
 impl WalkRecover for LayoutConfig {
     fn walk(w: &mut Walker) -> Self {
         let raw = w.rule_vec::<LayoutWorkspaceConfig>("workspace");
-        let workspace = dedup_workspace_overrides(raw, &w.prefix);
+        let workspace = dedup_preferred_layout_config(raw, &w.prefix);
         LayoutConfig { workspace }
     }
 }
@@ -946,7 +946,7 @@ fn default_master_config() -> MasterConfig {
     }
 }
 
-fn dedup_workspace_overrides(
+fn dedup_preferred_layout_config(
     entries: Vec<LayoutWorkspaceConfig>,
     prefix: &str,
 ) -> Vec<LayoutWorkspaceConfig> {
@@ -957,7 +957,7 @@ fn dedup_workspace_overrides(
         if ws_name.is_empty() {
             tracing::warn!(
                 field = %field_path(prefix, "workspace"),
-                "Empty workspace name in override, dropping",
+                "Empty workspace name, dropping",
             );
             continue;
         }
@@ -965,7 +965,7 @@ fn dedup_workspace_overrides(
             tracing::warn!(
                 field = %field_path(prefix, "workspace"),
                 name = ws_name,
-                "Duplicate workspace override, replacing earlier entry",
+                "Duplicate workspace, replacing earlier entry",
             );
             out[idx] = entry;
         } else {
@@ -2082,13 +2082,13 @@ mod tests {
     }
 
     #[test]
-    fn workspace_overrides_default_empty() {
+    fn preferred_layout_default_empty() {
         let layout: LayoutConfig = toml::from_str("").unwrap();
         assert!(layout.workspace.is_empty());
     }
 
     #[test]
-    fn workspace_overrides_parse_single_entry() {
+    fn preferred_layout_parse_single_entry() {
         let layout: LayoutConfig =
             toml::from_str("[[workspace]]\nname = \"1\"\nstrategy = \"master\"\n").unwrap();
         assert_eq!(layout.workspace.len(), 1);
@@ -2100,7 +2100,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_overrides_parse_multiple_distinct() {
+    fn preferred_layout_parse_multiple_distinct() {
         let layout: LayoutConfig = toml::from_str(concat!(
             "[[workspace]]\n",
             "name = \"1\"\n",
@@ -2125,7 +2125,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_overrides_drop_unknown_strategy() {
+    fn preferred_layout_drop_unknown_strategy() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2151,7 +2151,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_overrides_drop_missing_name() {
+    fn preferred_layout_drop_missing_name() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2176,7 +2176,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_overrides_drop_empty_name() {
+    fn preferred_layout_drop_empty_name() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2202,7 +2202,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_overrides_drop_unknown_field() {
+    fn preferred_layout_drop_unknown_field() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2229,7 +2229,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_overrides_dedup_last_wins() {
+    fn preferred_layout_dedup_last_wins() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2259,7 +2259,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_overrides_drop_non_table_element() {
+    fn preferred_layout_drop_non_table_element() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2273,7 +2273,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_overrides_survive_other_field_failure() {
+    fn preferred_layout_survive_other_field_failure() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

@@ -60,7 +60,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
         ws_id: WorkspaceId,
         ws_name: &str,
         layout: &GlobalLayoutConfig,
-        workspace_overrides: &[LayoutWorkspaceConfig],
+        preferred_layouts: &[LayoutWorkspaceConfig],
     );
 
     /// Insert a window into the tiling tree for the given workspace.
@@ -249,16 +249,12 @@ impl StrategySet {
         ws_id: WorkspaceId,
         name: &str,
         layout: &GlobalLayoutConfig,
-        workspace_overrides: &[LayoutWorkspaceConfig],
+        preferred_layouts: &[LayoutWorkspaceConfig],
     ) {
         self.kinds
-            .insert(ws_id, kind_for(name, workspace_overrides, layout.strategy));
-        self.get_mut(self.kind_of(ws_id)).prepare_workspace(
-            ws_id,
-            name,
-            layout,
-            workspace_overrides,
-        );
+            .insert(ws_id, kind_for(name, preferred_layouts, layout.strategy));
+        self.get_mut(self.kind_of(ws_id))
+            .prepare_workspace(ws_id, name, layout, preferred_layouts);
     }
 
     pub(super) fn prepare_workspace(
@@ -266,14 +262,10 @@ impl StrategySet {
         ws_id: WorkspaceId,
         name: &str,
         layout: &GlobalLayoutConfig,
-        workspace_overrides: &[LayoutWorkspaceConfig],
+        preferred_layouts: &[LayoutWorkspaceConfig],
     ) {
-        self.get_mut(self.kind_of(ws_id)).prepare_workspace(
-            ws_id,
-            name,
-            layout,
-            workspace_overrides,
-        );
+        self.get_mut(self.kind_of(ws_id))
+            .prepare_workspace(ws_id, name, layout, preferred_layouts);
     }
 
     pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {
@@ -312,7 +304,7 @@ impl StrategySet {
     pub(super) fn resync(
         &mut self,
         workspaces: &Allocator<Workspace>,
-        workspace_overrides: &[LayoutWorkspaceConfig],
+        preferred_layouts: &[LayoutWorkspaceConfig],
         layout: &GlobalLayoutConfig,
     ) -> Vec<WorkspaceKindChange> {
         let mut changes = Vec::new();
@@ -321,7 +313,7 @@ impl StrategySet {
                 .kinds
                 .get(&ws_id)
                 .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"));
-            let new = kind_for(&ws.name, workspace_overrides, layout.strategy);
+            let new = kind_for(&ws.name, preferred_layouts, layout.strategy);
             self.kinds.insert(ws_id, new);
             if old != new {
                 changes.push(WorkspaceKindChange { ws_id, old, new });
@@ -339,10 +331,10 @@ impl StrategySet {
 
 fn kind_for(
     name: &str,
-    workspace_overrides: &[LayoutWorkspaceConfig],
+    preferred_layouts: &[LayoutWorkspaceConfig],
     default_strategy: Strategy,
 ) -> Strategy {
-    workspace_overrides
+    preferred_layouts
         .iter()
         .find(|w| w.name() == name)
         .map(|w| match w {

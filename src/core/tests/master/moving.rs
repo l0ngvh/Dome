@@ -395,7 +395,7 @@ fn promote_secondary_to_master_when_there_is_room() {
                 .with_strategy(Strategy::Master)
                 .build(),
         )
-        .with_workspace_overrides(vec![
+        .with_preferred_layout(vec![
             LayoutWorkspaceConfigBuilder::new("0")
                 .with_strategy(Strategy::Master)
                 .with_secondary(vec![

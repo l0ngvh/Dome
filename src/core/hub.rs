@@ -157,7 +157,7 @@ pub(crate) struct HubAccess {
     pub(super) monitors: Allocator<Monitor>,
     pub(super) focused_monitor: MonitorId,
     pub(super) layout: GlobalLayoutConfig,
-    pub(super) workspace_overrides: Vec<LayoutWorkspaceConfig>,
+    pub(super) preferred_layouts: Vec<LayoutWorkspaceConfig>,
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
 }
@@ -183,7 +183,7 @@ impl Hub {
         primary_screen: Dimension,
         primary_scale: f32,
         layout: GlobalLayoutConfig,
-        workspace_overrides: Vec<LayoutWorkspaceConfig>,
+        preferred_layouts: Vec<LayoutWorkspaceConfig>,
         ignore_rules: Vec<WindowMatcher>,
     ) -> Self {
         let mut monitors: Allocator<Monitor> = Allocator::new();
@@ -202,23 +202,18 @@ impl Hub {
         monitors.get_mut(primary_id).active_workspace = primary_ws_id;
 
         let mut strategies = StrategySet::new(&layout);
-        strategies.register(
-            primary_ws_id,
-            &primary_ws_name,
-            &layout,
-            &workspace_overrides,
-        );
+        strategies.register(primary_ws_id, &primary_ws_name, &layout, &preferred_layouts);
 
         // Pre-allocate every workspace name listed in [[workspace]]
         // (skipping any that collide with the primary workspace's name) so
         // that named workspaces have stable IDs from boot. They live on the
         // primary monitor.
-        for entry in &workspace_overrides {
+        for entry in &preferred_layouts {
             if entry.name() == primary_ws_name {
                 continue;
             }
             let ws_id = workspaces.allocate(Workspace::new(entry.name().to_string(), primary_id));
-            strategies.register(ws_id, entry.name(), &layout, &workspace_overrides);
+            strategies.register(ws_id, entry.name(), &layout, &preferred_layouts);
         }
 
         let mut hub = Self {
@@ -226,7 +221,7 @@ impl Hub {
                 monitors,
                 focused_monitor: primary_id,
                 layout,
-                workspace_overrides,
+                preferred_layouts,
                 workspaces,
                 windows: Allocator::new(),
             },
@@ -440,7 +435,7 @@ impl Hub {
             ws_id,
             &name,
             &self.access.layout,
-            &self.access.workspace_overrides,
+            &self.access.preferred_layouts,
         );
         monitor_id
     }
@@ -504,7 +499,7 @@ impl Hub {
 
         let changes = self.strategies.resync(
             &self.access.workspaces,
-            &self.access.workspace_overrides,
+            &self.access.preferred_layouts,
             &self.access.layout,
         );
         let changed_ids: HashSet<WorkspaceId> = changes.iter().map(|c| c.ws_id).collect();
@@ -539,7 +534,7 @@ impl Hub {
                 change.ws_id,
                 ws_name,
                 &self.access.layout,
-                &self.access.workspace_overrides,
+                &self.access.preferred_layouts,
             );
             self.reattach_workspace_after_rebuild(change.ws_id, snapshot);
         }
@@ -547,7 +542,7 @@ impl Hub {
     }
 
     pub(crate) fn sync_preferred_layout(&mut self) {
-        // No-op for now. In future, will update workspace_overrides and rebuild matchers.
+        // No-op for now. In future, will update and rebuild matchers.
     }
 
     #[cfg(test)]
@@ -568,7 +563,7 @@ impl Hub {
         }
         let entries: Vec<Entry<'_>> = self
             .access
-            .workspace_overrides
+            .preferred_layouts
             .iter()
             .map(|entry| {
                 use LayoutWorkspaceConfig::*;
@@ -947,7 +942,7 @@ impl Hub {
             ws_id,
             name,
             &self.access.layout,
-            &self.access.workspace_overrides,
+            &self.access.preferred_layouts,
         );
         ws_id
     }
