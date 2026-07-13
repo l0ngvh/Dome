@@ -393,24 +393,24 @@ fn promote_secondary_to_master_when_there_is_room() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_secondary(vec![
-                            WindowMatcher {
-                                title: Some("B".to_string()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                title: Some("C".to_string()),
-                                ..Default::default()
-                            },
-                        ])
-                        .with_master_count(3)
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_secondary(vec![
+                    WindowMatcher {
+                        title: Some("B".to_string()),
+                        ..Default::default()
+                    },
+                    WindowMatcher {
+                        title: Some("C".to_string()),
+                        ..Default::default()
+                    },
+                ])
+                .with_master_count(3)
+                .build(),
+        ])
         .build();
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("A"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("B"));

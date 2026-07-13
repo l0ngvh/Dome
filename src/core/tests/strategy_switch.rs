@@ -6,11 +6,7 @@ use crate::core::node::{Dimension, Length, WindowRestrictions};
 use super::{LayoutConfigBuilder, setup_hub, snapshot, titled};
 use insta::assert_snapshot;
 
-fn layout(
-    strategy: Strategy,
-    ratio: f32,
-    count: usize,
-) -> (GlobalLayoutConfig, Vec<LayoutWorkspaceConfig>) {
+fn layout(strategy: Strategy, ratio: f32, count: usize) -> GlobalLayoutConfig {
     LayoutConfigBuilder::new()
         .with_strategy(strategy)
         .with_master_config(MasterConfig {
@@ -20,7 +16,10 @@ fn layout(
         .build()
 }
 
-fn setup_hub_with_layout(layout_cfg: (GlobalLayoutConfig, Vec<LayoutWorkspaceConfig>)) -> Hub {
+fn setup_hub_with_layout(
+    layout: GlobalLayoutConfig,
+    overrides: Vec<LayoutWorkspaceConfig>,
+) -> Hub {
     Hub::new(
         Dimension::new(
             Length::new(0.0),
@@ -29,8 +28,8 @@ fn setup_hub_with_layout(layout_cfg: (GlobalLayoutConfig, Vec<LayoutWorkspaceCon
             Length::new(30.0),
         ),
         1.0,
-        layout_cfg.0,
-        layout_cfg.1,
+        layout,
+        overrides,
         Vec::new(),
     )
 }
@@ -43,7 +42,7 @@ fn sync_config_no_op_when_layout_unchanged() {
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
     let snap_before = snapshot(&hub);
-    hub.sync_config(GlobalLayoutConfig::default(), Vec::new());
+    hub.sync_configuration(GlobalLayoutConfig::default());
     assert_eq!(hub.focused_window(ws), focus_before);
     assert_eq!(snapshot(&hub), snap_before);
 }
@@ -59,13 +58,13 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
     let focus_before = hub.focused_window(ws);
 
     // Change master-stack params while partition-tree is active.
-    let (l, o) = LayoutConfigBuilder::new()
+    let l = LayoutConfigBuilder::new()
         .with_master_config(MasterConfig {
             master_ratio: 0.3,
             master_count: 2,
         })
         .build();
-    hub.sync_config(l, o);
+    hub.sync_configuration(l);
 
     // Tree state (tabbed container) and focus preserved.
     assert_eq!(hub.focused_window(ws), focus_before);
@@ -117,8 +116,8 @@ fn sync_config_switches_partition_tree_to_master() {
     hub.insert_tiling(hub.current_workspace(), titled("w6"));
     hub.insert_tiling(hub.current_workspace(), titled("w7"));
 
-    let (l, o) = layout(Strategy::Master, 0.5, 1);
-    hub.sync_config(l, o);
+    let l = layout(Strategy::Master, 0.5, 1);
+    hub.sync_configuration(l);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -164,13 +163,13 @@ fn sync_config_switches_partition_tree_to_master() {
 
 #[test]
 fn sync_config_switches_master_to_partition_tree() {
-    let mut hub = setup_hub_with_layout(layout(Strategy::Master, 0.5, 1));
+    let mut hub = setup_hub_with_layout(layout(Strategy::Master, 0.5, 1), Vec::new());
     hub.insert_tiling(hub.current_workspace(), titled("w8"));
     hub.insert_tiling(hub.current_workspace(), titled("w9"));
     hub.insert_tiling(hub.current_workspace(), titled("w10"));
     hub.insert_tiling(hub.current_workspace(), titled("w11"));
 
-    hub.sync_config(GlobalLayoutConfig::default(), Vec::new());
+    hub.sync_configuration(GlobalLayoutConfig::default());
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
@@ -271,8 +270,8 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    let (l, o) = layout(Strategy::Master, 0.5, 1);
-    hub.sync_config(l, o);
+    let l = layout(Strategy::Master, 0.5, 1);
+    hub.sync_configuration(l);
 
     // Remove fullscreen to expose tiling + float layer.
     hub.delete_window(_fs_id);
@@ -321,8 +320,8 @@ fn sync_config_swap_preserves_float_and_fullscreen() {
 fn sync_config_swap_empty_workspace_no_panic() {
     let mut hub = setup_hub();
     // No windows inserted.
-    let (l, o) = layout(Strategy::Master, 0.5, 1);
-    hub.sync_config(l, o);
+    let l = layout(Strategy::Master, 0.5, 1);
+    hub.sync_configuration(l);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
@@ -355,8 +354,8 @@ fn sync_config_swap_iterates_every_active_workspace() {
     // Go back to workspace "0" so post-swap snapshot shows it.
     hub.focus_workspace("0");
 
-    let (l, o) = layout(Strategy::Master, 0.5, 1);
-    hub.sync_config(l, o);
+    let l = layout(Strategy::Master, 0.5, 1);
+    hub.sync_configuration(l);
 
     // Workspace "0" re-laid-out by master-stack.
     assert_snapshot!(snapshot(&hub), @"
@@ -498,8 +497,8 @@ fn sync_config_swap_preserves_float_focus() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     ");
 
-    let (l, o) = layout(Strategy::Master, 0.5, 1);
-    hub.sync_config(l, o);
+    let l = layout(Strategy::Master, 0.5, 1);
+    hub.sync_configuration(l);
 
     assert_eq!(snapshot(&hub), before);
 }
@@ -507,17 +506,16 @@ fn sync_config_swap_preserves_float_focus() {
 #[test]
 fn per_workspace_switch_leaves_sibling_unchanged() {
     let mut hub = setup_hub_with_layout(
-        LayoutConfigBuilder::new()
-            .with_workspace(vec![LayoutWorkspaceConfig::Master {
-                name: "1".to_string(),
-                master_ratio: None,
-                master_count: None,
-                master: Vec::new(),
-                secondary: Vec::new(),
-                float: Vec::new(),
-                fullscreen: Vec::new(),
-            }])
-            .build(),
+        LayoutConfigBuilder::new().build(),
+        vec![LayoutWorkspaceConfig::Master {
+            name: "1".to_string(),
+            master_ratio: None,
+            master_count: None,
+            master: Vec::new(),
+            secondary: Vec::new(),
+            float: Vec::new(),
+            fullscreen: Vec::new(),
+        }],
     );
 
     hub.insert_tiling(hub.current_workspace(), titled("w26"));
@@ -528,18 +526,8 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
     hub.insert_tiling(hub.current_workspace(), titled("w29"));
 
     // Reload with same config: workspace "1" stays master, "0" stays partition-tree.
-    let (l, o) = LayoutConfigBuilder::new()
-        .with_workspace(vec![LayoutWorkspaceConfig::Master {
-            name: "1".to_string(),
-            master_ratio: None,
-            master_count: None,
-            master: Vec::new(),
-            secondary: Vec::new(),
-            float: Vec::new(),
-            fullscreen: Vec::new(),
-        }])
-        .build();
-    hub.sync_config(l, o);
+    let l = LayoutConfigBuilder::new().build();
+    hub.sync_configuration(l);
 
     // Workspace "1" uses master layout (big left pane + stack).
     assert_snapshot!(snapshot(&hub), @"
@@ -624,168 +612,9 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
     ");
 }
 
-#[test]
-fn override_added_via_reload_rebuilds_only_target() {
-    let mut hub = setup_hub();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w30"));
-    hub.insert_tiling(hub.current_workspace(), titled("w31"));
-    hub.insert_tiling(hub.current_workspace(), titled("w32"));
 
-    hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w33"));
-    hub.insert_tiling(hub.current_workspace(), titled("w34"));
-    hub.insert_tiling(hub.current_workspace(), titled("w35"));
 
-    // Snapshot workspace "1" before reload (partition-tree layout).
-    let snap_ws1_before = {
-        hub.focus_workspace("1");
-        snapshot(&hub)
-    };
-
-    // Back to workspace "0".
-    hub.focus_workspace("0");
-    let snap_ws0_before = snapshot(&hub);
-
-    // Reload with override on workspace "1" to master.
-    let (l, o) = LayoutConfigBuilder::new()
-        .with_workspace(vec![LayoutWorkspaceConfig::Master {
-            name: "1".to_string(),
-            master_ratio: None,
-            master_count: None,
-            master: Vec::new(),
-            secondary: Vec::new(),
-            float: Vec::new(),
-            fullscreen: Vec::new(),
-        }])
-        .build();
-    hub.sync_config(l, o);
-
-    // Workspace "0" was not rebuilt: same strategy, snapshot unchanged.
-    assert_eq!(snapshot(&hub), snap_ws0_before);
-
-    // Workspace "1" was rebuilt with master layout (different from before).
-    hub.focus_workspace("1");
-    assert_ne!(snapshot(&hub), snap_ws1_before);
-    // Windows reattached in WindowId order with focus preserved.
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(5))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=0.00, y=0.00, w=75.00, h=30.00)
-        Window(id=WindowId(4), x=75.00, y=0.00, w=75.00, h=15.00)
-        Window(id=WindowId(5), x=75.00, y=15.00, w=75.00, h=15.00, highlighted)
-      )
-
-    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                    W4                                   |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         |+-------------------------------------------------------------------------+
-    |                                    W3                                   |***************************************************************************
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                    W5                                   *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+***************************************************************************
-    ");
-}
-
-#[test]
-fn override_removed_via_reload_falls_back_to_global() {
-    // Start with workspace "1" overridden to master.
-    let mut hub = setup_hub_with_layout(
-        LayoutConfigBuilder::new()
-            .with_workspace(vec![LayoutWorkspaceConfig::Master {
-                name: "1".to_string(),
-                master_ratio: None,
-                master_count: None,
-                master: Vec::new(),
-                secondary: Vec::new(),
-                float: Vec::new(),
-                fullscreen: Vec::new(),
-            }])
-            .build(),
-    );
-
-    hub.insert_tiling(hub.current_workspace(), titled("w36"));
-    hub.insert_tiling(hub.current_workspace(), titled("w37"));
-
-    hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w38"));
-    hub.insert_tiling(hub.current_workspace(), titled("w39"));
-    hub.insert_tiling(hub.current_workspace(), titled("w40"));
-
-    hub.focus_workspace("0");
-    let snap_ws0_before = snapshot(&hub);
-
-    // Reload without any overrides: workspace "1" falls back to partition-tree.
-    hub.sync_config(GlobalLayoutConfig::default(), Vec::new());
-
-    // Workspace "0": same strategy (partition-tree), no rebuild.
-    assert_eq!(snapshot(&hub), snap_ws0_before);
-
-    // Workspace "1": rebuilt as partition-tree (equal horizontal split).
-    hub.focus_workspace("1");
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(3), x=50.00, y=0.00, w=50.00, h=30.00)
-        Window(id=WindowId(2), x=0.00, y=0.00, w=50.00, h=30.00)
-        Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w38, w39, w40])
-      )
-
-    +------------------------------------------------++------------------------------------------------+**************************************************
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                       W2                       ||                       W3                       |*                       W4                       *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    |                                                ||                                                |*                                                *
-    +------------------------------------------------++------------------------------------------------+**************************************************
-    ");
-}
 
 #[test]
 fn same_kind_cross_workspace_move_preserves_container() {

@@ -13,18 +13,18 @@ fn secondary_matched_goes_to_stack() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_secondary(vec![WindowMatcher {
-                            process: Some("terminal.exe".into()),
-                            ..Default::default()
-                        }])
-                        .with_master_count(2)
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_secondary(vec![WindowMatcher {
+                process: Some("terminal.exe".into()),
+                ..Default::default()
+            }])
+                .with_master_count(2)
+                .build(),
+        ])
         .build();
     let _w0 = hub.insert_tiling(
         hub.current_workspace(),
@@ -80,21 +80,21 @@ fn master_matched_goes_to_master_pane() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![WindowMatcher {
-                            process: Some("browser.exe".into()),
-                            ..Default::default()
-                        }])
-                        .with_secondary(vec![WindowMatcher {
-                            process: Some("editor.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                process: Some("browser.exe".into()),
+                ..Default::default()
+            }])
+                .with_secondary(vec![WindowMatcher {
+                process: Some("editor.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     let _w0 = hub.insert_tiling(
         hub.current_workspace(),
@@ -150,17 +150,17 @@ fn master_full_cascades_to_secondary() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![WindowMatcher {
-                            process: Some("editor.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                process: Some("editor.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     let _w0 = hub.insert_tiling(
         hub.current_workspace(),
@@ -216,23 +216,23 @@ fn slot_occupied_skip() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![
-                            WindowMatcher {
-                                process: Some("browser.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("browser.exe".into()),
-                                ..Default::default()
-                            },
-                        ])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![
+                    WindowMatcher {
+                    process: Some("browser.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("browser.exe".into()),
+                    ..Default::default()
+                },
+                ])
+                .build(),
+        ])
         .build();
     hub.insert_tiling(hub.current_workspace(), titled_process("B1", "browser.exe"));
     hub.insert_tiling(hub.current_workspace(), titled_process("B2", "browser.exe"));
@@ -282,18 +282,18 @@ fn unmatched_fills_master_room() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![WindowMatcher {
-                            process: Some("editor.exe".into()),
-                            ..Default::default()
-                        }])
-                        .with_master_count(2)
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                process: Some("editor.exe".into()),
+                ..Default::default()
+            }])
+                .with_master_count(2)
+                .build(),
+        ])
         .build();
     hub.insert_tiling(
         hub.current_workspace(),
@@ -349,28 +349,28 @@ fn mixed_matched_and_unmatched_order() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![
-                            WindowMatcher {
-                                process: Some("C.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("A.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("B.exe".into()),
-                                ..Default::default()
-                            },
-                        ])
-                        .with_master_count(3)
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![
+                    WindowMatcher {
+                    process: Some("C.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("A.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("B.exe".into()),
+                    ..Default::default()
+                },
+                ])
+                .with_master_count(3)
+                .build(),
+        ])
         .build();
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
@@ -422,13 +422,13 @@ fn unmatched_goes_to_stack_when_master_full() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .build(),
+        ])
         .build();
     hub.insert_tiling(hub.current_workspace(), titled("w0"));
     hub.insert_tiling(hub.current_workspace(), titled("w1"));
@@ -478,38 +478,38 @@ fn matched_order_on_both_lanes() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![
-                            WindowMatcher {
-                                process: Some("A.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("B.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("C.exe".into()),
-                                ..Default::default()
-                            },
-                        ])
-                        .with_secondary(vec![
-                            WindowMatcher {
-                                process: Some("D.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("E.exe".into()),
-                                ..Default::default()
-                            },
-                        ])
-                        .with_master_count(3)
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![
+                    WindowMatcher {
+                    process: Some("A.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("B.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("C.exe".into()),
+                    ..Default::default()
+                },
+                ])
+                .with_secondary(vec![
+                    WindowMatcher {
+                    process: Some("D.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("E.exe".into()),
+                    ..Default::default()
+                },
+                ])
+                .with_master_count(3)
+                .build(),
+        ])
         .build();
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("E", "E.exe"));
@@ -559,128 +559,7 @@ fn matched_order_on_both_lanes() {
     ");
 }
 
-#[test]
-fn hot_reload_master_and_secondary_preference() {
-    let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![
-                            WindowMatcher {
-                                process: Some("A.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("B.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("C.exe".into()),
-                                ..Default::default()
-                            },
-                        ])
-                        .with_secondary(vec![
-                            WindowMatcher {
-                                process: Some("D.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("E.exe".into()),
-                                ..Default::default()
-                            },
-                        ])
-                        .with_master_count(3)
-                        .build(),
-                ])
-                .build(),
-        )
-        .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));
-    let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("E", "E.exe"));
-    let _w2 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
-    let _w3 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
-    let _w4 = hub.insert_tiling(hub.current_workspace(), titled_process("D", "D.exe"));
 
-    let (l, o) = LayoutConfigBuilder::new()
-        .with_strategy(Strategy::Master)
-        .with_workspace(vec![
-            LayoutWorkspaceConfigBuilder::new("0")
-                .with_strategy(Strategy::Master)
-                .with_master(vec![
-                    WindowMatcher {
-                        process: Some("D.exe".into()),
-                        ..Default::default()
-                    },
-                    WindowMatcher {
-                        process: Some("C.exe".into()),
-                        ..Default::default()
-                    },
-                    WindowMatcher {
-                        process: Some("A.exe".into()),
-                        ..Default::default()
-                    },
-                ])
-                .with_secondary(vec![
-                    WindowMatcher {
-                        process: Some("B.exe".into()),
-                        ..Default::default()
-                    },
-                    WindowMatcher {
-                        process: Some("E.exe".into()),
-                        ..Default::default()
-                    },
-                ])
-                .with_master_count(3)
-                .build(),
-        ])
-        .build();
-    hub.sync_config(l, o);
-
-    assert_snapshot!(snapshot(&hub), @r"
-    Hub(focused=WindowId(4))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(4), x=0.00, y=0.00, w=75.00, h=10.00, highlighted)
-        Window(id=WindowId(0), x=0.00, y=10.00, w=75.00, h=10.00)
-        Window(id=WindowId(2), x=0.00, y=20.00, w=75.00, h=10.00)
-        Window(id=WindowId(3), x=75.00, y=0.00, w=75.00, h=15.00)
-        Window(id=WindowId(1), x=75.00, y=15.00, w=75.00, h=15.00)
-      )
-
-    ***************************************************************************+-------------------------------------------------------------------------+
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                    W4                                   *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                                                         |
-    *                                                                         *|                                    W3                                   |
-    ***************************************************************************|                                                                         |
-    +-------------------------------------------------------------------------+|                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         |+-------------------------------------------------------------------------+
-    |                                    W0                                   |+-------------------------------------------------------------------------+
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    +-------------------------------------------------------------------------+|                                                                         |
-    +-------------------------------------------------------------------------+|                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                    W1                                   |
-    |                                                                         ||                                                                         |
-    |                                    W2                                   ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
-    ");
-}
 
 #[test]
 fn decrease_master_count_drop_matched_master() {
@@ -688,24 +567,24 @@ fn decrease_master_count_drop_matched_master() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![
-                            WindowMatcher {
-                                process: Some("A.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("B.exe".into()),
-                                ..Default::default()
-                            },
-                        ])
-                        .with_master_count(2)
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![
+                    WindowMatcher {
+                    process: Some("A.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("B.exe".into()),
+                    ..Default::default()
+                },
+                ])
+                .with_master_count(2)
+                .build(),
+        ])
         .build();
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
@@ -760,28 +639,28 @@ fn reordering_matched_windows_doesnt_guarrantee_next_match() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![
-                            WindowMatcher {
-                                process: Some("A.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("B.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("C.exe".into()),
-                                ..Default::default()
-                            },
-                        ])
-                        .with_master_count(3)
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![
+                    WindowMatcher {
+                    process: Some("A.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("B.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("C.exe".into()),
+                    ..Default::default()
+                },
+                ])
+                .with_master_count(3)
+                .build(),
+        ])
         .build();
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));
@@ -836,23 +715,23 @@ fn swapping_secondary_window_doesnt_guarrantee_next_match() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("0")
-                        .with_strategy(Strategy::Master)
-                        .with_secondary(vec![
-                            WindowMatcher {
-                                process: Some("A.exe".into()),
-                                ..Default::default()
-                            },
-                            WindowMatcher {
-                                process: Some("B.exe".into()),
-                                ..Default::default()
-                            },
-                        ])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_secondary(vec![
+                    WindowMatcher {
+                    process: Some("A.exe".into()),
+                    ..Default::default()
+                },
+                    WindowMatcher {
+                    process: Some("B.exe".into()),
+                    ..Default::default()
+                },
+                ])
+                .build(),
+        ])
         .build();
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));

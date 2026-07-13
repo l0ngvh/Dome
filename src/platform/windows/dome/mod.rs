@@ -109,7 +109,6 @@ pub(super) struct Dome {
     registry: WindowRegistry,
     monitors: MonitorRegistry,
     config: Config,
-    workspace_overrides: Vec<LayoutWorkspaceConfig>,
     taskbar: Rc<dyn ManageTaskbar>,
     overlay_factory: Box<dyn CreateOverlay>,
     display: Box<dyn QueryDisplay>,
@@ -202,7 +201,6 @@ impl Dome {
             registry: WindowRegistry::new(),
             monitors: monitors_reg,
             config,
-            workspace_overrides,
             taskbar: taskbar.clone(),
             overlay_factory,
             display,
@@ -219,9 +217,7 @@ impl Dome {
     }
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
-        let workspace_overrides = self.workspace_overrides.clone();
-        self.hub
-            .sync_config(GlobalLayoutConfig::from(&new_config), workspace_overrides);
+        self.hub.sync_configuration(GlobalLayoutConfig::from(&new_config));
         self.hub.set_ignore_rules(new_config.ignore.clone());
         self.config = new_config;
         for overlay in self.tiling_overlays.values_mut() {
@@ -239,11 +235,8 @@ impl Dome {
         self.apply_layout();
     }
 
-    pub(super) fn layout_changed(&mut self, new_layout: LayoutConfig) {
-        let layout_settings = GlobalLayoutConfig::from(&self.config);
-        self.workspace_overrides = new_layout.workspace;
-        self.hub
-            .sync_config(layout_settings, self.workspace_overrides.clone());
+    pub(super) fn layout_changed(&mut self, _new_layout: LayoutConfig) {
+        self.hub.sync_preferred_layout();
         tracing::info!("Layout reloaded");
         self.apply_layout();
     }

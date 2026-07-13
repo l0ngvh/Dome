@@ -499,30 +499,8 @@ impl Hub {
         }
     }
 
-    pub(crate) fn sync_config(
-        &mut self,
-        layout: GlobalLayoutConfig,
-        workspace_overrides: Vec<LayoutWorkspaceConfig>,
-    ) {
+    pub(crate) fn sync_configuration(&mut self, layout: GlobalLayoutConfig) {
         self.access.layout = layout;
-        self.access.workspace_overrides = workspace_overrides;
-
-        // Pre-allocate any workspace entries that don't exist yet.
-        for entry in &self.access.workspace_overrides {
-            let name = entry.name();
-            if self.access.workspaces.find(|ws| ws.name == name).is_none() {
-                let ws_id = self.access.workspaces.allocate(Workspace::new(
-                    name.to_string(),
-                    self.access.focused_monitor,
-                ));
-                self.strategies.register(
-                    ws_id,
-                    name,
-                    &self.access.layout,
-                    &self.access.workspace_overrides,
-                );
-            }
-        }
 
         let changes = self.strategies.resync(
             &self.access.workspaces,
@@ -566,6 +544,10 @@ impl Hub {
             self.reattach_workspace_after_rebuild(change.ws_id, snapshot);
         }
         self.rebuild_matchers();
+    }
+
+    pub(crate) fn sync_preferred_layout(&mut self) {
+        // No-op for now. In future, will update workspace_overrides and rebuild matchers.
     }
 
     #[cfg(test)]

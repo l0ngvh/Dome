@@ -6,7 +6,7 @@ use crate::core::{Dimension, Hub, tests::snapshot_text};
 
 #[test]
 fn sync_config_updates_tab_bar_height() {
-    let (l0, o0) = LayoutConfigBuilder::new()
+    let l0 = LayoutConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
                 .with_tab_bar_height(Length::<Logical>::new(10.0))
@@ -23,14 +23,14 @@ fn sync_config_updates_tab_bar_height() {
         ),
         1.0,
         l0,
-        o0,
+        Vec::new(),
         Vec::new(),
     );
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();
     hub.toggle_container_layout();
 
-    let (l1, o1) = LayoutConfigBuilder::new()
+    let l1 = LayoutConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
                 .with_tab_bar_height(Length::<Logical>::new(10.0))
@@ -38,7 +38,7 @@ fn sync_config_updates_tab_bar_height() {
                 .build(),
         )
         .build();
-    hub.sync_config(l1, o1);
+    hub.sync_configuration(l1);
 
     assert_snapshot!(snapshot_text(&hub), @"
     Hub(focused=WindowId(1))
@@ -51,7 +51,7 @@ fn sync_config_updates_tab_bar_height() {
 
 #[test]
 fn sync_config_recalculates_all_workspaces() {
-    let (l0, o0) = LayoutConfigBuilder::new()
+    let l0 = LayoutConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
                 .with_tab_bar_height(Length::<Logical>::new(10.0))
@@ -68,7 +68,7 @@ fn sync_config_recalculates_all_workspaces() {
         ),
         1.0,
         l0,
-        o0,
+        Vec::new(),
         Vec::new(),
     );
     hub.insert_tiling_titled();
@@ -80,7 +80,7 @@ fn sync_config_recalculates_all_workspaces() {
     hub.insert_tiling_titled();
     hub.toggle_container_layout();
 
-    let (l1, o1) = LayoutConfigBuilder::new()
+    let l1 = LayoutConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
                 .with_tab_bar_height(Length::<Logical>::new(5.0))
@@ -88,7 +88,7 @@ fn sync_config_recalculates_all_workspaces() {
                 .build(),
         )
         .build();
-    hub.sync_config(l1, o1);
+    hub.sync_configuration(l1);
 
     hub.focus_workspace("0");
     assert_snapshot!(snapshot_text(&hub), @"

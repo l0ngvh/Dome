@@ -286,11 +286,11 @@ fn scroll_window_into_view_in_vertical_child_container() {
 fn scroll_view_port_also_scroll_max_constrained_window() {
     let mut hub = setup();
 
-    let (l, o) = LayoutConfigBuilder::new()
+    let l = LayoutConfigBuilder::new()
         .with_max_height(SizeConstraint::Pixels(Length::new(10.0)))
         .with_min_height(SizeConstraint::Pixels(Length::new(7.0)))
         .build();
-    hub.sync_config(l, o);
+    hub.sync_configuration(l);
 
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w14"));
     hub.insert_tiling(hub.current_workspace(), titled("w15"));
@@ -357,12 +357,12 @@ fn scroll_view_port_also_scroll_max_constrained_window() {
 fn laying_out_max_constrained_windows_leaves_no_hole() {
     let mut hub = setup();
 
-    let (l, o) = LayoutConfigBuilder::new()
+    let l = LayoutConfigBuilder::new()
         .with_max_height(SizeConstraint::Pixels(Length::new(30.0)))
         .with_min_height(SizeConstraint::Pixels(Length::new(7.0)))
         .with_min_width(SizeConstraint::Pixels(Length::new(30.0)))
         .build();
-    hub.sync_config(l, o);
+    hub.sync_configuration(l);
 
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w23"));
     let w1 = hub.insert_tiling(hub.current_workspace(), titled("w24"));

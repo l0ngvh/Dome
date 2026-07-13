@@ -1400,9 +1400,9 @@ fn make_pref_tree_hub(tree: Option<TreeLayoutNode>) -> Hub {
     TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![ws_builder.build()])
                 .build(),
         )
+        .with_workspace_overrides(vec![ws_builder.build()])
         .build()
 }
 

@@ -9,21 +9,21 @@ fn float_matcher_routes_to_float() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("3")
-                        .with_strategy(Strategy::Master)
-                        .with_float(vec![WindowMatcher {
-                            process: Some("float.exe".into()),
-                            ..Default::default()
-                        }])
-                        .with_fullscreen(vec![WindowMatcher {
-                            process: Some("fullscreen.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("3")
+                .with_strategy(Strategy::Master)
+                .with_float(vec![WindowMatcher {
+                process: Some("float.exe".into()),
+                ..Default::default()
+            }])
+                .with_fullscreen(vec![WindowMatcher {
+                process: Some("fullscreen.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     hub.insert_window(
         process_meta("float.exe"),
@@ -75,21 +75,21 @@ fn fullscreen_matcher_routes_to_fullscreen() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("3")
-                        .with_strategy(Strategy::Master)
-                        .with_float(vec![WindowMatcher {
-                            process: Some("float.exe".into()),
-                            ..Default::default()
-                        }])
-                        .with_fullscreen(vec![WindowMatcher {
-                            process: Some("fullscreen.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("3")
+                .with_strategy(Strategy::Master)
+                .with_float(vec![WindowMatcher {
+                process: Some("float.exe".into()),
+                ..Default::default()
+            }])
+                .with_fullscreen(vec![WindowMatcher {
+                process: Some("fullscreen.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     hub.insert_window(
         process_meta("fullscreen.exe"),
@@ -146,21 +146,21 @@ fn fullscreen_beats_float_when_both_match() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("3")
-                        .with_strategy(Strategy::Master)
-                        .with_float(vec![WindowMatcher {
-                            title: Some("matchme".into()),
-                            ..Default::default()
-                        }])
-                        .with_fullscreen(vec![WindowMatcher {
-                            title: Some("matchme".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("3")
+                .with_strategy(Strategy::Master)
+                .with_float(vec![WindowMatcher {
+                title: Some("matchme".into()),
+                ..Default::default()
+            }])
+                .with_fullscreen(vec![WindowMatcher {
+                title: Some("matchme".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     hub.insert_window(
         titled_meta("matchme"),
@@ -217,21 +217,21 @@ fn no_match_tiles_on_current_workspace() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("3")
-                        .with_strategy(Strategy::Master)
-                        .with_float(vec![WindowMatcher {
-                            process: Some("float.exe".into()),
-                            ..Default::default()
-                        }])
-                        .with_fullscreen(vec![WindowMatcher {
-                            process: Some("fullscreen.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("3")
+                .with_strategy(Strategy::Master)
+                .with_float(vec![WindowMatcher {
+                process: Some("float.exe".into()),
+                ..Default::default()
+            }])
+                .with_fullscreen(vec![WindowMatcher {
+                process: Some("fullscreen.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     hub.insert_window(
         process_meta("unknown.exe"),
@@ -288,20 +288,20 @@ fn matchers_on_partition_tree_variant() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::PartitionTree)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("ws2")
-                        .with_float(vec![WindowMatcher {
-                            process: Some("float.exe".into()),
-                            ..Default::default()
-                        }])
-                        .with_fullscreen(vec![WindowMatcher {
-                            process: Some("fullscreen.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("ws2")
+                .with_float(vec![WindowMatcher {
+                process: Some("float.exe".into()),
+                ..Default::default()
+            }])
+                .with_fullscreen(vec![WindowMatcher {
+                process: Some("fullscreen.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     hub.insert_window(
         process_meta("float.exe"),
@@ -475,17 +475,17 @@ fn per_workspace_override_beats_global() {
                     process: Some("calc.exe".into()),
                     ..Default::default()
                 }])
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("3")
-                        .with_strategy(Strategy::Master)
-                        .with_float(vec![WindowMatcher {
-                            process: Some("calc.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("3")
+                .with_strategy(Strategy::Master)
+                .with_float(vec![WindowMatcher {
+                process: Some("calc.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     // "calc.exe" matches both per-workspace float on ws "3" and global float.
     // Per-workspace wins — routes to workspace "3" as float.
@@ -602,17 +602,17 @@ fn tiling_matcher_routes_to_workspace() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("dev")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![WindowMatcher {
-                            process: Some("editor.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("dev")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                process: Some("editor.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     hub.insert_window(
         process_meta("editor.exe"),
@@ -672,21 +672,21 @@ fn float_beats_tiling() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("dev")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![WindowMatcher {
-                            process: Some("popup.exe".into()),
-                            ..Default::default()
-                        }])
-                        .with_float(vec![WindowMatcher {
-                            process: Some("popup.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("dev")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                process: Some("popup.exe".into()),
+                ..Default::default()
+            }])
+                .with_float(vec![WindowMatcher {
+                process: Some("popup.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     hub.insert_window(
         process_meta("popup.exe"),
@@ -740,24 +740,24 @@ fn config_order_first_match_wins() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("code")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![WindowMatcher {
-                            process: Some("editor.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                    LayoutWorkspaceConfigBuilder::new("chat")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![WindowMatcher {
-                            process: Some("editor.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("code")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                process: Some("editor.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+            LayoutWorkspaceConfigBuilder::new("chat")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                process: Some("editor.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     hub.insert_window(
         process_meta("editor.exe"),
@@ -816,17 +816,17 @@ fn no_tiling_match_falls_back_to_current() {
         .with_layout(
             LayoutConfigBuilder::new()
                 .with_strategy(Strategy::Master)
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("dev")
-                        .with_strategy(Strategy::Master)
-                        .with_master(vec![WindowMatcher {
-                            process: Some("editor.exe".into()),
-                            ..Default::default()
-                        }])
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("dev")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                process: Some("editor.exe".into()),
+                ..Default::default()
+            }])
+                .build(),
+        ])
         .build();
     hub.insert_window(
         process_meta("unknown.exe"),

@@ -158,7 +158,6 @@ pub(in crate::platform::macos) struct Dome {
     registry: WindowRegistry,
     monitor_registry: MonitorRegistry,
     config: Config,
-    workspace_overrides: Vec<LayoutWorkspaceConfig>,
     /// Full height of the primary display (including menu bar/dock), used for Quartz→Cocoa
     /// coordinate conversion in overlay rendering.
     primary_full_height: f32,
@@ -202,7 +201,6 @@ impl Dome {
             registry: WindowRegistry::new(),
             monitor_registry,
             config,
-            workspace_overrides,
             primary_full_height: primary.full_height,
             observed_pids: HashSet::new(),
             sender,
@@ -345,9 +343,7 @@ impl Dome {
     }
 
     pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
-        let workspace_overrides = self.workspace_overrides.clone();
-        self.hub
-            .sync_config(GlobalLayoutConfig::from(&new_config), workspace_overrides);
+        self.hub.sync_configuration(GlobalLayoutConfig::from(&new_config));
         self.hub.set_ignore_rules(new_config.ignore.clone());
         self.sender
             .send(HubMessage::ConfigChanged(Box::new(new_config.clone())));
@@ -356,11 +352,8 @@ impl Dome {
         self.flush_layout();
     }
 
-    pub(in crate::platform::macos) fn layout_changed(&mut self, new_layout: LayoutConfig) {
-        let layout_settings = GlobalLayoutConfig::from(&self.config);
-        self.workspace_overrides = new_layout.workspace;
-        self.hub
-            .sync_config(layout_settings, self.workspace_overrides.clone());
+    pub(in crate::platform::macos) fn layout_changed(&mut self, _new_layout: LayoutConfig) {
+        self.hub.sync_preferred_layout();
         tracing::info!("Layout reloaded");
         self.flush_layout();
     }

@@ -11,25 +11,25 @@ fn insert_first_preferred_window_next_to_focused_window() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("1")
-                        .with_tree(TreeLayoutNode::Container {
-                            split: Some(SplitMode::Tabbed),
-                            children: vec![
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("AAA".into()),
-                                    ..Default::default()
-                                }),
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("BBB".into()),
-                                    ..Default::default()
-                                }),
-                            ],
-                        })
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Tabbed),
+                    children: vec![
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("AAA".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("BBB".into()),
+                            ..Default::default()
+                        }),
+                    ],
+                })
+                .build(),
+        ])
         .build();
     hub.focus_workspace("1");
 
@@ -92,47 +92,47 @@ fn insert_second_preferred_window_forming_lowest_common_ancestor() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("1")
-                        .with_tree(TreeLayoutNode::Container {
-                            split: Some(SplitMode::Horizontal),
-                            children: vec![
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("AAA".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("BBB".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("CCC".into()),
-                                    ..Default::default()
-                                }),
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("DDD".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("EEE".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                            ],
-                        })
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: vec![
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("AAA".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("BBB".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("CCC".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("DDD".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("EEE".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                    ],
+                })
+                .build(),
+        ])
         .build();
     hub.focus_workspace("1");
 
@@ -196,47 +196,47 @@ fn insert_three_preferred_window_to_lowest_common_ancestor() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("1")
-                        .with_tree(TreeLayoutNode::Container {
-                            split: Some(SplitMode::Horizontal),
-                            children: vec![
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("AAA".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("BBB".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("CCC".into()),
-                                    ..Default::default()
-                                }),
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("DDD".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("EEE".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                            ],
-                        })
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: vec![
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("AAA".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("BBB".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("CCC".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("DDD".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("EEE".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                    ],
+                })
+                .build(),
+        ])
         .build();
     hub.focus_workspace("1");
 
@@ -290,47 +290,47 @@ fn insert_nested_preferred_layout_tree() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("1")
-                        .with_tree(TreeLayoutNode::Container {
-                            split: Some(SplitMode::Horizontal),
-                            children: vec![
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("AAA".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("BBB".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("CCC".into()),
-                                    ..Default::default()
-                                }),
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("DDD".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("EEE".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                            ],
-                        })
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: vec![
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("AAA".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("BBB".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("CCC".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("DDD".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("EEE".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                    ],
+                })
+                .build(),
+        ])
         .build();
     hub.focus_workspace("1");
 
@@ -390,47 +390,47 @@ fn delete_and_reinsert_the_same_matching_window() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("1")
-                        .with_tree(TreeLayoutNode::Container {
-                            split: Some(SplitMode::Horizontal),
-                            children: vec![
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("AAA".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("BBB".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("CCC".into()),
-                                    ..Default::default()
-                                }),
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("DDD".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("EEE".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                            ],
-                        })
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: vec![
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("AAA".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("BBB".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("CCC".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("DDD".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("EEE".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                    ],
+                })
+                .build(),
+        ])
         .build();
     hub.focus_workspace("1");
 
@@ -538,47 +538,47 @@ fn clean_up_and_reforming_preferred_contaner() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("1")
-                        .with_tree(TreeLayoutNode::Container {
-                            split: Some(SplitMode::Horizontal),
-                            children: vec![
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("AAA".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("BBB".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("CCC".into()),
-                                    ..Default::default()
-                                }),
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Vertical),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("DDD".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("EEE".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
-                            ],
-                        })
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: vec![
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("AAA".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("BBB".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("CCC".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Container {
+                            split: Some(SplitMode::Vertical),
+                            children: vec![
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("DDD".into()),
+                                    ..Default::default()
+                                }),
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("EEE".into()),
+                                    ..Default::default()
+                                }),
+                            ],
+                        },
+                    ],
+                })
+                .build(),
+        ])
         .build();
     hub.focus_workspace("1");
 
@@ -689,38 +689,38 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("1")
-                        .with_tree(TreeLayoutNode::Container {
+                .build(),
+        )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Tabbed),
+                    children: vec![
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("AAA".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Container {
                             split: Some(SplitMode::Tabbed),
                             children: vec![
                                 TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("AAA".into()),
+                                    title: Some("BBB".into()),
                                     ..Default::default()
                                 }),
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Tabbed),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("BBB".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("CCC".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
                                 TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("DDD".into()),
+                                    title: Some("CCC".into()),
                                     ..Default::default()
                                 }),
                             ],
-                        })
-                        .build(),
-                ])
+                        },
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("DDD".into()),
+                            ..Default::default()
+                        }),
+                    ],
+                })
                 .build(),
-        )
+        ])
         .build();
     hub.focus_workspace("1");
 
@@ -833,29 +833,29 @@ fn move_preferred_root_to_another_workspace() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("1")
-                        .with_tree(TreeLayoutNode::Container {
-                            split: Some(SplitMode::Horizontal),
-                            children: vec![
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("AAA".into()),
-                                    ..Default::default()
-                                }),
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("DDD".into()),
-                                    ..Default::default()
-                                }),
-                                TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("CCC".into()),
-                                    ..Default::default()
-                                }),
-                            ],
-                        })
-                        .build(),
-                ])
                 .build(),
         )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: vec![
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("AAA".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("DDD".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("CCC".into()),
+                            ..Default::default()
+                        }),
+                    ],
+                })
+                .build(),
+        ])
         .build();
     hub.focus_workspace("1");
 
@@ -912,42 +912,42 @@ fn move_preferred_container_to_another_workspace() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
-                .with_workspace(vec![
-                    LayoutWorkspaceConfigBuilder::new("1")
-                        .with_tree(TreeLayoutNode::Container {
+                .build(),
+        )
+        .with_workspace_overrides(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Horizontal),
+                    children: vec![
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("AAA".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("DDD".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Container {
                             split: Some(SplitMode::Horizontal),
                             children: vec![
                                 TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("AAA".into()),
+                                    title: Some("TTT".into()),
                                     ..Default::default()
                                 }),
                                 TreeLayoutNode::Leaf(WindowMatcher {
-                                    title: Some("DDD".into()),
+                                    title: Some("YYY".into()),
                                     ..Default::default()
                                 }),
-                                TreeLayoutNode::Container {
-                                    split: Some(SplitMode::Horizontal),
-                                    children: vec![
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("TTT".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("YYY".into()),
-                                            ..Default::default()
-                                        }),
-                                        TreeLayoutNode::Leaf(WindowMatcher {
-                                            title: Some("CCC".into()),
-                                            ..Default::default()
-                                        }),
-                                    ],
-                                },
+                                TreeLayoutNode::Leaf(WindowMatcher {
+                                    title: Some("CCC".into()),
+                                    ..Default::default()
+                                }),
                             ],
-                        })
-                        .build(),
-                ])
+                        },
+                    ],
+                })
                 .build(),
-        )
+        ])
         .build();
     hub.focus_workspace("1");
 

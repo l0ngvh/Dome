@@ -704,17 +704,23 @@ struct TestHubBuilder {
 
 impl TestHubBuilder {
     fn new() -> Self {
-        let (layout, workspace_overrides) = LayoutConfigBuilder::new().build();
         Self {
-            layout,
-            workspace_overrides,
+            layout: LayoutConfigBuilder::new().build(),
+            workspace_overrides: Vec::new(),
         }
     }
 
-    fn with_layout(self, pair: (GlobalLayoutConfig, Vec<LayoutWorkspaceConfig>)) -> Self {
+    fn with_layout(self, layout: GlobalLayoutConfig) -> Self {
+        Self { layout, ..self }
+    }
+
+    fn with_workspace_overrides(
+        self,
+        workspace_overrides: Vec<LayoutWorkspaceConfig>,
+    ) -> Self {
         Self {
-            layout: pair.0,
-            workspace_overrides: pair.1,
+            workspace_overrides,
+            ..self
         }
     }
 
@@ -738,7 +744,6 @@ struct LayoutConfigBuilder {
     strategy: Strategy,
     master: MasterConfig,
     partition_tree: PartitionTreeConfig,
-    workspace: Vec<LayoutWorkspaceConfig>,
     min_width: SizeConstraint,
     min_height: SizeConstraint,
     max_width: SizeConstraint,
@@ -759,7 +764,6 @@ impl LayoutConfigBuilder {
                 tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
                 automatic_tiling: false,
             },
-            workspace: vec![],
             min_width: SizeConstraint::Pixels(Length::new(1.0)),
             min_height: SizeConstraint::Pixels(Length::new(1.0)),
             max_width: SizeConstraint::Pixels(Length::new(0.0)),
@@ -774,10 +778,6 @@ impl LayoutConfigBuilder {
 
     fn with_master_config(self, master: MasterConfig) -> Self {
         Self { master, ..self }
-    }
-
-    fn with_workspace(self, workspace: Vec<LayoutWorkspaceConfig>) -> Self {
-        Self { workspace, ..self }
     }
 
     fn with_min_width(self, min_width: SizeConstraint) -> Self {
@@ -811,21 +811,18 @@ impl LayoutConfigBuilder {
         Self { fullscreen, ..self }
     }
 
-    fn build(self) -> (GlobalLayoutConfig, Vec<LayoutWorkspaceConfig>) {
-        (
-            GlobalLayoutConfig {
-                strategy: self.strategy,
-                partition_tree: self.partition_tree,
-                master: self.master,
-                min_width: self.min_width,
-                min_height: self.min_height,
-                max_width: self.max_width,
-                max_height: self.max_height,
-                float: self.float,
-                fullscreen: self.fullscreen,
-            },
-            self.workspace,
-        )
+    fn build(self) -> GlobalLayoutConfig {
+        GlobalLayoutConfig {
+            strategy: self.strategy,
+            partition_tree: self.partition_tree,
+            master: self.master,
+            min_width: self.min_width,
+            min_height: self.min_height,
+            max_width: self.max_width,
+            max_height: self.max_height,
+            float: self.float,
+            fullscreen: self.fullscreen,
+        }
     }
 }
 

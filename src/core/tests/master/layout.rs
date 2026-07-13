@@ -3,8 +3,7 @@ use crate::core::allocator::NodeId;
 use crate::core::node::WindowId;
 use crate::core::strategy::TilingAction;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, snapshot, titled,
-    validate_hub,
+    LayoutConfigBuilder, TestHubBuilder, snapshot, titled, validate_hub,
 };
 use insta::assert_snapshot;
 
@@ -709,14 +708,14 @@ fn sync_config_preserves_workspace_master_count() {
     let ws = hub.current_workspace();
     let focus_before = hub.focused_window(ws);
 
-    let (l, o) = LayoutConfigBuilder::new()
+    let l = LayoutConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.5,
             master_count: 2,
         })
         .build();
-    hub.sync_config(l, o);
+    hub.sync_configuration(l);
 
     // Window ordering and focus preserved (no rebuild, apply_config path).
     assert_eq!(hub.focused_window(ws), focus_before);
@@ -777,14 +776,14 @@ fn sync_config_seeds_new_workspace_with_master_ratio() {
         )
         .build();
 
-    let (l, o) = LayoutConfigBuilder::new()
+    let l = LayoutConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.3,
             master_count: 1,
         })
         .build();
-    hub.sync_config(l, o);
+    hub.sync_configuration(l);
 
     hub.focus_workspace("1");
     hub.insert_tiling(hub.current_workspace(), titled("w41"));
@@ -862,14 +861,14 @@ fn sync_config_preserves_seeded_ratio_across_workspaces() {
     hub.focus_workspace("0");
 
     // Change master_ratio from 0.5 to 0.4 via hot-reload.
-    let (l, o) = LayoutConfigBuilder::new()
+    let l = LayoutConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.4,
             master_count: 1,
         })
         .build();
-    hub.sync_config(l, o);
+    hub.sync_configuration(l);
 
     // Both workspaces: ordering and focus preserved.
     assert_eq!(hub.focused_window(ws0), focus_ws0);
@@ -935,14 +934,14 @@ fn sync_config_preserves_runtime_tuned_master_ratio() {
     hub.handle_tiling_action(TilingAction::GrowMaster);
 
     // Hot-reload with a different file value does NOT override runtime tuning.
-    let (l, o) = LayoutConfigBuilder::new()
+    let l = LayoutConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.4,
             master_count: 1,
         })
         .build();
-    hub.sync_config(l, o);
+    hub.sync_configuration(l);
 
     // Layout still shows runtime-tuned 0.65 ratio.
     assert_snapshot!(snapshot(&hub), @"
@@ -1005,14 +1004,14 @@ fn sync_config_preserves_runtime_tuned_master_count() {
     hub.handle_tiling_action(TilingAction::MoreMaster);
 
     // Hot-reload with a different file value does NOT override runtime tuning.
-    let (l, o) = LayoutConfigBuilder::new()
+    let l = LayoutConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.5,
             master_count: 3,
         })
         .build();
-    hub.sync_config(l, o);
+    hub.sync_configuration(l);
 
     // Layout still shows runtime-tuned master_count=2 (not config's 3).
     assert_snapshot!(snapshot(&hub), @"
@@ -1118,75 +1117,7 @@ fn more_master_only_affects_focused_workspace() {
     ");
 }
 
-#[test]
-fn attach_window_seeds_master_count_from_per_workspace_override() {
-    let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .with_strategy(Strategy::Master)
-                .build(),
-        )
-        .build();
-    let (l, o) = LayoutConfigBuilder::new()
-        .with_strategy(Strategy::Master)
-        .with_master_config(MasterConfig {
-            master_ratio: 0.5,
-            master_count: 1,
-        })
-        .with_workspace(vec![
-            LayoutWorkspaceConfigBuilder::new("1".to_string())
-                .with_strategy(Strategy::Master)
-                .with_master_count(3)
-                .build(),
-        ])
-        .build();
-    hub.sync_config(l, o);
-    hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w59"));
-    hub.insert_tiling(hub.current_workspace(), titled("w60"));
-    hub.insert_tiling(hub.current_workspace(), titled("w61"));
-    hub.insert_tiling(hub.current_workspace(), titled("w62"));
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(3))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=10.00)
-        Window(id=WindowId(1), x=0.00, y=10.00, w=75.00, h=10.00)
-        Window(id=WindowId(2), x=0.00, y=20.00, w=75.00, h=10.00)
-        Window(id=WindowId(3), x=75.00, y=0.00, w=75.00, h=30.00, highlighted)
-      )
 
-    +-------------------------------------------------------------------------+***************************************************************************
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                    W0                                   |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+*                                                                         *
-    +-------------------------------------------------------------------------+*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                    W1                                   |*                                    W3                                   *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+*                                                                         *
-    +-------------------------------------------------------------------------+*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                    W2                                   |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    |                                                                         |*                                                                         *
-    +-------------------------------------------------------------------------+***************************************************************************
-    ");
-}
 
 #[test]
 fn attach_window_falls_back_to_global_when_no_per_workspace_override() {
@@ -1197,20 +1128,14 @@ fn attach_window_falls_back_to_global_when_no_per_workspace_override() {
                 .build(),
         )
         .build();
-    let (l, o) = LayoutConfigBuilder::new()
+    let l = LayoutConfigBuilder::new()
         .with_strategy(Strategy::Master)
         .with_master_config(MasterConfig {
             master_ratio: 0.5,
             master_count: 1,
         })
-        .with_workspace(vec![
-            LayoutWorkspaceConfigBuilder::new("1".to_string())
-                .with_strategy(Strategy::Master)
-                .with_master_count(3)
-                .build(),
-        ])
         .build();
-    hub.sync_config(l, o);
+    hub.sync_configuration(l);
     hub.focus_workspace("2");
     hub.insert_tiling(hub.current_workspace(), titled("w63"));
     hub.insert_tiling(hub.current_workspace(), titled("w64"));
