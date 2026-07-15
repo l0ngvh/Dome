@@ -7,7 +7,7 @@ mod types;
 #[cfg(test)]
 mod validate;
 
-use self::preferred_layout::{PreferredLayout, PreferredSlot};
+use self::preferred_layout::{PreferredContainerSlot, PreferredSlot, PreferredWindowSlot};
 pub(crate) use crate::core::node::Child;
 pub(crate) use container::Container;
 pub(crate) use types::*;
@@ -29,6 +29,8 @@ pub(crate) struct PartitionTreeStrategy {
     containers: Allocator<Container>,
     tiling_windows: HashMap<WindowId, TilingWindowData>,
     workspaces: HashMap<WorkspaceId, WorkspaceTilingState>,
+    window_slots: Allocator<PreferredWindowSlot>,
+    container_slots: Allocator<PreferredContainerSlot>,
     tab_bar_height: Length<Logical>,
     automatic_tiling: bool,
 }
@@ -41,16 +43,17 @@ impl TilingStrategy for PartitionTreeStrategy {
         _layout: &GlobalLayoutConfig,
         workspace_overrides: &[LayoutWorkspaceConfig],
     ) {
-        let preferred_layout = workspace_overrides.iter().find_map(|w| match w {
+        let tree = workspace_overrides.iter().find_map(|w| match w {
             LayoutWorkspaceConfig::PartitionTree { name, tree, .. } if *name == ws_name => {
-                tree.as_ref().map(PreferredLayout::from_tree_layout_node)
+                tree.as_ref()
             }
             _ => None,
         });
+        let preferred_root = tree.map(|t| self.build_preferred_layout(t));
         self.workspaces
             .entry(ws_id)
             .or_insert(WorkspaceTilingState {
-                preferred_layout,
+                preferred_root,
                 ..Default::default()
             });
     }
@@ -60,19 +63,19 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.tiling_windows
             .insert(window_id, TilingWindowData::new(ws_id));
 
-        let ws_state = self.workspaces.get(&ws_id).unwrap();
-        let Some(layout) = ws_state.preferred_layout.as_ref() else {
+        let preferred_root = self.workspaces.get(&ws_id).unwrap().preferred_root;
+        let Some(root) = preferred_root else {
             self.attach_child_according_to_spawn_mode(hub, Child::Window(window_id), ws_id);
             return;
         };
-        let Some(slot_id) = layout.find_window_slot(metadata) else {
+        let Some(slot_id) = self.find_window_slot(root, metadata) else {
             tracing::debug!(%window_id, "No preferred layout slot matched, falling back to spawn mode");
             self.attach_child_according_to_spawn_mode(hub, Child::Window(window_id), ws_id);
             return;
         };
         tracing::debug!(%window_id, ?slot_id, "Window matched preferred layout slot");
         hub.windows.get_mut(window_id).set_workspace(Some(ws_id));
-        if let Some(ancestor_slot) = layout.first_occupied_ancestor(slot_id) {
+        if let Some(ancestor_slot) = self.first_occupied_ancestor(slot_id) {
             self.attach_window_into_occupied_ancestor(
                 hub,
                 window_id,
@@ -83,18 +86,17 @@ impl TilingStrategy for PartitionTreeStrategy {
             return;
         }
 
-        let Some(root_slot) = ws_state.occupied_preferred_root else {
+        let occupied_root = self.workspaces.get(&ws_id).unwrap().occupied_preferred_root;
+        let Some(root_slot) = occupied_root else {
             // First matched window, insert via spawn mode and mark slot occupied
             self.attach_child_according_to_spawn_mode(hub, Child::Window(window_id), ws_id);
 
-            let ws_state = self.workspaces.get_mut(&ws_id).unwrap();
-            ws_state
-                .preferred_layout
-                .as_mut()
-                .unwrap()
-                .occupy_window_slot(slot_id, window_id);
+            self.occupy_window_slot(slot_id, window_id);
             self.tiling_windows.get_mut(&window_id).unwrap().occupy = Some(slot_id);
-            ws_state.occupied_preferred_root = Some(PreferredSlot::Window(slot_id));
+            self.workspaces
+                .get_mut(&ws_id)
+                .unwrap()
+                .occupied_preferred_root = Some(PreferredSlot::Window(slot_id));
             tracing::debug!(%window_id, ?slot_id, "First preferred window, established as root");
             return;
         };
@@ -318,18 +320,16 @@ impl TilingStrategy for PartitionTreeStrategy {
         ws_id: WorkspaceId,
         incoming: Option<&LayoutWorkspaceConfig>,
     ) {
-        let changed = match self.workspaces.get(&ws_id) {
-            Some(ws) => match ws.preferred_layout.as_ref() {
-                Some(current) => match incoming {
-                    Some(cfg) => !current.structurally_eq(cfg),
-                    None => true,
-                },
-                None => matches!(
-                    incoming,
-                    Some(LayoutWorkspaceConfig::PartitionTree { tree: Some(_), .. })
-                ),
+        let current_root = self.workspaces.get(&ws_id).and_then(|ws| ws.preferred_root);
+        let changed = match current_root {
+            Some(_) => match incoming {
+                Some(cfg) => !self.structurally_eq(current_root, cfg),
+                None => true,
             },
-            None => incoming.is_some(),
+            None => matches!(
+                incoming,
+                Some(LayoutWorkspaceConfig::PartitionTree { tree: Some(_), .. })
+            ),
         };
 
         if !changed {
@@ -365,13 +365,17 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
 
         // Set the new preferred layout.
-        let new_layout = incoming.and_then(|w| match w {
+        let new_root = incoming.and_then(|w| match w {
             LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
-                tree.as_ref().map(PreferredLayout::from_tree_layout_node)
+                tree.as_ref().map(|t| self.build_preferred_layout(t))
             }
             _ => None,
         });
-        self.workspaces.get_mut(&ws_id).unwrap().preferred_layout = new_layout;
+        self.workspaces.get_mut(&ws_id).unwrap().preferred_root = new_root;
+        self.workspaces
+            .get_mut(&ws_id)
+            .unwrap()
+            .occupied_preferred_root = None;
 
         // Reattach windows under the new layout.
         for &wid in &tiling_windows {
@@ -430,6 +434,8 @@ impl PartitionTreeStrategy {
             containers: Allocator::new(),
             tiling_windows: HashMap::new(),
             workspaces: HashMap::new(),
+            window_slots: Allocator::new(),
+            container_slots: Allocator::new(),
             tab_bar_height,
             automatic_tiling,
         }

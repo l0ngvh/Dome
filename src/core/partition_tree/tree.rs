@@ -104,31 +104,30 @@ impl PartitionTreeStrategy {
 
         let children: Vec<_> = self.children_dfs(child).collect();
         for child in children {
-            let workspace = self.workspaces.get_mut(&workspace_id).unwrap();
-            if let Some(layout) = workspace.preferred_layout.as_mut() {
-                match child {
-                    Child::Window(wid) => {
-                        let window = self.tiling_windows.get_mut(&wid).unwrap();
-                        if let Some(slot_id) = window.occupy {
-                            layout.clear_window_slot(slot_id);
-                            window.occupy = None;
-                            if workspace.occupied_preferred_root
-                                == Some(PreferredSlot::Window(slot_id))
-                            {
-                                workspace.occupied_preferred_root = None;
-                            }
+            match child {
+                Child::Window(wid) => {
+                    let slot_id = self.tiling_windows.get(&wid).unwrap().occupy;
+                    if let Some(slot_id) = slot_id {
+                        self.clear_window_slot(slot_id);
+                        self.tiling_windows.get_mut(&wid).unwrap().occupy = None;
+                        let ws_state = self.workspaces.get_mut(&workspace_id).unwrap();
+                        if ws_state.occupied_preferred_root == Some(PreferredSlot::Window(slot_id))
+                        {
+                            ws_state.occupied_preferred_root = None;
                         }
                     }
-                    Child::Container(cid) => {
-                        let container = self.containers.get_mut(cid);
-                        if let Some(slot_id) = container.occupy {
-                            layout.clear_container_slot(slot_id);
-                            container.occupy = None;
-                            if workspace.occupied_preferred_root
-                                == Some(PreferredSlot::Container(slot_id))
-                            {
-                                workspace.occupied_preferred_root = layout.top_occupied_in(slot_id);
-                            }
+                }
+                Child::Container(cid) => {
+                    let slot_id = self.containers.get(cid).occupy;
+                    if let Some(slot_id) = slot_id {
+                        let new_occupied_root = self.top_occupied_in(slot_id);
+                        self.clear_container_slot(slot_id);
+                        self.containers.get_mut(cid).occupy = None;
+                        let ws_state = self.workspaces.get_mut(&workspace_id).unwrap();
+                        if ws_state.occupied_preferred_root
+                            == Some(PreferredSlot::Container(slot_id))
+                        {
+                            ws_state.occupied_preferred_root = new_occupied_root;
                         }
                     }
                 }

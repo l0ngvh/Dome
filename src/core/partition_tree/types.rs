@@ -1,4 +1,4 @@
-use super::preferred_layout::{PreferredLayout, PreferredSlot, PreferredWindowSlotId};
+use super::preferred_layout::{PreferredSlot, PreferredWindowSlotId};
 use crate::config::SplitMode;
 use crate::core::hub::SpawnIndicator;
 use crate::core::node::Child;
@@ -197,8 +197,6 @@ impl TilingWindowData {
 #[derive(Debug, Default)]
 pub(super) struct WorkspaceTilingState {
     pub(super) root: Option<Child>,
-    /// The preferred layout tree for this workspace, if one is configured.
-    pub(super) preferred_layout: Option<PreferredLayout>,
     /// Tiling focus pointer. Usually a `Child::Window` (the focused window). Can be
     /// `Child::Container` for container-highlight mode, where
     /// `focused_tiling_window()` returns `None`. Can only be None in an empty workspace.
@@ -207,6 +205,8 @@ pub(super) struct WorkspaceTilingState {
     /// container of X has `focused == X`. Established by `set_focus_child`,
     /// preserved by `replace_child_focus`.
     pub(super) focused_tiling: Option<Child>,
+    /// Root of the static preferred layout tree. `None` when no layout is configured.
+    pub(super) preferred_root: Option<PreferredSlot>,
     /// The highest occupied node in the preferred layout tree. `None` when no
     /// matched window has been placed.
     pub(super) occupied_preferred_root: Option<PreferredSlot>,
