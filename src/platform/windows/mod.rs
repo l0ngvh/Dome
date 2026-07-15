@@ -187,7 +187,12 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
 
     std::panic::set_hook(Box::new(|panic_info| {
         let backtrace = backtrace::Backtrace::new();
-        tracing::error!("Application panicked: {panic_info}. Backtrace: {backtrace:?}");
+        let thread = std::thread::current();
+        let thread_name = thread.name().unwrap_or("<unnamed>");
+        tracing::error!(
+            thread = %thread_name,
+            "Application panicked: {panic_info}. Backtrace: {backtrace:?}"
+        );
     }));
 
     let main_thread_id = unsafe { GetCurrentThreadId() };
