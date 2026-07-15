@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::platform::windows::dome::window::MAX_DRIFT_RETRIES;
+
 #[test]
 fn compliant_window_no_redundant_set_position() {
     let mut env = TestEnv::new();
@@ -284,4 +286,178 @@ fn borderless_minimized_retries_reset_on_workspace_return() {
 
     env.unminimize_window(w1);
     assert!(env.is_minimized(w1));
+}
+
+#[test]
+fn drift_retry_timer_caps_tiling_retries() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    // Prevent the initial full-screen placement so dim stays at spawn.
+    env.simulate_resist(w1, (0, 0, 800, 600));
+    env.moves.lock().unwrap().clear();
+
+    // Opening _w2 triggers re-layout. show_tiling fires for w1 but
+    // resist clamps it — OS ignored both placements.
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.moves.lock().unwrap().clear();
+    env.clear_override_position(w1);
+    let correct = dim(4, 4, 952, 1072);
+    assert_eq!(
+        env.dim(w1),
+        SPAWN_DIM,
+        "w1 still at spawn after dropped placements"
+    );
+
+    // Each retry fires (actual != target) and increments the counter.
+    // After MAX_DRIFT_RETRIES + 1 calls, retries = 6 > 5 = capped.
+    for _ in 0..=MAX_DRIFT_RETRIES {
+        env.dome.retry_drifted_windows();
+    }
+    assert_eq!(
+        env.dim(w1),
+        correct,
+        "retry fixed position before hitting cap"
+    );
+
+    // Create a fresh gap — the cap prevents a fix.
+    env.simulate_resist(w1, (0, 0, 800, 600));
+    env.moves.lock().unwrap().clear();
+    env.dome.retry_drifted_windows();
+    assert_eq!(
+        env.dim(w1),
+        SPAWN_DIM,
+        "capped; retry does not fire for new gap"
+    );
+}
+
+#[test]
+fn drift_retry_timer_stops_when_tiling_window_settles() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    // Prevent the initial placement so actual != target.
+    env.simulate_resist(w1, (0, 0, 800, 600));
+    env.moves.lock().unwrap().clear();
+    env.clear_override_position(w1);
+    let correct = dim(4, 4, 1912, 1072);
+    assert_eq!(env.dim(w1), SPAWN_DIM, "placement dropped");
+
+    // Retry fixes the position.
+    env.dome.retry_drifted_windows();
+    assert_eq!(env.dim(w1), correct, "retry fixed position");
+
+    // Flush — OS reports back, actual converges to target.
+    env.flush_moves();
+
+    // Create a new gap — retry should NOT fire (actual == target).
+    env.simulate_resist(w1, (0, 0, 800, 600));
+    env.moves.lock().unwrap().clear();
+    env.dome.retry_drifted_windows();
+    assert_eq!(
+        env.dim(w1),
+        SPAWN_DIM,
+        "settled; retry does not fire for new gap"
+    );
+}
+
+#[test]
+fn drift_retry_timer_repositions_silently_dropped_float_window() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.run_actions("toggle float");
+    env.settle(10);
+
+    // Drag float to old_pos via observation (simulate_resist + flush).
+    env.simulate_resist(w1, (300, 200, 500, 400));
+    env.flush_moves();
+    env.clear_override_position(w1);
+
+    // Toggle float off — back to tiling. Don't settle.
+    env.run_actions("toggle float");
+    let old_pos = dim(300, 200, 500, 400);
+
+    // Resist the next float placement — OS drops it.
+    env.simulate_resist(w1, (300, 200, 500, 400));
+    env.moves.lock().unwrap().clear();
+
+    // Toggle float on — show_float fires, resist clamps it to old_pos.
+    env.run_actions("toggle float");
+    env.moves.lock().unwrap().clear();
+    env.clear_override_position(w1);
+    assert_eq!(
+        env.dim(w1),
+        old_pos,
+        "placement dropped, still at old position"
+    );
+
+    // Retry places window at correct float target.
+    env.dome.retry_drifted_windows();
+    assert_ne!(env.dim(w1), old_pos, "retry moved window to float target");
+}
+
+#[test]
+fn drift_retry_timer_retries_offscreen() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.settle(10);
+
+    // Capture w1's on-screen position so resist clamps move_offscreen to it.
+    let onscreen = env.dim(w1);
+    let tup = (
+        onscreen.x.value() as i32,
+        onscreen.y.value() as i32,
+        onscreen.width.value() as i32,
+        onscreen.height.value() as i32,
+    );
+    env.simulate_resist(w1, tup);
+    env.moves.lock().unwrap().clear();
+
+    // Switch workspace — hide_window calls move_offscreen, clamped to tup.
+    env.run_actions("focus workspace 1");
+    env.moves.lock().unwrap().clear();
+    env.clear_override_position(w1);
+    assert!(
+        !env.is_offscreen(w1),
+        "move_offscreen dropped, still on-screen"
+    );
+
+    // Retry re-issues move_offscreen — this time it takes effect.
+    env.dome.retry_drifted_windows();
+    assert!(env.is_offscreen(w1), "retry moved window offscreen");
+}
+
+#[test]
+fn drift_retry_timer_after_workspace_return() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    // Prevent both the initial and re-layout placements.
+    env.simulate_resist(w1, (0, 0, 800, 600));
+    env.moves.lock().unwrap().clear();
+
+    let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.moves.lock().unwrap().clear();
+    env.clear_override_position(w1);
+    let correct = dim(4, 4, 952, 1072);
+    assert_eq!(env.dim(w1), SPAWN_DIM);
+
+    // Switch away — hide_window, move_offscreen works normally (no resist).
+    env.run_actions("focus workspace 1");
+    assert!(
+        env.is_offscreen(w1),
+        "window should be offscreen after switch"
+    );
+
+    // Resist the return placement.
+    env.simulate_resist(w1, (0, 0, 800, 600));
+    env.moves.lock().unwrap().clear();
+
+    // Switch back — show_tiling fires, resist clamps it.
+    env.run_actions("focus workspace 0");
+    env.moves.lock().unwrap().clear();
+    env.clear_override_position(w1);
+    assert_eq!(env.dim(w1), SPAWN_DIM, "still at spawn after return");
+
+    // Retry places window at correct position.
+    env.dome.retry_drifted_windows();
+    assert_eq!(env.dim(w1), correct, "retry placed window at target");
 }

@@ -9,6 +9,7 @@ pub(super) enum TimerKind {
     Focus,
     MoveSettle { hwnd: HwndId, observed_at: Instant },
     Prune,
+    DriftRetry,
 }
 
 pub(super) trait OsTimer {
@@ -70,6 +71,10 @@ impl TimerRegistry {
         self.schedule(TimerKind::Prune, 0, period);
     }
 
+    pub(super) fn schedule_drift_retry(&mut self, period: Duration) {
+        self.schedule(TimerKind::DriftRetry, 0, period);
+    }
+
     pub(super) fn dispatch(&mut self, timer_id: usize) -> Option<TimerKind> {
         let kind = self.by_id.get(&timer_id).copied()?;
         match kind {
@@ -77,7 +82,7 @@ impl TimerRegistry {
                 self.by_id.remove(&timer_id);
                 self.os.kill_timer(timer_id);
             }
-            TimerKind::Prune => {}
+            TimerKind::Prune | TimerKind::DriftRetry => {}
         }
         Some(kind)
     }

@@ -18,6 +18,7 @@ const FOCUS_THROTTLE_INTERVAL: Duration = Duration::from_millis(500);
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 const DRAG_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
 const PRUNE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const DRIFT_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 pub(super) struct Runner {
     dome: Dome,
@@ -41,6 +42,7 @@ impl Runner {
     ) -> Self {
         let mut timers = TimerRegistry::new(Box::new(Win32Timer));
         timers.schedule_prune(PRUNE_INTERVAL);
+        timers.schedule_drift_retry(DRIFT_RETRY_INTERVAL);
         Self {
             dome,
             dispatcher: ReadDispatcher::new(thread_id),
@@ -69,6 +71,9 @@ impl Runner {
             }
             TimerKind::Prune => {
                 self.rejection_log_filter.prune(Instant::now());
+            }
+            TimerKind::DriftRetry => {
+                self.dome.retry_drifted_windows();
             }
         }
     }

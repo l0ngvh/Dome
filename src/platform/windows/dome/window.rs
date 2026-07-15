@@ -107,7 +107,7 @@ impl crate::core::WindowMetadata for WindowsMetadata {
     }
 }
 
-pub(super) const MAX_DRIFT_RETRIES: u8 = 5;
+pub(crate) const MAX_DRIFT_RETRIES: u8 = 5;
 
 #[derive(Clone, Copy)]
 pub(super) struct DriftState {
@@ -139,26 +139,29 @@ impl DriftState {
     }
 }
 
-/// Lightweight placement state for floating windows. Floats accept the
-/// OS-reported geometry as ground truth, so there is no `actual` field
-/// (target IS actual after each observation) and no retry/drift fields.
+/// Placement state for floating windows. The `actual` field tracks the
+/// last known OS-reported geometry, while `target` tracks what Dome last
+/// issued via `set_position`. They diverge when a placement is silently
+/// dropped by the window; the drift retry timer catches that gap.
 #[derive(Clone, Copy)]
 pub(super) struct FloatPlacement {
-    /// Last rect reconciled with the OS.
     pub(super) target: Dimension<Physical>,
-    /// Tracks OS ownership via `MonitorFromWindow`, reported atomically
-    /// with the rect observation in `window_moved`. Updated whenever a
-    /// drift observation arrives.
+    pub(super) actual: Dimension<Physical>,
+    pub(super) retries: u8,
     pub(super) monitor: MonitorId,
-    /// Anchor for the most recent outbound `set_position` for this float.
-    /// Observation arms write `target` directly without bumping this field.
     pub(super) placed_at: Instant,
 }
 
 impl FloatPlacement {
-    pub(super) fn new(target: Dimension<Physical>, monitor: MonitorId) -> Self {
+    pub(super) fn new(
+        target: Dimension<Physical>,
+        actual: Dimension<Physical>,
+        monitor: MonitorId,
+    ) -> Self {
         Self {
             target,
+            actual,
+            retries: 0,
             monitor,
             placed_at: Instant::now(),
         }
@@ -288,8 +291,16 @@ impl Dome {
         }
 
         if !settled {
+            let prev_actual = match &entry.state {
+                WindowState::Positioned(PositionedState::Float(fp)) => fp.actual,
+                WindowState::Positioned(PositionedState::Tiling(d)) => d.actual,
+                WindowState::Positioned(PositionedState::Offscreen { actual, .. }) => *actual,
+                _ => new_target,
+            };
             entry.state = WindowState::Positioned(PositionedState::Float(FloatPlacement::new(
-                new_target, monitor,
+                new_target,
+                prev_actual,
+                monitor,
             )));
         }
     }
@@ -378,13 +389,13 @@ impl Dome {
                 match above {
                     Some(prev) => {
                         entry.ext.set_position(ZOrder::After(prev), new_target);
-                        entry.state = tiling_state(fp.target);
+                        entry.state = tiling_state(fp.actual);
                     }
                     None => {
                         // NotTopmost above already wrote geometry; just park
                         // the overlay below self.
                         let id = entry.ext.id();
-                        entry.state = tiling_state(fp.target);
+                        entry.state = tiling_state(fp.actual);
                         overlay.demote_below(id);
                     }
                 }
@@ -449,8 +460,7 @@ impl Dome {
                 self.float_overlays.remove(&id);
                 let prev_actual = match ps {
                     PositionedState::Tiling(d) => d.actual,
-                    // Post-sync: fp.target is the last observed rect
-                    PositionedState::Float(fp) => fp.target,
+                    PositionedState::Float(fp) => fp.actual,
                     PositionedState::Offscreen { actual, .. } => actual,
                 };
                 entry.state = WindowState::Positioned(PositionedState::Tiling(DriftState::new(
@@ -486,10 +496,9 @@ impl Dome {
                 if let Some(overlay) = self.float_overlays.get_mut(&id) {
                     overlay.hide();
                 }
-                // Post-sync: fp.target is the last observed rect
                 entry.state = WindowState::Positioned(PositionedState::Offscreen {
                     retries: 0,
-                    actual: fp.target,
+                    actual: fp.actual,
                 });
             }
             WindowState::BorderlessFullscreen => {
@@ -644,6 +653,7 @@ impl Dome {
                     }
                 };
                 fp.monitor = resolved;
+                fp.actual = new_placement;
                 fp.target = new_placement;
                 let border = self
                     .monitors
@@ -690,6 +700,44 @@ impl Dome {
                     }
                 }
             }
+        }
+    }
+
+    /// Called periodically by the drift retry timer.
+    /// Re-issues the last placement if the window has not yet
+    /// acknowledged it, up to `MAX_DRIFT_RETRIES` attempts.
+    pub(super) fn retry_drift(&mut self, id: WindowId) {
+        let Some(entry) = self.registry.get_mut(id) else {
+            return;
+        };
+        match &mut entry.state {
+            WindowState::Positioned(PositionedState::Tiling(drift)) => {
+                if drift.actual == drift.target || drift.retries > MAX_DRIFT_RETRIES {
+                    return;
+                }
+                drift.retries = drift.retries.saturating_add(1);
+                drift.placed_at = Instant::now();
+                entry.ext.set_position(ZOrder::Unchanged, drift.target);
+            }
+            WindowState::Positioned(PositionedState::Float(fp)) => {
+                if fp.actual == fp.target || fp.retries > MAX_DRIFT_RETRIES {
+                    return;
+                }
+                fp.retries = fp.retries.saturating_add(1);
+                fp.placed_at = Instant::now();
+                entry.ext.set_position(ZOrder::Unchanged, fp.target);
+            }
+            WindowState::Positioned(PositionedState::Offscreen { retries, actual }) => {
+                if actual.x <= OFFSCREEN_POS || actual.y <= OFFSCREEN_POS {
+                    return;
+                }
+                if *retries >= MAX_DRIFT_RETRIES {
+                    return;
+                }
+                *retries = retries.saturating_add(1);
+                entry.ext.move_offscreen();
+            }
+            _ => {}
         }
     }
 

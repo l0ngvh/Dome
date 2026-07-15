@@ -6,7 +6,7 @@ mod placement_tracker;
 mod recovery;
 mod registry;
 pub(crate) mod rejection_log_filter;
-mod window;
+pub(super) mod window;
 
 pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};
 
@@ -929,6 +929,13 @@ impl Dome {
     /// primary-monitor DPI change posts WM_APP_DPI_CHANGE four times).
     pub(super) fn monitor_dpi_changed(&mut self, handle: isize, dpi: u32) {
         self.monitors.apply_dpi_change(handle, dpi, &mut self.hub);
+    }
+
+    pub(super) fn retry_drifted_windows(&mut self) {
+        let window_ids: Vec<(HwndId, WindowId)> = self.registry.iter().collect();
+        for (_hwnd_id, window_id) in window_ids {
+            self.retry_drift(window_id);
+        }
     }
 }
 
