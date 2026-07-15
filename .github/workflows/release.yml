@@ -153,7 +153,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           ZIP_NAME="dome-${VERSION}-x86_64-pc-windows-msvc.zip"
-          7z a "$ZIP_NAME" ./target/release/dome.exe
+          7z a "$ZIP_NAME" ./target/release/dome.exe ./target/release/dome.pdb
           echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:

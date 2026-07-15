@@ -62,7 +62,7 @@ jobs:
         shell: pwsh
         run: |
           cargo build --release --target ${{matrix.target}}
-          Compress-Archive -Force "target/${{matrix.target}}/release/dome.exe" ${{matrix.artifact}}
+          Compress-Archive -Force "target/${{matrix.target}}/release/dome.exe","target/${{matrix.target}}/release/dome.pdb" ${{matrix.artifact}}
 
       - name: build-macos
         if: matrix.os == 'macos-latest'

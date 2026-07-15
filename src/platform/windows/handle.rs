@@ -149,6 +149,13 @@ fn get_invisible_border(hwnd: HWND) -> (i32, i32, i32, i32) {
 
 const MSG_TIMEOUT_MS: u32 = 100;
 
+/// A buggy WndProc can return garbage from WM_GETTEXTLENGTH.
+const MAX_WINDOW_TITLE_U16: usize = 32 * 1024;
+
+const MAX_VERSION_INFO_BYTES: usize = 1 << 20;
+
+const MAX_FILE_DESCRIPTION_U16: usize = 1024;
+
 /// Target-dependent scale factor for values returned by WM_GETMINMAXINFO.
 ///
 /// MINMAXINFO fields are filled by the target HWND's wndproc, which runs
@@ -509,7 +516,10 @@ impl InspectExternalWindow for ExternalHwnd {
                 Some(&mut len),
             )
         };
-        if ret == LRESULT(0) || len == 0 {
+        if ret == LRESULT(0) {
+            return None;
+        }
+        if len == 0 || len > MAX_WINDOW_TITLE_U16 {
             return None;
         }
         let mut buf = vec![0u16; len + 1];
@@ -525,10 +535,15 @@ impl InspectExternalWindow for ExternalHwnd {
                 Some(&mut copied),
             )
         };
-        if ret == LRESULT(0) || copied == 0 {
+        if ret == LRESULT(0) {
             return None;
         }
-        Some(String::from_utf16_lossy(&buf[..copied]))
+        // Clamp a buggy WndProc that reports copied > buf.len().
+        let end = copied.min(buf.len());
+        if end == 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buf[..end]))
     }
 
     fn get_process_name(&self) -> anyhow::Result<String> {
@@ -604,7 +619,7 @@ impl InspectExternalWindow for ExternalHwnd {
         let path_ptr = PCWSTR(path.as_ptr());
 
         let size = unsafe { GetFileVersionInfoSizeW(path_ptr, None) };
-        if size == 0 {
+        if size == 0 || size as usize > MAX_VERSION_INFO_BYTES {
             return None;
         }
 
@@ -649,8 +664,15 @@ impl InspectExternalWindow for ExternalHwnd {
         if !ok.as_bool() || desc_len == 0 || desc_ptr.is_null() {
             return None;
         }
-        // desc_len includes the trailing null
-        let slice_len = (desc_len as usize).saturating_sub(1);
+        let slice_len = clamp_desc_len(
+            desc_ptr as usize,
+            buf.as_ptr() as usize,
+            buf.len(),
+            desc_len,
+        );
+        if slice_len == 0 {
+            return None;
+        }
         let desc_slice = unsafe { std::slice::from_raw_parts(desc_ptr as *const u16, slice_len) };
         let result = String::from_utf16_lossy(desc_slice).trim().to_string();
         if result.is_empty() {
@@ -690,4 +712,15 @@ impl InspectExternalWindow for ExternalHwnd {
             result
         }
     }
+}
+
+/// Clamps `desc_len` so the returned slice cannot read past `buf`. `desc_len`
+/// from VerQueryValueW counts the trailing null u16, hence the `-1`.
+fn clamp_desc_len(desc_ptr: usize, buf_ptr: usize, buf_len: usize, desc_len: u32) -> usize {
+    let offset_bytes = desc_ptr.saturating_sub(buf_ptr);
+    let remaining_u16 = buf_len.saturating_sub(offset_bytes) / 2;
+    (desc_len as usize)
+        .saturating_sub(1)
+        .min(remaining_u16)
+        .min(MAX_FILE_DESCRIPTION_U16)
 }
