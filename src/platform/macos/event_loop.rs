@@ -149,6 +149,9 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         HubEvent::ObservedPidsRefreshed(pids) => {
             runner.dome.set_observed_pids(pids);
         }
+        HubEvent::ExportLayout(path) => {
+            runner.dome.export_layout(std::path::Path::new(&path));
+        }
     });
 }
 

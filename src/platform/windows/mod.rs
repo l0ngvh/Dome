@@ -239,6 +239,7 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
 
     ipc::start_server({
         let sender = hub_sender.clone();
+        let export_layout_path = layout_path.clone();
         move |msg| {
             use crate::action::IpcMessage;
             match msg {
@@ -256,6 +257,10 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
                         Ok(json) => Ok(json),
                         Err(_) => Ok(r#"{"error":"query timed out"}"#.to_string()),
                     }
+                }
+                IpcMessage::ExportLayout => {
+                    sender.send(HubEvent::ExportLayout(export_layout_path.clone()));
+                    Ok("ok".to_string())
                 }
             }
         }

@@ -981,19 +981,40 @@ impl WindowMetadata for TestMetadata {
     }
 
     fn matches_window_matcher(&self, matcher: &crate::config::WindowMatcher) -> bool {
-        if let Some(ref title) = self.title
-            && let Some(ref mtitle) = matcher.title
-            && title == mtitle
-        {
-            return true;
+        let title = self.title.as_deref();
+        let process = self.process.as_deref();
+
+        if let Some(_p) = matcher.app.as_deref() {
+            return false;
         }
-        if let Some(ref process) = self.process
-            && let Some(ref mproc) = matcher.process
-            && process == mproc
-        {
-            return true;
+        if let Some(_p) = matcher.bundle_id.as_deref() {
+            return false;
         }
-        false
+        if let Some(_p) = matcher.class.as_deref() {
+            return false;
+        }
+        if let Some(_p) = matcher.aumid.as_deref() {
+            return false;
+        }
+        if let Some(p) = matcher.process.as_deref()
+            && !process.is_some_and(|s| crate::config::pattern_matches(p, s))
+        {
+            return false;
+        }
+        if let Some(p) = matcher.title.as_deref()
+            && !title.is_some_and(|t| crate::config::pattern_matches(p, t))
+        {
+            return false;
+        }
+        matcher.process.is_some() || matcher.title.is_some()
+    }
+
+    fn to_window_matcher(&self) -> crate::config::WindowMatcher {
+        crate::config::WindowMatcher {
+            title: self.title.clone(),
+            process: self.process.clone(),
+            ..Default::default()
+        }
     }
 }
 

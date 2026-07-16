@@ -6,7 +6,8 @@ use crate::core::WindowMetadata;
 use crate::core::hub::{HubAccess, TilingWindowPlacement};
 use crate::core::node::{Child, Dimension, Direction, Length, WindowId, WorkspaceId};
 use crate::core::strategy::{
-    TilingAction, TilingPlacements, TilingStrategy, clip, distribute_space, translate,
+    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, clip, distribute_space,
+    translate,
 };
 
 /// XMonad-style tiling: a master area on the left and a stack on the right.
@@ -857,6 +858,43 @@ impl TilingStrategy for MasterStrategy {
             }
         }
     }
+
+    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WorkspaceExport> {
+        let state = self.workspaces.get(&ws_id)?;
+
+        let master: Vec<WindowMatcher> = state
+            .master
+            .iter()
+            .map(|&(wid, ref tag)| matcher_for_window(hub, state, wid, tag))
+            .collect();
+        let secondary: Vec<WindowMatcher> = state
+            .stack
+            .iter()
+            .map(|&(wid, ref tag)| matcher_for_window(hub, state, wid, tag))
+            .collect();
+
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.matchers = master
+            .iter()
+            .map(|m| PaneMatcher {
+                pane: Pane::Master,
+                matcher: m.clone(),
+            })
+            .chain(secondary.iter().map(|m| PaneMatcher {
+                pane: Pane::Secondary,
+                matcher: m.clone(),
+            }))
+            .collect();
+
+        Some(WorkspaceExport {
+            strategy: "master".into(),
+            master_ratio: Some(state.master_ratio),
+            master_count: Some(state.master_count),
+            master,
+            secondary,
+            ..Default::default()
+        })
+    }
 }
 
 impl MasterStrategy {
@@ -1389,4 +1427,22 @@ fn effective_constraints(hub: &HubAccess, wid: WindowId) -> (Length, Length, Len
     };
 
     (min_w, min_h, max_w, max_h)
+}
+
+fn matcher_for_window(
+    hub: &HubAccess,
+    state: &MasterState,
+    wid: WindowId,
+    tag: &PlacementTag,
+) -> WindowMatcher {
+    match tag {
+        PlacementTag::Matched { pane, slot } => state
+            .matchers
+            .iter()
+            .filter(|pm| pm.pane == *pane)
+            .nth(*slot)
+            .map(|pm| pm.matcher.clone())
+            .unwrap_or_else(|| hub.windows.get(wid).metadata.to_window_matcher()),
+        PlacementTag::Unmatched => hub.windows.get(wid).metadata.to_window_matcher(),
+    }
 }

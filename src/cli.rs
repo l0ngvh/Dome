@@ -43,6 +43,7 @@ enum CliCommand {
     Mode {
         name: String,
     },
+    Export,
     Query {
         #[command(subcommand)]
         query: CliQuery,
@@ -121,6 +122,7 @@ enum Dispatch {
     },
     Action(Action),
     Query(Query),
+    Export,
 }
 
 impl From<CliFocus> for FocusTarget {
@@ -203,6 +205,7 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Exec { command } => Dispatch::Action(Action::Exec { command }),
             CliCommand::Exit => Dispatch::Action(Action::Exit),
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
+            CliCommand::Export => Dispatch::Export,
             CliCommand::Query { query } => Dispatch::Query(query.into()),
         }
     }
@@ -226,6 +229,9 @@ pub fn run() -> anyhow::Result<()> {
         Dispatch::Query(query) => {
             let response = crate::DomeClient.send_query(&query)?;
             println!("{response}");
+        }
+        Dispatch::Export => {
+            crate::DomeClient.send_export_layout()?;
         }
     }
     Ok(())

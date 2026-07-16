@@ -146,6 +146,10 @@ pub(crate) trait WindowMetadata:
     fn clone_box(&self) -> Box<dyn WindowMetadata>;
 
     fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool;
+
+    /// Synthesise a `WindowMatcher` from this window's metadata.
+    /// Every populated platform field is included for maximum specificity.
+    fn to_window_matcher(&self) -> WindowMatcher;
 }
 
 /// Represents a single application window

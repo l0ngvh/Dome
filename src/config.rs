@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use serde::{Deserialize, Deserializer};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -771,7 +772,7 @@ impl<'de> Deserialize<'de> for SizeConstraint {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Strategy {
     PartitionTree,
@@ -803,7 +804,7 @@ pub(crate) struct MasterConfig {
     pub(crate) master_count: usize,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub(crate) struct WindowMatcher {
     #[serde(default)]
     pub(crate) app: Option<String>,
@@ -825,7 +826,7 @@ impl WalkRule for WindowMatcher {
 }
 
 /// Split mode for a `TreeLayoutNode::Container`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SplitMode {
     Horizontal,
@@ -912,6 +913,23 @@ impl<'de> Deserialize<'de> for TreeLayoutNode {
             }
         }
         deserializer.deserialize_any(Visitor)
+    }
+}
+
+impl Serialize for TreeLayoutNode {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            TreeLayoutNode::Leaf(matcher) => matcher.serialize(serializer),
+            TreeLayoutNode::Container { split, children } => match split {
+                None => children.serialize(serializer),
+                Some(s) => {
+                    let mut map = serializer.serialize_map(Some(2))?;
+                    map.serialize_entry("split", s)?;
+                    map.serialize_entry("children", children)?;
+                    map.end()
+                }
+            },
+        }
     }
 }
 
@@ -1019,6 +1037,20 @@ impl LayoutWorkspaceConfig {
         match self {
             LayoutWorkspaceConfig::PartitionTree { name, .. }
             | LayoutWorkspaceConfig::Master { name, .. } => name,
+        }
+    }
+
+    pub(crate) fn float(&self) -> &[WindowMatcher] {
+        match self {
+            LayoutWorkspaceConfig::PartitionTree { float, .. }
+            | LayoutWorkspaceConfig::Master { float, .. } => float,
+        }
+    }
+
+    pub(crate) fn fullscreen(&self) -> &[WindowMatcher] {
+        match self {
+            LayoutWorkspaceConfig::PartitionTree { fullscreen, .. }
+            | LayoutWorkspaceConfig::Master { fullscreen, .. } => fullscreen,
         }
     }
 }

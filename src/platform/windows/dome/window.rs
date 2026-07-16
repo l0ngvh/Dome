@@ -105,6 +105,16 @@ impl crate::core::WindowMetadata for WindowsMetadata {
             || matcher.class.is_some()
             || matcher.aumid.is_some()
     }
+
+    fn to_window_matcher(&self) -> WindowMatcher {
+        WindowMatcher {
+            process: Some(self.process.clone()),
+            title: self.title.clone(),
+            class: self.class.clone(),
+            aumid: self.aumid.clone(),
+            ..Default::default()
+        }
+    }
 }
 
 pub(crate) const MAX_DRIFT_RETRIES: u8 = 5;

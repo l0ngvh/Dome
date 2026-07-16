@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::config::{LayoutWorkspaceConfig, Strategy};
+use crate::config::{LayoutWorkspaceConfig, Strategy, TreeLayoutNode, WindowMatcher};
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
@@ -43,6 +43,45 @@ pub(crate) enum TilingAction {
 pub(crate) struct TilingPlacements {
     pub(crate) windows: Vec<TilingWindowPlacement>,
     pub(crate) containers: Vec<ContainerPlacement>,
+}
+
+/// Per-strategy export payload for serialization to layout.toml.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct WorkspaceExport {
+    pub(crate) strategy: String,
+    pub(crate) tree: Option<TreeLayoutNode>,
+    pub(crate) master_ratio: Option<f32>,
+    pub(crate) master_count: Option<usize>,
+    pub(crate) master: Vec<WindowMatcher>,
+    pub(crate) secondary: Vec<WindowMatcher>,
+}
+
+impl WorkspaceExport {
+    pub(crate) fn to_layout_workspace_config(
+        &self,
+        name: &str,
+        float: Vec<WindowMatcher>,
+        fullscreen: Vec<WindowMatcher>,
+    ) -> LayoutWorkspaceConfig {
+        match self.strategy.as_str() {
+            "partition_tree" => LayoutWorkspaceConfig::PartitionTree {
+                name: name.to_owned(),
+                tree: self.tree.clone(),
+                float,
+                fullscreen,
+            },
+            "master" => LayoutWorkspaceConfig::Master {
+                name: name.to_owned(),
+                master_ratio: self.master_ratio,
+                master_count: self.master_count,
+                master: self.master.clone(),
+                secondary: self.secondary.clone(),
+                float,
+                fullscreen,
+            },
+            _ => unreachable!("unknown strategy"),
+        }
+    }
 }
 
 /// Abstraction over tiling behavior. Tiling-specific operations live here;
@@ -135,6 +174,10 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Validate strategy-specific structural invariants (test-only).
     #[cfg(test)]
     fn validate_tree(&self, hub: &HubAccess);
+
+    /// Export the current layout for a workspace, updating the strategy's
+    /// internal preferred-layout representation to match the live tree.
+    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WorkspaceExport>;
 }
 
 /// Convert layout-space coordinates to screen-absolute. Layout positions are

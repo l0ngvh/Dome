@@ -19,7 +19,9 @@ use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, SpawnIndicator, TilingWindowPlacement};
 use crate::core::node::{Dimension, Length, Logical, WindowId, WorkspaceId};
-use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, clip, translate};
+use crate::core::strategy::{
+    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, clip, translate,
+};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
 /// leaves and containers define split direction (horizontal/vertical) or tabbed
@@ -425,6 +427,10 @@ impl TilingStrategy for PartitionTreeStrategy {
                 }
             }
         }
+    }
+
+    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WorkspaceExport> {
+        PartitionTreeStrategy::export_workspace(self, hub, ws_id)
     }
 }
 

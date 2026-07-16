@@ -4,9 +4,9 @@ use crate::config::{LayoutWorkspaceConfig, SplitMode, TreeLayoutNode, WindowMatc
 use crate::core::WindowMetadata;
 use crate::core::allocator::{Allocator, Node, NodeId};
 use crate::core::hub::HubAccess;
-use crate::core::node::{Child, ContainerId, WindowId, WorkspaceId};
+use crate::core::node::{Child, ContainerId, Direction, WindowId, WorkspaceId};
 use crate::core::partition_tree::PartitionTreeStrategy;
-use crate::core::strategy::TilingStrategy;
+use crate::core::strategy::{TilingStrategy, WorkspaceExport};
 
 impl PartitionTreeStrategy {
     pub(super) fn build_preferred_layout(&mut self, tree: &TreeLayoutNode) -> PreferredSlot {
@@ -407,6 +407,139 @@ impl PartitionTreeStrategy {
         self.tiling_windows.get_mut(&window_id).unwrap().occupy = Some(slot_id);
         self.layout_workspace(hub, ws_id);
         self.set_focus_child(hub, Child::Window(window_id));
+    }
+
+    fn window_slot_matcher(&self, slot: PreferredWindowSlotId) -> &WindowMatcher {
+        &self.window_slots.get(slot).matcher
+    }
+
+    pub(super) fn build_from_live_tree(
+        &mut self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+    ) -> Option<PreferredSlot> {
+        let (root, old_root) = {
+            let ws = self.workspaces.get(&ws_id)?;
+            (ws.root?, ws.preferred_root)
+        };
+
+        let mut stack: Vec<(Option<PreferredContainerSlotId>, Child)> = vec![(None, root)];
+        for _ in crate::core::bounded_loop() {
+            let Some((parent, child)) = stack.pop() else {
+                break;
+            };
+            match child {
+                Child::Window(wid) => {
+                    let matcher = {
+                        let td = &self.tiling_windows[&wid];
+                        if let Some(old) = td.occupy {
+                            self.window_slot_matcher(old).clone()
+                        } else {
+                            hub.windows.get(wid).metadata.to_window_matcher()
+                        }
+                    };
+                    let new_slot = self.window_slots.allocate(PreferredWindowSlot {
+                        matcher,
+                        occupied: Some(wid),
+                        parent,
+                    });
+                    if let Some(pid) = parent {
+                        self.container_slots
+                            .get_mut(pid)
+                            .children
+                            .push(PreferredSlot::Window(new_slot));
+                    }
+                    self.tiling_windows.get_mut(&wid).unwrap().occupy = Some(new_slot);
+                }
+                Child::Container(cid) => {
+                    let split = {
+                        let container = self.containers.get(cid);
+                        Some(match container.direction() {
+                            Some(Direction::Horizontal) => SplitMode::Horizontal,
+                            Some(Direction::Vertical) => SplitMode::Vertical,
+                            None => SplitMode::Tabbed,
+                        })
+                    };
+                    let new_slot = self.container_slots.allocate(PreferredContainerSlot {
+                        split,
+                        children: vec![],
+                        occupied: Some(cid),
+                        parent,
+                    });
+                    if let Some(pid) = parent {
+                        self.container_slots
+                            .get_mut(pid)
+                            .children
+                            .push(PreferredSlot::Container(new_slot));
+                    }
+                    self.containers.get_mut(cid).occupy = Some(new_slot);
+                    for &c in self.containers.get(cid).children.iter().rev() {
+                        stack.push((Some(new_slot), c));
+                    }
+                }
+            }
+        }
+
+        if let Some(old) = old_root {
+            let mut stack = vec![old];
+            for _ in crate::core::bounded_loop() {
+                let Some(slot) = stack.pop() else { break };
+                match slot {
+                    PreferredSlot::Window(id) => self.window_slots.delete(id),
+                    PreferredSlot::Container(id) => {
+                        let children = self.container_slots.get(id).children.clone();
+                        self.container_slots.delete(id);
+                        for &c in children.iter().rev() {
+                            stack.push(c);
+                        }
+                    }
+                }
+            }
+        }
+
+        let pref_root = match root {
+            Child::Window(wid) => PreferredSlot::Window(self.tiling_windows[&wid].occupy.unwrap()),
+            Child::Container(cid) => {
+                PreferredSlot::Container(self.containers.get(cid).occupy.unwrap())
+            }
+        };
+        self.workspaces.get_mut(&ws_id).unwrap().preferred_root = Some(pref_root);
+
+        Some(pref_root)
+    }
+
+    pub(super) fn build_layout_node(&self, slot: PreferredSlot) -> TreeLayoutNode {
+        match slot {
+            PreferredSlot::Window(id) => {
+                let ws = self.window_slots.get(id);
+                TreeLayoutNode::Leaf(ws.matcher.clone())
+            }
+            PreferredSlot::Container(id) => {
+                let cs = self.container_slots.get(id);
+                TreeLayoutNode::Container {
+                    split: cs.split,
+                    children: cs
+                        .children
+                        .iter()
+                        .map(|&c| self.build_layout_node(c))
+                        .collect(),
+                }
+            }
+        }
+    }
+
+    pub(super) fn export_workspace(
+        &mut self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+    ) -> Option<WorkspaceExport> {
+        let root = self.build_from_live_tree(hub, ws_id)?;
+        let tree = self.build_layout_node(root);
+        Some(WorkspaceExport {
+            strategy: "partition_tree".into(),
+            tree: Some(tree),
+            ..Default::default()
+        })
     }
 }
 

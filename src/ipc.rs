@@ -48,6 +48,10 @@ impl DomeClient {
     pub fn send_query(&self, query: &crate::action::Query) -> std::io::Result<String> {
         self.send(&IpcMessage::Query(query.clone()))
     }
+
+    pub fn send_export_layout(&self) -> std::io::Result<String> {
+        self.send(&IpcMessage::ExportLayout)
+    }
 }
 
 pub(crate) fn start_server<F>(on_message: F) -> anyhow::Result<()>

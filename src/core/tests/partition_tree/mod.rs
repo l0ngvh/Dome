@@ -1,5 +1,6 @@
 mod automatic_tiling;
 mod delete_window;
+mod export;
 mod float_window;
 mod focus_direction;
 mod focus_parent;

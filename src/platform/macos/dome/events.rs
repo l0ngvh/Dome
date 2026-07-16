@@ -47,6 +47,7 @@ pub(in crate::platform::macos) enum HubEvent {
     },
     ConfigChanged(Box<Config>),
     LayoutConfigChanged(Box<LayoutConfig>),
+    ExportLayout(String),
     /// Periodic sync to catch missed AX notifications, as AX notifications are unreliable. Only
     /// syncs window state, not focus, as focus changes should come from user interactions. Beside
     /// we receive plenty of focus events, so missing them isn't a concern.
@@ -81,6 +82,7 @@ impl fmt::Display for HubEvent {
             Self::Query { query, .. } => write!(f, "Query({query:?})"),
             Self::ConfigChanged(_) => write!(f, "ConfigChanged"),
             Self::LayoutConfigChanged(_) => write!(f, "LayoutConfigChanged"),
+            Self::ExportLayout(_) => write!(f, "ExportLayout"),
             Self::Sync => write!(f, "Sync"),
             Self::MonitorsChanged(monitors) => {
                 write!(f, "MonitorsChanged(count={})", monitors.len())

@@ -7,6 +7,7 @@ use std::str::FromStr;
 pub enum IpcMessage {
     Action(Action),
     Query(Query),
+    ExportLayout,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

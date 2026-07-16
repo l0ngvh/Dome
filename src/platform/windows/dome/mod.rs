@@ -64,6 +64,7 @@ pub(super) enum HubEvent {
     },
     ConfigChanged(Box<Config>),
     LayoutConfigChanged(Box<LayoutConfig>),
+    ExportLayout(String),
     TabClicked(ContainerId, usize),
     Shutdown,
 }
@@ -301,6 +302,12 @@ impl Dome {
     pub(super) fn tab_clicked(&mut self, container_id: ContainerId, tab_idx: usize) {
         self.hub.focus_tab_index(container_id, tab_idx);
         self.apply_layout();
+    }
+
+    pub(super) fn export_layout(&mut self, path: &std::path::Path) {
+        if let Err(e) = self.hub.export_layout(path) {
+            tracing::error!("Export layout failed: {e:#}");
+        }
     }
 
     pub(super) fn handle_display_change(&mut self) -> Vec<HwndId> {

@@ -113,6 +113,15 @@ impl WindowMetadata for MacOSMetadata {
         }
         matcher.app.is_some() || matcher.bundle_id.is_some() || matcher.title.is_some()
     }
+
+    fn to_window_matcher(&self) -> crate::config::WindowMatcher {
+        crate::config::WindowMatcher {
+            app: self.app_name.clone(),
+            bundle_id: self.bundle_id.clone(),
+            title: self.title.clone(),
+            ..Default::default()
+        }
+    }
 }
 
 pub(in crate::platform::macos) enum PendingAdd {
@@ -432,6 +441,12 @@ impl Dome {
     ) {
         self.hub.focus_tab_index(container_id, tab_idx);
         self.flush_layout();
+    }
+
+    pub(in crate::platform::macos) fn export_layout(&mut self, path: &std::path::Path) {
+        if let Err(e) = self.hub.export_layout(path) {
+            tracing::error!("Export layout failed: {e:#}");
+        }
     }
 
     /// Handles the frontmost window entering native fullscreen after a space

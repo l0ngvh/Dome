@@ -163,6 +163,9 @@ impl Runner {
             HubEvent::TabClicked(id, idx) => {
                 self.dome.tab_clicked(id, idx);
             }
+            HubEvent::ExportLayout(path) => {
+                self.dome.export_layout(std::path::Path::new(&path));
+            }
         }
     }
 

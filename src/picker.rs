@@ -194,6 +194,12 @@ mod tests {
             fn matches_window_matcher(&self, _matcher: &crate::config::WindowMatcher) -> bool {
                 false
             }
+            fn to_window_matcher(&self) -> crate::config::WindowMatcher {
+                crate::config::WindowMatcher {
+                    title: self.title.clone(),
+                    ..Default::default()
+                }
+            }
         }
         Box::new(Meta {
             title: Some(t.to_owned()),
