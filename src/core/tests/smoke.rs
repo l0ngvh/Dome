@@ -8,8 +8,8 @@ use super::{
     setup_logger_with_level, titled, validate_hub,
 };
 use crate::action::MonitorTarget;
-use crate::config::{SplitMode, Strategy, TreeLayoutNode, WindowMatcher};
-use crate::core::hub::Hub;
+use crate::config::{SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher};
+use crate::core::hub::{GlobalLayoutConfig, Hub};
 use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
 use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
@@ -68,7 +68,8 @@ impl SmokeStrategy {
                 Vec::new(),
             ),
             SmokeStrategy::PreferredTree => {
-                let (tree_ops, preferred_titles) = generate_tree_ops(rng, abort);
+                let (tree_ops, preferred_titles) =
+                    generate_tree_ops(rng, abort, PREF_TREE_MAX_LEAVES);
                 let tree_node = reconstruct_tree(&tree_ops);
                 let hub = make_pref_tree_hub(tree_node);
                 (hub, preferred_titles, tree_ops)
@@ -166,9 +167,7 @@ fn reduce_smoke_failure() {
         _ => {
             tracing::info!(recorded = window_ops.len(), ?signature, "captured failure");
             let make_hub = strategy.make_simple_hub();
-            let reduced = ddmin(window_ops, |c| {
-                reproduces_signature(c, &signature, make_hub)
-            });
+            let reduced = config_op_shrink(window_ops, &signature, make_hub);
             tracing::error!("=== REDUCED OPERATIONS ({}) ===", reduced.len());
             for (i, op) in reduced.iter().enumerate() {
                 tracing::error!("  {i}: {op:?}");
@@ -217,6 +216,8 @@ enum OpKind {
     QueryWorkspaces,
     MinimizeWindow,
     UnminimizeWindow,
+    ConfigReload,
+    SyncPreferredLayout,
 }
 
 const ALL_OP_KINDS: &[OpKind] = &[
@@ -258,6 +259,8 @@ const ALL_OP_KINDS: &[OpKind] = &[
     OpKind::QueryWorkspaces,
     OpKind::MinimizeWindow,
     OpKind::UnminimizeWindow,
+    OpKind::ConfigReload,
+    OpKind::SyncPreferredLayout,
 ];
 
 #[derive(Debug, Clone)]
@@ -347,6 +350,13 @@ enum RecordedOp {
     IncrementMasterCount,
     DecrementMasterCount,
     QueryWorkspaces,
+    ConfigReload {
+        layout: GlobalLayoutConfig,
+    },
+    SyncPreferredLayout {
+        workspace_name: String,
+        tree_ops: Vec<PrefTreeBuildOp>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -365,8 +375,24 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
         return;
     }
 
+    let mut current_layout = match strategy {
+        SmokeStrategy::PartitionTree | SmokeStrategy::PreferredTree => {
+            LayoutConfigBuilder::new().build()
+        }
+        SmokeStrategy::Master => LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .build(),
+    };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_iteration(&mut hub, abort, |_| {}, &mut rng, ops_per_run, &free_titles);
+        run_iteration(
+            &mut hub,
+            abort,
+            |_| {},
+            &mut rng,
+            ops_per_run,
+            &free_titles,
+            &mut current_layout,
+        );
     }));
 
     if let Err(e) = result {
@@ -399,6 +425,7 @@ fn run_iteration<F>(
     rng: &mut ChaCha8Rng,
     ops_per_run: usize,
     free_titles: &[String],
+    current_layout: &mut GlobalLayoutConfig,
 ) where
     F: FnMut(&RecordedOp),
 {
@@ -409,6 +436,7 @@ fn run_iteration<F>(
     let mut monitors: Vec<MonitorId> = vec![hub.focused_monitor()];
     let mut monitor_origin: Vec<usize> = vec![usize::MAX];
     let mut next_op_index: usize = 0;
+    let mut workspace_names: Vec<String> = vec!["0".to_string()];
 
     for _ in 0..ops_per_run {
         if abort.load(Ordering::Relaxed) {
@@ -425,6 +453,8 @@ fn run_iteration<F>(
             &monitor_origin,
             next_op_index,
             &mut free_titles,
+            current_layout,
+            &workspace_names,
         ) else {
             continue;
         };
@@ -438,6 +468,17 @@ fn run_iteration<F>(
             &mut monitors,
             &mut monitor_origin,
         );
+        if let RecordedOp::ConfigReload { layout } = &op {
+            *current_layout = layout.clone();
+        }
+        match &op {
+            RecordedOp::MoveToWorkspace { name } | RecordedOp::FocusWorkspace { name } => {
+                if !workspace_names.iter().any(|n| n == name) {
+                    workspace_names.push(name.clone());
+                }
+            }
+            _ => {}
+        }
         next_op_index += 1;
         validate_hub(hub);
     }
@@ -471,6 +512,8 @@ fn build_op(
     monitor_origin: &[usize],
     next_op_index: usize,
     free_titles: &mut Vec<String>,
+    current_layout: &mut GlobalLayoutConfig,
+    workspace_names: &[String],
 ) -> Option<RecordedOp> {
     match kind {
         OpKind::InsertTiling => {
@@ -685,6 +728,50 @@ fn build_op(
                 window: RecordedWindow(window_origin[idx]),
             })
         }
+        OpKind::ConfigReload => {
+            let mut layout = current_layout.clone();
+            match rng.random_range(0..5u8) {
+                0 => {
+                    layout.partition_tree.automatic_tiling =
+                        !layout.partition_tree.automatic_tiling;
+                }
+                1 => {
+                    let h = rng.random_range(10.0f32..50.0);
+                    layout.partition_tree.tab_bar_height = Length::new(h);
+                }
+                2 => {
+                    layout.master.master_ratio = rng.random_range(0.2f32..0.8);
+                }
+                3 => {
+                    layout.master.master_count = rng.random_range(1..=4);
+                }
+                _ => {
+                    let v = rng.random_range(10.0f32..200.0);
+                    layout.min_width = SizeConstraint::Pixels(Length::new(v));
+                }
+            }
+            Some(RecordedOp::ConfigReload { layout })
+        }
+        OpKind::SyncPreferredLayout => {
+            if workspace_names.is_empty() {
+                return None;
+            }
+            if current_layout.strategy != Strategy::PartitionTree {
+                return None;
+            }
+            let workspace_name =
+                workspace_names[rng.random_range(0..workspace_names.len())].clone();
+            let max_leaves = rng.random_range(2..=5);
+            let (tree_ops, _titles) =
+                generate_tree_ops_small(rng, &AtomicBool::new(false), max_leaves);
+            if tree_ops.is_empty() {
+                return None;
+            }
+            Some(RecordedOp::SyncPreferredLayout {
+                workspace_name,
+                tree_ops,
+            })
+        }
     }
 }
 
@@ -857,6 +944,21 @@ fn apply_op(
         RecordedOp::QueryWorkspaces => {
             hub.query_workspaces();
         }
+        RecordedOp::ConfigReload { layout } => {
+            hub.sync_configuration(layout.clone());
+        }
+        RecordedOp::SyncPreferredLayout {
+            workspace_name,
+            tree_ops,
+        } => {
+            let tree = reconstruct_tree(tree_ops);
+            let mut ws_builder = LayoutWorkspaceConfigBuilder::new(workspace_name)
+                .with_strategy(Strategy::PartitionTree);
+            if let Some(t) = tree {
+                ws_builder = ws_builder.with_tree(t);
+            }
+            hub.sync_preferred_layout(vec![ws_builder.build()]);
+        }
     }
 }
 
@@ -1012,6 +1114,14 @@ fn record(
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let (mut hub, free_titles, tree_ops) = strategy.build_hub(&mut rng, &abort);
     let mut ops: Vec<RecordedOp> = Vec::new();
+    let mut current_layout = match strategy {
+        SmokeStrategy::PartitionTree | SmokeStrategy::PreferredTree => {
+            LayoutConfigBuilder::new().build()
+        }
+        SmokeStrategy::Master => LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .build(),
+    };
     let signature = capture_panic(|| {
         run_iteration(
             &mut hub,
@@ -1020,6 +1130,7 @@ fn record(
             &mut rng,
             ops_per_run,
             &free_titles,
+            &mut current_layout,
         );
     });
     (
@@ -1177,6 +1288,21 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
             RecordedOp::QueryWorkspaces => {
                 hub.query_workspaces();
             }
+            RecordedOp::ConfigReload { layout } => {
+                hub.sync_configuration(layout.clone());
+            }
+            RecordedOp::SyncPreferredLayout {
+                workspace_name,
+                tree_ops,
+            } => {
+                let tree = reconstruct_tree(tree_ops);
+                let mut ws_builder = LayoutWorkspaceConfigBuilder::new(workspace_name)
+                    .with_strategy(Strategy::PartitionTree);
+                if let Some(t) = tree {
+                    ws_builder = ws_builder.with_tree(t);
+                }
+                hub.sync_preferred_layout(vec![ws_builder.build()]);
+            }
         }
         validate_hub(&hub);
     }
@@ -1215,6 +1341,14 @@ enum PrefTreeBuildOp {
     },
 }
 
+fn generate_tree_ops_small(
+    rng: &mut ChaCha8Rng,
+    abort: &AtomicBool,
+    max_leaves: usize,
+) -> (Vec<PrefTreeBuildOp>, Vec<String>) {
+    generate_tree_ops(rng, abort, max_leaves)
+}
+
 fn random_split(rng: &mut ChaCha8Rng) -> SplitMode {
     match rng.random_range(0..3u8) {
         0 => SplitMode::Horizontal,
@@ -1226,10 +1360,11 @@ fn random_split(rng: &mut ChaCha8Rng) -> SplitMode {
 fn generate_tree_ops(
     rng: &mut ChaCha8Rng,
     abort: &AtomicBool,
+    max_leaves: usize,
 ) -> (Vec<PrefTreeBuildOp>, Vec<String>) {
     let mut ops = Vec::new();
     let mut titles = Vec::new();
-    let leaf_target = rng.random_range(2..=PREF_TREE_MAX_LEAVES);
+    let leaf_target = rng.random_range(2..=max_leaves);
 
     if abort.load(Ordering::Relaxed) {
         return (ops, titles);
@@ -1430,13 +1565,84 @@ fn pref_tree_shrink(
         let new_window = ddmin(window.clone(), |w| {
             pref_tree_reproduces_signature(&new_tree, w, &target)
         });
-        if new_tree.len() == tree.len() && new_window.len() == window.len() {
+
+        let mut payload_shrunk = false;
+        let mut current_window = new_window.clone();
+        for i in 0..current_window.len() {
+            if let RecordedOp::SyncPreferredLayout {
+                ref workspace_name,
+                ref tree_ops,
+            } = current_window[i]
+            {
+                let reduced_tree = ddmin(tree_ops.clone(), |t| {
+                    let mut candidate = current_window.clone();
+                    candidate[i] = RecordedOp::SyncPreferredLayout {
+                        workspace_name: workspace_name.clone(),
+                        tree_ops: t.to_vec(),
+                    };
+                    pref_tree_reproduces_signature(&new_tree, &candidate, &target)
+                });
+                if reduced_tree.len() < tree_ops.len() {
+                    current_window[i] = RecordedOp::SyncPreferredLayout {
+                        workspace_name: workspace_name.clone(),
+                        tree_ops: reduced_tree,
+                    };
+                    payload_shrunk = true;
+                    break;
+                }
+            }
+        }
+
+        if new_tree.len() == tree.len() && new_window.len() == window.len() && !payload_shrunk {
             return (tree, new_window);
         }
         tree = new_tree;
-        window = new_window;
+        window = current_window;
         tracing::info!(tree = tree.len(), window = window.len(), "shrink iteration");
     }
+}
+
+fn config_op_shrink(
+    ops: Vec<RecordedOp>,
+    target: &FailureSignature,
+    make_hub: fn() -> Hub,
+) -> Vec<RecordedOp> {
+    let mut ops = ops;
+    let target = target.clone();
+    loop {
+        ops = ddmin(ops.clone(), |c| reproduces_signature(c, &target, make_hub));
+
+        let mut shrunk = false;
+        for i in 0..ops.len() {
+            if let RecordedOp::SyncPreferredLayout {
+                ref workspace_name,
+                ref tree_ops,
+            } = ops[i]
+            {
+                let reduced_tree = ddmin(tree_ops.clone(), |t| {
+                    let mut candidate = ops.clone();
+                    candidate[i] = RecordedOp::SyncPreferredLayout {
+                        workspace_name: workspace_name.clone(),
+                        tree_ops: t.to_vec(),
+                    };
+                    reproduces_signature(&candidate, &target, make_hub)
+                });
+                if reduced_tree.len() < tree_ops.len() {
+                    ops[i] = RecordedOp::SyncPreferredLayout {
+                        workspace_name: workspace_name.clone(),
+                        tree_ops: reduced_tree,
+                    };
+                    shrunk = true;
+                    break;
+                }
+            }
+        }
+
+        if !shrunk {
+            break;
+        }
+    }
+    ops
 }
 
 mod tests {
