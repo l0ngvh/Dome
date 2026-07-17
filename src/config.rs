@@ -432,8 +432,14 @@ impl RawConfig {
             },
             float: w.rule_vec::<WindowMatcher>("float"),
             fullscreen: w.rule_vec::<WindowMatcher>("fullscreen"),
+            linux: w.nested_or("linux", LinuxConfig::default()),
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn default_ignore() -> Vec<WindowMatcher> {
+    Vec::new()
 }
 
 #[cfg(target_os = "macos")]
@@ -533,6 +539,14 @@ impl WalkRecover for PartitionTreeConfig {
         PartitionTreeConfig {
             tab_bar_height: w.field("tab_bar_height", default_tab_bar_height()),
             automatic_tiling: w.field("automatic_tiling", default_automatic_tiling()),
+        }
+    }
+}
+
+impl WalkRecover for LinuxConfig {
+    fn walk(w: &mut Walker) -> Self {
+        LinuxConfig {
+            xwayland: w.field("xwayland", true),
         }
     }
 }
@@ -841,11 +855,20 @@ pub(crate) struct WindowMatcher {
     pub(crate) class: Option<String>,
     #[serde(default)]
     pub(crate) aumid: Option<String>,
+    #[serde(default)]
+    pub(crate) app_id: Option<String>,
 }
 
 impl WalkRule for WindowMatcher {
-    const KNOWN: &'static [&'static str] =
-        &["app", "bundle_id", "title", "process", "class", "aumid"];
+    const KNOWN: &'static [&'static str] = &[
+        "app",
+        "bundle_id",
+        "title",
+        "process",
+        "class",
+        "aumid",
+        "app_id",
+    ];
 }
 
 /// Split mode for a `TreeLayoutNode::Container`.
@@ -1138,6 +1161,26 @@ pub(crate) struct Config {
     pub(crate) float: Vec<WindowMatcher>,
     #[serde(default)]
     pub(crate) fullscreen: Vec<WindowMatcher>,
+    #[serde(default)]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) linux: LinuxConfig,
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct LinuxConfig {
+    #[serde(default = "default_true")]
+    pub(crate) xwayland: bool,
+}
+
+impl Default for LinuxConfig {
+    fn default() -> Self {
+        Self { xwayland: true }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize, Default, Clone, Copy)]
@@ -1188,6 +1231,7 @@ impl Default for Config {
             size_constraints: SizeConstraints::default(),
             float: Vec::new(),
             fullscreen: Vec::new(),
+            linux: LinuxConfig::default(),
         }
     }
 }
@@ -1475,6 +1519,18 @@ mod tests {
     fn start_at_login_defaults_to_false() {
         let config: Config = toml::from_str("").unwrap();
         assert!(!config.start_at_login);
+    }
+
+    #[test]
+    fn linux_xwayland_defaults_to_true() {
+        let config: Config = toml::from_str("").unwrap();
+        assert!(config.linux.xwayland);
+    }
+
+    #[test]
+    fn linux_xwayland_can_be_disabled() {
+        let config: Config = toml::from_str("[linux]\nxwayland = false").unwrap();
+        assert!(!config.linux.xwayland);
     }
 
     #[test]

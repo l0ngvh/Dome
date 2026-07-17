@@ -44,6 +44,12 @@ pub(crate) struct Monitor {
     pub(super) active_workspace: WorkspaceId,
 }
 
+impl Monitor {
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 impl Node for Monitor {
     type Id = MonitorId;
 }

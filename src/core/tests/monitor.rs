@@ -578,3 +578,19 @@ fn monitor_scale_multiplies_size_constraints() {
       )
     ");
 }
+
+#[test]
+fn monitor_name_returns_construction_name() {
+    let mut hub = setup();
+    let monitor_id = hub.add_monitor(
+        "external-1".to_string(),
+        Dimension::new(
+            Length::new(150.0),
+            Length::new(0.0),
+            Length::new(100.0),
+            Length::new(30.0),
+        ),
+        1.0,
+    );
+    assert_eq!(hub.access.monitors.get(monitor_id).name(), "external-1");
+}

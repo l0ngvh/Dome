@@ -14,8 +14,8 @@ mod tests;
 mod workspace;
 
 pub(crate) use hub::Hub;
-#[cfg(target_os = "macos")]
-pub(crate) use hub::MonitorPlacements;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) use hub::{MonitorPlacements, VisiblePlacements};
 pub(crate) use hub::{
     ContainerPlacement, FloatWindowPlacement, GlobalLayoutConfig, MonitorLayout, SpawnIndicator,
     TilingWindowPlacement,

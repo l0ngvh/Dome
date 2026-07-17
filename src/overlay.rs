@@ -232,7 +232,7 @@ pub(crate) fn paint_tab_bar(
 /// hit-testing) live in per-`ContainerId` windows the platform shell hosts and
 /// do not paint from the per-monitor overlay.
 /// `origin` is the visible_frame's top-left in canvas coordinates (same as `paint_window_border`).
-fn show_container(
+pub(crate) fn show_container(
     ui: &mut egui::Ui,
     placement: &LogicalTiledContainer,
     theme: &Theme,

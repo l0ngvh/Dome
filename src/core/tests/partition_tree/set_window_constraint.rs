@@ -1593,3 +1593,32 @@ fn window_max_width_smaller_than_global_min_width() {
     +------------------------------------------------+****************************************************************************************************
     ");
 }
+
+#[test]
+fn set_window_constraint_returns_true_when_value_changes() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+
+    let changed = hub.set_window_constraint(w0, Some(100.0), None, None, None);
+    assert!(changed);
+}
+
+#[test]
+fn set_window_constraint_returns_false_when_all_values_match() {
+    let mut hub = setup();
+    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+
+    let first = hub.set_window_constraint(w0, Some(100.0), Some(20.0), Some(120.0), Some(40.0));
+    assert!(first);
+    let snap_before = snapshot(&hub);
+
+    // Repeating the same tuple, plus a run with only Nones, both short-circuit.
+    let repeat = hub.set_window_constraint(w0, Some(100.0), Some(20.0), Some(120.0), Some(40.0));
+    assert!(!repeat);
+    let nones = hub.set_window_constraint(w0, None, None, None, None);
+    assert!(!nones);
+
+    assert_eq!(snapshot(&hub), snap_before);
+}

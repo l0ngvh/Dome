@@ -713,6 +713,12 @@ impl Hub {
     /// - `Some(x)`: set constraint to x
     ///
     /// If setting min above existing max, max is raised to match min.
+    ///
+    /// Returns `true` if any stored value changed and a re-tile ran, `false`
+    /// if every supplied value already matched (short-circuit, no re-tile).
+    /// Callers can skip follow-up work like OS-side window notification when
+    /// this returns `false`.
+    #[must_use = "the bool indicates whether the layout actually changed; ignore explicitly if that is intended"]
     pub(crate) fn set_window_constraint(
         &mut self,
         window_id: WindowId,
@@ -720,8 +726,20 @@ impl Hub {
         min_height: Option<f32>,
         max_width: Option<f32>,
         max_height: Option<f32>,
-    ) {
+    ) -> bool {
         let window = self.access.windows.get_mut(window_id);
+
+        // Short-circuit when every supplied value matches the current stored
+        // value. The full update path below still normalises min/max ordering
+        // and re-tiles, so this pre-check must consider the raw incoming
+        // values only, not the post-normalisation view.
+        let unchanged = min_width.map_or(true, |v| v == window.min_width)
+            && min_height.map_or(true, |v| v == window.min_height)
+            && max_width.map_or(true, |v| v == window.max_width)
+            && max_height.map_or(true, |v| v == window.max_height);
+        if unchanged {
+            return false;
+        }
 
         let update = |name: &str,
                       min: &mut f32,
@@ -774,6 +792,7 @@ impl Hub {
                 .for_workspace_mut(ws)
                 .layout_workspace(&mut self.access, ws);
         }
+        true
     }
 
     #[tracing::instrument(skip(self))]
