@@ -1,10 +1,12 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
+
+use egui::ahash::HashSet;
 
 use crate::config::{LayoutWorkspaceConfig, WindowMatcher};
 use crate::core::WindowMetadata;
-use crate::core::allocator::{Allocator, Node, NodeId};
+use crate::core::allocator::{Node, NodeId};
 use crate::core::hub::HubAccess;
-use crate::core::master::{MasterStrategy, Pane, PlacementTag, WorkspaceState};
+use crate::core::master::{MasterStrategy, WindowState};
 use crate::core::node::{WindowId, WorkspaceId};
 use crate::core::strategy::TilingStrategy;
 
@@ -52,21 +54,20 @@ impl MasterStrategy {
         };
 
         let current_master: Vec<WindowMatcher> = state
-            .master_matcher_ids
+            .master_matchers
             .iter()
-            .map(|id| self.master_matchers.get(*id).clone())
+            .map(|id| self.matchers.get(*id).clone())
             .collect();
         let current_secondary: Vec<WindowMatcher> = state
-            .secondary_matcher_ids
+            .secondary_matchers
             .iter()
-            .map(|id| self.secondary_matchers.get(*id).clone())
+            .map(|id| self.matchers.get(*id).clone())
             .collect();
         let matchers_changed = current_master.as_slice() != incoming_master.as_slice()
             || current_secondary.as_slice() != incoming_secondary.as_slice();
         let new_effective_count = new_count_opt.unwrap_or(self.master_count);
         let cur_effective_count = state.master_count.unwrap_or(self.master_count);
-        let count_changed =
-            new_count_opt.is_some() && new_effective_count != cur_effective_count;
+        let count_changed = new_count_opt.is_some() && new_effective_count != cur_effective_count;
         let new_effective_ratio = new_ratio_opt.unwrap_or(self.master_ratio);
         let cur_effective_ratio = state.master_ratio.unwrap_or(self.master_ratio);
         let ratio_changed = new_ratio_opt.is_some()
@@ -82,29 +83,29 @@ impl MasterStrategy {
             let tiling_windows: Vec<WindowId> = state
                 .master
                 .iter()
-                .chain(state.stack.iter())
-                .map(|(id, _)| *id)
+                .chain(state.secondary.iter())
+                .copied()
                 .collect();
 
             let focused = self.focused_tiling_window(ws_id);
 
             let state = self.workspaces.get_mut(&ws_id).unwrap();
-            for &id in &state.master_matcher_ids {
-                self.master_matchers.delete(id);
+            for &id in &state.master_matchers {
+                self.matchers.delete(id);
             }
-            for &id in &state.secondary_matcher_ids {
-                self.secondary_matchers.delete(id);
+            for &id in &state.secondary_matchers {
+                self.matchers.delete(id);
             }
-            state.master_matcher_ids = incoming_master
+            state.master_matchers = incoming_master
                 .iter()
-                .map(|m| self.master_matchers.allocate(m.clone()))
+                .map(|m| self.matchers.allocate(m.clone()))
                 .collect();
-            state.secondary_matcher_ids = incoming_secondary
+            state.secondary_matchers = incoming_secondary
                 .iter()
-                .map(|m| self.secondary_matchers.allocate(m.clone()))
+                .map(|m| self.matchers.allocate(m.clone()))
                 .collect();
             state.master.clear();
-            state.stack.clear();
+            state.secondary.clear();
             state.focus = None;
             state.master_count = new_count_opt;
             state.master_ratio = new_ratio_opt;
@@ -129,77 +130,109 @@ impl MasterStrategy {
         }
     }
 
-    /// Decide where a new window should go. Pure function, no mutation.
-    /// Returns `(target_pane, insertion_index, tag)`.
-    pub(super) fn place(
-        state: &WorkspaceState,
+    pub(super) fn insert_window_against_preferred_layout(
+        &mut self,
+        ws_id: WorkspaceId,
+        window_id: WindowId,
         metadata: &dyn WindowMetadata,
-        master_matchers: &Allocator<WindowMatcher>,
-        secondary_matchers: &Allocator<WindowMatcher>,
-        global_master_count: usize,
-    ) -> (Pane, usize, PlacementTag) {
-        let occupied_master: HashSet<usize> = state.occupied_master().collect();
-        let occupied_secondary: HashSet<usize> = state.occupied_secondary().collect();
-
-        for (slot, id) in state.master_matcher_ids.iter().enumerate() {
-            if occupied_master.contains(&slot) {
-                continue;
-            }
-            if metadata.matches_window_matcher(master_matchers.get(*id)) {
-                return Self::insert_for_match(state, Pane::Master, slot, global_master_count);
-            }
-        }
-        for (slot, id) in state.secondary_matcher_ids.iter().enumerate() {
-            if occupied_secondary.contains(&slot) {
-                continue;
-            }
-            if metadata.matches_window_matcher(secondary_matchers.get(*id)) {
-                return Self::insert_for_match(state, Pane::Secondary, slot, global_master_count);
-            }
-        }
-
-        let effective_count = state.master_count.unwrap_or(global_master_count);
-        if state.master.len() < effective_count {
-            (Pane::Master, state.master.len(), PlacementTag::Unmatched)
-        } else {
-            (Pane::Secondary, state.stack.len(), PlacementTag::Unmatched)
-        }
-    }
-
-    /// Insert a matched window. When master-targeted and master is full,
-    /// cascades to stack only if master has no Unmatched windows to evict.
-    fn insert_for_match(
-        state: &WorkspaceState,
-        pane: Pane,
-        slot: usize,
-        global_master_count: usize,
-    ) -> (Pane, usize, PlacementTag) {
-        let tag = PlacementTag::Matched { pane, slot };
-
-        let effective_count = state.master_count.unwrap_or(global_master_count);
-        if pane == Pane::Master && state.master.len() >= effective_count {
-            let has_unmatched = state
-                .master
-                .iter()
-                .any(|(_, t)| matches!(t, PlacementTag::Unmatched));
-            if !has_unmatched {
-                let ins = state
-                    .stack
-                    .iter()
-                    .position(|(_, t)| Self::slot_of(t).is_some_and(|k| k > slot))
-                    .unwrap_or(state.stack.len());
-                return (Pane::Secondary, ins, tag);
-            }
-        }
-
-        let vec = match pane {
-            Pane::Master => &state.master,
-            Pane::Secondary => &state.stack,
-        };
-        let ins = vec
+    ) -> Option<MatcherId> {
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.focus = Some(window_id);
+        let effective_count = state.master_count.unwrap_or(self.master_count);
+        let occupied_master: HashSet<MatcherId> = state
+            .master
             .iter()
-            .position(|(_, t)| Self::slot_of(t).is_some_and(|k| k > slot))
-            .unwrap_or(vec.len());
-        (pane, ins, tag)
+            .filter_map(|&wid| self.window_states.get(&wid).and_then(|e| e.occupy))
+            .filter(|mid| state.master_matchers.contains(mid))
+            .collect();
+        let occupied_secondary: HashSet<MatcherId> = state
+            .secondary
+            .iter()
+            .filter_map(|&wid| self.window_states.get(&wid).and_then(|e| e.occupy))
+            .filter(|mid| state.secondary_matchers.contains(mid))
+            .collect();
+
+        for &mid in &state.master_matchers {
+            if occupied_master.contains(&mid) {
+                continue;
+            }
+            if metadata.matches_window_matcher(self.matchers.get(mid)) {
+                if state.master.len() >= effective_count {
+                    // Check whether we can evict any unmatched window
+                    if let Some(evict_pos) = state.master.iter().rposition(|&w| {
+                        self.window_states
+                            .get(&w)
+                            .is_some_and(|e| e.occupy.is_none())
+                    }) {
+                        let evicted_window = state.master.remove(evict_pos);
+                        state.secondary.insert(0, evicted_window);
+                        insert_matched_window(
+                            &self.window_states,
+                            &mut state.master,
+                            &state.master_matchers,
+                            window_id,
+                            mid,
+                        );
+                        return Some(mid);
+                    }
+                    // Proceed with matching in the secondary stack
+                } else {
+                    // There are still space so just push into master
+                    insert_matched_window(
+                        &self.window_states,
+                        &mut state.master,
+                        &state.master_matchers,
+                        window_id,
+                        mid,
+                    );
+                    return Some(mid);
+                }
+            }
+        }
+
+        for &mid in &state.secondary_matchers {
+            if occupied_secondary.contains(&mid) {
+                continue;
+            }
+            if metadata.matches_window_matcher(self.matchers.get(mid)) {
+                insert_matched_window(
+                    &self.window_states,
+                    &mut state.secondary,
+                    &state.secondary_matchers,
+                    window_id,
+                    mid,
+                );
+                return Some(mid);
+            }
+        }
+        None
     }
+}
+
+fn insert_matched_window(
+    window_states: &HashMap<WindowId, WindowState>,
+    pane: &mut Vec<WindowId>,
+    pane_matchers: &[MatcherId],
+    window_id: WindowId,
+    slot_id: MatcherId,
+) {
+    let slot_position = pane_matchers.iter().position(|&x| x == slot_id).unwrap();
+    // Get the insert position for a matcher slot, in the order specified in the preferred
+    // layout.
+    // Note that since matched windows can be moved, we can no longer ensure that all
+    // matched windows follow the specified order. Placing the window right before
+    // the first found subsequent slot is acceptable here
+    let insert_position = pane
+        .iter()
+        .position(|&w| {
+            let Some(mid) = window_states.get(&w).unwrap().occupy else {
+                return false;
+            };
+            pane_matchers
+                .iter()
+                .position(|&m| m == mid)
+                .is_some_and(|s| s > slot_position)
+        })
+        .unwrap_or(pane.len());
+    pane.insert(insert_position, window_id);
 }

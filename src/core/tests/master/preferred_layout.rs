@@ -145,7 +145,7 @@ fn master_matched_goes_to_master_pane() {
 }
 
 #[test]
-fn master_full_cascades_to_secondary() {
+fn master_full_pushes_unmatched_to_secondary() {
     let mut hub = TestHubBuilder::new()
         .with_layout(
             LayoutConfigBuilder::new()
@@ -207,6 +207,90 @@ fn master_full_cascades_to_secondary() {
     *                                                                         *|                                                                         |
     *                                                                         *|                                                                         |
     ***************************************************************************+-------------------------------------------------------------------------+
+    ");
+}
+
+#[test]
+fn master_full_continue_matching_in_secondary() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![
+                    WindowMatcher {
+                        process: Some("editor.exe".into()),
+                        ..Default::default()
+                    },
+                    WindowMatcher {
+                        process: Some("code.exe".into()),
+                        ..Default::default()
+                    },
+                ])
+                .with_secondary(vec![
+                    WindowMatcher {
+                        title: Some("Code".into()),
+                        ..Default::default()
+                    },
+                    WindowMatcher {
+                        process: Some("browser.exe".into()),
+                        ..Default::default()
+                    },
+                ])
+                .build(),
+        ])
+        .build();
+    let _w0 = hub.insert_tiling(
+        hub.current_workspace(),
+        titled_process("Editor", "editor.exe"),
+    );
+    let _w1 = hub.insert_tiling(
+        hub.current_workspace(),
+        titled_process("Browser", "browser.exe"),
+    );
+    let _w2 = hub.insert_tiling(hub.current_workspace(), titled_process("Code", "code.exe"));
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(2))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
+        Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=15.00, highlighted)
+        Window(id=WindowId(1), x=75.00, y=15.00, w=75.00, h=15.00)
+      )
+
+    +-------------------------------------------------------------------------+***************************************************************************
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                    W2                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |***************************************************************************
+    |                                    W0                                   |+-------------------------------------------------------------------------+
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                    W1                                   |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    |                                                                         ||                                                                         |
+    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     ");
 }
 
@@ -860,13 +944,6 @@ fn swapping_secondary_window_doesnt_guarrantee_next_match() {
     ");
 }
 
-fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
-    Box::new(TestMetadata {
-        title: Some(title.into()),
-        process: Some(process.into()),
-    })
-}
-
 #[test]
 fn increase_master_count_without_matcher_change() {
     // When only the master_count increases in a preferred layout (matchers
@@ -938,4 +1015,11 @@ fn increase_master_count_without_matcher_change() {
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
     ");
+}
+
+fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
+    Box::new(TestMetadata {
+        title: Some(title.into()),
+        process: Some(process.into()),
+    })
 }
