@@ -18,8 +18,9 @@
 //! move the focused node.
 
 use crate::core::hub::HubAccess;
+use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
-use crate::core::partition_tree::{Child, Constraints, SpawnMode};
+use crate::core::partition_tree::{Child, SpawnMode};
 use crate::core::strategy::{clip, distribute_space};
 
 use super::PartitionTreeStrategy;
@@ -416,8 +417,14 @@ impl PartitionTreeStrategy {
         let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
         let screen = monitor.dimension;
         let scale = monitor.scale;
-        let global_min_w = hub.layout.min_width.resolve(screen.width, scale);
-        let global_min_h = hub.layout.min_height.resolve(screen.height, scale);
+        let global_min_w = self
+            .size_constraints
+            .minimum_width
+            .resolve(screen.width, scale);
+        let global_min_h = self
+            .size_constraints
+            .minimum_height
+            .resolve(screen.height, scale);
 
         match child {
             Child::Window(id) => {
@@ -430,8 +437,14 @@ impl PartitionTreeStrategy {
                 let win_max_w = Length::new(win_max_w_raw);
                 let win_max_h = Length::new(win_max_h_raw);
 
-                let global_max_w = hub.layout.max_width.resolve(screen.width, scale);
-                let global_max_h = hub.layout.max_height.resolve(screen.height, scale);
+                let global_max_w = self
+                    .size_constraints
+                    .maximum_width
+                    .resolve(screen.width, scale);
+                let global_max_h = self
+                    .size_constraints
+                    .maximum_height
+                    .resolve(screen.height, scale);
 
                 let max_w = if win_max_w > Length::ZERO {
                     win_max_w

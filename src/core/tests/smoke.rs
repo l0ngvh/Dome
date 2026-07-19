@@ -747,7 +747,7 @@ fn build_op(
                 }
                 _ => {
                     let v = rng.random_range(10.0f32..200.0);
-                    layout.min_width = SizeConstraint::Pixels(Length::new(v));
+                    layout.size_constraints.minimum_width = SizeConstraint::Pixels(Length::new(v));
                 }
             }
             Some(RecordedOp::ConfigReload { layout })

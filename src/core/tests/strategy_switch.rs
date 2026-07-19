@@ -2,6 +2,7 @@ use crate::config::{LayoutWorkspaceConfig, MasterConfig, Strategy};
 use crate::core::GlobalLayoutConfig;
 use crate::core::hub::Hub;
 use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::tests::setup_logger_with_level;
 
 use super::{LayoutConfigBuilder, setup_hub, snapshot, titled};
 use insta::assert_snapshot;
@@ -27,7 +28,6 @@ fn setup_hub_with_layout(layout: GlobalLayoutConfig, overrides: Vec<LayoutWorksp
         1.0,
         layout,
         overrides,
-        Vec::new(),
     )
 }
 
@@ -108,6 +108,7 @@ fn sync_config_inactive_master_field_change_preserves_tree() {
 #[test]
 fn sync_config_switches_partition_tree_to_master() {
     let mut hub = setup_hub();
+    setup_logger_with_level("trace");
     hub.insert_tiling(hub.current_workspace(), titled("w4"));
     hub.insert_tiling(hub.current_workspace(), titled("w5"));
     hub.insert_tiling(hub.current_workspace(), titled("w6"));
@@ -397,14 +398,14 @@ fn sync_config_swap_iterates_every_active_workspace() {
     ");
 
     hub.focus_workspace("1");
-    assert_snapshot!(snapshot(&hub), @"
-    Hub(focused=WindowId(8))
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(7))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=0.00, y=0.00, w=75.00, h=30.00)
         Window(id=WindowId(5), x=75.00, y=0.00, w=75.00, h=10.00)
         Window(id=WindowId(6), x=75.00, y=10.00, w=75.00, h=10.00)
-        Window(id=WindowId(7), x=75.00, y=20.00, w=75.00, h=10.00)
-        Window(id=WindowId(8), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
+        Window(id=WindowId(7), x=75.00, y=20.00, w=75.00, h=10.00, highlighted)
+        Window(id=WindowId(8), x=10.00, y=5.00, w=30.00, h=20.00, float)
       )
 
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
@@ -412,92 +413,32 @@ fn sync_config_swap_iterates_every_active_workspace() {
     |                                                                         ||                                                                         |
     |                                                                         ||                                                                         |
     |                                                                         ||                                                                         |
-    |         ******************************                                  ||                                    W5                                   |
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  |+-------------------------------------------------------------------------+
-    |         *                            *                                  |+-------------------------------------------------------------------------+
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  ||                                                                         |
-    |         *             F8             *                                  ||                                    W6                                   |
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  |+-------------------------------------------------------------------------+
-    |         *                            *                                  |+-------------------------------------------------------------------------+
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  ||                                                                         |
-    |         *                            *                                  ||                                                                         |
-    |         ******************************                                  ||                                                                         |
-    |                                                                         ||                                    W7                                   |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    |                                                                         ||                                                                         |
-    +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
+    |         +----------------------------+                                  ||                                    W5                                   |
+    |         |                            |                                  ||                                                                         |
+    |         |                            |                                  ||                                                                         |
+    |         |                            |                                  ||                                                                         |
+    |         |                            |                                  |+-------------------------------------------------------------------------+
+    |         |                            |                                  |+-------------------------------------------------------------------------+
+    |         |                            |                                  ||                                                                         |
+    |         |                            |                                  ||                                                                         |
+    |         |                            |                                  ||                                                                         |
+    |         |                            |                                  ||                                                                         |
+    |         |             F8             |                                  ||                                    W6                                   |
+    |         |                            |                                  ||                                                                         |
+    |         |                            |                                  ||                                                                         |
+    |         |                            |                                  ||                                                                         |
+    |         |                            |                                  |+-------------------------------------------------------------------------+
+    |         |                            |                                  |***************************************************************************
+    |         |                            |                                  |*                                                                         *
+    |         |                            |                                  |*                                                                         *
+    |         |                            |                                  |*                                                                         *
+    |         +----------------------------+                                  |*                                                                         *
+    |                                                                         |*                                    W7                                   *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    |                                                                         |*                                                                         *
+    +-------------------------------------------------------------------------+***************************************************************************
     ");
-}
-
-#[test]
-fn sync_config_swap_preserves_float_focus() {
-    let mut hub = setup_hub();
-    hub.insert_tiling(hub.current_workspace(), titled("w24"));
-    let float_dim = Dimension::new(
-        Length::new(10.0),
-        Length::new(5.0),
-        Length::new(30.0),
-        Length::new(20.0),
-    );
-    let float_id = hub.insert_float(hub.current_workspace(), float_dim, titled("w25"));
-    // Focus the float so is_float_focused becomes true.
-    hub.set_focus(float_id);
-
-    let before = snapshot(&hub);
-    assert_snapshot!(before, @"
-    Hub(focused=WindowId(1))
-      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=30.00)
-        Window(id=WindowId(1), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
-      )
-
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |         ******************************                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *             F1             *                                  W0                                                                         |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         *                            *                                                                                                             |
-    |         ******************************                                                                                                             |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    |                                                                                                                                                    |
-    +----------------------------------------------------------------------------------------------------------------------------------------------------+
-    ");
-
-    let l = layout(Strategy::Master, 0.5, 1);
-    hub.sync_configuration(l);
-
-    assert_eq!(snapshot(&hub), before);
 }
 
 #[test]

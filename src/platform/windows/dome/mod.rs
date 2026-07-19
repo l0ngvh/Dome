@@ -150,7 +150,6 @@ impl Dome {
             primary.scale,
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
-            config.ignore.clone(),
         );
         let primary_monitor_id = hub.focused_monitor();
         let mut monitors_reg = MonitorRegistry::new();
@@ -220,7 +219,6 @@ impl Dome {
     pub(super) fn config_changed(&mut self, new_config: Config) {
         self.hub
             .sync_configuration(GlobalLayoutConfig::from(&new_config));
-        self.hub.set_ignore_rules(new_config.ignore.clone());
         self.config = new_config;
         for overlay in self.tiling_overlays.values_mut() {
             overlay.set_config(&self.config);

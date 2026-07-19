@@ -481,7 +481,6 @@ mod tests {
             1.0,
             GlobalLayoutConfig::default(),
             Vec::new(),
-            Vec::new(),
         )
     }
 

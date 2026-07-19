@@ -31,10 +31,10 @@ Controls how windows are tiled on screen.
 
 ```toml
 strategy = "partition_tree"
-min_width = "5%"
-min_height = "5%"
-max_width = 0
-max_height = 0
+minimum_width = "5%"
+minimum_height = "5%"
+maximum_width = 0
+maximum_height = 0
 
 [partition_tree]
 tab_bar_height = 24.0
@@ -48,8 +48,8 @@ master_count = 1
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `strategy` | string | `"partition_tree"` | Default tiling strategy. One of `"partition_tree"` or `"master"`. Per-workspace preferred layouts in `layout.toml` can set this per workspace. |
-| `min_width` / `min_height` | size | `"5%"` | Minimum window size. Float (e.g. `200`) parses as logical pixels. String with `%` suffix (e.g. `"10%"`) parses as percentage of workspace dimension. Use `0` to disable. |
-| `max_width` / `max_height` | size | `0` | Maximum window size. Same parsing rules as min. `0` means no limit. Windows clamped by max are centered within their allocated space. |
+| `minimum_width` / `minimum_height` | size | `"5%"` | Minimum window size. Float (e.g. `200`) parses as logical pixels. String with `%` suffix (e.g. `"10%"`) parses as percentage of workspace dimension. Use `0` to disable. |
+| `maximum_width` / `maximum_height` | size | `0` | Maximum window size. Same parsing rules as min. `0` means no limit. Windows clamped by max are centered within their allocated space. |
 | `partition_tree.tab_bar_height` | float | `24.0` | Height of the tab bar in tabbed containers, logical pixels. This value does not auto-scale with `font.text_size`, so long tab titles may truncate earlier as the body size grows. |
 | `partition_tree.automatic_tiling` | boolean | `true` | Pick split direction based on the focused window's dimensions. |
 | `master.master_ratio` | float | `0.5` | Width of the master area, in `[0.1, 0.9]`. |

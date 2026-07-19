@@ -15,8 +15,8 @@ mod strategy_switch;
 use std::collections::HashSet;
 
 use crate::config::{
-    LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, Strategy,
-    TreeLayoutNode, WindowMatcher,
+    LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, SizeConstraints,
+    Strategy, TreeLayoutNode, WindowMatcher,
 };
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
@@ -700,6 +700,7 @@ pub(super) fn setup_logger_with_level(level: &str) {
 struct TestHubBuilder {
     layout: GlobalLayoutConfig,
     preferred_layout: Vec<LayoutWorkspaceConfig>,
+    scale: f32,
 }
 
 impl TestHubBuilder {
@@ -707,6 +708,7 @@ impl TestHubBuilder {
         Self {
             layout: LayoutConfigBuilder::new().build(),
             preferred_layout: Vec::new(),
+            scale: 1.0,
         }
     }
 
@@ -721,6 +723,17 @@ impl TestHubBuilder {
         }
     }
 
+    #[cfg_attr(
+        not(target_os = "windows"),
+        expect(
+            dead_code,
+            reason = "phantom marker used only as a type parameter on Windows"
+        )
+    )]
+    fn with_scale(self, scale: f32) -> Self {
+        Self { scale, ..self }
+    }
+
     fn build(self) -> Hub {
         Hub::new(
             Dimension::new(
@@ -729,10 +742,9 @@ impl TestHubBuilder {
                 Length::new(ASCII_WIDTH as f32),
                 Length::new(ASCII_HEIGHT as f32),
             ),
-            1.0,
+            self.scale,
             self.layout,
             self.preferred_layout,
-            Vec::new(),
         )
     }
 }
@@ -741,10 +753,7 @@ struct LayoutConfigBuilder {
     strategy: Strategy,
     master: MasterConfig,
     partition_tree: PartitionTreeConfig,
-    min_width: SizeConstraint,
-    min_height: SizeConstraint,
-    max_width: SizeConstraint,
-    max_height: SizeConstraint,
+    size_constraints: SizeConstraints,
     float: Vec<WindowMatcher>,
     fullscreen: Vec<WindowMatcher>,
 }
@@ -761,10 +770,12 @@ impl LayoutConfigBuilder {
                 tab_bar_height: Length::<Logical>::new(TAB_BAR_HEIGHT),
                 automatic_tiling: false,
             },
-            min_width: SizeConstraint::Pixels(Length::new(1.0)),
-            min_height: SizeConstraint::Pixels(Length::new(1.0)),
-            max_width: SizeConstraint::Pixels(Length::new(0.0)),
-            max_height: SizeConstraint::Pixels(Length::new(0.0)),
+            size_constraints: SizeConstraints {
+                minimum_width: SizeConstraint::Pixels(Length::new(1.0)),
+                minimum_height: SizeConstraint::Pixels(Length::new(1.0)),
+                maximum_width: SizeConstraint::Pixels(Length::new(0.0)),
+                maximum_height: SizeConstraint::Pixels(Length::new(0.0)),
+            },
             float: vec![],
             fullscreen: vec![],
         }
@@ -778,11 +789,23 @@ impl LayoutConfigBuilder {
     }
 
     fn with_min_width(self, min_width: SizeConstraint) -> Self {
-        Self { min_width, ..self }
+        Self {
+            size_constraints: SizeConstraints {
+                minimum_width: min_width,
+                ..self.size_constraints
+            },
+            ..self
+        }
     }
 
     fn with_min_height(self, min_height: SizeConstraint) -> Self {
-        Self { min_height, ..self }
+        Self {
+            size_constraints: SizeConstraints {
+                minimum_height: min_height,
+                ..self.size_constraints
+            },
+            ..self
+        }
     }
 
     fn with_partition_tree_config(self, partition_tree: PartitionTreeConfig) -> Self {
@@ -793,11 +816,23 @@ impl LayoutConfigBuilder {
     }
 
     fn with_max_width(self, max_width: SizeConstraint) -> Self {
-        Self { max_width, ..self }
+        Self {
+            size_constraints: SizeConstraints {
+                maximum_width: max_width,
+                ..self.size_constraints
+            },
+            ..self
+        }
     }
 
     fn with_max_height(self, max_height: SizeConstraint) -> Self {
-        Self { max_height, ..self }
+        Self {
+            size_constraints: SizeConstraints {
+                maximum_height: max_height,
+                ..self.size_constraints
+            },
+            ..self
+        }
     }
 
     fn with_float(self, float: Vec<WindowMatcher>) -> Self {
@@ -813,12 +848,10 @@ impl LayoutConfigBuilder {
             strategy: self.strategy,
             partition_tree: self.partition_tree,
             master: self.master,
-            min_width: self.min_width,
-            min_height: self.min_height,
-            max_width: self.max_width,
-            max_height: self.max_height,
+            size_constraints: self.size_constraints,
             float: self.float,
             fullscreen: self.fullscreen,
+            ignore: Vec::new(),
         }
     }
 }
@@ -892,6 +925,13 @@ impl LayoutWorkspaceConfigBuilder {
     fn with_master_count(self, master_count: usize) -> Self {
         Self {
             master_count: Some(master_count),
+            ..self
+        }
+    }
+
+    fn with_master_ratio(self, master_ratio: f32) -> Self {
+        Self {
+            master_ratio: Some(master_ratio),
             ..self
         }
     }

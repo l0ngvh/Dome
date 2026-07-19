@@ -429,10 +429,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     config.strategy = layout.strategy;
     config.partition_tree = layout.partition_tree;
     config.master = layout.master.clone();
-    config.min_width = layout.min_width;
-    config.min_height = layout.min_height;
-    config.max_width = layout.max_width;
-    config.max_height = layout.max_height;
+    config.size_constraints = layout.size_constraints;
     config.float = layout.float;
     config.fullscreen = layout.fullscreen;
     let mut env = TestEnv::new_with_monitors(config, LayoutConfig::default(), vec![monitor]);

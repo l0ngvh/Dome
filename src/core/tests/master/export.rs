@@ -21,8 +21,6 @@ fn export_master_empty_workspace() {
         result,
         Some(WorkspaceExport {
             strategy: "master".into(),
-            master_ratio: Some(0.5),
-            master_count: Some(1),
             ..WorkspaceExport::default()
         })
     );
@@ -46,8 +44,6 @@ fn export_master_single_window() {
         result,
         Some(WorkspaceExport {
             strategy: "master".into(),
-            master_ratio: Some(0.5),
-            master_count: Some(1),
             master: vec![WindowMatcher {
                 title: Some("w0".into()),
                 ..Default::default()
@@ -85,8 +81,6 @@ fn export_master_matched_preserves_slot_matcher() {
         result,
         Some(WorkspaceExport {
             strategy: "master".into(),
-            master_ratio: Some(0.5),
-            master_count: Some(1),
             master: vec![slot_matcher],
             secondary: vec![],
             ..WorkspaceExport::default()
@@ -124,8 +118,6 @@ fn export_master_mixed_matched_and_unmatched() {
         result,
         Some(WorkspaceExport {
             strategy: "master".into(),
-            master_ratio: Some(0.5),
-            master_count: Some(1),
             master: vec![slot_matcher],
             secondary: vec![WindowMatcher {
                 title: Some("foreign".into()),

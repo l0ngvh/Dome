@@ -15,6 +15,7 @@ pub(crate) use types::*;
 use std::collections::HashMap;
 
 use crate::config::LayoutWorkspaceConfig;
+use crate::config::SizeConstraints;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, SpawnIndicator, TilingWindowPlacement};
@@ -35,29 +36,29 @@ pub(crate) struct PartitionTreeStrategy {
     container_slots: Allocator<PreferredContainerSlot>,
     tab_bar_height: Length<Logical>,
     automatic_tiling: bool,
+    size_constraints: SizeConstraints,
 }
 
 impl TilingStrategy for PartitionTreeStrategy {
     fn prepare_workspace(
         &mut self,
         ws_id: WorkspaceId,
-        ws_name: &str,
-        _layout: &GlobalLayoutConfig,
-        workspace_overrides: &[LayoutWorkspaceConfig],
+        preferred_layout: Option<&LayoutWorkspaceConfig>,
     ) {
-        let tree = workspace_overrides.iter().find_map(|w| match w {
-            LayoutWorkspaceConfig::PartitionTree { name, tree, .. } if *name == ws_name => {
-                tree.as_ref()
+        let preferred_root = match preferred_layout {
+            Some(LayoutWorkspaceConfig::PartitionTree { tree, .. }) => {
+                tree.as_ref().map(|t| self.build_preferred_layout(t))
             }
-            _ => None,
-        });
-        let preferred_root = tree.map(|t| self.build_preferred_layout(t));
-        self.workspaces
-            .entry(ws_id)
-            .or_insert(WorkspaceTilingState {
+            Some(_) => panic!("Preparing master workspace in partition tree strategy"),
+            None => None,
+        };
+        self.workspaces.insert(
+            ws_id,
+            WorkspaceTilingState {
                 preferred_root,
                 ..Default::default()
-            });
+            },
+        );
     }
 
     fn attach_window(&mut self, hub: &mut HubAccess, window_id: WindowId, ws_id: WorkspaceId) {
@@ -264,7 +265,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn focused_tiling_window(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> Option<WindowId> {
+    fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
         // Read focused_tiling directly instead of walking from root.
         // When focused_tiling is Child::Container (focus_parent highlight),
         // returns None so toggle_float/toggle_fullscreen become no-ops.
@@ -294,16 +295,10 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.attach_child_according_to_spawn_mode(hub, child, ws_id);
     }
 
-    fn has_tiling_windows(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> bool {
-        self.workspaces
-            .get(&ws_id)
-            .is_some_and(|s| s.root.is_some())
-    }
-
     /// Counts tiling windows by walking the container tree from root.
     /// A tree walk is necessary because `self.tiling_windows` is a global map
     /// across all workspaces and cannot be filtered by workspace without it.
-    fn tiling_window_count(&self, _hub: &HubAccess, ws_id: WorkspaceId) -> usize {
+    fn tiling_window_count(&self, ws_id: WorkspaceId) -> usize {
         let Some(root) = self.workspaces.get(&ws_id).and_then(|s| s.root) else {
             return 0;
         };
@@ -312,8 +307,25 @@ impl TilingStrategy for PartitionTreeStrategy {
             .count()
     }
 
-    fn prune_workspace(&mut self, ws_id: WorkspaceId) {
+    fn migrate(&mut self, ws_id: WorkspaceId) -> (Vec<WindowId>, Option<WindowId>) {
+        let focused = self.focused_tiling_window(ws_id);
+        let mut tiling: Vec<WindowId> = self
+            .workspaces
+            .get(&ws_id)
+            .and_then(|ws| ws.root)
+            .map(|root| {
+                self.children_dfs(root)
+                    .filter_map(|c| match c {
+                        Child::Window(id) => Some(id),
+                        Child::Container(_) => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // To return the windows in inserted order
+        tiling.reverse();
         self.workspaces.remove(&ws_id);
+        (tiling, focused)
     }
 
     fn sync_preferred_layout(
@@ -358,7 +370,7 @@ impl TilingStrategy for PartitionTreeStrategy {
             (windows, state.root)
         };
 
-        let focused = self.focused_tiling_window(hub, ws_id);
+        let focused = self.focused_tiling_window(ws_id);
 
         // Phase: mutable — detach root (clears bookmarks + occupation,
         // triggers one layout on the now-empty workspace).
@@ -389,10 +401,13 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        self.tab_bar_height = hub.layout.partition_tree.tab_bar_height;
-        self.automatic_tiling = hub.layout.partition_tree.automatic_tiling;
-        self.layout_workspace(hub, ws_id);
+    fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig) {
+        self.tab_bar_height = layout.partition_tree.tab_bar_height;
+        self.automatic_tiling = layout.partition_tree.automatic_tiling;
+        self.size_constraints = layout.size_constraints;
+        for ws_id in self.workspaces.keys().copied().collect::<Vec<_>>() {
+            self.layout_workspace(hub, ws_id);
+        }
     }
 
     #[cfg(test)]
@@ -435,7 +450,11 @@ impl TilingStrategy for PartitionTreeStrategy {
 }
 
 impl PartitionTreeStrategy {
-    pub(crate) fn new(tab_bar_height: Length<Logical>, automatic_tiling: bool) -> Self {
+    pub(crate) fn new(
+        tab_bar_height: Length<Logical>,
+        automatic_tiling: bool,
+        size_constraints: SizeConstraints,
+    ) -> Self {
         Self {
             containers: Allocator::new(),
             tiling_windows: HashMap::new(),
@@ -444,6 +463,7 @@ impl PartitionTreeStrategy {
             container_slots: Allocator::new(),
             tab_bar_height,
             automatic_tiling,
+            size_constraints,
         }
     }
 }

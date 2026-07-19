@@ -440,6 +440,19 @@ impl Length<Logical> {
     }
 }
 
+/// Effective per-child layout constraints in the `Length` unit.
+///
+/// `Length::ZERO` on a `max_*` field means "unbounded" on that axis. This
+/// matches the platform-side encoding of `Window::max_size` (zero means
+/// "no max"). Containers always set both maxes to `Length::ZERO`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Constraints {
+    pub(crate) min_width: Length,
+    pub(crate) min_height: Length,
+    pub(crate) max_width: Length,
+    pub(crate) max_height: Length,
+}
+
 impl Length<Unit> {
     pub(crate) fn value(self) -> f32 {
         self.v
@@ -509,16 +522,11 @@ impl<'de> serde::Deserialize<'de> for Length<Logical> {
 /// A rectangle tagged with a compile-time unit marker (`Logical` or `Physical`).
 /// The default type parameter `Unit` is cfg-aliased per target so core code can
 /// spell plain `Dimension` without an explicit generic.
-///
-/// `PhantomData<fn() -> U>` keeps `Dimension` `Send + Sync` regardless of `U`
-/// and makes `U` invariant, which is the idiomatic spelling for zero-sized tag
-/// types we never want the compiler to silently widen.
 pub(crate) struct Dimension<U = Unit> {
     pub(crate) width: Length<U>,
     pub(crate) height: Length<U>,
     pub(crate) x: Length<U>,
     pub(crate) y: Length<U>,
-    _unit: PhantomData<fn() -> U>,
 }
 
 // Manual Debug avoids a `U: Debug` bound that #[derive(Debug)] would infer.
@@ -572,7 +580,6 @@ impl<U> Dimension<U> {
             y,
             width,
             height,
-            _unit: PhantomData,
         }
     }
 

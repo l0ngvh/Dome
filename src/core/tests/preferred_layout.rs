@@ -5,6 +5,67 @@ use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, snapshot};
 use insta::assert_snapshot;
 
 #[test]
+fn sync_preferred_layout_creates_new_workspace() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .build();
+
+    hub.sync_preferred_layout(vec![
+        LayoutWorkspaceConfigBuilder::new("dev")
+            .with_strategy(Strategy::Master)
+            .with_float(vec![WindowMatcher {
+                process: Some("float.exe".into()),
+                ..Default::default()
+            }])
+            .build(),
+    ]);
+
+    hub.focus_workspace("dev");
+    hub.insert_window(
+        process_meta("float.exe"),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+        WindowRestrictions::None,
+    );
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=10.00, y=5.00, w=30.00, h=20.00, float, highlighted)
+      )
+
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+                                                                                                                                                          
+              ******************************                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *             F0             *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              *                            *                                                                                                              
+              ******************************
+    ");
+}
+
+#[test]
 fn float_matcher_routes_to_float() {
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())

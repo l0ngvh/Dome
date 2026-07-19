@@ -195,7 +195,6 @@ impl Dome {
             1.0,
             GlobalLayoutConfig::from(&config),
             workspace_overrides.clone(),
-            config.ignore.clone(),
         );
         let primary_monitor_id = hub.focused_monitor();
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
@@ -354,7 +353,6 @@ impl Dome {
     pub(in crate::platform::macos) fn config_changed(&mut self, new_config: Config) {
         self.hub
             .sync_configuration(GlobalLayoutConfig::from(&new_config));
-        self.hub.set_ignore_rules(new_config.ignore.clone());
         self.sender
             .send(HubMessage::ConfigChanged(Box::new(new_config.clone())));
         self.config = new_config;

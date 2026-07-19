@@ -5,6 +5,7 @@ use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, setup_logger_with_level,
     snapshot, titled,
 };
+use crate::core::{Dimension, Length, WindowRestrictions};
 
 #[test]
 fn insert_first_preferred_window_next_to_focused_window() {
@@ -1111,5 +1112,94 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
     ***************************************************************************+------------------------------------++-----------------------------------+
+    ");
+}
+
+#[test]
+fn insert_preferred_window_to_non_focused_workspace() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("10")
+                .with_tree(TreeLayoutNode::Container {
+                    split: Some(SplitMode::Tabbed),
+                    children: vec![
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("AAA".into()),
+                            ..Default::default()
+                        }),
+                        TreeLayoutNode::Leaf(WindowMatcher {
+                            title: Some("BBB".into()),
+                            ..Default::default()
+                        }),
+                    ],
+                })
+                .build(),
+        ])
+        .build();
+
+    hub.insert_window(
+        titled("BBB"),
+        Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            Length::new(800.0),
+            Length::new(600.0),
+        ),
+        WindowRestrictions::None,
+    );
+    hub.insert_window(
+        titled("AAA"),
+        Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            Length::new(800.0),
+            Length::new(600.0),
+        ),
+        WindowRestrictions::None,
+    );
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=None)
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
+    ");
+
+    hub.focus_workspace("10");
+    assert_snapshot!(snapshot(&hub), @r"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=28.00, highlighted, spawn=top)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=0, titles=[AAA, BBB])
+      )
+
+    +----------------------------------------------------------------------------------------------------------------------------------------------------+
+    |                                  [AAA]                                   |                                  BBB                                    |
+    ******************************************************************************************************************************************************
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                         W1                                                                         *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    *                                                                                                                                                    *
+    ******************************************************************************************************************************************************
     ");
 }

@@ -1,12 +1,8 @@
 use crate::action::MonitorTarget;
 use crate::config::{
-    Config, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraint, Strategy,
-    WindowMatcher, WindowMode,
+    Config, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraints, Strategy,
+    TreeLayoutNode, WindowMatcher, WindowMode,
 };
-
-use std::collections::HashSet;
-use std::path::Path;
-use toml_edit::{ArrayOfTables, DocumentMut, Item};
 
 use super::allocator::{Allocator, NodeId};
 use super::node::{
@@ -105,12 +101,10 @@ pub(crate) struct GlobalLayoutConfig {
     pub(crate) strategy: Strategy,
     pub(crate) partition_tree: PartitionTreeConfig,
     pub(crate) master: MasterConfig,
-    pub(crate) min_width: SizeConstraint,
-    pub(crate) min_height: SizeConstraint,
-    pub(crate) max_width: SizeConstraint,
-    pub(crate) max_height: SizeConstraint,
+    pub(crate) size_constraints: SizeConstraints,
     pub(crate) float: Vec<WindowMatcher>,
     pub(crate) fullscreen: Vec<WindowMatcher>,
+    pub(crate) ignore: Vec<WindowMatcher>,
 }
 
 impl From<&Config> for GlobalLayoutConfig {
@@ -119,12 +113,10 @@ impl From<&Config> for GlobalLayoutConfig {
             strategy: c.strategy,
             partition_tree: c.partition_tree.clone(),
             master: c.master.clone(),
-            min_width: c.min_width,
-            min_height: c.min_height,
-            max_width: c.max_width,
-            max_height: c.max_height,
+            size_constraints: c.size_constraints,
             float: c.float.clone(),
             fullscreen: c.fullscreen.clone(),
+            ignore: c.ignore.clone(),
         }
     }
 }
@@ -141,12 +133,10 @@ impl Default for GlobalLayoutConfig {
                 master_ratio: 0.5,
                 master_count: 1,
             },
-            min_width: SizeConstraint::default_min(),
-            min_height: SizeConstraint::default_min(),
-            max_width: SizeConstraint::default(),
-            max_height: SizeConstraint::default(),
+            size_constraints: SizeConstraints::default(),
             float: Vec::new(),
             fullscreen: Vec::new(),
+            ignore: Vec::new(),
         }
     }
 }
@@ -171,13 +161,9 @@ pub(crate) struct Hub {
     pub(super) minimized_windows: Vec<WindowId>,
     /// Flat matcher lists for window-on-open routing (fullscreen, float).
     /// Per-workspace matchers: filled from LayoutWorkspaceConfig entries. First match wins.
-    pub(super) ws_fullscreen_matchers: Vec<(WindowMatcher, WorkspaceId)>,
-    pub(super) ws_float_matchers: Vec<(WindowMatcher, WorkspaceId)>,
-    pub(super) ws_tiling_matchers: Vec<(WindowMatcher, WorkspaceId)>,
-    /// Global (top-level) matchers: filled from LayoutConfig. No workspace routing.
-    pub(super) fullscreen_matchers: Vec<WindowMatcher>,
-    pub(super) float_matchers: Vec<WindowMatcher>,
-    ignore_rules: Vec<WindowMatcher>,
+    ws_fullscreen_matchers: Vec<(WindowMatcher, WorkspaceId)>,
+    ws_float_matchers: Vec<(WindowMatcher, WorkspaceId)>,
+    ws_tiling_matchers: Vec<(WindowMatcher, WorkspaceId)>,
 }
 
 impl Hub {
@@ -186,45 +172,17 @@ impl Hub {
         primary_scale: f32,
         layout: GlobalLayoutConfig,
         preferred_layouts: Vec<LayoutWorkspaceConfig>,
-        ignore_rules: Vec<WindowMatcher>,
     ) -> Self {
-        let mut monitors: Allocator<Monitor> = Allocator::new();
-        let mut workspaces: Allocator<Workspace> = Allocator::new();
-
-        let primary_id = monitors.allocate(Monitor {
-            name: "primary".to_string(),
-            dimension: primary_screen,
-            scale: primary_scale,
-            active_workspace: WorkspaceId::new(0),
-        });
-
-        let primary_ws_name = "0".to_string();
-        let primary_ws_id =
-            workspaces.allocate(Workspace::new(primary_ws_name.clone(), primary_id));
-        monitors.get_mut(primary_id).active_workspace = primary_ws_id;
-
-        let mut strategies = StrategySet::new(&layout);
-        strategies.register(primary_ws_id, &primary_ws_name, &layout, &preferred_layouts);
-
-        // Pre-allocate every workspace name listed in [[workspace]]
-        // (skipping any that collide with the primary workspace's name) so
-        // that named workspaces have stable IDs from boot. They live on the
-        // primary monitor.
-        for entry in &preferred_layouts {
-            if entry.name() == primary_ws_name {
-                continue;
-            }
-            let ws_id = workspaces.allocate(Workspace::new(entry.name().to_string(), primary_id));
-            strategies.register(ws_id, entry.name(), &layout, &preferred_layouts);
-        }
+        let strategies = StrategySet::new(&layout);
 
         let mut hub = Self {
             access: HubAccess {
-                monitors,
-                focused_monitor: primary_id,
+                monitors: Allocator::new(),
+                // Placeholder id. will be changed after inserting primary monitor
+                focused_monitor: MonitorId::new(0),
                 layout,
                 preferred_layouts,
-                workspaces,
+                workspaces: Allocator::new(),
                 windows: Allocator::new(),
             },
             strategies,
@@ -232,11 +190,12 @@ impl Hub {
             ws_fullscreen_matchers: Vec::new(),
             ws_float_matchers: Vec::new(),
             ws_tiling_matchers: Vec::new(),
-            fullscreen_matchers: Vec::new(),
-            float_matchers: Vec::new(),
-            ignore_rules,
         };
-        hub.rebuild_matchers();
+
+        let primary_id = hub.add_monitor("primary".to_string(), primary_screen, primary_scale);
+        hub.access.focused_monitor = primary_id;
+        let preferred = hub.access.preferred_layouts.clone();
+        hub.index_matchers(&preferred);
         hub
     }
 
@@ -265,7 +224,7 @@ impl Hub {
         }
         self.strategies
             .for_workspace(ws_id)
-            .focused_tiling_window(&self.access, ws_id)
+            .focused_tiling_window(ws_id)
     }
 
     pub(super) fn is_restricted(&self, action: RestrictedAction) -> bool {
@@ -337,14 +296,7 @@ impl Hub {
         if let Some(window_id) = self.focused_window(current_ws) {
             self.move_child_to_workspace_with_id(window_id, target_ws);
         } else {
-            let has_tiling = self
-                .strategies
-                .for_workspace(current_ws)
-                .has_tiling_windows(&self.access, current_ws);
-            if has_tiling {
-                tracing::debug!(?current_ws, ?target_ws, "Moving container to monitor");
-                self.move_focused_across_workspaces(current_ws, target_ws);
-            }
+            self.move_focused_across_workspaces(current_ws, target_ws);
         }
     }
 
@@ -412,7 +364,7 @@ impl Hub {
         let tiling_count = self
             .strategies
             .for_workspace(ws_id)
-            .tiling_window_count(&self.access, ws_id);
+            .tiling_window_count(ws_id);
         tiling_count + ws.float_windows.len() + ws.fullscreen_windows.len()
     }
 
@@ -452,17 +404,25 @@ impl Hub {
             scale,
             active_workspace: WorkspaceId::new(0),
         });
+        // FIXME: each monitor have a dedicated set of workspaces, might be sharing the same name with the primary monitor
+        let workspace_name = if name == "primary" {
+            "0".to_string()
+        } else {
+            name.clone()
+        };
         let ws_id = self
             .access
             .workspaces
-            .allocate(Workspace::new(name.clone(), monitor_id));
+            // Placeholder id. will be changed after inserting primary monitor
+            .allocate(Workspace::new(workspace_name.clone(), monitor_id));
         self.access.monitors.get_mut(monitor_id).active_workspace = ws_id;
-        self.strategies.register(
-            ws_id,
-            &name,
-            &self.access.layout,
-            &self.access.preferred_layouts,
-        );
+        let preferred_layout = self
+            .access
+            .preferred_layouts
+            .iter()
+            .find(|w| w.name() == workspace_name);
+        self.strategies
+            .register(ws_id, &self.access.layout, preferred_layout);
         monitor_id
     }
 
@@ -521,76 +481,26 @@ impl Hub {
     }
 
     pub(crate) fn sync_configuration(&mut self, layout: GlobalLayoutConfig) {
-        self.access.layout = layout;
-
-        let changes = self.strategies.resync(
-            &self.access.workspaces,
-            &self.access.preferred_layouts,
-            &self.access.layout,
-        );
-        let changed_ids: HashSet<WorkspaceId> = changes.iter().map(|c| c.ws_id).collect();
-
-        let unchanged_ids: Vec<WorkspaceId> = self
-            .access
-            .workspaces
-            .all_active()
-            .iter()
-            .map(|(id, _)| *id)
-            .filter(|id| !changed_ids.contains(id))
-            .collect();
-        for ws_id in unchanged_ids {
+        for (ws_id, _) in self.access.workspaces.all_active() {
             self.strategies
                 .for_workspace_mut(ws_id)
-                .apply_config(&mut self.access, ws_id);
+                .apply_config(&mut self.access, layout.clone());
         }
+        let preferred_layouts = self.access.preferred_layouts.clone();
 
-        for change in changes {
-            tracing::debug!(
-                ws_id = %change.ws_id,
-                old = ?change.old,
-                new = ?change.new,
-                "Per-workspace strategy changed, rebuilding",
-            );
-            let snapshot = self.snapshot_workspace_for_rebuild(change.ws_id, change.old);
-            self.strategies
-                .get_mut(change.old)
-                .prune_workspace(change.ws_id);
-            let ws_name = &self.access.workspaces.get(change.ws_id).name;
-            self.strategies.prepare_workspace(
-                change.ws_id,
-                ws_name,
-                &self.access.layout,
-                &self.access.preferred_layouts,
-            );
-            self.reattach_workspace_after_rebuild(change.ws_id, snapshot);
-        }
-        self.rebuild_matchers();
+        // Change the strategy of workspages without preferred layout
+        self.strategies
+            .resync(&mut self.access, &preferred_layouts, layout.strategy);
+
+        self.access.layout = layout;
     }
 
-    pub(crate) fn sync_preferred_layout(
-        &mut self,
-        workspace_overrides: Vec<LayoutWorkspaceConfig>,
-    ) {
-        self.access.preferred_layouts = workspace_overrides;
-
-        // Iterate all existing workspaces so that removals are detected.
-        for (ws_id, ws) in self.access.workspaces.all_active() {
-            let incoming = self
-                .access
-                .preferred_layouts
-                .iter()
-                .find(|o| o.name() == ws.name.as_str())
-                .cloned();
-
-            let kind = self.strategies.kind_of(ws_id);
-            self.strategies.get_mut(kind).sync_preferred_layout(
-                &mut self.access,
-                ws_id,
-                incoming.as_ref(),
-            );
-        }
-
-        self.rebuild_matchers();
+    pub(crate) fn sync_preferred_layout(&mut self, preferred_layouts: Vec<LayoutWorkspaceConfig>) {
+        self.index_matchers(&preferred_layouts);
+        let default_strategy = self.access.layout.strategy;
+        self.strategies
+            .resync(&mut self.access, &preferred_layouts, default_strategy);
+        self.access.preferred_layouts = preferred_layouts;
     }
 
     #[cfg(test)]
@@ -598,76 +508,6 @@ impl Hub {
         self.strategies.validate_tree(&self.access);
     }
 
-    pub(crate) fn rebuild_matchers(&mut self) {
-        self.ws_fullscreen_matchers.clear();
-        self.ws_float_matchers.clear();
-        self.ws_tiling_matchers.clear();
-        // Collect all matchers with workspace names first (to avoid borrowing conflict).
-        struct Entry<'a> {
-            fullscreen: &'a [WindowMatcher],
-            float: &'a [WindowMatcher],
-            tiling: Vec<WindowMatcher>,
-            name: &'a str,
-        }
-        let entries: Vec<Entry<'_>> = self
-            .access
-            .preferred_layouts
-            .iter()
-            .map(|entry| {
-                use LayoutWorkspaceConfig::*;
-                match entry {
-                    PartitionTree {
-                        fullscreen,
-                        float,
-                        name,
-                        ..
-                    } => Entry {
-                        fullscreen: fullscreen.as_slice(),
-                        float: float.as_slice(),
-                        tiling: Vec::new(),
-                        name,
-                    },
-                    Master {
-                        fullscreen,
-                        float,
-                        master,
-                        secondary,
-                        name,
-                        ..
-                    } => Entry {
-                        fullscreen: fullscreen.as_slice(),
-                        float: float.as_slice(),
-                        tiling: master.iter().chain(secondary.iter()).cloned().collect(),
-                        name,
-                    },
-                }
-            })
-            .collect();
-        for entry in entries {
-            let ws_id = self
-                .access
-                .workspaces
-                .find(|ws| ws.name == entry.name)
-                .expect("workspace must be pre-allocated before rebuild_matchers");
-            for m in entry.fullscreen {
-                self.ws_fullscreen_matchers.push((m.clone(), ws_id));
-            }
-            for m in entry.float {
-                self.ws_float_matchers.push((m.clone(), ws_id));
-            }
-            for m in entry.tiling {
-                self.ws_tiling_matchers.push((m, ws_id));
-            }
-        }
-        self.fullscreen_matchers = self.access.layout.fullscreen.clone();
-        self.float_matchers = self.access.layout.float.clone();
-    }
-
-    pub(crate) fn set_ignore_rules(&mut self, rules: Vec<WindowMatcher>) {
-        self.ignore_rules = rules;
-    }
-
-    #[tracing::instrument(skip(self, metadata))]
     pub(crate) fn insert_window(
         &mut self,
         metadata: Box<dyn WindowMetadata>,
@@ -675,7 +515,9 @@ impl Hub {
         restrictions: WindowRestrictions,
     ) -> Option<WindowId> {
         if let Some(r) = self
-            .ignore_rules
+            .access
+            .layout
+            .ignore
             .iter()
             .find(|r| metadata.matches_window_matcher(r))
         {
@@ -934,9 +776,6 @@ impl Hub {
         }
     }
 
-    /// Move a window to a target workspace. For tiling windows, delegates to
-    /// `Hub::move_focused_across_workspaces` which handles both window and container
-    /// moves. For fullscreen/float, moves the specific window.
     #[tracing::instrument(skip(self))]
     pub(super) fn move_child_to_workspace_with_id(
         &mut self,
@@ -970,14 +809,6 @@ impl Hub {
         tracing::debug!("Moved to workspace");
     }
 
-    #[expect(dead_code)]
-    pub(crate) fn resolve_workspace(&mut self, name: Option<&str>) -> WorkspaceId {
-        match name {
-            Some(n) => self.get_or_create_workspace(n),
-            None => self.current_workspace(),
-        }
-    }
-
     pub(super) fn get_or_create_workspace(&mut self, name: &str) -> WorkspaceId {
         if let Some(id) = self.access.workspaces.find(|w| w.name == name) {
             return id;
@@ -986,12 +817,13 @@ impl Hub {
             name.to_string(),
             self.access.focused_monitor,
         ));
-        self.strategies.register(
-            ws_id,
-            name,
-            &self.access.layout,
-            &self.access.preferred_layouts,
-        );
+        let preferred_layout = self
+            .access
+            .preferred_layouts
+            .iter()
+            .find(|w| w.name() == name);
+        self.strategies
+            .register(ws_id, &self.access.layout, preferred_layout);
         ws_id
     }
 
@@ -1050,54 +882,6 @@ impl Hub {
             .reattach_child(&mut self.access, child, to);
     }
 
-    fn snapshot_workspace_for_rebuild(
-        &self,
-        ws_id: WorkspaceId,
-        old_kind: Strategy,
-    ) -> WorkspaceRebuildSnapshot {
-        let tiling_windows: Vec<WindowId> = self
-            .access
-            .windows
-            .all_active()
-            .iter()
-            .filter(|(_, w)| w.mode == DisplayMode::Tiling && w.workspace() == Some(ws_id))
-            .map(|(id, _)| *id)
-            .collect();
-        // Dispatch on the passed-in old_kind because StrategySet::resync has
-        // already updated the kind map to the NEW kind, but the OLD strategy
-        // still owns this workspace's tiling state.
-        let focused = self
-            .strategies
-            .get(old_kind)
-            .focused_tiling_window(&self.access, ws_id);
-        let was_float_focused = self.access.workspaces.get(ws_id).is_float_focused;
-        WorkspaceRebuildSnapshot {
-            tiling_windows,
-            focused,
-            was_float_focused,
-        }
-    }
-
-    fn reattach_workspace_after_rebuild(
-        &mut self,
-        ws_id: WorkspaceId,
-        snapshot: WorkspaceRebuildSnapshot,
-    ) {
-        for wid in &snapshot.tiling_windows {
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .attach_window(&mut self.access, *wid, ws_id);
-        }
-        if let Some(f) = snapshot.focused {
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .set_focus(&mut self.access, f);
-        }
-        if snapshot.was_float_focused {
-            self.access.workspaces.get_mut(ws_id).is_float_focused = true;
-        }
-    }
-
     /// Find workspace + mode via matchers.
     /// Returns (workspace, mode). `None` workspace = stay on current.
     fn resolve_matcher(
@@ -1121,12 +905,12 @@ impl Hub {
             }
         }
         // Global matchers (fallback, no workspace routing)
-        for m in &self.fullscreen_matchers {
+        for m in &self.access.layout.fullscreen {
             if metadata.matches_window_matcher(m) {
                 return Some((None, WindowMode::Fullscreen));
             }
         }
-        for m in &self.float_matchers {
+        for m in &self.access.layout.float {
             if metadata.matches_window_matcher(m) {
                 return Some((None, WindowMode::Float));
             }
@@ -1134,115 +918,72 @@ impl Hub {
         None
     }
 
-    pub(crate) fn export_layout(&mut self, layout_path: &std::path::Path) -> anyhow::Result<()> {
-        let ws_ids: Vec<(WorkspaceId, String)> = self
-            .access
-            .workspaces
-            .all_active()
-            .into_iter()
-            .map(|(ws_id, ws)| (ws_id, ws.name.clone()))
-            .collect();
+    fn index_matchers(&mut self, preferred_layouts: &[LayoutWorkspaceConfig]) {
+        self.ws_fullscreen_matchers.clear();
+        self.ws_float_matchers.clear();
+        self.ws_tiling_matchers.clear();
 
-        let workspaces: Vec<(String, WorkspaceExport)> = ws_ids
-            .into_iter()
-            .filter_map(|(ws_id, name)| self.export_workspace(ws_id).map(|export| (name, export)))
-            .collect();
-
-        let toml_string = write_layout(layout_path, &workspaces)?;
-
-        let tmp = layout_path.with_extension("toml.tmp");
-        std::fs::write(&tmp, &toml_string)?;
-        std::fs::rename(&tmp, layout_path)?;
-
-        Ok(())
+        for entry in preferred_layouts {
+            let ws_id = self.get_or_create_workspace(entry.name());
+            let matchers = workspace_matchers(entry);
+            for m in matchers.fullscreen {
+                self.ws_fullscreen_matchers.push((m, ws_id));
+            }
+            for m in matchers.float {
+                self.ws_float_matchers.push((m, ws_id));
+            }
+            for m in matchers.tiling {
+                self.ws_tiling_matchers.push((m, ws_id));
+            }
+        }
     }
 }
 
-fn ser_to_toml_edit_value<T: serde::Serialize>(value: &T) -> anyhow::Result<toml_edit::Value> {
-    let toml_string = toml::to_string(value)?;
-    Ok(toml_string.parse()?)
+struct Matchers {
+    fullscreen: Vec<WindowMatcher>,
+    float: Vec<WindowMatcher>,
+    tiling: Vec<WindowMatcher>,
 }
 
-fn write_layout(
-    layout_path: &Path,
-    exported: &[(String, WorkspaceExport)],
-) -> anyhow::Result<String> {
-    let content = std::fs::read_to_string(layout_path).unwrap_or_default();
-    let mut doc: DocumentMut = if content.is_empty() {
-        DocumentMut::new()
-    } else {
-        content.parse()?
-    };
-
-    let arr = doc
-        .entry("workspace")
-        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
-        .as_array_of_tables_mut()
-        .ok_or_else(|| anyhow::anyhow!("workspace key exists but is not an array of tables"))?;
-
-    for (name, ws) in exported {
-        let mut found = false;
-        for entry in arr.iter_mut() {
-            if entry["name"].as_str() == Some(name) {
-                fill_entry(entry, ws)?;
-                found = true;
-                break;
+fn workspace_matchers(entry: &LayoutWorkspaceConfig) -> Matchers {
+    match entry {
+        LayoutWorkspaceConfig::PartitionTree {
+            fullscreen,
+            float,
+            tree,
+            ..
+        } => {
+            let mut tiling = Vec::new();
+            if let Some(tree) = tree {
+                collect_tree_matchers(tree, &mut tiling);
+            }
+            Matchers {
+                fullscreen: fullscreen.clone(),
+                float: float.clone(),
+                tiling,
             }
         }
+        LayoutWorkspaceConfig::Master {
+            fullscreen,
+            float,
+            master,
+            secondary,
+            ..
+        } => Matchers {
+            fullscreen: fullscreen.clone(),
+            float: float.clone(),
+            tiling: master.iter().chain(secondary.iter()).cloned().collect(),
+        },
+    }
+}
 
-        if !found {
-            let mut table = toml_edit::Table::new();
-            table.insert("name", toml_edit::value(name));
-            fill_entry(&mut table, ws)?;
-            arr.push(table);
+fn collect_tree_matchers(node: &TreeLayoutNode, out: &mut Vec<WindowMatcher>) {
+    match node {
+        TreeLayoutNode::Leaf(m) => out.push(m.clone()),
+        TreeLayoutNode::Container { children, .. } => {
+            for child in children {
+                collect_tree_matchers(child, out);
+            }
         }
     }
-
-    Ok(doc.to_string())
-}
-
-fn fill_entry(table: &mut toml_edit::Table, ws: &WorkspaceExport) -> anyhow::Result<()> {
-    table.insert("strategy", toml_edit::value(&ws.strategy));
-    match ws.strategy.as_str() {
-        "partition_tree" => {
-            table.remove("master_ratio");
-            table.remove("master_count");
-            table.remove("master");
-            table.remove("secondary");
-            match &ws.tree {
-                Some(t) => {
-                    table.insert("tree", Item::Value(ser_to_toml_edit_value(t)?));
-                }
-                None => {
-                    table.remove("tree");
-                }
-            }
-        }
-        "master" => {
-            table.remove("tree");
-            if let Some(r) = ws.master_ratio {
-                table.insert("master_ratio", toml_edit::value(r as f64));
-            }
-            if let Some(c) = ws.master_count {
-                table.insert("master_count", toml_edit::value(c as i64));
-            }
-            if !ws.master.is_empty() {
-                table.insert("master", Item::Value(ser_to_toml_edit_value(&ws.master)?));
-            }
-            if !ws.secondary.is_empty() {
-                table.insert(
-                    "secondary",
-                    Item::Value(ser_to_toml_edit_value(&ws.secondary)?),
-                );
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-struct WorkspaceRebuildSnapshot {
-    tiling_windows: Vec<WindowId>,
-    focused: Option<WindowId>,
-    was_float_focused: bool,
 }

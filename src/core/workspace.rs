@@ -28,22 +28,11 @@ impl Hub {
             return;
         }
         let current_ws = self.current_workspace();
+        let target_ws = self.get_or_create_workspace(target_workspace);
         if let Some(window_id) = self.focused_window(current_ws) {
-            let target_ws = self.get_or_create_workspace(target_workspace);
             self.move_child_to_workspace_with_id(window_id, target_ws);
         } else {
-            let has_tiling = self
-                .strategies
-                .for_workspace(current_ws)
-                .has_tiling_windows(&self.access, current_ws);
-            if has_tiling {
-                let target_ws = self.get_or_create_workspace(target_workspace);
-                if current_ws == target_ws {
-                    return;
-                }
-                tracing::debug!(?current_ws, ?target_ws, "Moving container to workspace");
-                self.move_focused_across_workspaces(current_ws, target_ws);
-            }
+            self.move_focused_across_workspaces(current_ws, target_ws);
         }
     }
 }

@@ -2,12 +2,9 @@ use std::collections::HashMap;
 
 use crate::config::{LayoutWorkspaceConfig, Strategy, TreeLayoutNode, WindowMatcher};
 use crate::core::GlobalLayoutConfig;
-use crate::core::allocator::Allocator;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
-use crate::core::node::{
-    Child, ContainerId, Dimension, Direction, Length, WindowId, Workspace, WorkspaceId,
-};
+use crate::core::node::{Child, ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
 use crate::core::partition_tree::PartitionTreeStrategy;
 
 /// Actions that are specific to the tiling strategy.
@@ -97,9 +94,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     fn prepare_workspace(
         &mut self,
         ws_id: WorkspaceId,
-        ws_name: &str,
-        layout: &GlobalLayoutConfig,
-        preferred_layouts: &[LayoutWorkspaceConfig],
+        preferred_layout: Option<&LayoutWorkspaceConfig>,
     );
 
     /// Insert a window into the tiling tree for the given workspace.
@@ -136,28 +131,25 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Return the focused tiling window for a workspace. Returns `None` if
     /// `focused_tiling` is a `Child::Container` (container-highlight mode) or
     /// if the workspace is empty.
-    fn focused_tiling_window(&self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WindowId>;
+    fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId>;
 
     fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child>;
 
-    /// Returns true if the workspace has any tiling windows (root is Some).
-    fn has_tiling_windows(&self, hub: &HubAccess, ws_id: WorkspaceId) -> bool;
-
     /// Returns the number of tiling windows in the workspace.
-    fn tiling_window_count(&self, hub: &HubAccess, ws_id: WorkspaceId) -> usize;
+    fn tiling_window_count(&self, ws_id: WorkspaceId) -> usize;
 
     /// Re-attach a previously-detached `Child` into `ws_id`. Sets focus
     /// to the attached child. No-op when `child` is not applicable to
     /// this strategy (e.g. `Child::Container` for MasterStrategy).
     fn reattach_child(&mut self, hub: &mut HubAccess, child: Child, ws_id: WorkspaceId);
 
-    /// Remove all per-workspace state for a workspace being deleted.
-    fn prune_workspace(&mut self, ws_id: WorkspaceId);
+    /// Migrate windows out of a workspace being rebuilt after a strategy
+    /// change. Returns the list of tiling window IDs and the focused tiling
+    /// window (if any), then removes all per-workspace state.
+    fn migrate(&mut self, ws_id: WorkspaceId) -> (Vec<WindowId>, Option<WindowId>);
 
     /// Synchronize the preferred layout for a single workspace from an incoming
-    /// workspace override. No return value — each strategy logs its own
-    /// change via `tracing::debug!` when a rebuild occurs.
-    ///
+    /// workspace override.
     /// `incoming` is `None` when the workspace no longer has an override
     /// in the new config — the strategy should clear its per-workspace
     /// state and fall back to global defaults.
@@ -169,7 +161,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     );
 
     /// Refresh config-derived internal state and relayout the given workspace.
-    fn apply_config(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId);
+    fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig);
 
     /// Validate strategy-specific structural invariants (test-only).
     #[cfg(test)]
@@ -268,14 +260,6 @@ pub(crate) fn distribute_space(
         .collect()
 }
 
-/// Diff entry produced by `StrategySet::resync` for one workspace whose kind
-/// changed across a config reload. The caller drives the cross-kind rebuild.
-pub(super) struct WorkspaceKindChange {
-    pub(super) ws_id: WorkspaceId,
-    pub(super) old: Strategy,
-    pub(super) new: Strategy,
-}
-
 /// Owns one shared instance per tiling strategy and the per-workspace mapping
 /// from `WorkspaceId` to `Strategy`. Hub holds this as a single field disjoint
 /// from `HubAccess`, so dispatch (`for_workspace_mut`) borrows only this field
@@ -292,8 +276,13 @@ impl StrategySet {
         let partition_tree = PartitionTreeStrategy::new(
             layout.partition_tree.tab_bar_height,
             layout.partition_tree.automatic_tiling,
+            layout.size_constraints,
         );
-        let master = MasterStrategy::new();
+        let master = MasterStrategy::new(
+            layout.master.master_count,
+            layout.master.master_ratio,
+            layout.size_constraints,
+        );
         Self {
             partition_tree,
             master,
@@ -304,25 +293,19 @@ impl StrategySet {
     pub(super) fn register(
         &mut self,
         ws_id: WorkspaceId,
-        name: &str,
         layout: &GlobalLayoutConfig,
-        preferred_layouts: &[LayoutWorkspaceConfig],
+        preferred_layout: Option<&LayoutWorkspaceConfig>,
     ) {
-        self.kinds
-            .insert(ws_id, kind_for(name, preferred_layouts, layout.strategy));
-        self.get_mut(self.kind_of(ws_id))
-            .prepare_workspace(ws_id, name, layout, preferred_layouts);
-    }
+        let preferred_strategy = preferred_layout
+            .map(|w| match w {
+                LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
+                LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
+            })
+            .unwrap_or(layout.strategy);
 
-    pub(super) fn prepare_workspace(
-        &mut self,
-        ws_id: WorkspaceId,
-        name: &str,
-        layout: &GlobalLayoutConfig,
-        preferred_layouts: &[LayoutWorkspaceConfig],
-    ) {
+        self.kinds.insert(ws_id, preferred_strategy);
         self.get_mut(self.kind_of(ws_id))
-            .prepare_workspace(ws_id, name, layout, preferred_layouts);
+            .prepare_workspace(ws_id, preferred_layout);
     }
 
     pub(super) fn kind_of(&self, ws_id: WorkspaceId) -> Strategy {
@@ -355,28 +338,54 @@ impl StrategySet {
         self.get_mut(kind)
     }
 
-    /// Recompute kinds against `new_config`, returning entries only for
-    /// workspaces whose kind changed. The caller drives the cross-kind
-    /// rebuild. This method only updates the map.
+    /// Recompute kinds and drive the full sync. Returns nothing — all
+    /// cross-kind rebuilds and same-kind syncs happen here.
     pub(super) fn resync(
         &mut self,
-        workspaces: &Allocator<Workspace>,
+        hub: &mut HubAccess,
         preferred_layouts: &[LayoutWorkspaceConfig],
-        layout: &GlobalLayoutConfig,
-    ) -> Vec<WorkspaceKindChange> {
-        let mut changes = Vec::new();
-        for (ws_id, ws) in workspaces.all_active() {
+        default_strategy: Strategy,
+    ) {
+        for (ws_id, ws) in hub.workspaces.all_active() {
             let old = *self
                 .kinds
                 .get(&ws_id)
                 .unwrap_or_else(|| panic!("workspace {ws_id:?} not registered with StrategySet"));
-            let new = kind_for(&ws.name, preferred_layouts, layout.strategy);
+            let new = preferred_layouts
+                .iter()
+                .find(|w| w.name() == ws.name)
+                .map(|w| match w {
+                    LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
+                    LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
+                })
+                .unwrap_or(default_strategy);
             self.kinds.insert(ws_id, new);
+            let incoming = preferred_layouts
+                .iter()
+                .find(|o| o.name() == ws.name.as_str());
             if old != new {
-                changes.push(WorkspaceKindChange { ws_id, old, new });
+                tracing::debug!(
+                    ws_id = %ws_id,
+                    old = ?old,
+                    new = ?new,
+                    "Per-workspace strategy changed, rebuilding",
+                );
+                let (tiling_windows, focused) = self.get_mut(old).migrate(ws_id);
+                self.get_mut(new).prepare_workspace(ws_id, incoming);
+
+                for wid in &tiling_windows {
+                    self.for_workspace_mut(ws_id)
+                        .attach_window(hub, *wid, ws_id);
+                }
+                if let Some(f) = focused {
+                    self.for_workspace_mut(ws_id).set_focus(hub, f);
+                }
+            } else {
+                let cfg = incoming.cloned();
+                self.get_mut(new)
+                    .sync_preferred_layout(hub, ws_id, cfg.as_ref());
             }
         }
-        changes
     }
 
     #[cfg(test)]
@@ -384,21 +393,6 @@ impl StrategySet {
         self.partition_tree.validate_tree(hub);
         self.master.validate_tree(hub);
     }
-}
-
-fn kind_for(
-    name: &str,
-    preferred_layouts: &[LayoutWorkspaceConfig],
-    default_strategy: Strategy,
-) -> Strategy {
-    preferred_layouts
-        .iter()
-        .find(|w| w.name() == name)
-        .map(|w| match w {
-            LayoutWorkspaceConfig::PartitionTree { .. } => Strategy::PartitionTree,
-            LayoutWorkspaceConfig::Master { .. } => Strategy::Master,
-        })
-        .unwrap_or(default_strategy)
 }
 
 #[cfg(test)]

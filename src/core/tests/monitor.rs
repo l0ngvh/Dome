@@ -1,7 +1,7 @@
 use insta::assert_snapshot;
 
 #[cfg(target_os = "windows")]
-use super::{LayoutConfigBuilder, PartitionTreeConfigBuilder};
+use super::{LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder};
 #[cfg(target_os = "windows")]
 use crate::config::SizeConstraint;
 #[cfg(target_os = "windows")]
@@ -479,75 +479,30 @@ fn monitor_noop_cases() {
     }
 }
 
-// This test verifies that `to_unit(scale)` multiplies config-denominated lengths
-// by the monitor scale factor. On macOS (Unit = Logical), `to_unit` is identity
-// by design (scale is always 1.0 in production). The test exercises Windows behavior
-// where Unit = Physical and scale > 1.0 causes actual multiplication.
+// Has to be gated behind windows rn, since Hub is not generic over unit type
 #[cfg(target_os = "windows")]
 #[test]
-fn monitor_scale_multiplies_config_lengths() {
-    use crate::core::hub::{Hub, MonitorLayout};
-
-    /// Extract tiling window frames from a Hub's visible placements.
-    fn tiling_frames(hub: &Hub) -> Vec<Dimension> {
-        let vp = hub.get_visible_placements();
-        let mut frames = Vec::new();
-        for mp in &vp.monitors {
-            if let MonitorLayout::Normal { tiling_windows, .. } = &mp.layout {
-                for tw in tiling_windows {
-                    frames.push(tw.frame);
-                }
-            }
-        }
-        frames
-    }
-
-    // Part 1: tab_bar_height is multiplied by scale.
-    // scale=2.0, tab_bar_height config=20.0 -> physical tab bar = 40px.
-    // Need 2+ windows so insert_tiling creates a split container that
-    // toggle_container_layout can convert to Tabbed. A single root-level
-    // window has no parent container to toggle.
+fn monitor_scale_multiplies_tab_bar_height() {
     let l = LayoutConfigBuilder::new()
         .with_partition_tree_config(
             PartitionTreeConfigBuilder::new()
-                .with_tab_bar_height(Length::<Logical>::new(20.0))
+                .with_tab_bar_height(Length::<Logical>::new(5.0))
                 .with_automatic_tiling(true)
                 .build(),
         )
         .build();
-    let mut hub = Hub::new(
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1000.0),
-            Length::new(1000.0),
-        ),
-        2.0,
-        l,
-        Vec::new(),
-        Vec::new(),
-    );
+    let mut hub = TestHubBuilder::new().with_scale(2.0).with_layout(l).build();
     hub.insert_tiling(hub.current_workspace(), titled("w16"));
     hub.insert_tiling(hub.current_workspace(), titled("w17"));
-    hub.toggle_container_layout(); // switch split -> Tabbed
+    hub.toggle_container_layout();
+    assert_snapshot!(snapshot_text(&hub), @r"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=0.00, y=10.00, w=150.00, h=20.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[w16, w17])
+      )
+    ");
 
-    // Tabbed container shows only the active tab's window.
-    let frames = tiling_frames(&hub);
-    assert_eq!(frames.len(), 1);
-    let w = frames[0];
-    // tab_bar_height 20.0 * scale 2.0 = 40.0 consumed from monitor height
-    assert!(
-        (w.y - Length::new(40.0)).abs().value() < 0.01,
-        "expected y=40.0 (tab_bar_height*scale), got {}",
-        w.y
-    );
-    assert!(
-        (w.height - Length::new(960.0)).abs().value() < 0.01,
-        "expected height=960.0 (1000-40), got {}",
-        w.height
-    );
-
-    // After update_monitor with scale=3.0 -> tab_bar = 20*3 = 60
     let monitor_id = hub.focused_monitor();
     hub.update_monitor(
         monitor_id,
@@ -559,76 +514,67 @@ fn monitor_scale_multiplies_config_lengths() {
         ),
         3.0,
     );
-    let frames = tiling_frames(&hub);
-    let w = frames[0];
-    assert!(
-        (w.y - Length::new(60.0)).abs().value() < 0.01,
-        "expected y=60.0 (tab_bar_height*3.0), got {}",
-        w.y
-    );
-    assert!(
-        (w.height - Length::new(940.0)).abs().value() < 0.01,
-        "expected height=940.0 (1000-60), got {}",
-        w.height
-    );
+    assert_snapshot!(snapshot_text(&hub), @r"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=1000.00 h=1000.00),
+        Window(id=WindowId(1), x=0.00, y=15.00, w=1000.00, h=985.00, highlighted, spawn=right)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=1000.00, h=1000.00, tabbed, active_tab=1, titles=[w16, w17])
+      )
+    ");
+}
 
-    // Part 2: SizeConstraint::Pixels is multiplied by scale.
-    // 6 windows, screen 1000px wide, scale=2.0, min_width=Pixels(100).
-    // Equal split would give ~166.7px each, but scaled min = 100*2 = 200,
-    // so the min-width clamp must apply.
-    let l = LayoutConfigBuilder::new()
-        .with_partition_tree_config(
-            PartitionTreeConfigBuilder::new()
-                .with_tab_bar_height(Length::<Logical>::new(20.0))
-                .with_automatic_tiling(true)
+#[cfg(target_os = "windows")]
+#[test]
+fn monitor_scale_multiplies_size_constraints() {
+    let mut hub = TestHubBuilder::new()
+        .with_scale(2.0)
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_partition_tree_config(
+                    PartitionTreeConfigBuilder::new()
+                        .with_tab_bar_height(Length::<Logical>::new(10.0))
+                        .with_automatic_tiling(false)
+                        .build(),
+                )
+                // At scale of 2.0, min width should be 80
+                .with_min_width(SizeConstraint::Pixels(Length::new(40.0)))
                 .build(),
         )
-        .with_min_width(SizeConstraint::Pixels(Length::new(100.0)))
         .build();
-    let mut hub2 = Hub::new(
-        Dimension::new(
-            Length::new(0.0),
-            Length::new(0.0),
-            Length::new(1000.0),
-            Length::new(1000.0),
-        ),
-        2.0,
-        l,
-        Vec::new(),
-        Vec::new(),
-    );
-    for _ in 0..6 {
-        hub2.insert_tiling(hub2.current_workspace(), titled("w18"));
+    for i in 0..6 {
+        hub.insert_tiling(hub.current_workspace(), titled(format!("w{i}").as_str()));
     }
-    let min_w: f32 = tiling_frames(&hub2)
-        .iter()
-        .map(|f| f.width.value())
-        .fold(f32::INFINITY, f32::min);
-    assert!(
-        (min_w - 200.0).abs() < 0.01,
-        "expected min width=200.0 (Pixels(100)*scale 2.0), got {}",
-        min_w
-    );
+    assert_snapshot!(snapshot_text(&hub), @r"
+    Hub(focused=WindowId(5))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(5), x=70.00, y=0.00, w=80.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(4), x=0.00, y=0.00, w=70.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, w1, w2, w3, w4, w5])
+      )
+    ");
 
-    // After update_monitor with scale=3.0 -> min_width = 100*3 = 300
-    let monitor_id2 = hub2.focused_monitor();
-    hub2.update_monitor(
-        monitor_id2,
+    let monitor_id = hub.focused_monitor();
+    hub.update_monitor(
+        monitor_id,
         Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
-            Length::new(1000.0),
+            Length::new(500.0),
             Length::new(1000.0),
         ),
+        // At scale of 3.0, min width should be 120
         3.0,
     );
-    let min_w: f32 = tiling_frames(&hub2)
-        .iter()
-        .map(|f| f.width.value())
-        .fold(f32::INFINITY, f32::min);
-    assert!(
-        (min_w - 300.0).abs() < 0.01,
-        "expected min width=300.0 (Pixels(100)*scale 3.0), got {}",
-        min_w
-    );
+
+    assert_snapshot!(snapshot_text(&hub), @r"
+    Hub(focused=WindowId(5))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=500.00 h=1000.00),
+        Window(id=WindowId(5), x=380.00, y=0.00, w=120.00, h=1000.00, highlighted, spawn=right)
+        Window(id=WindowId(4), x=260.00, y=0.00, w=120.00, h=1000.00)
+        Window(id=WindowId(3), x=140.00, y=0.00, w=120.00, h=1000.00)
+        Window(id=WindowId(2), x=20.00, y=0.00, w=120.00, h=1000.00)
+        Window(id=WindowId(1), x=0.00, y=0.00, w=20.00, h=1000.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=500.00, h=1000.00, titles=[w0, w1, w2, w3, w4, w5])
+      )
+    ");
 }

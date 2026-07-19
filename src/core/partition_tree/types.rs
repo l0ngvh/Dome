@@ -4,19 +4,6 @@ use crate::core::hub::SpawnIndicator;
 use crate::core::node::Child;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 
-/// Effective per-child layout constraints in the tree's `Length` unit.
-///
-/// `Length::ZERO` on a `max_*` field means "unbounded" on that axis. This
-/// matches the platform-side encoding of `Window::max_size` (zero means
-/// "no max"). Containers always set both maxes to `Length::ZERO`.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Constraints {
-    pub(crate) min_width: Length,
-    pub(crate) min_height: Length,
-    pub(crate) max_width: Length,
-    pub(crate) max_height: Length,
-}
-
 /// Spawn mode of a container or window: where the next sibling will be
 /// inserted relative to it.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

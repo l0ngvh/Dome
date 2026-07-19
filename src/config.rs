@@ -424,10 +424,12 @@ impl RawConfig {
             strategy: w.field("strategy", default_strategy()),
             partition_tree: w.nested::<PartitionTreeConfig>("partition_tree"),
             master: w.nested::<MasterConfig>("master"),
-            min_width: w.field("min_width", SizeConstraint::default_min()),
-            min_height: w.field("min_height", SizeConstraint::default_min()),
-            max_width: w.field("max_width", SizeConstraint::default()),
-            max_height: w.field("max_height", SizeConstraint::default()),
+            size_constraints: SizeConstraints {
+                minimum_width: w.field("minimum_width", SizeConstraint::default_min()),
+                minimum_height: w.field("minimum_height", SizeConstraint::default_min()),
+                maximum_width: w.field("maximum_width", SizeConstraint::default()),
+                maximum_height: w.field("maximum_height", SizeConstraint::default()),
+            },
             float: w.rule_vec::<WindowMatcher>("float"),
             fullscreen: w.rule_vec::<WindowMatcher>("fullscreen"),
         }
@@ -772,6 +774,27 @@ impl<'de> Deserialize<'de> for SizeConstraint {
     }
 }
 
+/// Bundled min/max window size constraints from config.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
+pub(crate) struct SizeConstraints {
+    pub(crate) minimum_width: SizeConstraint,
+    pub(crate) minimum_height: SizeConstraint,
+    pub(crate) maximum_width: SizeConstraint,
+    pub(crate) maximum_height: SizeConstraint,
+}
+
+impl Default for SizeConstraints {
+    fn default() -> Self {
+        Self {
+            minimum_width: SizeConstraint::default_min(),
+            minimum_height: SizeConstraint::default_min(),
+            maximum_width: SizeConstraint::default(),
+            maximum_height: SizeConstraint::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Strategy {
@@ -1109,14 +1132,8 @@ pub(crate) struct Config {
     pub(crate) partition_tree: PartitionTreeConfig,
     #[serde(default = "default_master_config")]
     pub(crate) master: MasterConfig,
-    #[serde(default = "SizeConstraint::default_min")]
-    pub(crate) min_width: SizeConstraint,
-    #[serde(default = "SizeConstraint::default_min")]
-    pub(crate) min_height: SizeConstraint,
-    #[serde(default)]
-    pub(crate) max_width: SizeConstraint,
-    #[serde(default)]
-    pub(crate) max_height: SizeConstraint,
+    #[serde(flatten, default)]
+    pub(crate) size_constraints: SizeConstraints,
     #[serde(default)]
     pub(crate) float: Vec<WindowMatcher>,
     #[serde(default)]
@@ -1168,10 +1185,7 @@ impl Default for Config {
             strategy: default_strategy(),
             partition_tree: default_partition_tree_config(),
             master: default_master_config(),
-            min_width: SizeConstraint::default_min(),
-            min_height: SizeConstraint::default_min(),
-            max_width: SizeConstraint::default(),
-            max_height: SizeConstraint::default(),
+            size_constraints: SizeConstraints::default(),
             float: Vec::new(),
             fullscreen: Vec::new(),
         }
@@ -1235,19 +1249,21 @@ impl Config {
         // Validation compares config values in logical space directly. No scale
         // factor exists at validation time, so `.logical()` is the correct escape
         // hatch here (not `to_unit`).
-        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
-            (self.min_width, self.max_width)
-            && max.logical() > 0.0
+        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) = (
+            self.size_constraints.minimum_width,
+            self.size_constraints.maximum_width,
+        ) && max.logical() > 0.0
             && min > max
         {
-            anyhow::bail!("min_width ({min}) cannot be greater than max_width ({max})");
+            anyhow::bail!("minimum_width ({min}) cannot be greater than maximum_width ({max})");
         }
-        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) =
-            (self.min_height, self.max_height)
-            && max.logical() > 0.0
+        if let (SizeConstraint::Pixels(min), SizeConstraint::Pixels(max)) = (
+            self.size_constraints.minimum_height,
+            self.size_constraints.maximum_height,
+        ) && max.logical() > 0.0
             && min > max
         {
-            anyhow::bail!("min_height ({min}) cannot be greater than max_height ({max})");
+            anyhow::bail!("minimum_height ({min}) cannot be greater than maximum_height ({max})");
         }
         Ok(())
     }
@@ -1332,49 +1348,70 @@ mod tests {
     #[test]
     fn min_size_default() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Percent(5.0));
-        assert_eq!(config.min_height, SizeConstraint::Percent(5.0));
+        assert_eq!(
+            config.size_constraints.minimum_width,
+            SizeConstraint::Percent(5.0)
+        );
+        assert_eq!(
+            config.size_constraints.minimum_height,
+            SizeConstraint::Percent(5.0)
+        );
     }
 
     #[test]
     fn max_size_default() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.max_width, SizeConstraint::Pixels(Length::new(0.0)));
-        assert_eq!(config.max_height, SizeConstraint::Pixels(Length::new(0.0)));
+        assert_eq!(
+            config.size_constraints.maximum_width,
+            SizeConstraint::Pixels(Length::new(0.0))
+        );
+        assert_eq!(
+            config.size_constraints.maximum_height,
+            SizeConstraint::Pixels(Length::new(0.0))
+        );
     }
 
     #[test]
     fn size_constraint_parses_float_as_pixels() {
-        let config: Config = toml::from_str("min_width = 200.0").unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Pixels(Length::new(200.0)));
+        let config: Config = toml::from_str("minimum_width = 200.0").unwrap();
+        assert_eq!(
+            config.size_constraints.minimum_width,
+            SizeConstraint::Pixels(Length::new(200.0))
+        );
     }
 
     #[test]
     fn size_constraint_parses_int_as_pixels() {
-        let config: Config = toml::from_str("min_width = 200").unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Pixels(Length::new(200.0)));
+        let config: Config = toml::from_str("minimum_width = 200").unwrap();
+        assert_eq!(
+            config.size_constraints.minimum_width,
+            SizeConstraint::Pixels(Length::new(200.0))
+        );
     }
 
     #[test]
     fn size_constraint_parses_string_percent() {
-        let config: Config = toml::from_str(r#"min_width = "10%""#).unwrap();
-        assert_eq!(config.min_width, SizeConstraint::Percent(10.0));
+        let config: Config = toml::from_str(r#"minimum_width = "10%""#).unwrap();
+        assert_eq!(
+            config.size_constraints.minimum_width,
+            SizeConstraint::Percent(10.0)
+        );
     }
 
     #[test]
     fn size_constraint_rejects_invalid_percent() {
-        assert!(toml::from_str::<Config>(r#"min_width = "101%""#).is_err());
-        assert!(toml::from_str::<Config>(r#"min_width = "-5%""#).is_err());
+        assert!(toml::from_str::<Config>(r#"minimum_width = "101%""#).is_err());
+        assert!(toml::from_str::<Config>(r#"minimum_width = "-5%""#).is_err());
     }
 
     #[test]
     fn size_constraint_rejects_negative_pixels() {
-        assert!(toml::from_str::<Config>("min_width = -100").is_err());
+        assert!(toml::from_str::<Config>("minimum_width = -100").is_err());
     }
 
     #[test]
     fn size_constraint_rejects_string_without_percent() {
-        assert!(toml::from_str::<Config>(r#"min_width = "200""#).is_err());
+        assert!(toml::from_str::<Config>(r#"minimum_width = "200""#).is_err());
     }
 
     #[test]
@@ -1424,13 +1461,13 @@ mod tests {
 
     #[test]
     fn layout_validates_min_le_max() {
-        let config: Config = toml::from_str("min_width = 200\nmax_width = 100").unwrap();
+        let config: Config = toml::from_str("minimum_width = 200\nmaximum_width = 100").unwrap();
         assert!(config.validate_layout().is_err());
 
-        let config: Config = toml::from_str("min_height = 200\nmax_height = 100").unwrap();
+        let config: Config = toml::from_str("minimum_height = 200\nmaximum_height = 100").unwrap();
         assert!(config.validate_layout().is_err());
 
-        let config: Config = toml::from_str("min_width = 200\nmax_width = 0").unwrap();
+        let config: Config = toml::from_str("minimum_width = 200\nmaximum_width = 0").unwrap();
         assert!(config.validate_layout().is_ok());
     }
 
@@ -1868,7 +1905,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!("dome_layout_validate_fail_{nanos}.toml"));
-        std::fs::write(&path, "min_width = 100\nmax_width = 50\n").unwrap();
+        std::fs::write(&path, "minimum_width = 100\nmaximum_width = 50\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
         assert!(Config::load(path.to_str().unwrap()).is_err());
         let config = load_or_default(path.to_str().unwrap(), Config::load);
@@ -2077,18 +2114,27 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dome_layout_size_constraints_{nanos}.toml"));
         std::fs::write(
             &path,
-            "min_width = 200\nmax_width = \"50%\"\nmin_height = 100\nmax_height = 0\n",
+            "minimum_width = 200\nmaximum_width = \"50%\"\nminimum_height = 100\nmaximum_height = 0\n",
         )
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
         let layout = Config::load(path.to_str().unwrap()).unwrap();
-        assert_eq!(layout.min_width, SizeConstraint::Pixels(Length::new(200.0)));
-        assert_eq!(layout.max_width, SizeConstraint::Percent(50.0));
         assert_eq!(
-            layout.min_height,
+            layout.size_constraints.minimum_width,
+            SizeConstraint::Pixels(Length::new(200.0))
+        );
+        assert_eq!(
+            layout.size_constraints.maximum_width,
+            SizeConstraint::Percent(50.0)
+        );
+        assert_eq!(
+            layout.size_constraints.minimum_height,
             SizeConstraint::Pixels(Length::new(100.0))
         );
-        assert_eq!(layout.max_height, SizeConstraint::Pixels(Length::new(0.0)));
+        assert_eq!(
+            layout.size_constraints.maximum_height,
+            SizeConstraint::Pixels(Length::new(0.0))
+        );
     }
 
     #[test]
@@ -2102,7 +2148,7 @@ mod tests {
             &path,
             concat!(
                 "border_size = 5.0\n",
-                "min_width = 100\n",
+                "minimum_width = 100\n",
                 "[layout]\n",
                 "strategy = \"master\"\n",
             ),

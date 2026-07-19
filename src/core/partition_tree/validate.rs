@@ -1,6 +1,7 @@
 use crate::core::hub::HubAccess;
+use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
-use crate::core::partition_tree::{Child, Constraints, Container, Parent};
+use crate::core::partition_tree::{Child, Container, Parent};
 
 use super::PartitionTreeStrategy;
 
