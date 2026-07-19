@@ -472,10 +472,10 @@ fn run_iteration<F>(
             *current_layout = layout.clone();
         }
         match &op {
-            RecordedOp::MoveToWorkspace { name } | RecordedOp::FocusWorkspace { name } => {
-                if !workspace_names.iter().any(|n| n == name) {
-                    workspace_names.push(name.clone());
-                }
+            RecordedOp::MoveToWorkspace { name } | RecordedOp::FocusWorkspace { name }
+                if !workspace_names.iter().any(|n| n == name) =>
+            {
+                workspace_names.push(name.clone());
             }
             _ => {}
         }

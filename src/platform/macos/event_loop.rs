@@ -443,9 +443,9 @@ static SIGNAL_RECEIVED: AtomicBool = AtomicBool::new(false);
 
 fn install_signal_handlers() {
     unsafe {
-        libc::signal(libc::SIGINT, signal_handler as usize);
-        libc::signal(libc::SIGTERM, signal_handler as usize);
-        libc::signal(libc::SIGHUP, signal_handler as usize);
+        libc::signal(libc::SIGINT, signal_handler as *const () as usize);
+        libc::signal(libc::SIGTERM, signal_handler as *const () as usize);
+        libc::signal(libc::SIGHUP, signal_handler as *const () as usize);
     }
 }
 
