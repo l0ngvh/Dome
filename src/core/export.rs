@@ -1,15 +1,12 @@
 use std::path::Path;
 
+use serde::Serialize;
+use toml_edit::ser::ValueSerializer;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
 
 use super::Hub;
 use super::node::WorkspaceId;
 use super::strategy::WorkspaceExport;
-
-fn ser_to_toml_edit_value<T: serde::Serialize>(value: &T) -> anyhow::Result<toml_edit::Value> {
-    let toml_string = toml::to_string(value)?;
-    Ok(toml_string.parse()?)
-}
 
 pub(super) fn write_layout(
     layout_path: &Path,
@@ -59,7 +56,7 @@ fn fill_entry(table: &mut toml_edit::Table, ws: &WorkspaceExport) -> anyhow::Res
             table.remove("secondary");
             match &ws.tree {
                 Some(t) => {
-                    table.insert("tree", Item::Value(ser_to_toml_edit_value(t)?));
+                    table.insert("tree", Item::Value(t.serialize(ValueSerializer::new())?));
                 }
                 None => {
                     table.remove("tree");
@@ -75,12 +72,15 @@ fn fill_entry(table: &mut toml_edit::Table, ws: &WorkspaceExport) -> anyhow::Res
                 table.insert("master_count", toml_edit::value(c as i64));
             }
             if !ws.master.is_empty() {
-                table.insert("master", Item::Value(ser_to_toml_edit_value(&ws.master)?));
+                table.insert(
+                    "master",
+                    Item::Value(ws.master.serialize(ValueSerializer::new())?),
+                );
             }
             if !ws.secondary.is_empty() {
                 table.insert(
                     "secondary",
-                    Item::Value(ser_to_toml_edit_value(&ws.secondary)?),
+                    Item::Value(ws.secondary.serialize(ValueSerializer::new())?),
                 );
             }
         }
