@@ -45,7 +45,7 @@ impl PartitionTreeStrategy {
                     .get_mut(direct_parent_id)
                     .children
                     .swap(pos, target_pos);
-                self.layout_workspace(hub, current_ws);
+                self.compute_placement(hub, current_ws);
                 return;
             }
         }
@@ -73,7 +73,7 @@ impl PartitionTreeStrategy {
             );
             self.detach_child_from_container(direct_parent_id, child);
             self.attach_child_to_container(child, container_id, Some(insert_pos));
-            self.layout_workspace(hub, current_ws);
+            self.compute_placement(hub, current_ws);
             self.set_focus_child(hub, child);
         } else {
             tracing::debug!(?child, %current_ws, "Moving child to new root container");
@@ -86,7 +86,7 @@ impl PartitionTreeStrategy {
             };
             let spawn_mode = SpawnMode::from_direction(direction);
             self.replace_anchor_with_container(hub, root, children, spawn_mode.into());
-            self.layout_workspace(hub, current_ws);
+            self.compute_placement(hub, current_ws);
             self.set_focus_child(hub, child);
         }
     }
@@ -148,7 +148,7 @@ impl PartitionTreeStrategy {
         }
         self.containers.get_mut(root_id).toggle_direction();
         self.maintain_direction_invariance(Parent::Container(root_id));
-        self.layout_workspace(hub, workspace_id);
+        self.compute_placement(hub, workspace_id);
     }
 
     pub(super) fn convert_container_layout(
@@ -182,7 +182,7 @@ impl PartitionTreeStrategy {
             self.maintain_direction_invariance(Parent::Container(container_id));
         }
         self.maintain_direction_invariance(parent);
-        self.layout_workspace(hub, ws);
+        self.compute_placement(hub, ws);
     }
 
     pub(super) fn toggle_spawn_mode(&mut self, hub: &mut HubAccess) {

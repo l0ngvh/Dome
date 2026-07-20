@@ -2,10 +2,46 @@ use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 use crate::core::partition_tree::{Child, Container, Parent};
+use crate::core::strategy::ValidateStrategy;
 
 use super::PartitionTreeStrategy;
 
 const VALIDATION_TOLERANCE: Length = Length::new(0.01);
+
+impl ValidateStrategy for PartitionTreeStrategy {
+    fn validate(&self, hub: &HubAccess) {
+        for (workspace_id, workspace) in hub.workspaces.all_active() {
+            self.validate_workspace_focus(hub, workspace_id, &workspace);
+
+            let Some(root) = self.workspaces.get(&workspace_id).and_then(|s| s.root) else {
+                continue;
+            };
+            // Hand-rolled DFS kept because the walk threads expected_parent
+            // derived from the traversal structure. Using children_dfs plus
+            // parent would check the parent field against itself.
+            let mut stack = vec![(root, Parent::Workspace(workspace_id))];
+            for _ in crate::core::bounded_loop() {
+                let Some((child, expected_parent)) = stack.pop() else {
+                    break;
+                };
+                match child {
+                    Child::Window(wid) => {
+                        self.validate_window(hub, wid, expected_parent, workspace_id)
+                    }
+                    Child::Container(cid) => {
+                        self.validate_container(
+                            hub,
+                            cid,
+                            expected_parent,
+                            workspace_id,
+                            &mut stack,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
 
 impl PartitionTreeStrategy {
     /// Validate workspace focus invariants:
@@ -13,7 +49,7 @@ impl PartitionTreeStrategy {
     /// - `focused_tiling` points to a tiling-mode window (not float/fullscreen)
     /// - `focused_tiling` is reachable from root by walking `container.focused`
     /// - `root.is_some()` implies `focused_tiling.is_some()`
-    pub(super) fn validate_workspace_focus(
+    fn validate_workspace_focus(
         &self,
         hub: &HubAccess,
         workspace_id: WorkspaceId,
@@ -64,7 +100,7 @@ impl PartitionTreeStrategy {
         }
     }
 
-    pub(super) fn validate_container(
+    fn validate_container(
         &self,
         hub: &HubAccess,
         cid: ContainerId,
@@ -296,7 +332,7 @@ impl PartitionTreeStrategy {
         }
     }
 
-    pub(super) fn validate_window(
+    fn validate_window(
         &self,
         hub: &HubAccess,
         wid: crate::core::node::WindowId,

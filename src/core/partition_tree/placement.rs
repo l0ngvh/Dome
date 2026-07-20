@@ -1,27 +1,9 @@
-//! Layout pipeline for the partition tree.
-//!
-//! `do_layout_workspace` runs two passes:
-//! 1. Bottom-up `update_container_min_size` walk: a container's minimum
-//!    is the sum (along its split axis) or max (across) of its
-//!    children's minimums. Must complete before pass 2 because the
-//!    root's minimum can exceed the screen.
-//! 2. Top-down `do_layout_top_down`: places the root, then
-//!    distributes each container's space to its children using the
-//!    current viewport offset.
-//!
-//! `scroll_into_view` then clamps and adjusts the viewport offset to
-//! keep the focused node visible. When the offset moves it re-runs
-//! `do_layout_top_down` so max-constrained windows recenter inside
-//! the new visible section. The `initial` capture in
-//! `scroll_into_view` gates this re-run: layout converges in one extra
-//! pass at most because the second `do_layout_top_down` does not
-//! move the focused node.
-
 use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 use crate::core::partition_tree::{Child, SpawnMode};
-use crate::core::strategy::{clip, distribute_space};
+use crate::core::strategy::{TilingPlacements, clip, distribute_space, translate};
+use crate::core::{ContainerPlacement, SpawnIndicator, TilingWindowPlacement};
 
 use super::PartitionTreeStrategy;
 
@@ -30,10 +12,12 @@ impl PartitionTreeStrategy {
     /// is the sum of its children's mins), then top-down to distribute space.
     /// A single pass can't do both because the total minimum must be known
     /// before distributing remaining space.
-    pub(super) fn do_layout_workspace(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        let Some(ws_state) = self.workspaces.get(&ws_id) else {
-            return;
-        };
+    pub(super) fn compute_placement_against_constraint(
+        &mut self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+    ) {
+        let ws_state = self.workspaces.get(&ws_id).unwrap();
         let Some(root) = ws_state.root else { return };
 
         if let Child::Container(root_id) = root {
@@ -49,16 +33,14 @@ impl PartitionTreeStrategy {
             }
         }
 
-        self.do_layout_top_down(hub, ws_id);
+        self.adjust_placement(hub, ws_id);
         self.scroll_into_view(hub, ws_id);
     }
 
     /// Top-down placement pass: places the root and distributes space to
     /// each container's children using the current viewport_offset.
-    pub(super) fn do_layout_top_down(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        let Some(ws_state) = self.workspaces.get(&ws_id) else {
-            return;
-        };
+    pub(super) fn adjust_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
+        let ws_state = self.workspaces.get(&ws_id).unwrap();
         let Some(root) = ws_state.root else { return };
         let viewport_offset = ws_state.viewport_offset;
         let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
@@ -67,7 +49,7 @@ impl PartitionTreeStrategy {
         let (offset_x, offset_y) = viewport_offset;
         let viewport_rect = Dimension::new(offset_x, offset_y, screen.width, screen.height);
 
-        self.set_root_dimension(hub, root, screen, viewport_rect);
+        self.set_root_dimension(hub, root, screen);
 
         let Child::Container(root_id) = root else {
             return;
@@ -93,70 +75,104 @@ impl PartitionTreeStrategy {
         }
     }
 
-    /// Adjust the workspace's viewport offset so the focused node is fully
-    /// visible.
-    ///
-    /// Captures `initial` before clamping so the trailing
-    /// `do_layout_top_down` only re-runs when the offset actually moved.
-    /// The re-run lets max-constrained children recenter in the new visible
-    /// section.
-    pub(super) fn scroll_into_view(&mut self, hub: &mut HubAccess, workspace_id: WorkspaceId) {
-        let Some(initial) = self
-            .workspaces
-            .get(&workspace_id)
-            .map(|s| s.viewport_offset)
-        else {
-            return;
+    pub(super) fn collect_placements(
+        &self,
+        hub: &HubAccess,
+        ws_id: WorkspaceId,
+        focused: bool,
+    ) -> TilingPlacements {
+        let Some(ws_state) = self.workspaces.get(&ws_id) else {
+            return TilingPlacements {
+                windows: Vec::new(),
+                containers: Vec::new(),
+            };
         };
-
-        self.clamp_viewport_offset(hub, workspace_id);
-
-        let Some(ws_state) = self.workspaces.get(&workspace_id) else {
-            return;
+        let ws = hub.workspaces.get(ws_id);
+        let (offset_x, offset_y) = ws_state.viewport_offset;
+        let screen = hub.monitors.get(ws.monitor).dimension;
+        // Only highlight tiling focus when this is the current workspace AND
+        // the workspace's effective focus is on tiling (not float). Fullscreen
+        // workspaces never reach here (hub returns early with MonitorLayout::Fullscreen).
+        let focused = if focused && !ws.is_float_focused {
+            ws_state.focused_tiling
+        } else {
+            None
         };
-        let monitor_id = hub.workspaces.get(workspace_id).monitor;
-        let screen = hub.monitors.get(monitor_id).dimension;
-        let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
+        let mut windows = Vec::new();
+        let mut containers = Vec::new();
 
-        if let Some(focused) = ws_state.focused_tiling {
-            let focused_dim = self.child_dimension(focused);
-            let scale = hub.monitors.get(monitor_id).scale;
-            let reserved_top = self.enclosing_tabbed_strip_total(focused, scale);
-
-            offset_x =
-                nudge_offset_into_view(offset_x, focused_dim.x, focused_dim.width, screen.width);
-            offset_y =
-                nudge_offset_into_view(offset_y, focused_dim.y, focused_dim.height, screen.height);
-            // Keep enclosing tab strips visible at the top of the viewport.
-            // After this clamp, focused.y - offset_y >= reserved_top, so each
-            // enclosing strip sits on or below the top of the screen.
-            offset_y = offset_y.min(focused_dim.y - reserved_top);
-
-            self.workspaces
-                .get_mut(&workspace_id)
-                .unwrap()
-                .viewport_offset = (offset_x, offset_y);
-        }
-
-        if (offset_x, offset_y) != initial {
-            self.do_layout_top_down(hub, workspace_id);
-        }
-    }
-
-    /// Sum of `tab_bar_length` over each strict ancestor of `focused` that is
-    /// tabbed. Used by `scroll_into_view` to reserve space for tab strips when
-    /// clamping the viewport offset.
-    fn enclosing_tabbed_strip_total(&self, focused: Child, scale: f32) -> Length {
-        let tb = self.tab_bar_length(scale);
-        let mut total = Length::ZERO;
-        for (_, parent_id) in self.ancestors_of(focused) {
-            if self.containers.get(parent_id).is_tabbed() {
-                total += tb;
+        // Hand-rolled DFS kept because tabbed containers push only the active
+        // tab, not all children. This visible-only traversal differs from the
+        // full pre-order that children_dfs provides.
+        let mut stack: Vec<Child> = ws_state.root.into_iter().collect();
+        for _ in crate::core::bounded_loop() {
+            let Some(child) = stack.pop() else { break };
+            match child {
+                Child::Window(id) => {
+                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
+                    if let Some(visible_frame) = clip(frame, screen) {
+                        let is_highlighted = focused == Some(Child::Window(id));
+                        windows.push(TilingWindowPlacement {
+                            id,
+                            frame,
+                            visible_frame,
+                            is_highlighted,
+                            spawn_indicator: if is_highlighted {
+                                Some(SpawnIndicator::from(self.child_spawn_mode(child)))
+                            } else {
+                                None
+                            },
+                        });
+                    }
+                }
+                Child::Container(id) => {
+                    let container = self.containers.get(id);
+                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
+                    let Some(visible_frame) = clip(frame, screen) else {
+                        continue;
+                    };
+                    let is_highlighted = focused == Some(Child::Container(id));
+                    containers.push(ContainerPlacement {
+                        id,
+                        frame,
+                        visible_frame,
+                        is_highlighted,
+                        spawn_indicator: if is_highlighted {
+                            Some(SpawnIndicator::from(self.child_spawn_mode(child)))
+                        } else {
+                            None
+                        },
+                        is_tabbed: container.is_tabbed(),
+                        active_tab_index: container.active_tab_index(),
+                        titles: container
+                            .children()
+                            .iter()
+                            .map(|c| match c {
+                                Child::Window(wid) => hub.windows.get(*wid).title().to_owned(),
+                                Child::Container(_) => "Container".to_string(),
+                            })
+                            .collect(),
+                    });
+                    if let Some(active) = container.active_tab() {
+                        stack.push(active);
+                    } else {
+                        for &c in container.children() {
+                            stack.push(c);
+                        }
+                    }
+                }
             }
         }
-        total
+
+        TilingPlacements {
+            windows,
+            containers,
+        }
     }
 
+    /// Layout the children in the container.
+    /// Max constrained children are centered inside of the visible portion of the container, or
+    /// just centered inside the container if it's completely offscreen
     fn layout_children(
         &self,
         hub: &HubAccess,
@@ -256,50 +272,12 @@ impl PartitionTreeStrategy {
             .collect()
     }
 
-    /// Clamp the workspace's viewport offset against the root's dimension.
-    /// With no root, resets to `(ZERO, ZERO)` so a later attach starts from a
-    /// known origin instead of inheriting a stale offset from a previous tree.
-    fn clamp_viewport_offset(&mut self, hub: &mut HubAccess, workspace_id: WorkspaceId) {
-        let Some(ws_state) = self.workspaces.get(&workspace_id) else {
-            return;
-        };
-        let screen = hub
-            .monitors
-            .get(hub.workspaces.get(workspace_id).monitor)
-            .dimension;
-        let (mut offset_x, mut offset_y) = ws_state.viewport_offset;
-
-        let root_dim = match ws_state.root {
-            Some(child) => self.child_dimension(child),
-            None => {
-                self.workspaces
-                    .get_mut(&workspace_id)
-                    .unwrap()
-                    .viewport_offset = (Length::ZERO, Length::ZERO);
-                return;
-            }
-        };
-
-        offset_x = clamp_offset(offset_x, root_dim.width, screen.width);
-        offset_y = clamp_offset(offset_y, root_dim.height, screen.height);
-        self.workspaces
-            .get_mut(&workspace_id)
-            .unwrap()
-            .viewport_offset = (offset_x, offset_y);
-    }
-
     /// Place the root child within the screen. Base dimension is
     /// `screen.max(min)` on each axis: the root grows past the screen when a
     /// descendant's minimum exceeds the screen, and the viewport scrolls to it
     /// instead of clipping. Then applies the root's max constraint with the
     /// current viewport for centering.
-    fn set_root_dimension(
-        &mut self,
-        hub: &mut HubAccess,
-        root: Child,
-        screen: Dimension,
-        viewport_rect: Dimension,
-    ) {
+    fn set_root_dimension(&mut self, hub: &HubAccess, root: Child, screen: Dimension) {
         let c = self.get_effective_constraints(hub, root);
         let base_dim: Dimension = Dimension::new(
             Length::ZERO,
@@ -307,8 +285,7 @@ impl PartitionTreeStrategy {
             screen.width.max(c.min_width),
             screen.height.max(c.min_height),
         );
-        let visible = clip(base_dim, viewport_rect).unwrap_or(base_dim);
-        let dim = place_in_visible(base_dim, (c.max_width, c.max_height), visible);
+        let dim = place_in_visible(base_dim, (c.max_width, c.max_height), base_dim);
 
         self.set_child_dimension(root, dim);
     }
@@ -534,29 +511,6 @@ fn place_in_visible(container: Dimension, max: (Length, Length), visible: Dimens
         visible.y - container.y,
     );
     Dimension::new(container.x + x_off, container.y + y_off, w, h)
-}
-
-fn nudge_offset_into_view(
-    offset: Length,
-    dim_origin: Length,
-    dim_extent: Length,
-    screen_extent: Length,
-) -> Length {
-    let mut offset = offset;
-    if dim_origin - offset + dim_extent > screen_extent {
-        offset = dim_origin + dim_extent - screen_extent;
-    }
-    if dim_origin - offset < Length::ZERO {
-        offset = dim_origin;
-    }
-    offset
-}
-
-fn clamp_offset(offset: Length, root_extent: Length, screen_extent: Length) -> Length {
-    offset.clamp(
-        Length::ZERO,
-        (root_extent - screen_extent).max(Length::ZERO),
-    )
 }
 
 #[derive(Copy, Clone)]

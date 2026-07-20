@@ -127,7 +127,7 @@ impl Hub {
                 let dim = self
                     .strategies
                     .for_workspace_mut(current_ws)
-                    .detach_window(&mut self.access, window_id);
+                    .detach_window(&self.access, window_id);
                 self.attach_float_to_workspace(current_ws, window_id, dim);
                 tracing::debug!(%window_id, "Window is now floating");
             }

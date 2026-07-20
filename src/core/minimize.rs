@@ -38,13 +38,17 @@ impl Hub {
 
         match prior_mode {
             DisplayMode::Tiling => {
-                self.strategies
-                    .for_workspace_mut(prior_workspace)
-                    .detach_window(&mut self.access, window_id);
+                let strategy = self.strategies.for_workspace_mut(prior_workspace);
+                strategy.detach_window(&self.access, window_id);
+                if strategy.tiling_window_count(prior_workspace) == 0 {
+                    let ws = self.access.workspaces.get_mut(prior_workspace);
+                    if ws.fullscreen_windows.is_empty() {
+                        ws.is_float_focused = !ws.float_windows.is_empty();
+                    }
+                }
             }
-            // Float dim rides along on the variant; nothing to stash.
             DisplayMode::Float { .. } => {
-                let _dim = self.detach_float_from_workspace(window_id);
+                self.detach_float_from_workspace(window_id);
             }
             DisplayMode::Fullscreen => {
                 self.detach_fullscreen_from_workspace(window_id);

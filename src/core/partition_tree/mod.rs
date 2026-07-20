@@ -1,7 +1,8 @@
 mod container;
-mod layout;
 mod navigate;
+mod placement;
 mod preferred_layout;
+mod scroll;
 mod tree;
 mod types;
 #[cfg(test)]
@@ -18,11 +19,9 @@ use crate::config::LayoutWorkspaceConfig;
 use crate::config::SizeConstraints;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
-use crate::core::hub::{ContainerPlacement, HubAccess, SpawnIndicator, TilingWindowPlacement};
+use crate::core::hub::HubAccess;
 use crate::core::node::{Dimension, Length, Logical, WindowId, WorkspaceId};
-use crate::core::strategy::{
-    TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, clip, translate,
-};
+use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
 /// leaves and containers define split direction (horizontal/vertical) or tabbed
@@ -107,7 +106,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.attach_window_to_unoccupied_container(hub, window_id, ws_id, slot_id, root_slot);
     }
 
-    fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> Dimension {
+    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> Dimension {
         let child_dim = self.tiling_windows.get(&window_id).unwrap().dimension;
         let workspace_id = hub
             .windows
@@ -160,8 +159,8 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn layout_workspace(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) {
-        self.do_layout_workspace(hub, ws_id);
+    fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
+        self.compute_placement_against_constraint(hub, ws_id);
     }
 
     /// Update tiling focus to a window. Delegates to `set_focus_child`, which writes
@@ -174,95 +173,9 @@ impl TilingStrategy for PartitionTreeStrategy {
         &self,
         hub: &HubAccess,
         ws_id: WorkspaceId,
-        highlighted: bool,
+        focused: bool,
     ) -> TilingPlacements {
-        let Some(ws_state) = self.workspaces.get(&ws_id) else {
-            return TilingPlacements {
-                windows: Vec::new(),
-                containers: Vec::new(),
-            };
-        };
-        let ws = hub.workspaces.get(ws_id);
-        let (offset_x, offset_y) = ws_state.viewport_offset;
-        let screen = hub.monitors.get(ws.monitor).dimension;
-        // Only highlight tiling focus when this is the current workspace AND
-        // the workspace's effective focus is on tiling (not float). Fullscreen
-        // workspaces never reach here (hub returns early with MonitorLayout::Fullscreen).
-        let focused = if highlighted && !ws.is_float_focused {
-            ws_state.focused_tiling
-        } else {
-            None
-        };
-        let mut windows = Vec::new();
-        let mut containers = Vec::new();
-
-        // Hand-rolled DFS kept because tabbed containers push only the active
-        // tab, not all children. This visible-only traversal differs from the
-        // full pre-order that children_dfs provides.
-        let mut stack: Vec<Child> = ws_state.root.into_iter().collect();
-        for _ in crate::core::bounded_loop() {
-            let Some(child) = stack.pop() else { break };
-            match child {
-                Child::Window(id) => {
-                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
-                    if let Some(visible_frame) = clip(frame, screen) {
-                        let is_highlighted = focused == Some(Child::Window(id));
-                        windows.push(TilingWindowPlacement {
-                            id,
-                            frame,
-                            visible_frame,
-                            is_highlighted,
-                            spawn_indicator: if is_highlighted {
-                                Some(SpawnIndicator::from(self.child_spawn_mode(child)))
-                            } else {
-                                None
-                            },
-                        });
-                    }
-                }
-                Child::Container(id) => {
-                    let container = self.containers.get(id);
-                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
-                    let Some(visible_frame) = clip(frame, screen) else {
-                        continue;
-                    };
-                    let is_highlighted = focused == Some(Child::Container(id));
-                    containers.push(ContainerPlacement {
-                        id,
-                        frame,
-                        visible_frame,
-                        is_highlighted,
-                        spawn_indicator: if is_highlighted {
-                            Some(SpawnIndicator::from(self.child_spawn_mode(child)))
-                        } else {
-                            None
-                        },
-                        is_tabbed: container.is_tabbed(),
-                        active_tab_index: container.active_tab_index(),
-                        titles: container
-                            .children()
-                            .iter()
-                            .map(|c| match c {
-                                Child::Window(wid) => hub.windows.get(*wid).title().to_owned(),
-                                Child::Container(_) => "Container".to_string(),
-                            })
-                            .collect(),
-                    });
-                    if let Some(active) = container.active_tab() {
-                        stack.push(active);
-                    } else {
-                        for &c in container.children() {
-                            stack.push(c);
-                        }
-                    }
-                }
-            }
-        }
-
-        TilingPlacements {
-            windows,
-            containers,
-        }
+        self.collect_placements(hub, ws_id, focused)
     }
 
     fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
@@ -277,7 +190,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child> {
+    fn detach_focused_child(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child> {
         let focused = self.workspaces.get(&ws_id)?.focused_tiling?;
         self.detach_child(hub, focused);
 
@@ -406,41 +319,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         self.automatic_tiling = layout.partition_tree.automatic_tiling;
         self.size_constraints = layout.size_constraints;
         for ws_id in self.workspaces.keys().copied().collect::<Vec<_>>() {
-            self.layout_workspace(hub, ws_id);
-        }
-    }
-
-    #[cfg(test)]
-    fn validate_tree(&self, hub: &HubAccess) {
-        for (workspace_id, workspace) in hub.workspaces.all_active() {
-            self.validate_workspace_focus(hub, workspace_id, &workspace);
-
-            let Some(root) = self.workspaces.get(&workspace_id).and_then(|s| s.root) else {
-                continue;
-            };
-            // Hand-rolled DFS kept because the walk threads expected_parent
-            // derived from the traversal structure. Using children_dfs plus
-            // parent would check the parent field against itself.
-            let mut stack = vec![(root, Parent::Workspace(workspace_id))];
-            for _ in crate::core::bounded_loop() {
-                let Some((child, expected_parent)) = stack.pop() else {
-                    break;
-                };
-                match child {
-                    Child::Window(wid) => {
-                        self.validate_window(hub, wid, expected_parent, workspace_id)
-                    }
-                    Child::Container(cid) => {
-                        self.validate_container(
-                            hub,
-                            cid,
-                            expected_parent,
-                            workspace_id,
-                            &mut stack,
-                        );
-                    }
-                }
-            }
+            self.compute_placement(hub, ws_id);
         }
     }
 

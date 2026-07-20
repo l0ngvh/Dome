@@ -84,11 +84,6 @@ impl WorkspaceExport {
 /// Abstraction over tiling behavior. Tiling-specific operations live here;
 /// generic window management (monitors, workspaces, float, fullscreen, focus
 /// priority) does not.
-///
-/// Each method receives `&mut HubAccess` (or `&HubAccess`) so the strategy
-/// can read/write monitors, workspaces, and windows without borrowing Hub.
-/// This solves the split-borrow problem: `self` (the strategy) and `hub`
-/// (the access struct) are disjoint fields on Hub.
 pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Pre-allocate per-workspace state, no-op when the state already exists.
     fn prepare_workspace(
@@ -103,7 +98,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Remove a window from its workspace's tiling tree. Returns the window's
     /// dimension in screen-absolute coordinates (translated before detach
     /// because detach triggers layout, which can change viewport_offset).
-    fn detach_window(&mut self, hub: &mut HubAccess, window_id: WindowId) -> Dimension;
+    fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> Dimension;
 
     /// Dispatch a tiling-specific action. Reads the current workspace from
     /// `hub.focused_monitor` internally. Both mutates state and triggers
@@ -111,16 +106,13 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction);
 
     /// Compute layout for all tiling windows in the workspace.
-    fn layout_workspace(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId);
+    fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId);
 
     /// Set tiling focus to the given window, updating container focus chains
     /// and workspace focus state.
     fn set_focus(&mut self, hub: &mut HubAccess, window_id: WindowId);
 
-    /// Collect tiling placements for rendering. The strategy reads
-    /// offset/screen/focused_tiling from hub.workspaces internally.
-    /// `highlighted`: true for the current workspace, false for others.
-    /// When false, no placement is highlighted.
+    /// Collect tiling placements for rendering.
     fn collect_tiling_placements(
         &self,
         hub: &HubAccess,
@@ -133,7 +125,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// if the workspace is empty.
     fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId>;
 
-    fn detach_focused_child(&mut self, hub: &mut HubAccess, ws_id: WorkspaceId) -> Option<Child>;
+    fn detach_focused_child(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child>;
 
     /// Returns the number of tiling windows in the workspace.
     fn tiling_window_count(&self, ws_id: WorkspaceId) -> usize;
@@ -163,13 +155,14 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Refresh config-derived internal state and relayout the given workspace.
     fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig);
 
-    /// Validate strategy-specific structural invariants (test-only).
-    #[cfg(test)]
-    fn validate_tree(&self, hub: &HubAccess);
-
     /// Export the current layout for a workspace, updating the strategy's
     /// internal preferred-layout representation to match the live tree.
     fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WorkspaceExport>;
+}
+
+#[cfg(test)]
+pub(super) trait ValidateStrategy {
+    fn validate(&self, hub: &HubAccess);
 }
 
 /// Convert layout-space coordinates to screen-absolute. Layout positions are
@@ -389,9 +382,9 @@ impl StrategySet {
     }
 
     #[cfg(test)]
-    pub(super) fn validate_tree(&self, hub: &HubAccess) {
-        self.partition_tree.validate_tree(hub);
-        self.master.validate_tree(hub);
+    pub(super) fn validate(&self, hub: &HubAccess) {
+        self.partition_tree.validate(hub);
+        self.master.validate(hub);
     }
 }
 

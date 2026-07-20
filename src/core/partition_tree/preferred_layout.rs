@@ -190,7 +190,7 @@ impl PartitionTreeStrategy {
             .unwrap()
             .occupied_preferred_root = Some(PreferredSlot::Container(lowest_common_ancestor));
 
-        self.layout_workspace(hub, ws_id);
+        self.compute_placement(hub, ws_id);
         self.set_focus_child(hub, Child::Window(window_id));
     }
 
@@ -405,7 +405,7 @@ impl PartitionTreeStrategy {
     ) {
         self.occupy_window_slot(slot_id, window_id);
         self.tiling_windows.get_mut(&window_id).unwrap().occupy = Some(slot_id);
-        self.layout_workspace(hub, ws_id);
+        self.compute_placement(hub, ws_id);
         self.set_focus_child(hub, Child::Window(window_id));
     }
 

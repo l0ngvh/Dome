@@ -375,6 +375,7 @@ impl Hub {
             .for_workspace_mut(ws_id)
             .export_workspace(&self.access, ws_id)?;
 
+        // FIXME: nope, we will need to export float and fullscreen as well
         let (float, fullscreen) = self
             .access
             .preferred_layouts
@@ -445,7 +446,7 @@ impl Hub {
             self.access.workspaces.get_mut(ws_id).monitor = fallback_id;
             self.strategies
                 .for_workspace_mut(ws_id)
-                .layout_workspace(&mut self.access, ws_id);
+                .compute_placement(&self.access, ws_id);
         }
 
         if self.access.focused_monitor == monitor_id {
@@ -476,7 +477,7 @@ impl Hub {
         for ws_id in ws_ids {
             self.strategies
                 .for_workspace_mut(ws_id)
-                .layout_workspace(&mut self.access, ws_id);
+                .compute_placement(&self.access, ws_id);
         }
     }
 
@@ -504,8 +505,8 @@ impl Hub {
     }
 
     #[cfg(test)]
-    pub(crate) fn validate_tree(&self) {
-        self.strategies.validate_tree(&self.access);
+    pub(crate) fn validate(&self) {
+        self.strategies.validate(&self.access);
     }
 
     pub(crate) fn insert_window(
@@ -686,18 +687,23 @@ impl Hub {
         if is_minimized {
             self.minimized_windows.retain(|&w| w != id);
         } else {
-            let ws = window
+            let ws_id = window
                 .workspace()
                 .expect("non-minimized window has a workspace");
             match mode {
                 DisplayMode::Float { .. } => {
-                    let _dim = self.detach_float_from_workspace(id);
+                    self.detach_float_from_workspace(id);
                 }
                 DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
                 DisplayMode::Tiling => {
-                    self.strategies
-                        .for_workspace_mut(ws)
-                        .detach_window(&mut self.access, id);
+                    let strategy = self.strategies.for_workspace_mut(ws_id);
+                    strategy.detach_window(&self.access, id);
+                    if strategy.tiling_window_count(ws_id) == 0 {
+                        let ws = self.access.workspaces.get_mut(ws_id);
+                        if ws.fullscreen_windows.is_empty() {
+                            ws.is_float_focused = !ws.float_windows.is_empty();
+                        }
+                    }
                 }
             }
         }
@@ -772,7 +778,7 @@ impl Hub {
         if let Some(ws) = window.workspace() {
             self.strategies
                 .for_workspace_mut(ws)
-                .layout_workspace(&mut self.access, ws);
+                .compute_placement(&self.access, ws);
         }
     }
 
@@ -870,13 +876,17 @@ impl Hub {
     }
 
     pub(super) fn move_focused_across_workspaces(&mut self, from: WorkspaceId, to: WorkspaceId) {
-        let child = self
-            .strategies
-            .for_workspace_mut(from)
-            .detach_focused_child(&mut self.access, from);
+        let strategy = self.strategies.for_workspace_mut(from);
+        let child = strategy.detach_focused_child(&self.access, from);
         let Some(child) = child else {
             return;
         };
+        if strategy.tiling_window_count(from) == 0 {
+            let ws = self.access.workspaces.get_mut(from);
+            if ws.fullscreen_windows.is_empty() {
+                ws.is_float_focused = !ws.float_windows.is_empty();
+            }
+        }
         self.strategies
             .for_workspace_mut(to)
             .reattach_child(&mut self.access, child, to);

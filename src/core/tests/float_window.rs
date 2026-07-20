@@ -459,7 +459,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     hub.insert_tiling(hub.current_workspace(), titled("w13"));
 
     hub.focus_workspace("1");
-    let f0 = hub.insert_float(
+    let f1 = hub.insert_float(
         hub.current_workspace(),
         Dimension::new(
             Length::new(10.0),
@@ -469,7 +469,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
         ),
         titled("w14"),
     );
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w15"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w15"));
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -512,8 +512,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
 
     hub.focus_workspace("0");
 
-    // Delete the tiling window on workspace 1 (workspace 1 should NOT be deleted because it has a float)
-    hub.delete_window(w1);
+    hub.delete_window(w2);
 
     let after_tiling_delete = snapshot(&hub);
     assert_snapshot!(after_tiling_delete, @"
@@ -555,7 +554,7 @@ fn workspace_with_only_floats_not_deleted_prematurely() {
     ");
 
     // Now delete the float - this should not panic
-    hub.delete_window(f0);
+    hub.delete_window(f1);
 
     assert_eq!(snapshot(&hub), after_tiling_delete);
 }

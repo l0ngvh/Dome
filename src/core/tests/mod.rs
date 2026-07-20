@@ -489,7 +489,7 @@ fn draw_focused_border(grid: &mut [Vec<char>], x: f32, y: f32, w: f32, h: f32, c
 }
 
 fn validate_hub(hub: &Hub) {
-    hub.validate_tree();
+    hub.validate();
     validate_visible_placements(hub);
     validate_minimized(hub);
 }

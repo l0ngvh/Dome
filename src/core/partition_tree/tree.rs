@@ -24,7 +24,7 @@ impl PartitionTreeStrategy {
             self.workspaces.get_mut(&ws_id).unwrap().root = Some(child);
             self.set_parent(child, Parent::Workspace(ws_id));
             self.set_focus_child(hub, child);
-            self.layout_workspace(hub, ws_id);
+            self.compute_placement(hub, ws_id);
             return;
         };
 
@@ -74,19 +74,19 @@ impl PartitionTreeStrategy {
             }
         }
 
-        self.layout_workspace(hub, ws_id);
+        self.compute_placement(hub, ws_id);
         self.set_focus_child(hub, child);
     }
 
     /// Detach a `Child` (window or container) from its workspace.
-    pub(super) fn detach_child(&mut self, hub: &mut HubAccess, child: Child) {
+    pub(super) fn detach_child(&mut self, hub: &HubAccess, child: Child) {
         let workspace_id = self.child_workspace(hub, child);
 
         let parent = self.parent(child);
         match parent {
             Parent::Container(parent_id) => {
                 self.detach_child_from_container(parent_id, child);
-                self.layout_workspace(hub, workspace_id);
+                self.compute_placement(hub, workspace_id);
             }
             Parent::Workspace(workspace_id) => {
                 self.workspaces.get_mut(&workspace_id).unwrap().root = None;
@@ -95,10 +95,7 @@ impl PartitionTreeStrategy {
                     .unwrap()
                     .focused_tiling = None;
 
-                let ws = hub.workspaces.get_mut(workspace_id);
-                ws.is_float_focused = !ws.float_windows.is_empty();
-
-                self.layout_workspace(hub, workspace_id);
+                self.compute_placement(hub, workspace_id);
             }
         }
 

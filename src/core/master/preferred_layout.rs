@@ -126,7 +126,7 @@ impl MasterStrategy {
                 let state = self.workspaces.get_mut(&ws_id).unwrap();
                 state.master_ratio = new_ratio_opt;
             }
-            self.layout_workspace(hub, ws_id);
+            self.compute_placement(hub, ws_id);
         }
     }
 
