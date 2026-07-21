@@ -1,16 +1,41 @@
 name: release-nightly
 
 on:
-  push:
-    branches: [main]
+  schedule:
+    - cron: "0 7 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-head
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA=$(git rev-parse HEAD)
+          LAST_SHA=$(gh release view nightly --json body -q .body 2>/dev/null \
+            | grep -oE 'sha=[a-f0-9]{40}$' | head -1 | cut -d= -f2 || true)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$LAST_SHA" ] || [ "$HEAD_SHA" != "$LAST_SHA" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: build-${{matrix.target}}
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
     runs-on: ${{matrix.os}}
     strategy:
       fail-fast: false
@@ -71,9 +96,11 @@ jobs:
           BUNDLE_TARGET: ${{matrix.target}}
           DOME_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
         run: |
+          set -euo pipefail
           cargo build --release --target ${{matrix.target}}
           cargo make bundle
-          mv target/Dome-0.1.0.dmg ${{matrix.artifact}}
+          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          mv "target/Dome-${CARGO_VERSION}.dmg" "${{matrix.artifact}}"
 
       - name: verify-codesign
         if: matrix.os == 'macos-latest'
@@ -104,7 +131,8 @@ jobs:
 
   publish:
     name: publish-nightly
-    needs: build
+    needs: [gate, build]
+    if: needs.gate.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -116,17 +144,33 @@ jobs:
       - name: compute-sha
         id: sha
         run: |
+          set -euo pipefail
           echo "sha_aarch64_dmg=$(sha256sum dist/dome-nightly-aarch64-apple-darwin/dome-nightly-aarch64-apple-darwin.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "sha_zip=$(sha256sum dist/dome-nightly-x86_64-pc-windows-msvc/dome-nightly-x86_64-pc-windows-msvc.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: compute-version
+        id: version
+        run: |
+          set -euo pipefail
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          FULL_SHA=$(git rev-parse HEAD)
+          DATE=$(date -u +%Y.%m.%d)
+          echo "short_sha=$SHORT_SHA"     >> "$GITHUB_OUTPUT"
+          echo "full_sha=$FULL_SHA"       >> "$GITHUB_OUTPUT"
+          echo "date=$DATE"               >> "$GITHUB_OUTPUT"
+          echo "version=$DATE.$SHORT_SHA" >> "$GITHUB_OUTPUT"
 
       - name: create-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete nightly --yes || true
+          set -euo pipefail
+          gh release delete nightly --cleanup-tag --yes || true
           gh release create nightly \
-            --title "Dome Nightly" \
+            --title "Dome Nightly ${{ steps.version.outputs.date }} (${{ steps.version.outputs.short_sha }})" \
+            --notes "Nightly build at ${{ steps.version.outputs.date }} UTC. sha=${{ steps.version.outputs.full_sha }}" \
             --prerelease \
+            --target "${{ steps.version.outputs.full_sha }}" \
             dist/dome-nightly-aarch64-apple-darwin/dome-nightly-aarch64-apple-darwin.dmg \
             dist/dome-nightly-x86_64-pc-windows-msvc/dome-nightly-x86_64-pc-windows-msvc.zip
 
@@ -136,8 +180,11 @@ jobs:
         with:
           token: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
           repository: l0ngvh/homebrew-dome
-          event-type: new-release
-          client-payload: '{"version": "nightly", "sha_aarch64_dmg": "${{ steps.sha.outputs.sha_aarch64_dmg }}"}'
+          event-type: new-nightly-release
+          client-payload: >-
+            {"version": "${{ steps.version.outputs.version }}",
+             "sha_aarch64_dmg": "${{ steps.sha.outputs.sha_aarch64_dmg }}",
+             "sha_zip": "${{ steps.sha.outputs.sha_zip }}"}
 
       - name: dispatch-scoop
         continue-on-error: true
@@ -145,5 +192,8 @@ jobs:
         with:
           token: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
           repository: l0ngvh/scoop-dome
-          event-type: new-release
-          client-payload: '{"version": "nightly", "sha_zip": "${{ steps.sha.outputs.sha_zip }}"}'
+          event-type: new-nightly-release
+          client-payload: >-
+            {"version": "${{ steps.version.outputs.version }}",
+             "sha_aarch64_dmg": "${{ steps.sha.outputs.sha_aarch64_dmg }}",
+             "sha_zip": "${{ steps.sha.outputs.sha_zip }}"}
