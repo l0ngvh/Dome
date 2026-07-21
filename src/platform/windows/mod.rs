@@ -38,9 +38,8 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, IDC_ARROW, LoadCursorW,
-    MA_NOACTIVATE, MSG, PostThreadMessageW, RegisterClassW, SPI_SETWORKAREA, TranslateMessage,
-    WM_APP, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WM_QUIT, WM_SETTINGCHANGE,
-    WM_TIMER, WNDCLASSW,
+    MA_NOACTIVATE, MSG, PostThreadMessageW, RegisterClassW, TranslateMessage, WM_APP,
+    WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW,
 };
 use windows::core::BOOL;
 
@@ -50,6 +49,7 @@ use crate::config::{
 };
 use crate::ipc;
 use crate::keymap::KeymapState;
+use dome::app_window::{APP_WINDOW_CLASS, AppWindow, app_wnd_proc};
 use dome::overlay::{
     FLOAT_OVERLAY_CLASS, TAB_BAR_OVERLAY_CLASS, TILING_OVERLAY_CLASS, WgpuOverlayFactory,
     tab_bar_overlay_wnd_proc, tiling_overlay_wnd_proc,
@@ -357,20 +357,6 @@ pub(super) fn dome_wnd_proc_common(
             };
             Some(LRESULT(0))
         }
-        WM_SETTINGCHANGE => {
-            if wparam.0 == SPI_SETWORKAREA.0 as usize {
-                unsafe {
-                    PostThreadMessageW(
-                        GetCurrentThreadId(),
-                        WM_APP_WORKAREA_CHANGE,
-                        WPARAM(0),
-                        LPARAM(0),
-                    )
-                    .ok()
-                };
-            }
-            Some(LRESULT(0))
-        }
         WM_GETDPISCALEDSIZE => {
             let mut rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut rect).ok() };
@@ -454,6 +440,15 @@ fn run_dome(
     };
     unsafe { RegisterClassW(&wc_picker) };
 
+    let wc_app = WNDCLASSW {
+        lpfnWndProc: Some(app_wnd_proc),
+        hInstance: hinstance.into(),
+        lpszClassName: APP_WINDOW_CLASS,
+        hCursor: arrow,
+        ..Default::default()
+    };
+    unsafe { RegisterClassW(&wc_app) };
+
     // DX12 is the only backend we target. All other descriptor fields (flags, memory
     // budget thresholds, backend options, display) stay at their defaults. wgpu 29
     // dropped Default on InstanceDescriptor and now exposes explicit constructors
@@ -501,6 +496,9 @@ fn run_dome(
         hub_sender: hub_sender.clone(),
     };
 
+    let app_window =
+        AppWindow::new(hinstance.into(), hub_sender.clone()).expect("Failed to create app window");
+
     let dome = Dome::new(
         config.clone(),
         workspace_overrides,
@@ -508,6 +506,7 @@ fn run_dome(
         Box::new(overlays),
         Box::new(dome::Win32Display),
         picker,
+        app_window,
     )
     .expect("Failed to initialize Dome");
 

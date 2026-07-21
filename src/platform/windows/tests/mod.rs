@@ -19,10 +19,11 @@ use crate::core::GlobalLayoutConfig;
 use crate::core::PickerEntry;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Length, Logical, Physical, TilingWindowPlacement,
-    WindowId,
+    WindowId, WorkspaceInfo,
 };
 use crate::font::FontConfig;
 use crate::platform::windows::dome::MonitorInfo;
+use crate::platform::windows::dome::app_window::AppWindowApi;
 use crate::platform::windows::dome::overlay::{
     FloatOverlayApi, PickerApi, TabBarOverlayApi, TilingOverlayApi,
 };
@@ -255,6 +256,7 @@ impl TestEnv {
             Box::new(overlays.clone()),
             Box::new(display),
             Box::new(picker.clone()),
+            Box::new(NoopAppWindow),
         )
         .unwrap();
         Self {
@@ -910,6 +912,11 @@ struct NoopTaskbar;
 impl ManageTaskbar for NoopTaskbar {
     fn add_tab(&self, _: HwndId) {}
     fn delete_tab(&self, _: HwndId) {}
+}
+
+struct NoopAppWindow;
+impl AppWindowApi for NoopAppWindow {
+    fn update_tray(&self, _: &[WorkspaceInfo]) {}
 }
 
 #[derive(Clone)]

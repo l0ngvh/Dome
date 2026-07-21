@@ -1,3 +1,4 @@
+pub(super) mod app_window;
 pub(super) mod icon;
 pub(super) mod monitor;
 pub(super) mod overlay;
@@ -6,6 +7,7 @@ mod placement_tracker;
 mod recovery;
 mod registry;
 pub(crate) mod rejection_log_filter;
+pub(super) mod tray;
 pub(super) mod window;
 
 pub(super) use self::monitor::{MonitorInfo, QueryDisplay, Win32Display};
@@ -21,10 +23,11 @@ use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
     Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId,
-    WindowRestrictions,
+    WindowRestrictions, WorkspaceInfo,
 };
 use crate::picker::build_picker_entries;
 
+use self::app_window::AppWindowApi;
 use self::overlay::{FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi};
 use self::placement_tracker::PlacementTracker;
 use self::recovery::Recovery;
@@ -122,6 +125,7 @@ pub(super) struct Dome {
     placement_tracker: PlacementTracker,
     recovery: Recovery,
     picker: Box<dyn overlay::PickerApi>,
+    app_window: Box<dyn AppWindowApi>,
 }
 
 impl Drop for Dome {
@@ -138,6 +142,7 @@ impl Dome {
         overlay_factory: Box<dyn CreateOverlay>,
         display: Box<dyn QueryDisplay>,
         picker: Box<dyn overlay::PickerApi>,
+        app_window: Box<dyn AppWindowApi>,
     ) -> anyhow::Result<Self> {
         let monitors = display.get_all_monitors()?;
         anyhow::ensure!(!monitors.is_empty(), "No monitors detected");
@@ -213,7 +218,12 @@ impl Dome {
             placement_tracker: PlacementTracker::new(),
             recovery: Recovery::new(taskbar),
             picker,
+            app_window,
         })
+    }
+
+    fn refresh_tray(&self) {
+        self.app_window.update_tray(&self.query_workspaces());
     }
 
     pub(super) fn config_changed(&mut self, new_config: Config) {
@@ -471,6 +481,10 @@ impl Dome {
         self.hub.set_focus(id);
         tracing::info!("Window focused");
         self.apply_layout();
+    }
+
+    pub(super) fn query_workspaces(&self) -> Vec<WorkspaceInfo> {
+        self.hub.query_workspaces()
     }
 
     pub(super) fn query_workspaces_json(&self) -> String {
@@ -753,6 +767,7 @@ impl Dome {
             }
         }
         self.last_focused_monitor = Some(current_monitor);
+        self.refresh_tray();
     }
 
     #[tracing::instrument(level = "trace", skip_all)]

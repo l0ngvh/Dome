@@ -31,13 +31,13 @@ dispatch2 = "0.3"
 futures-channel = "0.3"
 libc = "0.2.179"
 objc2 = "0.6.3"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "libc", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSWindow", "NSWindowScripting", "NSView", "NSColor", "NSEvent", "NSScreen", "NSResponder", "NSGraphics", "NSImage", "NSImageRep", "NSBitmapImageRep", "objc2-core-foundation", "objc2-core-graphics", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "libc", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSWindow", "NSWindowScripting", "NSView", "NSColor", "NSEvent", "NSScreen", "NSResponder", "NSGraphics", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSButton", "NSControl", "NSCell", "objc2-core-foundation", "objc2-core-graphics", "objc2-quartz-core"] }
 objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "objc2", "libc", "HIServices", "AXUIElement", "AXValue", "AXError", "Accessibility", "AXNotificationConstants"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFDictionary", "CFNumber", "CFString", "CFRunLoop", "CFMachPort", "CFCGTypes", "CFDate", "CFURL"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGWindow", "CGColorSpace", "CGError", "CGGeometry", "CGSession", "CGDirectDisplay", "CGEvent", "CGEventTypes"] }
 objc2-core-media = { version = "0.3.2", default-features = false, features = ["std", "CMSampleBuffer", "objc2-core-video"] }
 objc2-core-video = { version = "0.3.2", features = ["CVPixelBufferIOSurface", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "objc2-io-surface"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSObject", "NSString", "NSValue", "NSNotification", "NSDistributedNotificationCenter", "NSOperation", "NSGeometry", "NSError", "NSObjCRuntime", "NSArray", "NSDictionary"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSObject", "NSString", "NSValue", "NSNotification", "NSDistributedNotificationCenter", "NSOperation", "NSGeometry", "NSError", "NSObjCRuntime", "NSArray", "NSDictionary", "NSData"] }
 objc2-io-surface = { version = "0.3.2", features = ["IOSurfaceRef"] }
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer", "CAMetalLayer", "CATransaction"] }
 objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "dispatch2", "SCShareableContent", "SCStream", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-media"] }

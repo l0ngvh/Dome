@@ -11,7 +11,7 @@ use crate::config::{Config, LayoutConfig};
 use crate::core::PickerEntry;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId,
-    TilingWindowPlacement, WindowId,
+    TilingWindowPlacement, WindowId, WorkspaceInfo,
 };
 
 use super::super::MonitorInfo;
@@ -130,6 +130,7 @@ pub(in crate::platform::macos) struct RenderFrame {
     pub(in crate::platform::macos) focused_window: Option<WindowId>,
     pub(in crate::platform::macos) focused_monitor_id: MonitorId,
     pub(in crate::platform::macos) tab_bar_height: Length<Logical>,
+    pub(in crate::platform::macos) workspaces: Vec<WorkspaceInfo>,
 }
 
 pub(in crate::platform::macos) struct MonitorTilingData {

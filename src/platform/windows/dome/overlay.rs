@@ -9,22 +9,22 @@ use std::sync::Arc;
 
 use crate::config::Config;
 use crate::font::FontConfig;
-use crate::platform::windows::{HubEvent, HubSender, WM_APP_DISPLAY_CHANGE};
+use crate::platform::windows::{HubEvent, HubSender};
 use crate::theme::{Flavor, apply_catppuccin};
+use windows::Win32::Foundation::HINSTANCE;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice2, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
 };
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GW_HWNDPREV, GWLP_USERDATA, GetWindow,
-    GetWindowLongPtrW, HWND_BOTTOM, HWND_TOP, MA_NOACTIVATE, PostThreadMessageW, SW_HIDE,
-    SW_SHOWNA, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_DISPLAYCHANGE, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_PAINT, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+    GetWindowLongPtrW, HWND_BOTTOM, HWND_TOP, MA_NOACTIVATE, SW_HIDE, SW_SHOWNA, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE,
+    WM_MOUSEMOVE, WM_PAINT, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_OVERLAPPED, WS_POPUP,
 };
 use windows::core::{Interface, PCWSTR};
 
@@ -75,6 +75,37 @@ impl OwnedHwnd {
                 None,
             )?
         };
+        Ok(Self {
+            hwnd,
+            is_visible: false,
+        })
+    }
+
+    /// Creates a hidden top-level window whose sole reason to exist is to receive
+    /// `HWND_BROADCAST` shell messages. `HWND_BROADCAST` does not reach message-only
+    /// windows, so a top-level HWND is required. `WS_EX_TOOLWINDOW` hides it from the
+    /// taskbar and Alt-Tab. `WS_EX_NOACTIVATE` keeps it out of the activation chain.
+    /// No `WS_VISIBLE`, no `ShowWindow` call, and zero geometry, so nothing is ever drawn.
+    pub(in crate::platform::windows) fn new_hidden_top_level(
+        class_name: PCWSTR,
+        instance: HINSTANCE,
+    ) -> anyhow::Result<Self> {
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                class_name,
+                windows::core::w!(""),
+                WS_OVERLAPPED,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                Some(instance),
+                None,
+            )
+        }?;
         Ok(Self {
             hwnd,
             is_visible: false,
@@ -620,22 +651,6 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
 ) -> LRESULT {
     if let Some(lr) = crate::platform::windows::dome_wnd_proc_common(hwnd, msg, wparam, lparam) {
         return lr;
-    }
-    // One tiling overlay per monitor, so a WM_DISPLAYCHANGE broadcast can
-    // produce multiple posts. The WM_APP_DISPLAY_CHANGE handler re-enumerates
-    // monitors and is idempotent, mirroring the duplicate-post note on the
-    // common helper's WM_DPICHANGED arm.
-    if msg == WM_DISPLAYCHANGE {
-        unsafe {
-            PostThreadMessageW(
-                GetCurrentThreadId(),
-                WM_APP_DISPLAY_CHANGE,
-                WPARAM(0),
-                LPARAM(0),
-            )
-            .ok()
-        };
-        return LRESULT(0);
     }
     // Belt-and-braces guard: WS_EX_LAYERED + WS_EX_TRANSPARENT already routes
     // pointer events past the overlay, but the active-window-tracking

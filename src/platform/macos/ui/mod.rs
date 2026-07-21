@@ -3,6 +3,7 @@ mod mirror;
 mod overlay;
 mod picker;
 mod renderer;
+mod status_menu;
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -31,6 +32,7 @@ use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TabBarOverlay, TilingOverlay};
 use picker::PickerPopup;
 use renderer::WgpuFactory;
+use status_menu::StatusMenu;
 
 /// Promote Dome's own process to OS-level frontmost via the AX API.
 ///
@@ -167,6 +169,7 @@ struct AppDelegateIvars {
     last_focused: Cell<Option<WindowId>>,
     last_focused_monitor_id: Cell<Option<MonitorId>>,
     picker_window: RefCell<Option<PickerPopup>>,
+    status_menu: RefCell<Option<StatusMenu>>,
 }
 
 define_class!(
@@ -213,6 +216,7 @@ impl AppDelegate {
             last_focused: Cell::new(None),
             last_focused_monitor_id: Cell::new(None),
             picker_window: RefCell::new(None),
+            status_menu: RefCell::new(None),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
@@ -225,6 +229,14 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
     while let Ok(msg) = delegate.ivars().frame_rx.try_recv() {
         match msg {
             HubMessage::Frame(frame) => {
+                let ivars = delegate.ivars();
+                let sender_clone = ivars.hub_sender.clone();
+                ivars
+                    .status_menu
+                    .borrow_mut()
+                    .get_or_insert_with(|| StatusMenu::new(mtm, sender_clone))
+                    .update(mtm, &frame.workspaces);
+
                 let mut tiling_overlays = delegate.ivars().tiling_overlays.borrow_mut();
                 let mut float_overlays = delegate.ivars().float_overlays.borrow_mut();
                 let mut captures = delegate.ivars().captures.borrow_mut();
