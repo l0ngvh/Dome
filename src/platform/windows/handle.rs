@@ -20,11 +20,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, EnumWindows, GA_ROOT, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE,
     GetAncestor, GetClassNameW, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowRect,
     GetWindowThreadProcessId, HWND_BOTTOM, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO,
-    SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
-    SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow, SetWindowPos, ShowWindow,
-    ShowWindowAsync, WM_GETMINMAXINFO, WM_GETTEXT, WM_GETTEXTLENGTH, WS_CHILD, WS_EX_APPWINDOW,
-    WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX,
-    WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
+    PostMessageW, SMTO_ABORTIFHUNG, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_ASYNCWINDOWPOS,
+    SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SendMessageTimeoutW, SetForegroundWindow,
+    SetWindowPos, ShowWindow, ShowWindowAsync, WM_CLOSE, WM_GETMINMAXINFO, WM_GETTEXT,
+    WM_GETTEXTLENGTH, WS_CHILD, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -392,6 +392,12 @@ impl ManageExternalWindow for ExternalHwnd {
             ShowCmd::Minimize => SW_MINIMIZE,
         };
         unsafe { ShowWindowAsync(self.0, sw).ok().ok() };
+    }
+
+    fn close(&self) {
+        if let Err(e) = unsafe { PostMessageW(Some(self.0), WM_CLOSE, WPARAM(0), LPARAM(0)) } {
+            tracing::trace!(hwnd = ?self.0, "PostMessage WM_CLOSE failed: {e}");
+        }
     }
 
     fn set_foreground_window(&self) {

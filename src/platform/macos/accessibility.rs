@@ -15,12 +15,12 @@ use objc2_core_graphics::{CGSessionCopyCurrentDictionary, CGWindowID};
 use crate::core::{Dimension, Length, Logical};
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::objc2_wrapper::{
-    AXError, get_attribute, get_cg_window_id, is_attribute_settable,
+    AXError, get_attribute, get_cg_window_id, is_attribute_settable, kAXCloseButtonAttribute,
     kAXEnhancedUserInterfaceAttribute, kAXFocusedWindowAttribute, kAXFrontmostAttribute,
     kAXFullScreenAttribute, kAXMainAttribute, kAXMinimizedAttribute, kAXParentAttribute,
-    kAXPositionAttribute, kAXRoleAttribute, kAXSizeAttribute, kAXStandardWindowSubrole,
-    kAXSubroleAttribute, kAXTitleAttribute, kAXWindowRole, kAXWindowsAttribute,
-    set_attribute_value,
+    kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXSizeAttribute,
+    kAXStandardWindowSubrole, kAXSubroleAttribute, kAXTitleAttribute, kAXWindowRole,
+    kAXWindowsAttribute, perform_action, set_attribute_value,
 };
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -323,6 +323,17 @@ impl AXWindow {
         .with_context(|| format!("unminimize for {self}"))
     }
 
+    pub(super) fn close(&self) -> Result<()> {
+        let button = match get_attribute::<AXUIElement>(&self.element, &kAXCloseButtonAttribute()) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(window = %self, "close button missing: {e}");
+                return Ok(());
+            }
+        };
+        perform_action(&button, &kAXPressAction()).with_context(|| format!("close for {self}"))
+    }
+
     pub(super) fn get_size(&self) -> Result<(Length<Logical>, Length<Logical>)> {
         let size = get_attribute::<AXValue>(&self.element, &kAXSizeAttribute())
             .with_context(|| format!("get_size for {self}"))?;
@@ -481,6 +492,7 @@ pub(crate) trait ExternalWindow: Send + Sync + std::fmt::Display {
     fn hide_at(&self, x: Length<Logical>, y: Length<Logical>) -> Result<()>;
     fn minimize(&self) -> Result<()>;
     fn unminimize(&self) -> Result<()>;
+    fn close(&self) -> Result<()>;
     fn is_valid(&self, marker: &DispatcherMarker) -> bool;
     fn is_minimized(&self, marker: &DispatcherMarker) -> bool;
     fn read_title(&self, marker: &DispatcherMarker) -> Option<String>;
@@ -525,6 +537,9 @@ impl ExternalWindow for AXWindow {
     }
     fn unminimize(&self) -> Result<()> {
         self.unminimize()
+    }
+    fn close(&self) -> Result<()> {
+        self.close()
     }
     fn is_valid(&self, _marker: &DispatcherMarker) -> bool {
         self.is_valid()

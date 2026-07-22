@@ -152,7 +152,7 @@ actions that fire in order on a single press.
 | <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>j</kbd> | `move monitor down` |
 | <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>k</kbd> | `move monitor up` |
 | <kbd>meta</kbd>+<kbd>alt</kbd>+<kbd>shift</kbd>+<kbd>l</kbd> | `move monitor right` |
-| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>q</kbd> | `exit` |
+| <kbd>meta</kbd>+<kbd>shift</kbd>+<kbd>q</kbd> | `close` |
 
 ### Modes
 

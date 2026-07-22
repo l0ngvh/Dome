@@ -78,6 +78,14 @@ pub(crate) fn set_attribute_value(
     Ok(())
 }
 
+pub(crate) fn perform_action(element: &AXUIElement, action: &CFString) -> Result<(), AXError> {
+    let res = unsafe { element.perform_action(action) };
+    if res != RawAXError::Success {
+        return Err(res.into());
+    }
+    Ok(())
+}
+
 pub(crate) fn get_pid(element: &AXUIElement) -> Result<i32, AXError> {
     let mut pid = 0;
     let value_ptr = NonNull::new(&mut pid as *mut i32).unwrap();
@@ -253,6 +261,16 @@ pub(crate) fn kAXMovedNotification() -> CFRetained<CFString> {
 #[allow(non_snake_case)]
 pub(crate) fn kAXFocusedWindowAttribute() -> CFRetained<CFString> {
     CFString::from_static_str("AXFocusedWindow")
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn kAXCloseButtonAttribute() -> CFRetained<CFString> {
+    CFString::from_static_str("AXCloseButton")
+}
+
+#[allow(non_snake_case)]
+pub(crate) fn kAXPressAction() -> CFRetained<CFString> {
+    CFString::from_static_str("AXPress")
 }
 
 pub(crate) fn is_attribute_settable(element: &AXUIElement, attribute: &CFString) -> bool {

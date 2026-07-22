@@ -188,6 +188,9 @@ impl ExternalWindow for MockAXWindow {
         self.is_minimized.set(false);
         Ok(())
     }
+    fn close(&self) -> Result<()> {
+        Ok(())
+    }
     fn is_valid(&self, _marker: &DispatcherMarker) -> bool {
         self.is_valid.get()
     }

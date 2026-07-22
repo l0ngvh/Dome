@@ -622,6 +622,17 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(skip(self))]
+    pub(super) fn close_focused_window(&mut self) {
+        let Some(window_id) = self.hub.focused_window(self.hub.current_workspace()) else {
+            return;
+        };
+        let Some(entry) = self.registry.get(window_id) else {
+            return;
+        };
+        entry.ext.close();
+    }
+
     #[tracing::instrument(level = "trace", skip_all)]
     pub(super) fn apply_layout(&mut self) {
         let created = std::mem::take(&mut self.pending_created);

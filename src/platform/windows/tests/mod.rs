@@ -861,6 +861,8 @@ impl ManageExternalWindow for MockExternalHwnd {
         *self.focus_target.lock().unwrap() = FocusTarget::Window(self.hwnd_id);
     }
 
+    fn close(&self) {}
+
     fn is_maximized(&self) -> bool {
         false
     }

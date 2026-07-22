@@ -77,6 +77,7 @@ pub(crate) trait ManageExternalWindow: Send + Sync {
     fn set_position(&self, z: ZOrder, dim: Dimension<Physical>);
     fn move_offscreen(&self);
     fn show_cmd(&self, cmd: ShowCmd);
+    fn close(&self);
     fn set_foreground_window(&self);
     fn is_maximized(&self) -> bool;
     fn recover(&self, was_maximized: bool);

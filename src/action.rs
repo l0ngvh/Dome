@@ -41,6 +41,7 @@ pub enum Action {
         command: String,
     },
     Exit,
+    Close,
     Mode {
         name: String,
     },
@@ -81,6 +82,7 @@ impl fmt::Display for Action {
             Action::UnminimizeWindow(id) => write!(f, "unminimize window {id}"),
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
+            Action::Close => write!(f, "close"),
             Action::Mode { name } => write!(f, "mode {name}"),
         }
     }
@@ -303,6 +305,7 @@ impl FromStr for Action {
             ["master", "more"] => Ok(Action::Master(MasterTarget::More)),
             ["master", "fewer"] => Ok(Action::Master(MasterTarget::Fewer)),
             ["exit"] => Ok(Action::Exit),
+            ["close"] => Ok(Action::Close),
             _ => Err(anyhow!("Unknown action: {}", s)),
         }
     }
@@ -344,6 +347,7 @@ mod tests {
                 r#"{"Exec":{"command":"open -a Terminal"}}"#,
             ),
             (Action::Exit, r#""Exit""#),
+            (Action::Close, r#""Close""#),
             (Action::ToggleMinimized, r#""ToggleMinimized""#),
             (
                 Action::Mode {
@@ -429,6 +433,7 @@ mod tests {
             "master more",
             "master fewer",
             "exit",
+            "close",
             "mode resize",
             "exec open -a Terminal",
         ];

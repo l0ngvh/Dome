@@ -211,7 +211,7 @@ impl Hub {
     /// The top most fullscreen window will get the focus, if any, as fullscreen windows take over
     /// the whole workspaces they are in.
     /// If none is present, focus between float and tiling windows will be decided by is_float_focused
-    pub(super) fn focused_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
+    pub(crate) fn focused_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
         let workspace = self.access.workspaces.get(ws_id);
 
         if let Some(&id) = workspace.fullscreen_windows.last() {

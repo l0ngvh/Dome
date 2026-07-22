@@ -202,6 +202,9 @@ impl Runner {
                     };
                     unsafe { PostQuitMessage(0) };
                 }
+                Action::Close => {
+                    self.dome.close_focused_window();
+                }
                 Action::UnminimizeWindow(id) => {
                     self.dome.picker_unminimize_window(*id);
                 }

@@ -57,7 +57,7 @@ keybindings:
 | <kbd>Meta</kbd> + <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> / <kbd>J</kbd> / <kbd>K</kbd> / <kbd>L</kbd> | Move window to monitor left/down/up/right |
 | <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> | Toggle floating |
 | <kbd>Meta</kbd> + <kbd>B</kbd> | Toggle split/tabbed layout |
-| <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>Q</kbd> | Exit Dome |
+| <kbd>Meta</kbd> + <kbd>Shift</kbd> + <kbd>Q</kbd> | Close focused window |
 
 Dome can also be controlled via the CLI:
 
@@ -68,6 +68,7 @@ dome toggle float|fullscreen     # Toggle floating or fullscreen
 dome toggle layout               # Toggle split/tabbed
 dome toggle minimized            # Open minimized window picker
 dome focus workspace <name>      # Switch workspace
+dome close                       # Close focused window
 dome exit                        # Quit Dome
 ```
 

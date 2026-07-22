@@ -40,6 +40,7 @@ enum CliCommand {
         command: String,
     },
     Exit,
+    Close,
     Mode {
         name: String,
     },
@@ -204,6 +205,7 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Master { target } => Dispatch::Action(Action::Master(target.into())),
             CliCommand::Exec { command } => Dispatch::Action(Action::Exec { command }),
             CliCommand::Exit => Dispatch::Action(Action::Exit),
+            CliCommand::Close => Dispatch::Action(Action::Close),
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
             CliCommand::Export => Dispatch::Export,
             CliCommand::Query { query } => Dispatch::Query(query.into()),
@@ -323,6 +325,11 @@ mod tests {
     #[test]
     fn cli_exit() {
         assert_action(&["dome", "exit"], "exit");
+    }
+
+    #[test]
+    fn cli_close() {
+        assert_action(&["dome", "close"], "close");
     }
 
     #[test]

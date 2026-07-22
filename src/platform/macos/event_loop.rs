@@ -186,6 +186,9 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
                 tracing::debug!("Exit action received");
                 runner.signal.stop();
             }
+            Action::Close => {
+                runner.dome.close_focused_window();
+            }
             Action::UnminimizeWindow(id) => {
                 runner.dome.picker_unminimize_window(*id);
             }

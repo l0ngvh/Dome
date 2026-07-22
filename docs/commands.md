@@ -46,6 +46,7 @@ These actions change the focused window's display mode.
 | `toggle float` | Toggle the focused window between tiling and floating. No effect on fullscreen windows. |
 | `toggle fullscreen` | Toggle the focused window between normal and fullscreen. Works for both tiling and float windows. |
 | `toggle minimized` | Open or close the minimized window picker. |
+| `close` | Close the focused window. Sends the platform-native close request. The app decides whether to prompt the user or exit immediately. |
 
 A window toggled into floating or fullscreen is placed next to the last-focused tiling window on the current workspace. A floated window toggled back to tiling restores its previous tiling dimension. Toggling fullscreen off reveals the next lower fullscreen window, if any.
 

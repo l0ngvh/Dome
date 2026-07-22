@@ -604,6 +604,19 @@ impl Dome {
         self.flush_layout();
     }
 
+    #[tracing::instrument(skip(self))]
+    pub(in crate::platform::macos) fn close_focused_window(&mut self) {
+        let Some(window_id) = self.hub.focused_window(self.hub.current_workspace()) else {
+            return;
+        };
+        let Some(window) = self.registry.by_id(window_id) else {
+            return;
+        };
+        if let Err(e) = window.ext.close() {
+            tracing::warn!(%window_id, "close failed: {e:#}");
+        }
+    }
+
     #[tracing::instrument(skip(self), fields(target = ?target))]
     pub(in crate::platform::macos) fn apply_focus(&mut self, target: &FocusTarget) {
         match target {

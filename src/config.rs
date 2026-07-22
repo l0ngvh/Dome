@@ -199,7 +199,7 @@ fn default_keymaps() -> ModalKeymaps {
             key: "q".into(),
             modifiers: Modifiers::META | Modifiers::SHIFT,
         },
-        Actions::new(vec![Action::Exit]),
+        Actions::new(vec![Action::Close]),
     );
     // Monitor focus: Meta+Alt+hjkl
     for (key, target) in [
