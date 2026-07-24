@@ -4,6 +4,7 @@ use crate::action::{
     Action, FocusTarget, MasterTarget, MonitorTarget, MoveTarget, Query, TabDirection,
     ToggleTarget, parse_monitor_target,
 };
+use crate::core::WindowId;
 
 #[derive(Parser)]
 #[command(name = "dome", about = "A cross-platform tiling window manager")]
@@ -48,6 +49,10 @@ enum CliCommand {
     Query {
         #[command(subcommand)]
         query: CliQuery,
+    },
+    #[command(name = "unminimize-window")]
+    UnminimizeWindow {
+        id: u64,
     },
 }
 
@@ -113,6 +118,8 @@ enum CliTab {
 #[derive(Subcommand)]
 enum CliQuery {
     Workspaces,
+    #[command(name = "minimized")]
+    MinimizedWindows,
 }
 
 #[derive(Debug)]
@@ -180,6 +187,7 @@ impl From<CliQuery> for Query {
     fn from(cq: CliQuery) -> Self {
         match cq {
             CliQuery::Workspaces => Query::Workspaces,
+            CliQuery::MinimizedWindows => Query::MinimizedWindows,
         }
     }
 }
@@ -209,6 +217,14 @@ impl From<CliCommand> for Dispatch {
             CliCommand::Mode { name } => Dispatch::Action(Action::Mode { name }),
             CliCommand::Export => Dispatch::Export,
             CliCommand::Query { query } => Dispatch::Query(query.into()),
+            CliCommand::UnminimizeWindow { id } => {
+                // WindowId's tuple-struct constructor is pub(crate) in core, so round-trip
+                // through serde instead. Its Deserialize impl accepts a bare integer, and
+                // every u64 fits in usize on the 64-bit targets Dome supports.
+                let window_id: WindowId = serde_json::from_value(serde_json::json!(id))
+                    .expect("WindowId round-trips from a bare integer");
+                Dispatch::Action(Action::UnminimizeWindow(window_id))
+            }
         }
     }
 }
@@ -338,6 +354,25 @@ mod tests {
         match d {
             Dispatch::Query(Query::Workspaces) => {}
             other => panic!("expected Query(Workspaces), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_query_minimized() {
+        let d = dispatch_from_argv(&["dome", "query", "minimized"]);
+        match d {
+            Dispatch::Query(Query::MinimizedWindows) => {}
+            other => panic!("expected Query(MinimizedWindows), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_unminimize_window() {
+        let expected: WindowId = serde_json::from_value(serde_json::json!(7)).unwrap();
+        let d = dispatch_from_argv(&["dome", "unminimize-window", "7"]);
+        match d {
+            Dispatch::Action(Action::UnminimizeWindow(id)) if id == expected => {}
+            other => panic!("expected Action(UnminimizeWindow(7)), got {other:?}"),
         }
     }
 

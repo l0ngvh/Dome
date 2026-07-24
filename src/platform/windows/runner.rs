@@ -155,6 +155,9 @@ impl Runner {
             HubEvent::Query { query, sender } => {
                 let json = match query {
                     crate::action::Query::Workspaces => self.dome.query_workspaces_json(),
+                    crate::action::Query::MinimizedWindows => {
+                        self.dome.query_minimized_windows_json()
+                    }
                 };
                 if sender.send(json).is_err() {
                     tracing::debug!("Query response dropped -- receiver gone");

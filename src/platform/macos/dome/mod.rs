@@ -21,7 +21,9 @@ use std::time::Instant;
 
 use objc2_core_graphics::CGWindowID;
 
-use crate::action::{FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
+use crate::action::{
+    FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
+};
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig, WindowMatcher, pattern_matches};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
@@ -396,8 +398,8 @@ impl Dome {
         if let Some(entry) = self.registry.get_mut(cg_id)
             && let Some(title) = title
         {
-            if self.hub.set_window_title(entry.window_id, title) {
-                tracing::trace!("Title changed");
+            if self.hub.set_window_title(entry.window_id, title.clone()) {
+                tracing::trace!(title = %title, "Title changed");
             }
             self.flush_layout();
         }
@@ -564,6 +566,21 @@ impl Dome {
     pub(in crate::platform::macos) fn query_workspaces_json(&self) -> String {
         serde_json::to_string(&self.hub.query_workspaces())
             .expect("WorkspaceInfo is infallibly serializable")
+    }
+
+    pub(in crate::platform::macos) fn query_minimized_windows_json(&self) -> String {
+        let entries: Vec<MinimizedWindow> = self
+            .hub
+            .minimized_window_entries()
+            .into_iter()
+            .map(|e| MinimizedWindow {
+                id: e.id,
+                title: e.title,
+                app_id: e.app_id,
+                app_name: e.app_name,
+            })
+            .collect();
+        serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
     /// Sends picker data to the UI thread, which toggles the picker window:

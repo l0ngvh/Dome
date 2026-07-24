@@ -44,10 +44,10 @@ Prints one JSON entry per active workspace, ordered by creation:
 ```json
 [
   {
-    "name": "0",
-    "is_focused": true,
-    "is_visible": true,
-    "window_count": 3
+    "name": "0",           // workspace name from the config
+    "is_focused": true,    // true for the workspace on the focused monitor
+    "is_visible": true,    // true for the workspace shown on each monitor, one per monitor
+    "window_count": 3      // tiling + float + fullscreen, no double-count, stays 0 for empty workspaces until Dome exits
   },
   {
     "name": "web",
@@ -58,8 +58,32 @@ Prints one JSON entry per active workspace, ordered by creation:
 ]
 ```
 
-`is_focused` is true for the workspace on the focused monitor. `is_visible` is
-true for any workspace currently active on a monitor, one per monitor.
-`window_count` totals tiling, float, and fullscreen windows without
-double-counting. Empty workspaces stay in the output with a `window_count`
-of 0 until Dome exits.
+## `dome query minimized`
+
+Prints one JSON entry per minimized window, in the order they were minimized:
+
+```json
+[
+  {
+    "id": 7,                   // bare integer (not a wrapped object), pair with `dome unminimize-window <id>` to restore
+    "title": "draft.md - Zed", // window title
+    "app_id": "dev.zed.Zed",   // nullable, on macOS the app's bundle identifier for Raycast and similar launcher icon APIs
+    "app_name": "Zed"          // nullable
+  },
+  {
+    "id": 12,
+    "title": "inbox",
+    "app_id": null,
+    "app_name": null
+  }
+]
+```
+
+## `dome unminimize-window <id>`
+
+Restores a specific minimized window by id. External callers pair
+`dome query minimized` with this command to build their own picker.
+
+Keymaps cannot bind to this action. `WindowId`s are not stable across daemon
+restarts, so a bound id would refer to a different window (or no window)
+after a reload.

@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+use crate::core::WindowId;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IpcMessage {
     Action(Action),
@@ -13,9 +15,19 @@ pub enum IpcMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Query {
     Workspaces,
+    MinimizedWindows,
 }
 
-use crate::core::WindowId;
+/// Wire DTO for `Query::MinimizedWindows`. `id` serialises as a bare integer
+/// because `WindowId` is a tuple struct, and external launchers (Raycast)
+/// consume that shape.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MinimizedWindow {
+    pub id: WindowId,
+    pub title: String,
+    pub app_id: Option<String>,
+    pub app_name: Option<String>,
+}
 
 /// Every user-visible action Dome can perform. This is the single source of
 /// truth for the action set: CLI (`src/cli.rs`), IPC JSON, and TOML keymap
@@ -34,8 +46,10 @@ pub enum Action {
     Toggle(ToggleTarget),
     Master(MasterTarget),
     ToggleMinimized,
-    /// Restore a specific minimized window. Sent by the picker UI, not
-    /// user-configurable (no `FromStr` arm, no CLI subcommand).
+    /// Restore a specific minimized window. Not bindable in keymaps and lacks
+    /// `FromStr` because `WindowId`s are not stable across daemon restarts, so a
+    /// bound id would have no meaning after a reload. The `unminimize-window`
+    /// CLI subcommand exists for external launchers like Raycast.
     UnminimizeWindow(WindowId),
     Exec {
         command: String,
@@ -350,6 +364,10 @@ mod tests {
             (Action::Close, r#""Close""#),
             (Action::ToggleMinimized, r#""ToggleMinimized""#),
             (
+                Action::UnminimizeWindow(serde_json::from_value(serde_json::json!(7)).unwrap()),
+                r#"{"UnminimizeWindow":7}"#,
+            ),
+            (
                 Action::Mode {
                     name: "resize".into(),
                 },
@@ -385,6 +403,10 @@ mod tests {
             (
                 IpcMessage::Query(Query::Workspaces),
                 r#"{"Query":"Workspaces"}"#,
+            ),
+            (
+                IpcMessage::Query(Query::MinimizedWindows),
+                r#"{"Query":"MinimizedWindows"}"#,
             ),
         ];
         for (msg, expected) in &cases {
@@ -453,5 +475,37 @@ mod tests {
         let id: WindowId = serde_json::from_value(serde_json::json!(7)).unwrap();
         let action = Action::UnminimizeWindow(id);
         assert_eq!(action.to_string(), "unminimize window WindowId(7)");
+    }
+
+    #[test]
+    fn minimized_window_wire_format() {
+        let id: WindowId = serde_json::from_value(serde_json::json!(7)).unwrap();
+        let cases = vec![
+            (
+                MinimizedWindow {
+                    id,
+                    title: "foo".into(),
+                    app_id: Some("com.example.app".into()),
+                    app_name: Some("Example".into()),
+                },
+                r#"{"id":7,"title":"foo","app_id":"com.example.app","app_name":"Example"}"#,
+            ),
+            (
+                MinimizedWindow {
+                    id,
+                    title: "foo".into(),
+                    app_id: None,
+                    app_name: None,
+                },
+                r#"{"id":7,"title":"foo","app_id":null,"app_name":null}"#,
+            ),
+        ];
+        for (window, expected) in &cases {
+            let json = serde_json::to_string(window).unwrap();
+            assert_eq!(&json, expected, "serialize {window:?}");
+            let round_trip: MinimizedWindow = serde_json::from_str(expected).unwrap();
+            let re_json = serde_json::to_string(&round_trip).unwrap();
+            assert_eq!(&re_json, expected, "round-trip {window:?}");
+        }
     }
 }

@@ -17,7 +17,9 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use crate::action::Query;
-use crate::action::{Actions, FocusTarget, MasterTarget, MoveTarget, TabDirection, ToggleTarget};
+use crate::action::{
+    Actions, FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
+};
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
@@ -490,6 +492,21 @@ impl Dome {
     pub(super) fn query_workspaces_json(&self) -> String {
         serde_json::to_string(&self.hub.query_workspaces())
             .expect("WorkspaceInfo is infallibly serializable")
+    }
+
+    pub(super) fn query_minimized_windows_json(&self) -> String {
+        let entries: Vec<MinimizedWindow> = self
+            .hub
+            .minimized_window_entries()
+            .into_iter()
+            .map(|e| MinimizedWindow {
+                id: e.id,
+                title: e.title,
+                app_id: e.app_id,
+                app_name: e.app_name,
+            })
+            .collect();
+        serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
     pub(super) fn apply_focus(&mut self, target: &FocusTarget) {
