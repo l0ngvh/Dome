@@ -1,7 +1,7 @@
 use crate::core::allocator::NodeId;
 
 use super::{setup, snapshot, titled};
-use crate::core::node::{Dimension, Length, MonitorId, PickerEntry, WindowRestrictions};
+use crate::core::node::{Dimension, Length, MinimizedWindowEntry, MonitorId, WindowRestrictions};
 use insta::assert_snapshot;
 
 #[test]
@@ -430,13 +430,13 @@ fn minimized_window_entries_returns_id_and_title() {
     assert_eq!(
         entries,
         vec![
-            PickerEntry {
+            MinimizedWindowEntry {
                 id: w0,
                 title: "Firefox".into(),
                 app_id: None,
                 app_name: None,
             },
-            PickerEntry {
+            MinimizedWindowEntry {
                 id: w1,
                 title: "Terminal".into(),
                 app_id: None,

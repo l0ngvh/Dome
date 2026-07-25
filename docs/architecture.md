@@ -26,10 +26,10 @@ restrictions, so the user can't move them across monitors or convert them to a
 different type, among other restrictions.
 
 A window can also be minimized, in which case it leaves its workspace and sits
-in a Hub-wide scratchpad list until the user restores it through the picker.
-Minimize preserves the window's prior mode (tiling, float, or fullscreen),
-restrictions, and float geometry, so restoration returns the window to the
-current workspace in the same mode it had before.
+in a Hub-wide scratchpad list until the user restores it. Minimize preserves
+the window's prior mode (tiling, float, or fullscreen), restrictions, and float
+geometry, so restoration returns the window to the current workspace in the
+same mode it had before.
 
 `Hub` is unit-agnostic about coordinates. Every position and size it stores is
 in whichever unit the OS shell hands back, physical pixels or logical points,

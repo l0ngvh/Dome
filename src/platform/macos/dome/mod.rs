@@ -30,7 +30,6 @@ use crate::core::{
     ContainerId, Direction, Hub, Length, Logical, TilingAction, WindowId, WindowMetadata,
     WindowRestrictions,
 };
-use crate::picker::build_picker_entries;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::accessibility::RejectionReason;
 
@@ -583,31 +582,9 @@ impl Dome {
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")
     }
 
-    /// Sends picker data to the UI thread, which toggles the picker window:
-    /// creates it if absent, closes it if already open.
-    pub(in crate::platform::macos) fn toggle_picker(&mut self) {
-        let minimized = self.hub.minimized_window_entries();
-        let entries = build_picker_entries(&minimized);
-        let focused_monitor = self.hub.focused_monitor();
-        let m = self.monitor_registry.monitor(focused_monitor);
-        let monitor_dim = m.work_area();
-        let scale = m.egui_scale();
-        let cocoa_frame = crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa(
-            Length::new(self.primary_full_height),
-            monitor_dim,
-        );
-        self.sender.send(HubMessage::PickerToggle {
-            entries,
-            monitor_dim,
-            cocoa_frame,
-            scale,
-        });
-    }
-
-    /// Unminimize a window selected via the picker. Clears the minimize flag
-    /// and drives the OS-side restore.
+    /// Clear the minimize flag on a window and drive the OS-side restore.
     #[tracing::instrument(skip(self), fields(window_id = %window_id))]
-    pub(in crate::platform::macos) fn picker_unminimize_window(&mut self, window_id: WindowId) {
+    pub(in crate::platform::macos) fn unminimize_window(&mut self, window_id: WindowId) {
         self.hub.unminimize_window(window_id);
         let Some(window) = self.registry.by_id_mut(window_id) else {
             return;
@@ -615,7 +592,7 @@ impl Dome {
         if window.is_minimized {
             window.is_minimized = false;
             if let Err(e) = window.ext.unminimize() {
-                tracing::debug!("Failed to unminimize window from picker: {e:#}");
+                tracing::debug!("Failed to unminimize window: {e:#}");
             }
         }
         self.flush_layout();

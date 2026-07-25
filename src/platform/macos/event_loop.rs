@@ -177,9 +177,6 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
                 runner.dome.apply_master(t);
                 runner.dome.flush_layout();
             }
-            Action::ToggleMinimized => {
-                runner.dome.toggle_picker();
-            }
             Action::Exec { command } => {
                 if let Err(e) = crate::platform::macos::spawn::spawn_disclaimed_sh(command) {
                     tracing::warn!(%command, "Failed to exec: {e}");
@@ -193,7 +190,7 @@ fn process_actions(runner: &mut DomeRunner, actions: &Actions) {
                 runner.dome.close_focused_window();
             }
             Action::UnminimizeWindow(id) => {
-                runner.dome.picker_unminimize_window(*id);
+                runner.dome.unminimize_window(*id);
             }
             Action::Mode { name } => {
                 runner.keymap_state.write().unwrap().switch_mode(name);

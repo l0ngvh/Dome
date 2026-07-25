@@ -24,12 +24,6 @@ pub(crate) struct Theme {
     pub(crate) tab_bar_bg: Color32,
     pub(crate) active_tab_bg: Color32,
     pub(crate) tab_text: Color32,
-    pub(crate) picker_selected_row: Color32,
-    pub(crate) picker_hover_row: Color32,
-    pub(crate) picker_separator: Color32,
-    pub(crate) picker_title_text: Color32,
-    pub(crate) picker_subtext: Color32,
-    pub(crate) picker_empty_text: Color32,
 }
 
 impl Theme {
@@ -42,12 +36,6 @@ impl Theme {
             tab_bar_bg: p.mantle,
             active_tab_bg: p.surface1,
             tab_text: p.text,
-            picker_selected_row: p.surface2,
-            picker_hover_row: p.surface1,
-            picker_separator: p.surface0,
-            picker_title_text: p.text,
-            picker_subtext: p.subtext0,
-            picker_empty_text: p.overlay1,
         }
     }
 }
@@ -209,7 +197,7 @@ pub(crate) fn palette(flavor: Flavor) -> Palette {
 }
 
 /// Sets egui's built-in widget chrome to the Catppuccin palette for `flavor`.
-/// Dome-specific painted colours (borders, tab bars, picker rows) come from
+/// Dome-specific painted colours (borders, tab bars) come from
 /// `Theme::from_flavor` instead.
 pub(crate) fn apply_catppuccin(ctx: &egui::Context, flavor: Flavor) {
     let p = palette(flavor);

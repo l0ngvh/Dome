@@ -54,7 +54,6 @@ use dome::overlay::{
     FLOAT_OVERLAY_CLASS, TAB_BAR_OVERLAY_CLASS, TILING_OVERLAY_CLASS, WgpuOverlayFactory,
     tab_bar_overlay_wnd_proc, tiling_overlay_wnd_proc,
 };
-use dome::picker::{PICKER_OVERLAY_CLASS, PickerWindow, picker_wnd_proc};
 use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
 use external::HwndId;
@@ -431,15 +430,6 @@ fn run_dome(
     };
     unsafe { RegisterClassW(&wc_tab_bar) };
 
-    let wc_picker = WNDCLASSW {
-        lpfnWndProc: Some(picker_wnd_proc),
-        hInstance: hinstance.into(),
-        lpszClassName: PICKER_OVERLAY_CLASS,
-        hCursor: arrow,
-        ..Default::default()
-    };
-    unsafe { RegisterClassW(&wc_picker) };
-
     let wc_app = WNDCLASSW {
         lpfnWndProc: Some(app_wnd_proc),
         hInstance: hinstance.into(),
@@ -478,16 +468,6 @@ fn run_dome(
         thread_id: unsafe { GetCurrentThreadId() },
     };
 
-    let picker = PickerWindow::new(
-        &instance,
-        &adapter,
-        Arc::clone(&device),
-        Arc::clone(&queue),
-        hub_sender.clone(),
-        config.clone(),
-    )
-    .expect("Failed to create picker window");
-
     let overlays = WgpuOverlayFactory {
         instance,
         adapter,
@@ -505,7 +485,6 @@ fn run_dome(
         Rc::new(taskbar),
         Box::new(overlays),
         Box::new(dome::Win32Display),
-        picker,
         app_window,
     )
     .expect("Failed to initialize Dome");

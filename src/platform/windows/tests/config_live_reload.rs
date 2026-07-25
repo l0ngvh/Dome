@@ -33,34 +33,27 @@ fn config_reload_dispatches_apply_theme_on_flavor_change() {
     let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let _w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     env.run_actions("toggle float");
-    let w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
+    let _w3 = env.open(3, "App3", "app3.exe", SPAWN_DIM);
 
-    // Open the picker so self.picker is Some and config_changed dispatches
-    // apply_theme on it.
-    env.minimize_window(w3);
-    env.run_actions("toggle minimized");
-
-    // Sanity: both overlays and picker start at the default Mocha flavor.
-    // w2 is the floated window; w1 is tiling (no float overlay). Only w2
+    // Sanity: overlays start at the default Mocha flavor.
+    // w2 is the floated window. w1 is tiling (no float overlay). Only w2
     // has a float overlay entry.
     let tiling = env.tiling_overlays();
     assert_eq!(tiling[0].flavor, crate::theme::Flavor::Mocha);
     for f in &env.float_overlays() {
         assert_eq!(f.flavor, crate::theme::Flavor::Mocha);
     }
-    assert_eq!(env.picker_flavor(), crate::theme::Flavor::Mocha);
 
     let mut new_config = env.config.clone();
     new_config.theme = crate::theme::Flavor::Latte;
     env.dome.config_changed(new_config);
 
-    // After a flavor change, both overlays and picker must end up holding Latte.
+    // After a flavor change, overlays must end up holding Latte.
     let tiling = env.tiling_overlays();
     assert_eq!(tiling[0].flavor, crate::theme::Flavor::Latte);
     for f in &env.float_overlays() {
         assert_eq!(f.flavor, crate::theme::Flavor::Latte);
     }
-    assert_eq!(env.picker_flavor(), crate::theme::Flavor::Latte);
 }
 
 #[test]
@@ -72,7 +65,6 @@ fn config_reload_dispatches_apply_font_on_font_change() {
 
     let new_font = crate::font::FontConfig {
         text_size: 18.0,
-        subtext_size: 12.0,
         family: None,
     };
     // Sanity: overlays start at the default font (different from `new_font`).
@@ -92,21 +84,4 @@ fn config_reload_dispatches_apply_font_on_font_change() {
     for f in &env.float_overlays() {
         assert_eq!(f.font, new_font);
     }
-}
-
-#[test]
-fn config_reload_dispatches_apply_font_on_picker() {
-    let mut env = TestEnv::new();
-    let _w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-
-    // Open the picker so config_changed dispatches set_config on it.
-    env.minimize_window(w2);
-    env.run_actions("toggle minimized");
-
-    let mut new_config = env.config.clone();
-    new_config.font.text_size += 2.0;
-    env.dome.config_changed(new_config.clone());
-
-    assert_eq!(env.picker_font(), new_config.font);
 }

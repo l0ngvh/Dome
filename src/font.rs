@@ -10,18 +10,16 @@ use serde::Deserialize;
 
 // Minimum validated font size. Smaller values produce unreadable glyphs.
 pub(crate) const MIN_FONT_SIZE: f32 = 4.0;
-// Upper bound for validated font sizes. Above this the UI breaks layout
-// (tabs overflow, picker rows overlap); catches obvious typos at load time.
+// Upper bound for validated font sizes. Above this the UI breaks layout,
+// tabs overflow. Catches obvious typos at load time.
 pub(crate) const MAX_FONT_SIZE: f32 = 128.0;
 
-// DTO: a pair of font sizes with no invariants beyond the validation range.
+// DTO: a font size plus optional family with no invariants beyond the validation range.
 // pub(crate) fields are intentional (plain data, mirrors Flavor/Theme pattern).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub(crate) struct FontConfig {
     #[serde(default = "default_text_size")]
     pub(crate) text_size: f32,
-    #[serde(default = "default_subtext_size")]
-    pub(crate) subtext_size: f32,
     #[serde(default)]
     pub(crate) family: Option<String>,
 }
@@ -30,35 +28,25 @@ pub(crate) fn default_text_size() -> f32 {
     14.0
 }
 
-pub(crate) fn default_subtext_size() -> f32 {
-    12.0
-}
-
-// Default preserves today's hardcoded appearance (14pt body, 12pt subtext).
+// Default preserves today's hardcoded appearance (14pt body).
 impl Default for FontConfig {
     fn default() -> Self {
         Self {
             text_size: default_text_size(),
-            subtext_size: default_subtext_size(),
             family: None,
         }
     }
 }
 
 impl FontConfig {
-    /// Pins egui's `TextStyle::Body` and `TextStyle::Small` to the configured
-    /// sizes. Must land atomically with the call-site switch from `.size(N)` to
-    /// `.text_style(TextStyle::Body|Small)`, otherwise picker subtext would
-    /// shrink to egui's default Small (10pt) instead of our 12pt.
+    /// Pins egui's `TextStyle::Body` to the configured size. Must land
+    /// atomically with the call-site switch from `.size(N)` to
+    /// `.text_style(TextStyle::Body)`.
     pub(crate) fn apply_to(&self, ctx: &Context) {
         ctx.global_style_mut(|s| {
             s.text_styles.insert(
                 TextStyle::Body,
                 FontId::new(self.text_size, FontFamily::Proportional),
-            );
-            s.text_styles.insert(
-                TextStyle::Small,
-                FontId::new(self.subtext_size, FontFamily::Proportional),
             );
         });
     }
@@ -84,37 +72,31 @@ mod tests {
     fn font_defaults() {
         let fc = FontConfig::default();
         assert_eq!(fc.text_size, 14.0);
-        assert_eq!(fc.subtext_size, 12.0);
         assert_eq!(fc.family, None);
     }
 
     #[test]
     fn font_config_deserializes_sizes() {
-        let fc: FontConfig = toml::from_str("text_size = 18.0\nsubtext_size = 15.0").unwrap();
+        let fc: FontConfig = toml::from_str("text_size = 18.0").unwrap();
         assert_eq!(fc.text_size, 18.0);
-        assert_eq!(fc.subtext_size, 15.0);
     }
 
     #[test]
-    fn apply_to_sets_body_and_small_sizes() {
+    fn apply_to_sets_body_size() {
         let ctx = egui::Context::default();
         let fc = FontConfig {
             text_size: 20.0,
-            subtext_size: 11.0,
             family: None,
         };
         fc.apply_to(&ctx);
         let style = ctx.global_style();
         assert_eq!(style.text_styles[&TextStyle::Body].size, 20.0);
-        assert_eq!(style.text_styles[&TextStyle::Small].size, 11.0);
     }
 
     #[test]
     fn font_config_deserializes_family() {
-        let fc: FontConfig = toml::from_str(
-            "text_size = 14.0\nsubtext_size = 12.0\nfamily = \"Microsoft YaHei UI\"",
-        )
-        .unwrap();
+        let fc: FontConfig =
+            toml::from_str("text_size = 14.0\nfamily = \"Microsoft YaHei UI\"").unwrap();
         assert_eq!(fc.family, Some("Microsoft YaHei UI".into()));
     }
 

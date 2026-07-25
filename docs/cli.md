@@ -21,7 +21,7 @@ with the same word-for-word syntax used in `[keymaps]` bindings:
 ```bash
 dome focus right
 dome move workspace 2
-dome toggle minimized
+dome toggle float
 dome master grow
 dome mode resize
 dome exit

@@ -1,6 +1,5 @@
 mod config_live_reload;
 mod lifecycle;
-mod picker;
 mod placement;
 mod transitions;
 mod uncooperative;
@@ -16,7 +15,6 @@ use std::time::Instant;
 use crate::action::{Action, Actions};
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
-use crate::core::PickerEntry;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Length, Logical, Physical, TilingWindowPlacement,
     WindowId, WorkspaceInfo,
@@ -25,7 +23,7 @@ use crate::font::FontConfig;
 use crate::platform::windows::dome::MonitorInfo;
 use crate::platform::windows::dome::app_window::AppWindowApi;
 use crate::platform::windows::dome::overlay::{
-    FloatOverlayApi, PickerApi, TabBarOverlayApi, TilingOverlayApi,
+    FloatOverlayApi, TabBarOverlayApi, TilingOverlayApi,
 };
 use crate::platform::windows::dome::{
     CreateOverlay, Dome, NewWindow, QueryDisplay, WindowsMetadata,
@@ -177,7 +175,6 @@ struct TestEnv {
     exclusive_fullscreen_hwnd: Arc<Mutex<Option<HwndId>>>,
     config: Config,
     overlays: Rc<RefCell<MockOverlays>>,
-    picker: Rc<RefCell<MockPicker>>,
     tab_bars: Rc<RefCell<HashMap<ContainerId, MockTabBarOverlay>>>,
     z_stack: ZOrderStack,
     focus_target: Arc<Mutex<FocusTarget>>,
@@ -223,14 +220,6 @@ impl TestEnv {
             exclusive_fullscreen_hwnd: exclusive_fullscreen_hwnd.clone(),
         };
         let focus_target = Arc::new(Mutex::new(FocusTarget::Initial));
-        let picker = Rc::new(RefCell::new(MockPicker {
-            visible: Cell::new(false),
-            entries: RefCell::new(Vec::new()),
-            loaded_icons: RefCell::new(HashSet::new()),
-            flavor: Cell::new(config.theme),
-            font: RefCell::new(config.font.clone()),
-            config: config.clone(),
-        }));
         let z_stack = ZOrderStack::new();
         let next_float_overlay_id = Rc::new(Cell::new(9000_isize));
         let next_tiling_overlay_id = Rc::new(Cell::new(9900_isize));
@@ -255,7 +244,6 @@ impl TestEnv {
             Rc::new(NoopTaskbar),
             Box::new(overlays.clone()),
             Box::new(display),
-            Box::new(picker.clone()),
             Box::new(NoopAppWindow),
         )
         .unwrap();
@@ -267,7 +255,6 @@ impl TestEnv {
             exclusive_fullscreen_hwnd,
             config,
             overlays,
-            picker,
             tab_bars,
             z_stack,
             focus_target,
@@ -488,7 +475,6 @@ impl TestEnv {
             Action::Move(t) => self.dome.apply_move(t),
             Action::Toggle(t) => self.dome.apply_toggle(t),
             Action::Master(t) => self.dome.apply_master(t),
-            Action::ToggleMinimized => self.dome.toggle_picker(),
             _ => {}
         }
         self.dome.apply_layout();
@@ -530,32 +516,6 @@ impl TestEnv {
                 font: shared.font.borrow().clone(),
             })
             .collect()
-    }
-
-    fn picker_flavor(&self) -> Flavor {
-        self.picker.borrow().flavor.get()
-    }
-
-    fn picker_font(&self) -> FontConfig {
-        self.picker.borrow().font.borrow().clone()
-    }
-
-    fn picker_loaded_icons(&self) -> HashSet<String> {
-        self.picker.borrow().loaded_icons.borrow().clone()
-    }
-
-    fn picker_icons_to_load(&mut self) -> Vec<(String, HwndId)> {
-        self.dome.picker_icons_to_load()
-    }
-
-    fn picker_receive_icon(&mut self, app_id: String) {
-        // Use a 1x1 dummy image; the noop picker ignores the pixel data.
-        let image = egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]);
-        self.dome.picker_receive_icon(app_id, image);
-    }
-
-    fn picker_scale(&self) -> Option<f32> {
-        self.dome.picker_scale()
     }
 
     fn add_monitor(&mut self, monitor: MonitorInfo) {
@@ -1072,68 +1032,6 @@ impl TilingOverlayApi for MockTilingOverlay {
     }
     fn focus(&self) {
         *self.focus_target.lock().unwrap() = FocusTarget::Overlay;
-    }
-}
-
-struct MockPicker {
-    visible: Cell<bool>,
-    entries: RefCell<Vec<PickerEntry>>,
-    loaded_icons: RefCell<HashSet<String>>,
-    flavor: Cell<Flavor>,
-    font: RefCell<FontConfig>,
-    config: Config,
-}
-
-impl PickerApi for Rc<RefCell<MockPicker>> {
-    fn show(&mut self, entries: Vec<PickerEntry>, _monitor_dim: Dimension, _scale: f32) {
-        let this = self.borrow_mut();
-        *this.entries.borrow_mut() = entries;
-        this.visible.set(true);
-    }
-
-    fn hide(&mut self) {
-        self.borrow().visible.set(false);
-    }
-
-    fn is_visible(&self) -> bool {
-        self.borrow().visible.get()
-    }
-
-    fn icons_to_load(
-        &mut self,
-        lookup_hwnd: &dyn Fn(crate::core::WindowId) -> Option<HwndId>,
-    ) -> Vec<(String, HwndId)> {
-        let this = self.borrow_mut();
-        let entries = this.entries.borrow();
-        let mut loaded = this.loaded_icons.borrow_mut();
-        let mut result = Vec::new();
-        for entry in entries.iter() {
-            let Some(app_id) = entry.app_id.as_ref() else {
-                continue;
-            };
-            if loaded.contains(app_id) {
-                continue;
-            }
-            let Some(hwnd_id) = lookup_hwnd(entry.id) else {
-                continue;
-            };
-            loaded.insert(app_id.clone());
-            result.push((app_id.clone(), hwnd_id));
-        }
-        result
-    }
-
-    fn receive_icon(&mut self, app_id: String, _image: egui::ColorImage) {
-        self.borrow_mut().loaded_icons.borrow_mut().insert(app_id);
-    }
-
-    fn rerender(&mut self) {}
-
-    fn set_config(&mut self, config: &Config) {
-        let mut this = self.borrow_mut();
-        this.flavor.set(config.theme);
-        *this.font.borrow_mut() = config.font.clone();
-        this.config = config.clone();
     }
 }
 

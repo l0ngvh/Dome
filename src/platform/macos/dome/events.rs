@@ -8,7 +8,6 @@ use objc2_foundation::NSRect;
 use crate::action::Actions;
 use crate::action::Query;
 use crate::config::{Config, LayoutConfig};
-use crate::core::PickerEntry;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId,
     TilingWindowPlacement, WindowId, WorkspaceInfo,
@@ -105,12 +104,6 @@ pub(in crate::platform::macos) enum HubMessage {
     Frame(RenderFrame),
     RefreshObservers,
     ConfigChanged(Box<Config>),
-    PickerToggle {
-        entries: Vec<PickerEntry>,
-        monitor_dim: Dimension,
-        cocoa_frame: NSRect,
-        scale: f64,
-    },
     Shutdown,
 }
 

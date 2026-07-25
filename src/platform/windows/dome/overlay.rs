@@ -28,10 +28,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Interface, PCWSTR};
 
-use crate::core::PickerEntry;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, Physical,
-    TilingWindowPlacement, WindowId,
+    TilingWindowPlacement,
 };
 use crate::overlay;
 use crate::platform::windows::dome::CreateOverlay;
@@ -50,7 +49,7 @@ impl OwnedHwnd {
     /// `WS_EX_NOREDIRECTIONBITMAP` is force-OR'd in because every Dome overlay
     /// uses DirectComposition and must suppress the GDI redirection bitmap.
     /// Click-through (`WS_EX_LAYERED | WS_EX_TRANSPARENT`) stays per-call so
-    /// the picker and tab bars can receive pointer events.
+    /// the tab bars can receive pointer events.
     pub(super) fn new(
         class: PCWSTR,
         ex_style: WINDOW_EX_STYLE,
@@ -130,10 +129,6 @@ impl OwnedHwnd {
             unsafe { ShowWindow(self.hwnd, SW_HIDE).ok().ok() };
             self.is_visible = false;
         }
-    }
-
-    pub(super) fn is_visible(&self) -> bool {
-        self.is_visible
     }
 }
 
@@ -254,10 +249,6 @@ impl Renderer {
         self.surface.configure(&self.device, &self.surface_config);
         // configure() may recreate the swap chain and call SetContent again.
         unsafe { self.dcomp_device.Commit() }.expect("DComp commit after resize");
-    }
-
-    pub(super) fn egui_ctx(&self) -> &egui::Context {
-        &self.egui_ctx
     }
 
     pub(super) fn apply_theme(&self, flavor: Flavor) {
@@ -705,19 +696,6 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
     /// Demotes the overlay below `managed` via a z-only `SetWindowPos`.
     /// Fallback for when `window_above()` returns None (overlay at top).
     fn demote_below(&mut self, managed: HwndId);
-}
-
-pub(in crate::platform::windows) trait PickerApi {
-    fn show(&mut self, entries: Vec<PickerEntry>, monitor_dim: Dimension, scale: f32);
-    fn hide(&mut self);
-    fn is_visible(&self) -> bool;
-    fn icons_to_load(
-        &mut self,
-        lookup_hwnd: &dyn Fn(WindowId) -> Option<HwndId>,
-    ) -> Vec<(String, HwndId)>;
-    fn receive_icon(&mut self, app_id: String, image: egui::ColorImage);
-    fn rerender(&mut self);
-    fn set_config(&mut self, config: &Config);
 }
 
 pub(in crate::platform::windows) const FLOAT_OVERLAY_CLASS: PCWSTR =

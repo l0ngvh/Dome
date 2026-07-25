@@ -572,7 +572,6 @@ fn send(dome: &mut Dome, s: &str) {
             dome.apply_master(t);
             dome.flush_layout();
         }
-        Action::ToggleMinimized => dome.toggle_picker(),
         _ => panic!("send() only handles tiling actions, got: {action}"),
     }
 }

@@ -188,12 +188,6 @@ impl Runner {
                 Action::Master(t) => {
                     self.dome.apply_master(t);
                 }
-                Action::ToggleMinimized => {
-                    self.dome.toggle_picker();
-                    if self.dome.picker_visible() {
-                        self.dispatch_picker_icons();
-                    }
-                }
                 Action::Exec { command } => {
                     if let Err(e) = crate::platform::windows::spawn::spawn(command) {
                         tracing::warn!(%command, "Failed to exec: {e:#}");
@@ -209,7 +203,7 @@ impl Runner {
                     self.dome.close_focused_window();
                 }
                 Action::UnminimizeWindow(id) => {
-                    self.dome.picker_unminimize_window(*id);
+                    self.dome.unminimize_window(*id);
                 }
                 Action::Mode { name } => {
                     self.keymap_state.write().unwrap().switch_mode(name);
@@ -324,28 +318,6 @@ impl Runner {
                 runner.dome.apply_layout();
             },
         );
-    }
-
-    fn dispatch_picker_icons(&mut self) {
-        let to_load = self.dome.picker_icons_to_load();
-        let scale = self.dome.picker_scale().unwrap_or_else(|| {
-            panic!("dispatch_picker_icons: picker_visible() was true but picker_scale() returned None -- picker state desynced")
-        });
-        for (app_id, hwnd_id) in to_load {
-            self.dispatcher.dispatch(
-                move || {
-                    let hwnd = windows::Win32::Foundation::HWND::from(hwnd_id);
-                    crate::platform::windows::dome::icon::load_app_icon(hwnd, scale)
-                        .map(|image| (app_id, image))
-                },
-                move |result, runner| {
-                    if let Some((app_id, image)) = result {
-                        runner.dome.picker_receive_icon(app_id, image);
-                        runner.dome.picker_rerender();
-                    }
-                },
-            );
-        }
     }
 }
 

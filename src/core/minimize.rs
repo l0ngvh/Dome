@@ -17,7 +17,7 @@
 
 use crate::core::{
     Hub, WindowId,
-    node::{DisplayMode, PickerEntry},
+    node::{DisplayMode, MinimizedWindowEntry},
 };
 
 impl Hub {
@@ -65,7 +65,7 @@ impl Hub {
 
     /// Restore a minimized window to the current workspace using its preserved
     /// mode. No-op if the window is not in `minimized_windows` (guards against
-    /// stale picker entries where a window was deleted while minimized).
+    /// stale entries where a window was deleted while minimized).
     #[tracing::instrument(skip(self))]
     pub(crate) fn unminimize_window(&mut self, window_id: WindowId) {
         if !self.minimized_windows.contains(&window_id) {
@@ -94,13 +94,13 @@ impl Hub {
         tracing::info!(?prior_mode, "Window unminimized");
     }
 
-    /// Returns picker entries for all minimized windows, in insertion order.
-    pub(crate) fn minimized_window_entries(&self) -> Vec<PickerEntry> {
+    /// Returns entries for all minimized windows, in insertion order.
+    pub(crate) fn minimized_window_entries(&self) -> Vec<MinimizedWindowEntry> {
         self.minimized_windows
             .iter()
             .map(|&id| {
                 let w = self.access.windows.get(id);
-                PickerEntry {
+                MinimizedWindowEntry {
                     id,
                     title: w.metadata.title().map(str::to_owned).unwrap_or_default(),
                     app_id: w.metadata.icon_key(),

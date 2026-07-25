@@ -180,13 +180,11 @@ new config removes it.
 
 ```toml
 [font]
-text_size = 14.0       # Body text: tab titles, picker labels.
-subtext_size = 12.0    # Secondary text: picker app-name subtext.
+text_size = 14.0       # Body text: tab titles.
 # family = "PingFang SC"
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `font.text_size` | float | `14.0` | Body text size in points (`4.0` to `128.0`). |
-| `font.subtext_size` | float | `12.0` | Secondary text size in points (`4.0` to `128.0`). |
 | `font.family` | string | unset | System font to use for rendering. When unset, egui's built-in Ubuntu-Light is used. Dome logs a warning and falls back to built-in fonts when a commercial font cannot be used. |

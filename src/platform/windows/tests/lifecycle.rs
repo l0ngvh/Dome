@@ -4,6 +4,15 @@ use super::*;
 use crate::config::{Config, LayoutConfig, PartitionTreeConfig, WindowMatcher};
 use crate::core::GlobalLayoutConfig;
 
+/// Count minimized windows tracked by the daemon by parsing the same JSON
+/// blob external launchers consume via `Query::MinimizedWindows`.
+fn minimized_json_len(dome: &Dome) -> usize {
+    let json = dome.query_minimized_windows_json();
+    let arr: Vec<serde_json::Value> =
+        serde_json::from_str(&json).expect("query_minimized_windows_json is well-formed");
+    arr.len()
+}
+
 #[test]
 fn window_destroyed_fills_screen() {
     let mut env = TestEnv::new();
@@ -34,9 +43,9 @@ fn window_minimized_removes_from_tiling() {
         default_monitor().dimension,
         env.config.border_size,
     );
-    // w2 should be in the minimize picker, not deleted
-    env.run_actions("toggle minimized");
-    assert_eq!(env.picker.borrow().entries.borrow().len(), 1);
+    // w2 stays tracked as a minimized window (not deleted), reachable
+    // via the external launcher query surface.
+    assert_eq!(minimized_json_len(&env.dome), 1);
 }
 
 #[test]
@@ -46,13 +55,10 @@ fn user_minimize_then_restore() {
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
 
     env.minimize_window(w2);
-    env.run_actions("toggle minimized");
-    assert_eq!(env.picker.borrow().entries.borrow().len(), 1);
-    env.run_actions("toggle minimized"); // hide
+    assert_eq!(minimized_json_len(&env.dome), 1);
 
     env.unminimize_window(w2);
-    env.run_actions("toggle minimized"); // show again with fresh entries
-    assert_eq!(env.picker.borrow().entries.borrow().len(), 0);
+    assert_eq!(minimized_json_len(&env.dome), 0);
     // Both windows should be tiled again
     assert_h_tiled(
         &[env.dim(w1), env.dim(w2)],
@@ -333,7 +339,6 @@ fn multi_action_sequence_applies_each_hub_action() {
                 env.dome.apply_master(t);
                 env.dome.apply_layout();
             }
-            Action::ToggleMinimized => env.dome.toggle_picker(),
             _ => {}
         }
     }

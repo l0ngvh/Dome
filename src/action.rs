@@ -30,22 +30,16 @@ pub struct MinimizedWindow {
 }
 
 /// Every user-visible action Dome can perform. This is the single source of
-/// truth for the action set: CLI (`src/cli.rs`), IPC JSON, and TOML keymap
+/// truth for the action set. CLI (`src/cli.rs`), IPC JSON, and TOML keymap
 /// strings all parse into this enum. Adding a new action requires editing only
 /// this enum and its `Display`/`FromStr` impls. IPC wire format uses the
-/// variant name as its tag; a rename is a wire-format break.
-///
-/// `ToggleMinimized` is a first-class variant (not a `ToggleTarget` member)
-/// because the picker is a UI concern, not a tree mutation. Making it top-level
-/// lets the compiler enforce that every platform runner handles it explicitly,
-/// instead of relying on `unreachable!()` arms in hub dispatch.
+/// variant name as its tag, so a rename is a wire-format break.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Action {
     Focus(FocusTarget),
     Move(MoveTarget),
     Toggle(ToggleTarget),
     Master(MasterTarget),
-    ToggleMinimized,
     /// Restore a specific minimized window. Not bindable in keymaps and lacks
     /// `FromStr` because `WindowId`s are not stable across daemon restarts, so a
     /// bound id would have no meaning after a reload. The `unminimize-window`
@@ -92,7 +86,6 @@ impl fmt::Display for Action {
             Action::Move(t) => write!(f, "move {t}"),
             Action::Toggle(t) => write!(f, "toggle {t}"),
             Action::Master(t) => write!(f, "master {t}"),
-            Action::ToggleMinimized => write!(f, "toggle minimized"),
             Action::UnminimizeWindow(id) => write!(f, "unminimize window {id}"),
             Action::Exec { command } => write!(f, "exec {command}"),
             Action::Exit => write!(f, "exit"),
@@ -313,7 +306,6 @@ impl FromStr for Action {
             ["toggle", "layout"] => Ok(Action::Toggle(ToggleTarget::Layout)),
             ["toggle", "float"] => Ok(Action::Toggle(ToggleTarget::Float)),
             ["toggle", "fullscreen"] => Ok(Action::Toggle(ToggleTarget::Fullscreen)),
-            ["toggle", "minimized"] => Ok(Action::ToggleMinimized),
             ["master", "grow"] => Ok(Action::Master(MasterTarget::Grow)),
             ["master", "shrink"] => Ok(Action::Master(MasterTarget::Shrink)),
             ["master", "more"] => Ok(Action::Master(MasterTarget::More)),
@@ -362,7 +354,6 @@ mod tests {
             ),
             (Action::Exit, r#""Exit""#),
             (Action::Close, r#""Close""#),
-            (Action::ToggleMinimized, r#""ToggleMinimized""#),
             (
                 Action::UnminimizeWindow(serde_json::from_value(serde_json::json!(7)).unwrap()),
                 r#"{"UnminimizeWindow":7}"#,
@@ -449,7 +440,6 @@ mod tests {
             "toggle layout",
             "toggle float",
             "toggle fullscreen",
-            "toggle minimized",
             "master grow",
             "master shrink",
             "master more",

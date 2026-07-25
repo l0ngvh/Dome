@@ -322,7 +322,6 @@ fn multi_action_sequence_applies_each_hub_action() {
                 dome.apply_master(t);
                 dome.flush_layout();
             }
-            Action::ToggleMinimized => dome.toggle_picker(),
             _ => {}
         }
     }

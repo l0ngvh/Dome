@@ -10,9 +10,7 @@ use crate::action::{
     Action, Actions, FocusTarget, MonitorTarget, MoveTarget, TabDirection, ToggleTarget,
 };
 use crate::core::{Length, Logical, Unit};
-use crate::font::{
-    FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_subtext_size, default_text_size,
-};
+use crate::font::{FontConfig, MAX_FONT_SIZE, MIN_FONT_SIZE, default_text_size};
 use crate::theme::{Flavor, Theme};
 
 bitflags::bitflags! {
@@ -581,17 +579,6 @@ impl WalkRecover for FontConfig {
             );
             default_text_size()
         };
-        let subtext_size = w.field("subtext_size", default_subtext_size());
-        let subtext_size = if (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&subtext_size) {
-            subtext_size
-        } else {
-            tracing::warn!(
-                field = %field_path(&w.prefix, "subtext_size"),
-                value = subtext_size,
-                "Out of range, using default",
-            );
-            default_subtext_size()
-        };
         let family: Option<String> = w.field("family", None);
         let family = match family {
             Some(s) if s.trim().is_empty() => {
@@ -603,11 +590,7 @@ impl WalkRecover for FontConfig {
             }
             other => other,
         };
-        FontConfig {
-            text_size,
-            subtext_size,
-            family,
-        }
+        FontConfig { text_size, family }
     }
 }
 
@@ -1497,10 +1480,8 @@ mod tests {
 
     #[test]
     fn font_deserializes_via_config() {
-        let config: Config =
-            toml::from_str("[font]\ntext_size = 18.0\nsubtext_size = 15.0").unwrap();
+        let config: Config = toml::from_str("[font]\ntext_size = 18.0").unwrap();
         assert_eq!(config.font.text_size, 18.0);
-        assert_eq!(config.font.subtext_size, 15.0);
     }
 
     #[test]

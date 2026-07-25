@@ -693,10 +693,10 @@ fn user_minimized_window_receives_move_event() {
 
 #[test]
 fn user_minimized_unminimize_via_focus() {
-    // When set_focus is called on a minimized window (e.g. from the picker),
-    // hub.set_focus checks the is_minimized flag, calls unminimize_window to
-    // clear it and reattach to the current workspace. flush_layout then
-    // positions the window via show_tiling / show_float.
+    // When set_focus is called on a minimized window (e.g. via an OS-side
+    // restore path like Dock click), hub.set_focus checks the is_minimized flag,
+    // calls unminimize_window to clear it and reattach to the current workspace.
+    // flush_layout then positions the window via show_tiling / show_float.
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
@@ -719,7 +719,7 @@ fn user_minimized_unminimize_via_focus() {
     // cg2 should now be full screen (border inset makes it slightly less than 1920)
     assert_eq!(macos.window_frame(cg2), (4, 4, 1912, 1072));
 
-    // User selects cg1 from the picker → focus_window_by_cg
+    // OS-side restore path: focus_window_by_cg triggered by Dock click on cg1
     dome.focus_window_by_cg(cg1);
     macos.settle(&mut dome, 10);
 
@@ -849,7 +849,7 @@ fn tiling_state_preserved_through_user_minimize_round_trip() {
     macos.user_minimize(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
-    // Unminimize via focus (simulates picker or Dock click)
+    // Unminimize via focus (simulates a Dock click)
     dome.focus_window_by_cg(cg1);
     macos.settle(&mut dome, 10);
 
@@ -931,7 +931,7 @@ fn float_state_preserved_through_user_minimize_round_trip() {
     macos.user_minimize(&mut dome, cg2);
     macos.settle(&mut dome, 10);
 
-    // Unminimize via focus (simulates picker or Dock click)
+    // Unminimize via focus (simulates a Dock click)
     dome.focus_window_by_cg(cg2);
     macos.settle(&mut dome, 10);
 
@@ -944,10 +944,10 @@ fn float_state_preserved_through_user_minimize_round_trip() {
 #[test]
 fn native_fullscreen_state_preserved_through_user_minimize_round_trip() {
     // Round-trip: native fullscreen window user-minimized via the OS should
-    // return to its original position when restored through the picker.
-    // The picker path is required because focus_window_by_cg alone does not
-    // clear ByUser on NativeFullscreen windows (place_fullscreen_window only
-    // handles ByDome).
+    // return to its original position when restored via unminimize_window.
+    // The unminimize_window path is required because focus_window_by_cg alone
+    // does not clear ByUser on NativeFullscreen windows (place_fullscreen_window
+    // only handles ByDome).
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
 
@@ -961,16 +961,16 @@ fn native_fullscreen_state_preserved_through_user_minimize_round_trip() {
 
     let placed = macos.window_frame(cg1);
     // Grab WindowId from frame state while the window is focused (before minimize
-    // clears focus). Needed to drive the picker restore path.
+    // clears focus). Needed to drive the unminimize_window restore path.
     let window_id = macos.last_frame_state().focused_window.unwrap();
 
     // User minimizes cg1
     macos.user_minimize(&mut dome, cg1);
     macos.settle(&mut dome, 10);
 
-    // Restore via picker (the picker handles ByUser and preserves NativeFullscreen
+    // Restore via unminimize_window (handles ByUser and preserves NativeFullscreen
     // state, unlike the window_moved path which would exit the fullscreen Space).
-    dome.picker_unminimize_window(window_id);
+    dome.unminimize_window(window_id);
     dome.flush_layout();
     macos.settle(&mut dome, 10);
 

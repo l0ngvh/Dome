@@ -367,9 +367,9 @@ impl Dome {
         if window.is_moving {
             return;
         }
-        // User-minimized window being restored (picker or focus_window_by_cg path).
-        // Clear the flag and drive the OS-side restore; fall through to the
-        // preserved state match for geometry placement.
+        // User-minimized window being restored via focus_window_by_cg. Clear the
+        // flag and drive the OS-side restore. Fall through to the preserved
+        // state match for geometry placement.
         if window.is_minimized {
             window.is_minimized = false;
             if let Err(e) = window.ext.unminimize() {
@@ -431,9 +431,9 @@ impl Dome {
         if window.is_moving {
             return;
         }
-        // User-minimized window being restored (picker or focus_window_by_cg path).
-        // Clear the flag and drive the OS-side restore; fall through to the
-        // preserved state match for geometry placement.
+        // User-minimized window being restored via focus_window_by_cg. Clear the
+        // flag and drive the OS-side restore. Fall through to the preserved
+        // state match for geometry placement.
         if window.is_minimized {
             window.is_minimized = false;
             if let Err(e) = window.ext.unminimize() {

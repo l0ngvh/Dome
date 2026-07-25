@@ -136,7 +136,7 @@ pub(crate) trait WindowMetadata:
 {
     /// Icon cache key: process executable path on Windows, bundle ID on macOS.
     fn icon_key(&self) -> Option<String>;
-    /// Human-readable app name for the picker subtitle.
+    /// Human-readable app name used by the minimized window listing.
     fn app_name(&self) -> Option<String>;
     /// Current window title, if any.
     fn title(&self) -> Option<&str>;
@@ -276,10 +276,11 @@ impl Window {
     }
 }
 
-/// Entry for the window picker overlay. Created by `minimized_window_entries`
-/// on `Hub` and consumed by `build_picker_entries` in the platform shell.
+/// One minimized window in title order. Produced by
+/// `Hub::minimized_window_entries` and serialized as the JSON payload of
+/// `Query::MinimizedWindows` for external launchers.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PickerEntry {
+pub(crate) struct MinimizedWindowEntry {
     pub(crate) id: WindowId,
     pub(crate) title: String,
     pub(crate) app_id: Option<String>,

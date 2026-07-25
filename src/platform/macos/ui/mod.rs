@@ -1,7 +1,5 @@
-mod icon;
 mod mirror;
 mod overlay;
-mod picker;
 mod renderer;
 mod status_menu;
 
@@ -30,7 +28,6 @@ use crate::config::Config;
 use crate::core::{ContainerId, MonitorId, WindowId};
 use mirror::{WindowCapture, create_captures_async};
 use overlay::{FloatOverlay, TabBarOverlay, TilingOverlay};
-use picker::PickerPopup;
 use renderer::WgpuFactory;
 use status_menu::StatusMenu;
 
@@ -39,8 +36,8 @@ use status_menu::StatusMenu;
 /// macOS 14+ "cooperative activation" silently ignores `NSApplication::activate()` for
 /// self-activation. The AX API bypasses this via the privileged accessibility subsystem.
 /// Without this, `makeKeyAndOrderFront` only makes a Dome-owned window key inside Dome's
-/// AppKit context while the OS-level foreground app stays elsewhere. Used by both the
-/// minimized-window picker on launch and the tiling overlay's focus-sink path.
+/// AppKit context while the OS-level foreground app stays elsewhere. Used by the tiling
+/// overlay's focus-sink path.
 fn activate_self() {
     let pid = std::process::id() as i32;
     let ax_app = unsafe { AXUIElement::new_application(pid) };
@@ -168,7 +165,6 @@ struct AppDelegateIvars {
     config: RefCell<Config>,
     last_focused: Cell<Option<WindowId>>,
     last_focused_monitor_id: Cell<Option<MonitorId>>,
-    picker_window: RefCell<Option<PickerPopup>>,
     status_menu: RefCell<Option<StatusMenu>>,
 }
 
@@ -215,7 +211,6 @@ impl AppDelegate {
             config: RefCell::new(config),
             last_focused: Cell::new(None),
             last_focused_monitor_id: Cell::new(None),
-            picker_window: RefCell::new(None),
             status_menu: RefCell::new(None),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
@@ -396,39 +391,6 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                 }
                 for overlay in delegate.ivars().tab_bar_overlays.borrow().values() {
                     overlay.set_config(&new_config);
-                }
-                if let Some(picker) = delegate.ivars().picker_window.borrow().as_ref() {
-                    picker.set_config(&new_config);
-                }
-            }
-            HubMessage::PickerToggle {
-                entries,
-                monitor_dim,
-                cocoa_frame,
-                scale,
-            } => {
-                let mut pw = delegate.ivars().picker_window.borrow_mut();
-                match pw.as_ref() {
-                    Some(picker) if picker.is_visible() => {
-                        picker.hide();
-                    }
-                    Some(picker) => {
-                        picker.update_and_show(mtm, entries, monitor_dim, cocoa_frame, scale);
-                    }
-                    None => {
-                        let wgpu_factory = delegate.ivars().wgpu_factory.clone();
-                        let hub_sender = delegate.ivars().hub_sender.clone();
-                        let config = delegate.ivars().config.borrow().clone();
-                        let picker = PickerPopup::new(
-                            mtm,
-                            wgpu_factory,
-                            entries,
-                            (monitor_dim, cocoa_frame, scale),
-                            hub_sender,
-                            config,
-                        );
-                        *pw = Some(picker);
-                    }
                 }
             }
             HubMessage::Shutdown => {

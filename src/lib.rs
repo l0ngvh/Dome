@@ -7,7 +7,6 @@ mod ipc;
 mod keymap;
 mod logging;
 mod overlay;
-pub(crate) mod picker;
 mod platform;
 mod theme;
 
