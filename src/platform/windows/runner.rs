@@ -7,7 +7,6 @@ use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessage
 use crate::action::{Action, Actions};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
-use crate::platform::windows::dome::rejection_log_filter::RejectionLogFilter;
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow, WindowsMetadata};
 use crate::platform::windows::external::{HwndId, InspectExternalWindow, ManageExternalWindow};
 use crate::platform::windows::handle::ExternalHwnd;
@@ -17,7 +16,6 @@ use crate::platform::windows::timer_registry::{TimerKind, TimerRegistry, Win32Ti
 const FOCUS_THROTTLE_INTERVAL: Duration = Duration::from_millis(500);
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
 const DRAG_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
-const PRUNE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const DRIFT_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 pub(super) struct Runner {
@@ -30,7 +28,6 @@ pub(super) struct Runner {
     timers: TimerRegistry,
     main_thread_id: u32,
     keymap_state: Arc<RwLock<KeymapState>>,
-    rejection_log_filter: Arc<RejectionLogFilter>,
 }
 
 impl Runner {
@@ -41,7 +38,6 @@ impl Runner {
         keymap_state: Arc<RwLock<KeymapState>>,
     ) -> Self {
         let mut timers = TimerRegistry::new(Box::new(Win32Timer));
-        timers.schedule_prune(PRUNE_INTERVAL);
         timers.schedule_drift_retry(DRIFT_RETRY_INTERVAL);
         Self {
             dome,
@@ -50,7 +46,6 @@ impl Runner {
             timers,
             main_thread_id,
             keymap_state,
-            rejection_log_filter: Arc::new(RejectionLogFilter::new()),
         }
     }
 
@@ -68,9 +63,6 @@ impl Runner {
             TimerKind::MoveSettle { hwnd, observed_at } => {
                 self.dome.clear_move_state(hwnd);
                 self.dispatch_placement_read(hwnd, observed_at);
-            }
-            TimerKind::Prune => {
-                self.rejection_log_filter.prune(Instant::now());
             }
             TimerKind::DriftRetry => {
                 self.dome.retry_drifted_windows();
@@ -218,20 +210,9 @@ impl Runner {
         let ext = Arc::new(ExternalHwnd::new(hwnd_id.into()));
         let inspect: Arc<dyn InspectExternalWindow> = ext.clone();
         let manage: Arc<dyn ManageExternalWindow> = ext;
-        let log_filter = Arc::clone(&self.rejection_log_filter);
         self.dispatcher.dispatch(
             move || {
-                if let Some(reason) = inspect.check_unmanageable() {
-                    let title = inspect.get_window_title();
-                    let pid = manage.pid();
-                    if pid == 0 {
-                        // Zombie HWND: GetWindowThreadProcessId returned 0. No
-                        // stable key for dedup, log unconditionally.
-                        tracing::trace!(?hwnd_id, ?title, ?reason, "not manageable");
-                    } else if log_filter.record_and_should_log(hwnd_id, pid, reason, Instant::now())
-                    {
-                        tracing::trace!(?hwnd_id, ?title, ?reason, "not manageable");
-                    }
+                if inspect.check_unmanageable() {
                     return None;
                 }
                 let class = inspect.get_class_name();

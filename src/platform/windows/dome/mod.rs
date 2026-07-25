@@ -4,7 +4,6 @@ pub(super) mod overlay;
 mod placement_tracker;
 mod recovery;
 mod registry;
-pub(crate) mod rejection_log_filter;
 pub(super) mod tray;
 pub(super) mod window;
 

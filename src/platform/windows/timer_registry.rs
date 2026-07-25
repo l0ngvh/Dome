@@ -8,7 +8,6 @@ use crate::platform::windows::external::HwndId;
 pub(super) enum TimerKind {
     Focus,
     MoveSettle { hwnd: HwndId, observed_at: Instant },
-    Prune,
     DriftRetry,
 }
 
@@ -67,10 +66,6 @@ impl TimerRegistry {
         }
     }
 
-    pub(super) fn schedule_prune(&mut self, period: Duration) {
-        self.schedule(TimerKind::Prune, 0, period);
-    }
-
     pub(super) fn schedule_drift_retry(&mut self, period: Duration) {
         self.schedule(TimerKind::DriftRetry, 0, period);
     }
@@ -82,7 +77,7 @@ impl TimerRegistry {
                 self.by_id.remove(&timer_id);
                 self.os.kill_timer(timer_id);
             }
-            TimerKind::Prune | TimerKind::DriftRetry => {}
+            TimerKind::DriftRetry => {}
         }
         Some(kind)
     }
@@ -189,23 +184,6 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_prune_keeps_entry_live() {
-        let mock = MockOs::new(50);
-        let kill_calls = mock.kill_calls.clone();
-        let mut reg = TimerRegistry::new(Box::new(mock));
-
-        reg.schedule_prune(Duration::from_secs(300));
-
-        let kind = reg.dispatch(50);
-        assert!(matches!(kind, Some(TimerKind::Prune)));
-
-        let kind2 = reg.dispatch(50);
-        assert!(matches!(kind2, Some(TimerKind::Prune)));
-
-        assert!(kill_calls.borrow().is_empty());
-    }
-
-    #[test]
     fn cancel_move_settle_removes_only_target_hwnd() {
         let mock = MockOs::new(10);
         let kill_calls = mock.kill_calls.clone();
@@ -231,14 +209,12 @@ mod tests {
 
         registry.schedule_focus(Duration::from_millis(500));
         registry.schedule_move_settle(HwndId::test(1), Instant::now(), Duration::from_millis(100));
-        registry.schedule_prune(Duration::from_secs(300));
         drop(registry);
 
         let kills = kill_calls.borrow();
-        assert_eq!(kills.len(), 3);
+        assert_eq!(kills.len(), 2);
         assert!(kills.contains(&200));
         assert!(kills.contains(&201));
-        assert!(kills.contains(&202));
     }
 
     #[test]

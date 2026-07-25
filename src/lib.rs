@@ -5,10 +5,17 @@ mod core;
 mod font;
 mod ipc;
 mod keymap;
+mod log_dedup;
 mod logging;
 mod overlay;
 mod platform;
 mod theme;
+
+#[expect(
+    unused_imports,
+    reason = "debug_once and warn_once reserved for future callers"
+)]
+pub(crate) use log_dedup::{debug_once, trace_once, warn_once};
 
 pub use action::{
     Action, FocusTarget, IpcMessage, MasterTarget, MonitorTarget, MoveTarget, Query, TabDirection,

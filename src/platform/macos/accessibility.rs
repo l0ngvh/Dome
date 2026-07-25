@@ -23,19 +23,6 @@ use crate::platform::macos::objc2_wrapper::{
     kAXWindowsAttribute, perform_action, set_attribute_value,
 };
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub(super) enum RejectionReason {
-    NoTitle,
-    Role,
-    Subrole,
-    Root,
-    Position,
-    Size,
-    Main,
-    Minimized,
-    IgnoredByRule,
-}
-
 /// Per-app accessibility state shared across all windows of the same application.
 ///
 /// Holds the AXUIElement for the app process and cached app metadata (name, bundle ID).
@@ -346,9 +333,15 @@ impl AXWindow {
         ))
     }
 
-    pub(super) fn check_unmanageable(&self) -> Option<RejectionReason> {
+    pub(super) fn check_unmanageable(&self) -> bool {
+        let cg_id = self.cg_id();
+        let pid = self.pid();
         if self.title.is_none() {
-            return Some(RejectionReason::NoTitle);
+            crate::trace_once!(
+                key: (cg_id, pid),
+                window = %self, "not manageable: no title"
+            );
+            return true;
         }
 
         let role = get_attribute::<CFString>(&self.element, &kAXRoleAttribute()).ok();
@@ -357,7 +350,11 @@ impl AXWindow {
             .map(|r| CFEqual(Some(&**r), Some(&*kAXWindowRole())))
             .unwrap_or(false);
         if !is_window {
-            return Some(RejectionReason::Role);
+            crate::trace_once!(
+                key: (cg_id, pid),
+                window = %self, "not manageable: role is not AXWindow"
+            );
+            return true;
         }
 
         let subrole = get_attribute::<CFString>(&self.element, &kAXSubroleAttribute()).ok();
@@ -366,34 +363,58 @@ impl AXWindow {
             .map(|sr| CFEqual(Some(&**sr), Some(&*kAXStandardWindowSubrole())))
             .unwrap_or(false);
         if !is_standard {
-            return Some(RejectionReason::Subrole);
+            crate::trace_once!(
+                key: (cg_id, pid),
+                window = %self, "not manageable: subrole is not standard"
+            );
+            return true;
         }
 
         let is_root = self.app.is_root_window(&self.element);
         if !is_root {
-            return Some(RejectionReason::Root);
+            crate::trace_once!(
+                key: (cg_id, pid),
+                window = %self, "not manageable: not a root window"
+            );
+            return true;
         }
 
         if !is_attribute_settable(&self.element, &kAXPositionAttribute()) {
-            return Some(RejectionReason::Position);
+            crate::trace_once!(
+                key: (cg_id, pid),
+                window = %self, "not manageable: position not settable"
+            );
+            return true;
         }
 
         if !is_attribute_settable(&self.element, &kAXSizeAttribute()) {
-            return Some(RejectionReason::Size);
+            crate::trace_once!(
+                key: (cg_id, pid),
+                window = %self, "not manageable: size not settable"
+            );
+            return true;
         }
 
         if !is_attribute_settable(&self.element, &kAXMainAttribute()) {
-            return Some(RejectionReason::Main);
+            crate::trace_once!(
+                key: (cg_id, pid),
+                window = %self, "not manageable: main not settable"
+            );
+            return true;
         }
 
         let is_minimized = get_attribute::<CFBoolean>(&self.element, &kAXMinimizedAttribute())
             .map(|b| b.as_bool())
             .unwrap_or(false);
         if is_minimized {
-            return Some(RejectionReason::Minimized);
+            crate::trace_once!(
+                key: (cg_id, pid),
+                window = %self, "not manageable: minimized"
+            );
+            return true;
         }
 
-        None
+        false
     }
 
     /// Without this the windows move in a janky way
@@ -403,12 +424,19 @@ impl AXWindow {
         F: FnOnce() -> Result<()>,
     {
         let can_set = self.app.can_set_enhanced_ui();
+        let pid = self.app.pid();
         if can_set && let Err(err) = self.app.set_enhanced_ui(false) {
-            tracing::trace!(window = %self, "Failed to disable enhanced UI: {err:#}");
+            crate::trace_once!(
+                key: pid,
+                window = %self, "Failed to disable enhanced UI: {err:#}"
+            );
         }
         let result = f();
         if can_set && let Err(err) = self.app.set_enhanced_ui(true) {
-            tracing::trace!(window = %self, "Failed to re-enable enhanced UI: {err:#}");
+            crate::trace_once!(
+                key: pid,
+                window = %self, "Failed to re-enable enhanced UI: {err:#}"
+            );
         }
         result
     }

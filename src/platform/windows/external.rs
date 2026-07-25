@@ -2,7 +2,6 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
 use crate::core::{Dimension, Physical};
-use crate::platform::windows::dome::rejection_log_filter::RejectionReason;
 
 /// Opaque window identity. Replaces `ManagedHwnd` throughout the codebase.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,7 +89,7 @@ pub(crate) trait ManageExternalWindow: Send + Sync {
 /// writes because `AXWindow` caches an `AXUIElement` and cannot be cheaply
 /// re-fabricated.
 pub(crate) trait InspectExternalWindow: Send + Sync {
-    fn check_unmanageable(&self) -> Option<RejectionReason>;
+    fn check_unmanageable(&self) -> bool;
     /// Live `IsIconic` query against the OS.
     fn is_minimized(&self) -> bool;
     fn get_window_title(&self) -> Option<String>;

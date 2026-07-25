@@ -29,7 +29,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PCWSTR, w};
 
 use crate::core::{Dimension, Length, Physical};
-use crate::platform::windows::dome::rejection_log_filter::RejectionReason;
 use crate::platform::windows::external::{
     HwndId, InspectExternalWindow, ManageExternalWindow, ShowCmd, ZOrder,
 };
@@ -437,12 +436,19 @@ impl ManageExternalWindow for ExternalHwnd {
 }
 
 impl InspectExternalWindow for ExternalHwnd {
-    fn check_unmanageable(&self) -> Option<RejectionReason> {
+    fn check_unmanageable(&self) -> bool {
         // We don't check for empty title here, as most some text editor apps open windows with
         // empty title for untitled documents
         let hwnd = self.0;
+        let hwnd_id: HwndId = hwnd.into();
+        let pid = self.pid();
+        let title = self.get_window_title();
         if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
-            return Some(RejectionReason::NotVisible);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: not visible"
+            );
+            return true;
         }
         if unsafe { IsIconic(hwnd) }.as_bool() {
             // Already-minimized windows are skipped at registration time. Their
@@ -450,35 +456,71 @@ impl InspectExternalWindow for ExternalHwnd {
             // is unreliable, and we have no way to know the user's intended
             // tiling-vs-float state. Picked back up by the standard create path
             // when the user restores the window via WM_RESTORE / unminimize.
-            return Some(RejectionReason::Iconic);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: iconic"
+            );
+            return true;
         }
         if is_cloaked(hwnd) {
-            return Some(RejectionReason::Cloaked);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: cloaked"
+            );
+            return true;
         }
         if unsafe { GetAncestor(hwnd, GA_ROOT) } != hwnd {
-            return Some(RejectionReason::Ancestor);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: not top-level ancestor"
+            );
+            return true;
         }
         let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
         let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
         if style & WS_CHILD.0 != 0 {
-            return Some(RejectionReason::WsChild);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: WS_CHILD"
+            );
+            return true;
         }
         if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
-            return Some(RejectionReason::Toolwindow);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: WS_EX_TOOLWINDOW"
+            );
+            return true;
         }
         if ex_style & WS_EX_NOACTIVATE.0 != 0 {
-            return Some(RejectionReason::Noactivate);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: WS_EX_NOACTIVATE"
+            );
+            return true;
         }
         if ex_style & WS_EX_TRANSPARENT.0 != 0 {
-            return Some(RejectionReason::Transparent);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: WS_EX_TRANSPARENT"
+            );
+            return true;
         }
         if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
-            return Some(RejectionReason::DlgModalFrame);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: WS_EX_DLGMODALFRAME"
+            );
+            return true;
         }
         if style & WS_POPUP.0 != 0
             && style & (WS_THICKFRAME.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0) == 0
         {
-            return Some(RejectionReason::PopupNoFrame);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: WS_POPUP without frame"
+            );
+            return true;
         }
         // Mirror the Windows Shell's taskbar/Alt-Tab rule: a top-level app window
         // is either ownerless or sets WS_EX_APPWINDOW. Owned windows without that
@@ -495,13 +537,21 @@ impl InspectExternalWindow for ExternalHwnd {
             Ok(h) if !h.is_invalid(),
         );
         if has_owner && ex_style & WS_EX_APPWINDOW.0 == 0 {
-            return Some(RejectionReason::OwnedNoAppWindow);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: owned window without WS_EX_APPWINDOW"
+            );
+            return true;
         }
         let dim = get_dimension(hwnd);
         if dim.width == Length::ZERO || dim.height == Length::ZERO {
-            return Some(RejectionReason::ZeroDim);
+            crate::trace_once!(
+                key: (hwnd_id, pid),
+                ?hwnd_id, ?title, ?pid, "not manageable: zero dimension"
+            );
+            return true;
         }
-        None
+        false
     }
 
     fn is_minimized(&self) -> bool {
