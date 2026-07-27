@@ -370,7 +370,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
         return;
     }
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let (mut hub, free_titles, _tree_ops) = strategy.build_hub(&mut rng, abort);
+    let (mut hub, preferred_titles, _tree_ops) = strategy.build_hub(&mut rng, abort);
     if abort.load(Ordering::Relaxed) {
         return;
     }
@@ -390,7 +390,7 @@ fn run_smoke_iteration(seed: u64, ops_per_run: usize, strategy: SmokeStrategy, a
             |_| {},
             &mut rng,
             ops_per_run,
-            &free_titles,
+            &preferred_titles,
             &mut current_layout,
         );
     }));
@@ -424,12 +424,11 @@ fn run_iteration<F>(
     mut observer: F,
     rng: &mut ChaCha8Rng,
     ops_per_run: usize,
-    free_titles: &[String],
+    preferred_titles: &[String],
     current_layout: &mut GlobalLayoutConfig,
 ) where
     F: FnMut(&RecordedOp),
 {
-    let mut free_titles: Vec<String> = free_titles.to_vec();
     let mut windows: Vec<WindowId> = Vec::new();
     let mut window_origin: Vec<usize> = Vec::new();
     let mut window_minimized: Vec<bool> = Vec::new();
@@ -452,7 +451,7 @@ fn run_iteration<F>(
             &monitors,
             &monitor_origin,
             next_op_index,
-            &mut free_titles,
+            preferred_titles,
             current_layout,
             &workspace_names,
         ) else {
@@ -511,15 +510,14 @@ fn build_op(
     monitors: &[MonitorId],
     monitor_origin: &[usize],
     next_op_index: usize,
-    free_titles: &mut Vec<String>,
+    preferred_titles: &[String],
     current_layout: &mut GlobalLayoutConfig,
     workspace_names: &[String],
 ) -> Option<RecordedOp> {
     match kind {
         OpKind::InsertTiling => {
-            if rng.random_bool(0.5)
-                && let Some(title) = free_titles.pop()
-            {
+            if rng.random_bool(0.5) && !preferred_titles.is_empty() {
+                let title = preferred_titles[rng.random_range(0..preferred_titles.len())].clone();
                 return Some(RecordedOp::InsertTiling {
                     producer_id: next_op_index,
                     title: Some(title),
@@ -1112,7 +1110,7 @@ fn record(
 ) -> (Vec<PrefTreeBuildOp>, Vec<RecordedOp>, FailureSignature) {
     let abort = AtomicBool::new(false);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let (mut hub, free_titles, tree_ops) = strategy.build_hub(&mut rng, &abort);
+    let (mut hub, preferred_titles, tree_ops) = strategy.build_hub(&mut rng, &abort);
     let mut ops: Vec<RecordedOp> = Vec::new();
     let mut current_layout = match strategy {
         SmokeStrategy::PartitionTree | SmokeStrategy::PreferredTree => {
@@ -1129,7 +1127,7 @@ fn record(
             |op| ops.push(op.clone()),
             &mut rng,
             ops_per_run,
-            &free_titles,
+            &preferred_titles,
             &mut current_layout,
         );
     });

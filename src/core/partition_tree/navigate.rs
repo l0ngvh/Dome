@@ -1,7 +1,6 @@
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Direction, WorkspaceId};
 use crate::core::partition_tree::{Child, Parent, SpawnMode};
-use crate::core::strategy::TilingStrategy;
 
 use super::PartitionTreeStrategy;
 
@@ -74,7 +73,7 @@ impl PartitionTreeStrategy {
             self.detach_child_from_container(direct_parent_id, child);
             self.attach_child_to_container(child, container_id, Some(insert_pos));
             self.compute_placement(hub, current_ws);
-            self.set_focus_child(hub, child);
+            self.set_focus(hub, child);
         } else {
             tracing::debug!(?child, %current_ws, "Moving child to new root container");
             self.detach_child_from_container(direct_parent_id, child);
@@ -87,7 +86,7 @@ impl PartitionTreeStrategy {
             let spawn_mode = SpawnMode::from_direction(direction);
             self.replace_anchor_with_container(hub, root, children, spawn_mode.into());
             self.compute_placement(hub, current_ws);
-            self.set_focus_child(hub, child);
+            self.set_focus(hub, child);
         }
     }
 
@@ -122,7 +121,7 @@ impl PartitionTreeStrategy {
         if let Some(sibling) = sibling_found {
             let focus_target = self.descend_to_focused(sibling);
             tracing::debug!(?direction, forward, from = ?focused, to = ?focus_target, "Changing focus");
-            self.set_focus_child(hub, focus_target);
+            self.set_focus(hub, focus_target);
         }
     }
 
@@ -251,7 +250,7 @@ impl PartitionTreeStrategy {
             .unwrap();
         let focus_target = self.descend_to_focused(new_child);
         tracing::debug!(forward, %container_id, ?focus_target, "Focusing tab");
-        self.set_focus_child(hub, focus_target);
+        self.set_focus(hub, focus_target);
     }
 
     pub(super) fn focus_tab_index(
@@ -268,7 +267,7 @@ impl PartitionTreeStrategy {
             return;
         };
         let focus_target = self.descend_to_focused(new_child);
-        self.set_focus_child(hub, focus_target);
+        self.set_focus(hub, focus_target);
     }
 
     /// Move tiling focus from the current child to its parent container. Sets
@@ -284,6 +283,6 @@ impl PartitionTreeStrategy {
             return;
         };
         tracing::debug!(parent = %container_id, %focused, "Focusing parent");
-        self.set_focus_child(hub, Child::Container(container_id));
+        self.set_focus(hub, Child::Container(container_id));
     }
 }

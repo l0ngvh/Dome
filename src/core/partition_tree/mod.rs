@@ -88,22 +88,25 @@ impl TilingStrategy for PartitionTreeStrategy {
             return;
         }
 
-        let occupied_root = self.workspaces.get(&ws_id).unwrap().occupied_preferred_root;
-        let Some(root_slot) = occupied_root else {
-            // First matched window, insert via spawn mode and mark slot occupied
-            self.attach_child_according_to_spawn_mode(hub, Child::Window(window_id), ws_id);
-
-            self.occupy_window_slot(slot_id, window_id);
-            self.tiling_windows.get_mut(&window_id).unwrap().occupy = Some(slot_id);
-            self.workspaces
-                .get_mut(&ws_id)
-                .unwrap()
-                .occupied_preferred_root = Some(PreferredSlot::Window(slot_id));
-            tracing::debug!(%window_id, ?slot_id, "First preferred window, established as root");
+        if !self.window_slots.get(slot_id).windows.is_empty() {
+            self.attach_window_into_same_slot(hub, window_id, ws_id, slot_id);
             return;
-        };
+        }
 
-        self.attach_window_to_unoccupied_container(hub, window_id, ws_id, slot_id, root_slot);
+        if let Some(root_slot) = self.workspaces.get(&ws_id).unwrap().occupied_preferred_root {
+            self.attach_window_to_unoccupied_container(hub, window_id, ws_id, slot_id, root_slot);
+            return;
+        }
+
+        // First matched window, insert via spawn mode and mark slot occupied
+        self.attach_child_according_to_spawn_mode(hub, Child::Window(window_id), ws_id);
+
+        self.occupy_window_slot(slot_id, window_id);
+        self.workspaces
+            .get_mut(&ws_id)
+            .unwrap()
+            .occupied_preferred_root = Some(PreferredSlot::Window(slot_id));
+        tracing::debug!(%window_id, ?slot_id, "First preferred window, established as root");
     }
 
     fn detach_window(&mut self, hub: &HubAccess, window_id: WindowId) -> Dimension {
@@ -160,13 +163,13 @@ impl TilingStrategy for PartitionTreeStrategy {
     }
 
     fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
-        self.compute_placement_against_constraint(hub, ws_id);
+        self.compute_placement(hub, ws_id);
     }
 
     /// Update tiling focus to a window. Delegates to `set_focus_child`, which writes
     /// the window as the focused node on every ancestor container up to the workspace root.
     fn set_focus(&mut self, hub: &mut HubAccess, window_id: WindowId) {
-        self.set_focus_child(hub, Child::Window(window_id));
+        self.set_focus(hub, Child::Window(window_id));
     }
 
     fn collect_tiling_placements(
@@ -175,7 +178,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         ws_id: WorkspaceId,
         focused: bool,
     ) -> TilingPlacements {
-        self.collect_placements(hub, ws_id, focused)
+        self.collect_tiling_placements(hub, ws_id, focused)
     }
 
     fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
@@ -247,71 +250,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         ws_id: WorkspaceId,
         incoming: Option<&LayoutWorkspaceConfig>,
     ) {
-        let current_root = self.workspaces.get(&ws_id).and_then(|ws| ws.preferred_root);
-        let changed = match current_root {
-            Some(_) => match incoming {
-                Some(cfg) => !self.structurally_eq(current_root, cfg),
-                None => true,
-            },
-            None => matches!(
-                incoming,
-                Some(LayoutWorkspaceConfig::PartitionTree { tree: Some(_), .. })
-            ),
-        };
-
-        if !changed {
-            return;
-        }
-
-        tracing::debug!(%ws_id, "PartitionTree preferred layout changed, reloading");
-
-        // Phase: immutable snapshot — collect windows, old root, and focus.
-        // Mutable work (detach_child, container deletion) happens below.
-        let (tiling_windows, old_root) = {
-            let state = self.workspaces.get(&ws_id).unwrap();
-            let windows: Vec<WindowId> = state
-                .root
-                .map(|r| {
-                    self.children_dfs(r)
-                        .filter_map(|c| match c {
-                            Child::Window(id) => Some(id),
-                            Child::Container(_) => None,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            (windows, state.root)
-        };
-
-        let focused = self.focused_tiling_window(ws_id);
-
-        // Phase: mutable — detach root (clears bookmarks + occupation,
-        // triggers one layout on the now-empty workspace).
-        if let Some(root) = old_root {
-            self.detach_child(hub, root);
-        }
-
-        // Set the new preferred layout.
-        let new_root = incoming.and_then(|w| match w {
-            LayoutWorkspaceConfig::PartitionTree { tree, .. } => {
-                tree.as_ref().map(|t| self.build_preferred_layout(t))
-            }
-            _ => None,
-        });
-        self.workspaces.get_mut(&ws_id).unwrap().preferred_root = new_root;
-        self.workspaces
-            .get_mut(&ws_id)
-            .unwrap()
-            .occupied_preferred_root = None;
-
-        // Reattach windows under the new layout.
-        for &wid in &tiling_windows {
-            self.attach_window(hub, wid, ws_id);
-        }
-
-        if let Some(f) = focused {
-            self.set_focus(hub, f);
-        }
+        self.sync_preferred_layout(hub, ws_id, incoming)
     }
 
     fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig) {

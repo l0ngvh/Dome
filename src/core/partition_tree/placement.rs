@@ -12,11 +12,7 @@ impl PartitionTreeStrategy {
     /// is the sum of its children's mins), then top-down to distribute space.
     /// A single pass can't do both because the total minimum must be known
     /// before distributing remaining space.
-    pub(super) fn compute_placement_against_constraint(
-        &mut self,
-        hub: &HubAccess,
-        ws_id: WorkspaceId,
-    ) {
+    pub(super) fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let ws_state = self.workspaces.get(&ws_id).unwrap();
         let Some(root) = ws_state.root else { return };
 
@@ -75,7 +71,7 @@ impl PartitionTreeStrategy {
         }
     }
 
-    pub(super) fn collect_placements(
+    pub(super) fn collect_tiling_placements(
         &self,
         hub: &HubAccess,
         ws_id: WorkspaceId,

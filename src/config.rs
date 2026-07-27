@@ -810,7 +810,7 @@ pub(crate) struct MasterConfig {
     pub(crate) master_count: usize,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub(crate) struct WindowMatcher {
     #[serde(default)]
     pub(crate) app: Option<String>,

@@ -1,9 +1,7 @@
-use super::preferred_layout::PreferredSlot;
 use crate::config::SplitMode;
 use crate::core::hub::HubAccess;
 use crate::core::node::{ContainerId, Dimension, WorkspaceId};
 use crate::core::partition_tree::{Child, Container, Parent, SpawnMode};
-use crate::core::strategy::TilingStrategy;
 
 use super::PartitionTreeStrategy;
 
@@ -23,7 +21,7 @@ impl PartitionTreeStrategy {
         let Some(insert_anchor) = insert_anchor else {
             self.workspaces.get_mut(&ws_id).unwrap().root = Some(child);
             self.set_parent(child, Parent::Workspace(ws_id));
-            self.set_focus_child(hub, child);
+            self.set_focus(hub, child);
             self.compute_placement(hub, ws_id);
             return;
         };
@@ -75,7 +73,7 @@ impl PartitionTreeStrategy {
         }
 
         self.compute_placement(hub, ws_id);
-        self.set_focus_child(hub, child);
+        self.set_focus(hub, child);
     }
 
     /// Detach a `Child` (window or container) from its workspace.
@@ -99,37 +97,7 @@ impl PartitionTreeStrategy {
             }
         }
 
-        let children: Vec<_> = self.children_dfs(child).collect();
-        for child in children {
-            match child {
-                Child::Window(wid) => {
-                    let slot_id = self.tiling_windows.get(&wid).unwrap().occupy;
-                    if let Some(slot_id) = slot_id {
-                        self.clear_window_slot(slot_id);
-                        self.tiling_windows.get_mut(&wid).unwrap().occupy = None;
-                        let ws_state = self.workspaces.get_mut(&workspace_id).unwrap();
-                        if ws_state.occupied_preferred_root == Some(PreferredSlot::Window(slot_id))
-                        {
-                            ws_state.occupied_preferred_root = None;
-                        }
-                    }
-                }
-                Child::Container(cid) => {
-                    let slot_id = self.containers.get(cid).occupy;
-                    if let Some(slot_id) = slot_id {
-                        let new_occupied_root = self.top_occupied_in(slot_id);
-                        self.clear_container_slot(slot_id);
-                        self.containers.get_mut(cid).occupy = None;
-                        let ws_state = self.workspaces.get_mut(&workspace_id).unwrap();
-                        if ws_state.occupied_preferred_root
-                            == Some(PreferredSlot::Container(slot_id))
-                        {
-                            ws_state.occupied_preferred_root = new_occupied_root;
-                        }
-                    }
-                }
-            }
-        }
+        self.detach_preferred_slot(workspace_id, child);
     }
 
     /// Internal set_focus that works with `Child` (window or container).
@@ -139,7 +107,7 @@ impl PartitionTreeStrategy {
     /// `active_tab` on each tabbed ancestor with the walk position (not
     /// `child`). At the workspace level, sets `focused_tiling = Some(child)`
     /// and clears `is_float_focused`.
-    pub(super) fn set_focus_child(&mut self, hub: &mut HubAccess, child: Child) {
+    pub(super) fn set_focus(&mut self, hub: &mut HubAccess, child: Child) {
         let path: Vec<_> = self.ancestors_of(child).collect();
         for (walk_pos, parent_id) in &path {
             let container = self.containers.get_mut(*parent_id);
@@ -155,7 +123,7 @@ impl PartitionTreeStrategy {
             None => child,
         };
         let Parent::Workspace(ws) = self.parent(ws_child) else {
-            panic!("set_focus_child: top of ancestor path has no workspace parent");
+            panic!("set_focus: top of ancestor path has no workspace parent");
         };
         self.workspaces.get_mut(&ws).unwrap().focused_tiling = Some(child);
         hub.workspaces.get_mut(ws).is_float_focused = false;
