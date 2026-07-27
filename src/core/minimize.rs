@@ -103,8 +103,9 @@ impl Hub {
                 MinimizedWindowEntry {
                     id,
                     title: w.metadata.title().map(str::to_owned).unwrap_or_default(),
-                    app_id: w.metadata.icon_key(),
                     app_name: w.metadata.app_name(),
+                    bundle_id: w.metadata.bundle_id(),
+                    executable_path: w.metadata.executable_path(),
                 }
             })
             .collect()

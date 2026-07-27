@@ -13,8 +13,9 @@ import {
 type MinimizedWindow = {
   id: number;
   title: string;
-  app_id: string | null;
   app_name: string | null;
+  bundle_id: string | null;
+  executable_path: string | null;
 };
 
 const DOME_BINARY = "dome";
@@ -113,7 +114,7 @@ export default function Command() {
           key={entry.id}
           title={entry.title || "Untitled"}
           subtitle={entry.app_name ?? undefined}
-          icon={entry.app_id ? { fileIcon: entry.app_id } : Icon.AppWindow}
+          icon={entry.bundle_id ? { fileIcon: entry.bundle_id } : Icon.AppWindow}
           actions={
             <ActionPanel>
               <Action

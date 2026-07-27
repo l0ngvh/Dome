@@ -65,16 +65,18 @@ Prints one JSON entry per minimized window, in the order they were minimized:
 ```json
 [
   {
-    "id": 7,                   // bare integer (not a wrapped object), pair with `dome unminimize-window <id>` to restore
-    "title": "draft.md - Zed", // window title
-    "app_id": "dev.zed.Zed",   // nullable, on macOS the app's bundle identifier for Raycast and similar launcher icon APIs
-    "app_name": "Zed"          // nullable
+    "id": 7,                            // bare integer (not a wrapped object), pair with `dome unminimize-window <id>` to restore
+    "title": "draft.md - Zed",          // window title
+    "app_name": "Zed",                  // nullable
+    "bundle_id": "dev.zed.Zed",         // nullable, populated on macOS, consumed by Raycast's `fileIcon` input
+    "executable_path": null             // nullable, populated on Windows, consumed by Flow Launcher's `IcoPath`
   },
   {
     "id": 12,
-    "title": "inbox",
-    "app_id": null,
-    "app_name": null
+    "title": "Untitled - Notepad",
+    "app_name": null,
+    "bundle_id": null,
+    "executable_path": "C:\\Windows\\System32\\notepad.exe"
   }
 ]
 ```

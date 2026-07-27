@@ -32,6 +32,7 @@ impl std::fmt::Display for NewWindow {
 pub(in crate::platform::windows) struct WindowsMetadata {
     pub title: Option<String>,
     pub process: String,
+    pub process_path: Option<String>,
     pub class: Option<String>,
     pub aumid: Option<String>,
     pub app_name: Option<String>,
@@ -57,9 +58,6 @@ impl std::fmt::Display for WindowsMetadata {
 }
 
 impl crate::core::WindowMetadata for WindowsMetadata {
-    fn icon_key(&self) -> Option<String> {
-        Some(self.process.clone())
-    }
     fn app_name(&self) -> Option<String> {
         self.app_name
             .clone()
@@ -67,6 +65,9 @@ impl crate::core::WindowMetadata for WindowsMetadata {
     }
     fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+    fn executable_path(&self) -> Option<String> {
+        self.process_path.clone()
     }
     fn set_title(&mut self, title: String) {
         self.title = Some(title);

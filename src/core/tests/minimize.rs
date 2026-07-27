@@ -433,14 +433,16 @@ fn minimized_window_entries_returns_id_and_title() {
             MinimizedWindowEntry {
                 id: w0,
                 title: "Firefox".into(),
-                app_id: None,
                 app_name: None,
+                bundle_id: None,
+                executable_path: None,
             },
             MinimizedWindowEntry {
                 id: w1,
                 title: "Terminal".into(),
-                app_id: None,
                 app_name: None,
+                bundle_id: None,
+                executable_path: None,
             },
         ]
     );

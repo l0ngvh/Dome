@@ -218,6 +218,7 @@ impl Runner {
                 let class = inspect.get_class_name();
                 let aumid = inspect.get_aumid();
                 let process = inspect.get_process_name().unwrap_or_default();
+                let process_path = inspect.get_process_path().ok();
                 let title = inspect.get_window_title();
                 Some((
                     NewWindow {
@@ -225,6 +226,7 @@ impl Runner {
                         metadata: WindowsMetadata {
                             title,
                             process,
+                            process_path,
                             class,
                             aumid,
                             app_name: inspect.get_app_display_name(),

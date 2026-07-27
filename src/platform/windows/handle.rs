@@ -614,6 +614,14 @@ impl InspectExternalWindow for ExternalHwnd {
             .ok_or_else(|| anyhow::anyhow!("no filename in path"))
     }
 
+    fn get_process_path(&self) -> anyhow::Result<String> {
+        let hwnd = self.0;
+        let path_wide = crate::platform::windows::process::get_exe_path(hwnd)
+            .ok_or_else(|| anyhow::anyhow!("could not query process image name"))?;
+        let end = path_wide.len().saturating_sub(1);
+        Ok(String::from_utf16_lossy(&path_wide[..end]))
+    }
+
     /// Applies `target_scale_to_physical` to handle legacy-DPI-unaware targets,
     /// then subtracts invisible borders.
     fn get_size_constraints(&self) -> (f32, f32, f32, f32) {

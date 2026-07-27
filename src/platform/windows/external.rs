@@ -94,6 +94,9 @@ pub(crate) trait InspectExternalWindow: Send + Sync {
     fn is_minimized(&self) -> bool;
     fn get_window_title(&self) -> Option<String>;
     fn get_process_name(&self) -> anyhow::Result<String>;
+    /// Sibling of `get_process_name`. Returns the full path from
+    /// `QueryFullProcessImageNameW` without splitting the basename off.
+    fn get_process_path(&self) -> anyhow::Result<String>;
     fn get_size_constraints(&self) -> (f32, f32, f32, f32);
     /// Returns the visible frame bounds excluding invisible window borders,
     /// in physical pixels. Same coordinate space as `set_position`.

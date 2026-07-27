@@ -18,15 +18,15 @@ pub enum Query {
     MinimizedWindows,
 }
 
-/// Wire DTO for `Query::MinimizedWindows`. `id` serialises as a bare integer
-/// because `WindowId` is a tuple struct, and external launchers (Raycast)
-/// consume that shape.
+/// Wire DTO for `Query::MinimizedWindows`. `bundle_id` is populated on
+/// macOS, `executable_path` on Windows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinimizedWindow {
     pub id: WindowId,
     pub title: String,
-    pub app_id: Option<String>,
     pub app_name: Option<String>,
+    pub bundle_id: Option<String>,
+    pub executable_path: Option<String>,
 }
 
 /// Every user-visible action Dome can perform. This is the single source of
@@ -42,8 +42,7 @@ pub enum Action {
     Master(MasterTarget),
     /// Restore a specific minimized window. Not bindable in keymaps and lacks
     /// `FromStr` because `WindowId`s are not stable across daemon restarts, so a
-    /// bound id would have no meaning after a reload. The `unminimize-window`
-    /// CLI subcommand exists for external launchers like Raycast.
+    /// bound id would have no meaning after a reload.
     UnminimizeWindow(WindowId),
     Exec {
         command: String,
@@ -474,20 +473,32 @@ mod tests {
             (
                 MinimizedWindow {
                     id,
-                    title: "foo".into(),
-                    app_id: Some("com.example.app".into()),
-                    app_name: Some("Example".into()),
+                    title: "draft.md".into(),
+                    app_name: Some("Zed".into()),
+                    bundle_id: Some("dev.zed.Zed".into()),
+                    executable_path: None,
                 },
-                r#"{"id":7,"title":"foo","app_id":"com.example.app","app_name":"Example"}"#,
+                r#"{"id":7,"title":"draft.md","app_name":"Zed","bundle_id":"dev.zed.Zed","executable_path":null}"#,
             ),
             (
                 MinimizedWindow {
                     id,
                     title: "foo".into(),
-                    app_id: None,
                     app_name: None,
+                    bundle_id: None,
+                    executable_path: Some("C:\\Windows\\System32\\notepad.exe".into()),
                 },
-                r#"{"id":7,"title":"foo","app_id":null,"app_name":null}"#,
+                r#"{"id":7,"title":"foo","app_name":null,"bundle_id":null,"executable_path":"C:\\Windows\\System32\\notepad.exe"}"#,
+            ),
+            (
+                MinimizedWindow {
+                    id,
+                    title: "foo".into(),
+                    app_name: None,
+                    bundle_id: None,
+                    executable_path: None,
+                },
+                r#"{"id":7,"title":"foo","app_name":null,"bundle_id":null,"executable_path":null}"#,
             ),
         ];
         for (window, expected) in &cases {

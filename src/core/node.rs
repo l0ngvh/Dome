@@ -129,13 +129,11 @@ pub(crate) enum WindowRestrictions {
     ProtectFullscreen,
 }
 
-/// Per-platform metadata for a window (title, app name, icon key, etc.).
-/// Each platform provides its own concrete type implementing this trait.
+/// Per-platform metadata for a window (title, app name, etc.). Each platform
+/// provides its own concrete type implementing this trait.
 pub(crate) trait WindowMetadata:
     std::fmt::Display + std::fmt::Debug + Send + Sync + 'static
 {
-    /// Icon cache key: process executable path on Windows, bundle ID on macOS.
-    fn icon_key(&self) -> Option<String>;
     /// Human-readable app name used by the minimized window listing.
     fn app_name(&self) -> Option<String>;
     /// Current window title, if any.
@@ -150,6 +148,14 @@ pub(crate) trait WindowMetadata:
     /// Synthesise a `WindowMatcher` from this window's metadata.
     /// Every populated platform field is included for maximum specificity.
     fn to_window_matcher(&self) -> WindowMatcher;
+
+    fn bundle_id(&self) -> Option<String> {
+        None
+    }
+
+    fn executable_path(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Represents a single application window
@@ -276,15 +282,14 @@ impl Window {
     }
 }
 
-/// One minimized window in title order. Produced by
-/// `Hub::minimized_window_entries` and serialized as the JSON payload of
-/// `Query::MinimizedWindows` for external launchers.
+/// Core-side twin of `MinimizedWindow` in `src/action.rs`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MinimizedWindowEntry {
     pub(crate) id: WindowId,
     pub(crate) title: String,
-    pub(crate) app_id: Option<String>,
     pub(crate) app_name: Option<String>,
+    pub(crate) bundle_id: Option<String>,
+    pub(crate) executable_path: Option<String>,
 }
 
 /// Unit marker for rectangles expressed in **logical points** (DPI-independent).

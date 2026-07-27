@@ -292,6 +292,7 @@ impl TestEnv {
             metadata: WindowsMetadata {
                 title: ext.title.clone(),
                 process: ext.process.clone(),
+                process_path: None,
                 class: ext.class.clone(),
                 aumid: None,
                 app_name: ext.app_name.clone(),

@@ -494,8 +494,9 @@ impl Dome {
             .map(|e| MinimizedWindow {
                 id: e.id,
                 title: e.title,
-                app_id: e.app_id,
                 app_name: e.app_name,
+                bundle_id: e.bundle_id,
+                executable_path: e.executable_path,
             })
             .collect();
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")

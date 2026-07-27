@@ -1,0 +1,12 @@
+{
+  "ID": "55637ED1-0682-4CD8-B99C-B1E79FDD060B",
+  "ActionKeyword": "dome",
+  "Name": "Dome",
+  "Description": "Restore minimized Dome windows.",
+  "Author": "dome",
+  "Version": "0.0.1",
+  "Language": "python",
+  "Website": "https://github.com/l0ngvh/Dome",
+  "IcoPath": "assets\\icon.png",
+  "ExecuteFileName": "main.py"
+}

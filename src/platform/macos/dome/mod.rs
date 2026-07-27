@@ -70,14 +70,14 @@ impl std::fmt::Display for MacOSMetadata {
 }
 
 impl WindowMetadata for MacOSMetadata {
-    fn icon_key(&self) -> Option<String> {
-        self.bundle_id.clone()
-    }
     fn app_name(&self) -> Option<String> {
         self.app_name.clone()
     }
     fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+    fn bundle_id(&self) -> Option<String> {
+        self.bundle_id.clone()
     }
     fn set_title(&mut self, title: String) {
         self.title = Some(title);
@@ -562,8 +562,9 @@ impl Dome {
             .map(|e| MinimizedWindow {
                 id: e.id,
                 title: e.title,
-                app_id: e.app_id,
                 app_name: e.app_name,
+                bundle_id: e.bundle_id,
+                executable_path: e.executable_path,
             })
             .collect();
         serde_json::to_string(&entries).expect("MinimizedWindow is infallibly serializable")

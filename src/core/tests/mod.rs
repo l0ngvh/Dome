@@ -1004,9 +1004,6 @@ impl std::fmt::Display for TestMetadata {
 }
 
 impl WindowMetadata for TestMetadata {
-    fn icon_key(&self) -> Option<String> {
-        None
-    }
     fn app_name(&self) -> Option<String> {
         None
     }
