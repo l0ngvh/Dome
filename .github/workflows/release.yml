@@ -162,8 +162,58 @@ jobs:
           ${{ env.MSI_NAME }}
           ${{ env.ZIP_NAME }}
 
+  build-raycast-extension:
+    needs: validate
+    if: github.event_name == 'push'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: integrations/raycast/.nvmrc
+          cache: npm
+          cache-dependency-path: integrations/raycast/package-lock.json
+      - name: Install dependencies
+        working-directory: integrations/raycast
+        run: npm ci
+      - name: Build extension
+        working-directory: integrations/raycast
+        run: npm run build
+      - name: Package zip
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ZIP_NAME="dome-${VERSION}-raycast-extension.zip"
+          cd integrations/raycast
+          zip -r "../../${ZIP_NAME}" dist
+          cd -
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dome-raycast-extension
+          path: ${{ env.ZIP_NAME }}
+
+  build-flow-launcher-plugin:
+    needs: validate
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package zip
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ZIP_NAME="dome-${VERSION}-flow-launcher-plugin.zip"
+          cd integrations
+          zip -r "../${ZIP_NAME}" flow-launcher \
+            -x '*/__pycache__/*' -x '*.pyc'
+          cd -
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dome-flow-launcher-plugin
+          path: ${{ env.ZIP_NAME }}
+
   publish:
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-raycast-extension, build-flow-launcher-plugin]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:

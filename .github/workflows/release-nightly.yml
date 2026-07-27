@@ -129,9 +129,51 @@ jobs:
           name: dome-nightly-${{matrix.target}}
           path: ${{matrix.artifact}}
 
+  build-raycast-extension:
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: integrations/raycast/.nvmrc
+          cache: npm
+          cache-dependency-path: integrations/raycast/package-lock.json
+      - name: install-deps
+        working-directory: integrations/raycast
+        run: npm ci
+      - name: build
+        working-directory: integrations/raycast
+        run: npm run build
+      - name: package
+        run: |
+          cd integrations/raycast
+          zip -r ../../dome-nightly-raycast-extension.zip dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dome-nightly-raycast-extension
+          path: dome-nightly-raycast-extension.zip
+
+  build-flow-launcher-plugin:
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: package
+        run: |
+          cd integrations
+          zip -r ../dome-nightly-flow-launcher-plugin.zip flow-launcher \
+            -x '*/__pycache__/*' -x '*.pyc'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dome-nightly-flow-launcher-plugin
+          path: dome-nightly-flow-launcher-plugin.zip
+
   publish:
     name: publish-nightly
-    needs: [gate, build]
+    needs: [gate, build, build-raycast-extension, build-flow-launcher-plugin]
     if: needs.gate.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -172,7 +214,9 @@ jobs:
             --prerelease \
             --target "${{ steps.version.outputs.full_sha }}" \
             dist/dome-nightly-aarch64-apple-darwin/dome-nightly-aarch64-apple-darwin.dmg \
-            dist/dome-nightly-x86_64-pc-windows-msvc/dome-nightly-x86_64-pc-windows-msvc.zip
+            dist/dome-nightly-x86_64-pc-windows-msvc/dome-nightly-x86_64-pc-windows-msvc.zip \
+            dist/dome-nightly-raycast-extension/dome-nightly-raycast-extension.zip \
+            dist/dome-nightly-flow-launcher-plugin/dome-nightly-flow-launcher-plugin.zip
 
       - name: dispatch-homebrew
         continue-on-error: true
