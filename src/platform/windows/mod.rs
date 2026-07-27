@@ -58,7 +58,6 @@ use dome::{Dome, HubEvent};
 use event_listener::install_event_hooks;
 use external::HwndId;
 
-const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 use keyboard::{install_keyboard_hook, uninstall_keyboard_hook};
 use taskbar::Taskbar;
 
@@ -236,32 +235,18 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> Resu
     let keyboard_hook = install_keyboard_hook(hub_sender.clone(), Arc::clone(&keymap_state))?;
     let _event_hooks = install_event_hooks(hub_sender.clone())?;
 
-    ipc::start_server({
+    ipc::start_server(layout_path.clone(), {
         let sender = hub_sender.clone();
-        let export_layout_path = layout_path.clone();
-        move |msg| {
-            use crate::action::IpcMessage;
-            match msg {
-                IpcMessage::Action(action) => {
-                    sender.send(HubEvent::Action(crate::action::Actions::new(vec![action])));
-                    Ok("ok".to_string())
-                }
-                IpcMessage::Query(query) => {
-                    let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(1);
-                    sender.send(HubEvent::Query {
-                        query,
-                        sender: resp_tx,
-                    });
-                    match resp_rx.recv_timeout(QUERY_TIMEOUT) {
-                        Ok(json) => Ok(json),
-                        Err(_) => Ok(r#"{"error":"query timed out"}"#.to_string()),
-                    }
-                }
-                IpcMessage::ExportLayout => {
-                    sender.send(HubEvent::ExportLayout(export_layout_path.clone()));
-                    Ok("ok".to_string())
-                }
+        move |ev| {
+            match ev {
+                ipc::IpcEvent::Action(actions) => sender.send(HubEvent::Action(actions)),
+                ipc::IpcEvent::Query { query, reply } => sender.send(HubEvent::Query {
+                    query,
+                    sender: reply,
+                }),
+                ipc::IpcEvent::ExportLayout(path) => sender.send(HubEvent::ExportLayout(path)),
             }
+            Ok(())
         }
     })?;
 

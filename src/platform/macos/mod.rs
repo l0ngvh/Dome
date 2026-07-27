@@ -37,8 +37,6 @@ use keyboard::KeyboardListener;
 use listeners::EventListener;
 use ui::Ui;
 
-const QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
-
 pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyhow::Result<()> {
     let logger = Logger::init();
 
@@ -120,35 +118,21 @@ pub fn run_app(config_path: Option<String>, layout_path: Option<String>) -> anyh
     .inspect_err(|e| tracing::warn!("Failed to setup layout watcher: {e:#}"))
     .ok();
 
-    ipc::start_server({
+    ipc::start_server(layout_path.clone(), {
         let tx = event_tx.clone();
-        let export_layout_path = layout_path.clone();
-        move |msg| {
-            use crate::action::IpcMessage;
-            match msg {
-                IpcMessage::Action(action) => {
-                    tx.send(HubEvent::Action(crate::action::Actions::new(vec![action])))
-                        .or(Err(anyhow::anyhow!("channel closed")))?;
-                    Ok("ok".to_string())
-                }
-                IpcMessage::Query(query) => {
-                    let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(1);
-                    tx.send(HubEvent::Query {
-                        query,
-                        sender: resp_tx,
-                    })
-                    .or(Err(anyhow::anyhow!("channel closed")))?;
-                    match resp_rx.recv_timeout(QUERY_TIMEOUT) {
-                        Ok(json) => Ok(json),
-                        Err(_) => Ok(r#"{"error":"query timed out"}"#.to_string()),
-                    }
-                }
-                IpcMessage::ExportLayout => {
-                    tx.send(HubEvent::ExportLayout(export_layout_path.clone()))
-                        .or(Err(anyhow::anyhow!("channel closed")))?;
-                    Ok("ok".to_string())
-                }
-            }
+        move |ev| match ev {
+            ipc::IpcEvent::Action(actions) => tx
+                .send(HubEvent::Action(actions))
+                .or(Err(anyhow::anyhow!("channel closed"))),
+            ipc::IpcEvent::Query { query, reply } => tx
+                .send(HubEvent::Query {
+                    query,
+                    sender: reply,
+                })
+                .or(Err(anyhow::anyhow!("channel closed"))),
+            ipc::IpcEvent::ExportLayout(path) => tx
+                .send(HubEvent::ExportLayout(path))
+                .or(Err(anyhow::anyhow!("channel closed"))),
         }
     })?;
 

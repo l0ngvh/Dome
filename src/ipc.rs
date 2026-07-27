@@ -1,12 +1,27 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::sync::mpsc::SyncSender;
+use std::time::Duration;
 
 use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
     traits::{Listener, Stream},
 };
 
-use crate::action::IpcMessage;
+use crate::action::{Actions, IpcMessage, Query};
+
+pub(crate) enum IpcEvent {
+    Action(Actions),
+    Query {
+        query: Query,
+        reply: SyncSender<String>,
+    },
+    // ExportLayout carries the path so start_server owns it, not each platform.
+    ExportLayout(String),
+}
+
+const QUERY_TIMEOUT: Duration = Duration::from_secs(1);
+const QUERY_TIMEOUT_JSON: &str = r#"{"error":"query timed out"}"#;
 
 fn socket_path() -> PathBuf {
     #[cfg(unix)]
@@ -54,7 +69,34 @@ impl DomeClient {
     }
 }
 
-pub(crate) fn start_server<F>(on_message: F) -> anyhow::Result<()>
+pub(crate) fn start_server<F>(export_layout_path: String, dispatch: F) -> anyhow::Result<()>
+where
+    F: Fn(IpcEvent) -> anyhow::Result<()> + Send + 'static,
+{
+    let on_message = move |msg: IpcMessage| -> anyhow::Result<String> {
+        match msg {
+            IpcMessage::Action(action) => {
+                dispatch(IpcEvent::Action(Actions::new(vec![action])))?;
+                Ok("ok".to_string())
+            }
+            IpcMessage::Query(query) => {
+                let (reply, resp_rx) = std::sync::mpsc::sync_channel(1);
+                dispatch(IpcEvent::Query { query, reply })?;
+                match resp_rx.recv_timeout(QUERY_TIMEOUT) {
+                    Ok(json) => Ok(json),
+                    Err(_) => Ok(QUERY_TIMEOUT_JSON.to_string()),
+                }
+            }
+            IpcMessage::ExportLayout => {
+                dispatch(IpcEvent::ExportLayout(export_layout_path.clone()))?;
+                Ok("ok".to_string())
+            }
+        }
+    };
+    listen(on_message)
+}
+
+fn listen<F>(on_message: F) -> anyhow::Result<()>
 where
     F: Fn(IpcMessage) -> anyhow::Result<String> + Send + 'static,
 {
