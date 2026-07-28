@@ -1,4 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+import { useRef } from "react";
 import {
   Action,
   ActionPanel,
@@ -6,9 +8,11 @@ import {
   Detail,
   Icon,
   List,
+  PopToRootType,
   Toast,
   showToast,
 } from "@raycast/api";
+import { showFailureToast, useCachedPromise } from "@raycast/utils";
 
 type MinimizedWindow = {
   id: number;
@@ -28,25 +32,16 @@ const SPAWN_ENV = {
     .join(":"),
 };
 
-type FetchResult =
-  | { kind: "ok"; entries: MinimizedWindow[] }
-  | { kind: "missing-binary" }
-  | { kind: "daemon-down"; message: string };
+const execFileAsync = promisify(execFile);
 
-function fetchMinimizedWindows(): FetchResult {
-  try {
-    const out = execFileSync(DOME_BINARY, ["query", "minimized"], {
-      encoding: "utf8",
-      env: SPAWN_ENV,
-    });
-    const parsed = JSON.parse(out) as MinimizedWindow[];
-    return { kind: "ok", entries: parsed };
-  } catch (err) {
-    if (isEnoent(err)) {
-      return { kind: "missing-binary" };
-    }
-    return { kind: "daemon-down", message: describeError(err) };
-  }
+async function fetchMinimizedWindows(
+  signal?: AbortSignal,
+): Promise<MinimizedWindow[]> {
+  const { stdout } = await execFileAsync(DOME_BINARY, ["query", "minimized"], {
+    env: SPAWN_ENV,
+    signal,
+  });
+  return JSON.parse(stdout) as MinimizedWindow[];
 }
 
 function isEnoent(err: unknown): boolean {
@@ -81,7 +76,10 @@ async function restoreWindow(entry: MinimizedWindow) {
     execFileSync(DOME_BINARY, ["unminimize-window", String(entry.id)], {
       env: SPAWN_ENV,
     });
-    await closeMainWindow({ clearRootSearch: true });
+    await closeMainWindow({
+      clearRootSearch: true,
+      popToRootType: PopToRootType.Immediate,
+    });
   } catch (err) {
     await showToast({
       style: Toast.Style.Failure,
@@ -92,34 +90,58 @@ async function restoreWindow(entry: MinimizedWindow) {
 }
 
 export default function Command() {
-  const result = fetchMinimizedWindows();
+  // Raycast may preserve the React tree on close, so rely on SWR plus a
+  // manual Cmd-R revalidate rather than mount-only refetch.
+  const abortable = useRef<AbortController | null>(null);
+  const { isLoading, data, error, revalidate } = useCachedPromise(
+    async () => fetchMinimizedWindows(abortable.current?.signal),
+    [],
+    {
+      abortable,
+      // ENOENT is handled by MissingBinaryView. Skip the toast.
+      onError: async (err) => {
+        if (isEnoent(err)) {
+          return;
+        }
+        await showFailureToast(err, {
+          title: "Dome is not running",
+          primaryAction: {
+            title: "Refresh",
+            onAction: (toast) => {
+              toast.hide();
+              revalidate();
+            },
+          },
+        });
+      },
+    },
+  );
 
-  if (result.kind === "missing-binary") {
+  if (error && isEnoent(error)) {
     return <MissingBinaryView />;
   }
 
-  if (result.kind === "daemon-down") {
-    showToast({
-      style: Toast.Style.Failure,
-      title: "Dome is not running",
-      message: result.message,
-    });
-    return <List />;
-  }
-
   return (
-    <List>
-      {result.entries.map((entry) => (
+    <List isLoading={isLoading}>
+      {(data ?? []).map((entry) => (
         <List.Item
           key={entry.id}
           title={entry.title || "Untitled"}
           subtitle={entry.app_name ?? undefined}
-          icon={entry.bundle_id ? { fileIcon: entry.bundle_id } : Icon.AppWindow}
+          icon={
+            entry.bundle_id ? { fileIcon: entry.bundle_id } : Icon.AppWindow
+          }
           actions={
             <ActionPanel>
               <Action
                 title="Restore Window"
                 onAction={() => restoreWindow(entry)}
+              />
+              <Action
+                title="Refresh"
+                icon={Icon.ArrowClockwise}
+                shortcut={{ modifiers: ["cmd"], key: "r" }}
+                onAction={() => revalidate()}
               />
             </ActionPanel>
           }
