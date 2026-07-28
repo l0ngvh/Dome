@@ -128,6 +128,7 @@ impl TilingStrategy for MasterStrategy {
             dim.height,
         );
 
+        self.reconcile_master_count(ws_id);
         self.compute_placement(hub, ws_id);
         result
     }
@@ -361,6 +362,7 @@ impl TilingStrategy for MasterStrategy {
         state.remove_window(focus_id);
 
         self.window_states.remove(&focus_id);
+        self.reconcile_master_count(ws_id);
         self.compute_placement(hub, ws_id);
 
         Some(Child::Window(focus_id))

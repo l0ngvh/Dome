@@ -1,3 +1,4 @@
+mod detach;
 mod export;
 mod layout;
 mod moving;
