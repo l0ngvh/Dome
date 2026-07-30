@@ -7,11 +7,11 @@ mod validate;
 
 use std::collections::HashMap;
 
-use crate::config::{LayoutWorkspaceConfig, SizeConstraints, WindowMatcher};
+use crate::config::{LayoutWorkspaceConfig, SizeConstraints};
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
-use crate::core::master::preferred_layout::MatcherId;
+use crate::core::master::preferred_layout::{Slot, SlotId};
 use crate::core::node::{Child, Constraints, Dimension, Direction, Length, WindowId, WorkspaceId};
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space,
@@ -25,7 +25,7 @@ use crate::core::strategy::{
 pub(crate) struct MasterStrategy {
     workspaces: HashMap<WorkspaceId, WorkspaceState>,
     window_states: HashMap<WindowId, WindowState>,
-    matchers: Allocator<WindowMatcher>,
+    slots: Allocator<Slot>,
     master_count: usize,
     master_ratio: f32,
     size_constraints: SizeConstraints,
@@ -65,13 +65,23 @@ impl TilingStrategy for MasterStrategy {
             panic!("Preparing partition tree workspace in master strategy");
         };
 
-        let master_ids: Vec<MatcherId> = master
+        let master_ids: Vec<SlotId> = master
             .iter()
-            .map(|m| self.matchers.allocate(m.clone()))
+            .map(|m| {
+                self.slots.allocate(Slot {
+                    matcher: m.clone(),
+                    windows: Vec::new(),
+                })
+            })
             .collect();
-        let secondary_ids: Vec<MatcherId> = secondary
+        let secondary_ids: Vec<SlotId> = secondary
             .iter()
-            .map(|m| self.matchers.allocate(m.clone()))
+            .map(|m| {
+                self.slots.allocate(Slot {
+                    matcher: m.clone(),
+                    windows: Vec::new(),
+                })
+            })
             .collect();
 
         self.workspaces.insert(
@@ -114,13 +124,13 @@ impl TilingStrategy for MasterStrategy {
 
         let y_offset = state.remove_window(id);
 
-        let dim = self
-            .window_states
-            .remove(&id)
-            .unwrap_or_else(|| {
-                panic!("master: detach_window called for {id:?} but window_states has no entry")
-            })
-            .dimension;
+        let removed = self.window_states.remove(&id).unwrap_or_else(|| {
+            panic!("master: detach_window called for {id:?} but window_states has no entry")
+        });
+        if let Some(sid) = removed.occupy {
+            self.slots.get_mut(sid).windows.retain(|w| w != &id);
+        }
+        let dim = removed.dimension;
         let result = Dimension::new(
             dim.x + screen.x,
             dim.y - y_offset + screen.y,
@@ -128,7 +138,7 @@ impl TilingStrategy for MasterStrategy {
             dim.height,
         );
 
-        self.reconcile_master_count(ws_id);
+        self.reconcile_master_count(hub, ws_id);
         self.compute_placement(hub, ws_id);
         result
     }
@@ -161,7 +171,7 @@ impl TilingStrategy for MasterStrategy {
         ws_id: WorkspaceId,
         focused: bool,
     ) -> TilingPlacements {
-        self.collect_placements(hub, ws_id, focused)
+        self.collect_tiling_placements(hub, ws_id, focused)
     }
 
     fn handle_action(&mut self, hub: &mut HubAccess, action: TilingAction) {
@@ -250,9 +260,15 @@ impl TilingStrategy for MasterStrategy {
                                 state.master.push(moved);
                                 state.secondary.push(swapped);
                                 state.focus = Some(moved);
+                                let moved_slots = state.master_matchers.clone();
+                                let swapped_slots = state.secondary_matchers.clone();
+                                self.remap_slot_on_pane_change(hub, ws_id, moved, &moved_slots);
+                                self.remap_slot_on_pane_change(hub, ws_id, swapped, &swapped_slots);
                             } else if state.master.len() < effective {
                                 state.master.push(moved);
                                 state.focus = Some(moved);
+                                let moved_slots = state.master_matchers.clone();
+                                self.remap_slot_on_pane_change(hub, ws_id, moved, &moved_slots);
                             }
                         }
                     }
@@ -263,6 +279,10 @@ impl TilingStrategy for MasterStrategy {
                             state.master.push(swapped);
                             state.secondary.push(moved);
                             state.focus = Some(moved);
+                            let moved_slots = state.secondary_matchers.clone();
+                            let swapped_slots = state.master_matchers.clone();
+                            self.remap_slot_on_pane_change(hub, ws_id, moved, &moved_slots);
+                            self.remap_slot_on_pane_change(hub, ws_id, swapped, &swapped_slots);
                         }
                     }
                     (Direction::Vertical, false) => {
@@ -321,7 +341,7 @@ impl TilingStrategy for MasterStrategy {
                     let current = state.master_count.unwrap_or(global_count);
                     state.master_count = Some(current + 1);
                 }
-                self.reconcile_master_count(ws_id);
+                self.reconcile_master_count(hub, ws_id);
                 self.compute_placement(hub, ws_id);
             }
             TilingAction::FewerMaster => {
@@ -338,7 +358,7 @@ impl TilingStrategy for MasterStrategy {
                     let state = self.workspaces.get_mut(&ws_id).unwrap();
                     state.master_count = Some(current - 1);
                 }
-                self.reconcile_master_count(ws_id);
+                self.reconcile_master_count(hub, ws_id);
                 self.compute_placement(hub, ws_id);
             }
             _ => {}
@@ -346,7 +366,7 @@ impl TilingStrategy for MasterStrategy {
     }
 
     fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
-        self.compute_placement_against_constraint(hub, ws_id);
+        self.compute_placement(hub, ws_id);
     }
 
     fn tiling_window_count(&self, ws_id: WorkspaceId) -> usize {
@@ -361,8 +381,11 @@ impl TilingStrategy for MasterStrategy {
 
         state.remove_window(focus_id);
 
-        self.window_states.remove(&focus_id);
-        self.reconcile_master_count(ws_id);
+        let removed = self.window_states.remove(&focus_id);
+        if let Some(sid) = removed.and_then(|e| e.occupy) {
+            self.slots.get_mut(sid).windows.retain(|w| w != &focus_id);
+        }
+        self.reconcile_master_count(hub, ws_id);
         self.compute_placement(hub, ws_id);
 
         Some(Child::Window(focus_id))
@@ -389,10 +412,10 @@ impl TilingStrategy for MasterStrategy {
                 self.window_states.remove(&wid);
             }
             for &id in &state.master_matchers {
-                self.matchers.delete(id);
+                self.slots.delete(id);
             }
             for &id in &state.secondary_matchers {
-                self.matchers.delete(id);
+                self.slots.delete(id);
             }
         }
         (tiling, focused)
@@ -404,7 +427,7 @@ impl TilingStrategy for MasterStrategy {
         ws_id: WorkspaceId,
         incoming: Option<&LayoutWorkspaceConfig>,
     ) {
-        self.do_sync_preferred_layout(hub, ws_id, incoming)
+        self.sync_preferred_layout(hub, ws_id, incoming)
     }
 
     fn apply_config(&mut self, hub: &mut HubAccess, layout: GlobalLayoutConfig) {
@@ -419,14 +442,14 @@ impl TilingStrategy for MasterStrategy {
                 .map(|s| s.master_count.is_none() && old_master_count != self.master_count)
                 .unwrap_or(false);
             if needs_reconcile {
-                self.reconcile_master_count(ws_id);
+                self.reconcile_master_count(hub, ws_id);
             }
             self.compute_placement(hub, ws_id);
         }
     }
 
     fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WorkspaceExport> {
-        self.do_export_workspace(hub, ws_id)
+        self.export_workspace(hub, ws_id)
     }
 }
 
@@ -442,41 +465,28 @@ impl MasterStrategy {
             size_constraints,
             workspaces: HashMap::new(),
             window_states: HashMap::new(),
-            matchers: Allocator::new(),
+            slots: Allocator::new(),
         }
     }
 
     fn place(&mut self, hub: &HubAccess, ws_id: WorkspaceId, id: WindowId) {
         let metadata = hub.windows.get(id).metadata.as_ref();
+        let occupy = self.sort_window_into_pane(ws_id, id, metadata);
 
-        let matcher = if let Some(matcher_id) =
-            self.insert_window_against_preferred_layout(ws_id, id, metadata)
-        {
-            Some(matcher_id)
-        } else {
-            let state = self.workspaces.get_mut(&ws_id).unwrap();
-            let effective_count = state.master_count.unwrap_or(self.master_count);
-            // This window doesn't match any slot
-            if state.master.len() < effective_count {
-                state.master.push(id);
-            } else {
-                state.secondary.push(id);
-            };
-            state.focus = Some(id);
-            None
-        };
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.focus = Some(id);
 
         self.window_states.insert(
             id,
             WindowState {
-                occupy: matcher,
+                occupy,
                 // Only a place holder, will be populated later
                 dimension: Dimension::default(),
             },
         );
     }
 
-    fn reconcile_master_count(&mut self, ws_id: WorkspaceId) {
+    fn reconcile_master_count(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let Some(state) = self.workspaces.get_mut(&ws_id) else {
             return;
         };
@@ -496,10 +506,16 @@ impl MasterStrategy {
             }
         }
 
+        let mut overflow = Vec::new();
         while state.master.len() > effective_count {
             if let Some(wid) = state.master.pop() {
                 state.secondary.insert(0, wid);
+                overflow.push(wid);
             }
+        }
+        let secondary_slots = state.secondary_matchers.clone();
+        for wid in overflow {
+            self.remap_slot_on_pane_change(hub, ws_id, wid, &secondary_slots);
         }
     }
 
@@ -538,8 +554,8 @@ impl MasterStrategy {
 struct WorkspaceState {
     master: Vec<WindowId>,
     secondary: Vec<WindowId>,
-    master_matchers: Vec<MatcherId>,
-    secondary_matchers: Vec<MatcherId>,
+    master_matchers: Vec<SlotId>,
+    secondary_matchers: Vec<SlotId>,
     focus: Option<WindowId>,
     master_y_offset: Length,
     stack_y_offset: Length,
@@ -585,7 +601,7 @@ impl WorkspaceState {
 /// Per-window state: matcher slot occupancy and computed dimension.
 #[derive(Debug)]
 struct WindowState {
-    occupy: Option<MatcherId>,
+    occupy: Option<SlotId>,
     dimension: Dimension,
 }
 

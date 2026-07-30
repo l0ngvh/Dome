@@ -7,11 +7,7 @@ use crate::core::{
 };
 
 impl MasterStrategy {
-    pub(super) fn compute_placement_against_constraint(
-        &mut self,
-        hub: &HubAccess,
-        ws_id: WorkspaceId,
-    ) {
+    pub(super) fn compute_placement(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let Some(state) = self.workspaces.get(&ws_id) else {
             return;
         };
@@ -72,7 +68,7 @@ impl MasterStrategy {
         self.scroll_into_view(hub, ws_id);
     }
 
-    pub(super) fn collect_placements(
+    pub(super) fn collect_tiling_placements(
         &self,
         hub: &HubAccess,
         ws_id: WorkspaceId,

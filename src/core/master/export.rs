@@ -1,99 +1,67 @@
+use std::collections::HashMap;
+
 use crate::{
     config::WindowMatcher,
-    core::{hub::HubAccess, master::MasterStrategy, node::WorkspaceId, strategy::WorkspaceExport},
+    core::{
+        hub::HubAccess,
+        master::{MasterStrategy, preferred_layout::Slot, preferred_layout::SlotId},
+        node::{WindowId, WorkspaceId},
+        strategy::WorkspaceExport,
+    },
 };
 
 impl MasterStrategy {
-    pub(super) fn do_export_workspace(
+    pub(super) fn export_workspace(
         &mut self,
         hub: &HubAccess,
         ws_id: WorkspaceId,
     ) -> Option<WorkspaceExport> {
         let state = self.workspaces.get(&ws_id)?;
 
-        let master: Vec<WindowMatcher> = state
-            .master
-            .iter()
-            .map(
-                |&wid| match self.window_states.get(&wid).and_then(|e| e.occupy) {
-                    Some(mid) => self.matchers.get(mid).clone(),
-                    None => hub.windows.get(wid).metadata.to_window_matcher(),
-                },
-            )
-            .collect();
-        let secondary: Vec<WindowMatcher> = state
-            .secondary
-            .iter()
-            .map(
-                |&wid| match self.window_states.get(&wid).and_then(|e| e.occupy) {
-                    Some(mid) => self.matchers.get(mid).clone(),
-                    None => hub.windows.get(wid).metadata.to_window_matcher(),
-                },
-            )
-            .collect();
+        let master_groups = self.group_pane(hub, &state.master.clone());
+        let secondary_groups = self.group_pane(hub, &state.secondary.clone());
+
+        let master: Vec<WindowMatcher> = master_groups.iter().map(|g| g.0.clone()).collect();
+        let secondary: Vec<WindowMatcher> = secondary_groups.iter().map(|g| g.0.clone()).collect();
 
         let state = self.workspaces.get_mut(&ws_id).unwrap();
-        let old_master_ids = state.master_matchers.clone();
-        let old_secondary_ids = state.secondary_matchers.clone();
-
         for &id in &state.master_matchers {
-            self.matchers.delete(id);
+            self.slots.delete(id);
         }
         for &id in &state.secondary_matchers {
-            self.matchers.delete(id);
+            self.slots.delete(id);
         }
 
-        state.master_matchers = master
-            .iter()
-            .map(|m| self.matchers.allocate(m.clone()))
-            .collect();
-        state.secondary_matchers = secondary
-            .iter()
-            .map(|m| self.matchers.allocate(m.clone()))
-            .collect();
+        let mut master_slots = Vec::with_capacity(master_groups.len());
+        for (matcher, matched, windows) in &master_groups {
+            let sid = self.slots.allocate(Slot {
+                matcher: matcher.clone(),
+                windows: windows.clone(),
+            });
+            master_slots.push(sid);
+            for &wid in windows {
+                if let Some(entry) = self.window_states.get_mut(&wid) {
+                    entry.occupy = matched.then_some(sid);
+                }
+            }
+        }
+        let mut secondary_slots = Vec::with_capacity(secondary_groups.len());
+        for (matcher, matched, windows) in &secondary_groups {
+            let sid = self.slots.allocate(Slot {
+                matcher: matcher.clone(),
+                windows: windows.clone(),
+            });
+            secondary_slots.push(sid);
+            for &wid in windows {
+                if let Some(entry) = self.window_states.get_mut(&wid) {
+                    entry.occupy = matched.then_some(sid);
+                }
+            }
+        }
 
-        for &wid in &state.master {
-            let new_occupy = self
-                .window_states
-                .get(&wid)
-                .and_then(|e| e.occupy)
-                .and_then(|old_id| {
-                    old_master_ids
-                        .iter()
-                        .position(|&x| x == old_id)
-                        .and_then(|slot| state.master_matchers.get(slot).copied())
-                        .or_else(|| {
-                            old_secondary_ids
-                                .iter()
-                                .position(|&x| x == old_id)
-                                .and_then(|slot| state.secondary_matchers.get(slot).copied())
-                        })
-                });
-            if let Some(entry) = self.window_states.get_mut(&wid) {
-                entry.occupy = new_occupy;
-            }
-        }
-        for &wid in &state.secondary {
-            let new_occupy = self
-                .window_states
-                .get(&wid)
-                .and_then(|e| e.occupy)
-                .and_then(|old_id| {
-                    old_master_ids
-                        .iter()
-                        .position(|&x| x == old_id)
-                        .and_then(|slot| state.master_matchers.get(slot).copied())
-                        .or_else(|| {
-                            old_secondary_ids
-                                .iter()
-                                .position(|&x| x == old_id)
-                                .and_then(|slot| state.secondary_matchers.get(slot).copied())
-                        })
-                });
-            if let Some(entry) = self.window_states.get_mut(&wid) {
-                entry.occupy = new_occupy;
-            }
-        }
+        let state = self.workspaces.get_mut(&ws_id).unwrap();
+        state.master_matchers = master_slots;
+        state.secondary_matchers = secondary_slots;
 
         Some(WorkspaceExport {
             strategy: "master".into(),
@@ -103,5 +71,31 @@ impl MasterStrategy {
             secondary,
             ..Default::default()
         })
+    }
+
+    fn group_pane(
+        &self,
+        hub: &HubAccess,
+        pane: &[WindowId],
+    ) -> Vec<(WindowMatcher, bool, Vec<WindowId>)> {
+        let mut groups: Vec<(WindowMatcher, bool, Vec<WindowId>)> = Vec::new();
+        let mut slot_index: HashMap<SlotId, usize> = HashMap::new();
+        for &wid in pane {
+            match self.window_states.get(&wid).and_then(|e| e.occupy) {
+                Some(sid) => {
+                    if let Some(&i) = slot_index.get(&sid) {
+                        groups[i].2.push(wid);
+                    } else {
+                        slot_index.insert(sid, groups.len());
+                        groups.push((self.slots.get(sid).matcher.clone(), true, vec![wid]));
+                    }
+                }
+                None => {
+                    let matcher = hub.windows.get(wid).metadata.to_window_matcher();
+                    groups.push((matcher, false, vec![wid]));
+                }
+            }
+        }
+        groups
     }
 }

@@ -46,6 +46,29 @@ impl ValidateStrategy for MasterStrategy {
                 );
             }
 
+            for &wid in &state.master {
+                if let Some(occupy) = self.window_states.get(&wid).and_then(|w| w.occupy) {
+                    assert!(
+                        state.master_matchers.contains(&occupy),
+                        "master-stack workspace {ws_id}: master window {wid:?} occupies slot {occupy:?} outside master pane"
+                    );
+                }
+            }
+            for &wid in &state.secondary {
+                if let Some(occupy) = self.window_states.get(&wid).and_then(|w| w.occupy) {
+                    assert!(
+                        state.secondary_matchers.contains(&occupy),
+                        "master-stack workspace {ws_id}: secondary window {wid:?} occupies slot {occupy:?} outside secondary pane"
+                    );
+                }
+            }
+            for slot in &state.master_matchers {
+                assert!(
+                    !state.secondary_matchers.contains(slot),
+                    "master-stack workspace {ws_id}: slot {slot:?} shared between master and secondary panes"
+                );
+            }
+
             if state.master.is_empty() && state.secondary.is_empty() {
                 continue;
             }
