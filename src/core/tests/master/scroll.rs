@@ -160,12 +160,8 @@ fn both_panes_scroll_independently() {
     hub.set_window_constraint(w5, None, Some(20.0), None, None);
     hub.set_window_constraint(w6, None, Some(20.0), None, None);
     hub.set_window_constraint(w7, None, Some(20.0), None, None);
-    // w7 is focused after insert, stack already scrolled to show it.
-    // Focus master and scroll it to the bottom.
-    hub.focus_left();
-    hub.focus_down();
-    hub.focus_down();
-    hub.focus_down();
+
+    hub.set_focus(w3);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -606,11 +602,9 @@ fn master_count_decrement_clamps_master_scroll() {
     hub.set_window_constraint(w1, None, Some(20.0), None, None);
     hub.set_window_constraint(w2, None, Some(20.0), None, None);
     hub.set_window_constraint(w3, None, Some(20.0), None, None);
-    // Navigate to last master window to scroll master pane to bottom
+    // focus_left lands on w3, the last-inserted master window, scrolling master to the bottom
+    // so the offset is out of range once master shrinks.
     hub.focus_left();
-    hub.focus_down();
-    hub.focus_down();
-    hub.focus_down();
     // FewerMaster: last master becomes first stack window
     hub.handle_tiling_action(TilingAction::FewerMaster);
     assert_snapshot!(snapshot(&hub), @"

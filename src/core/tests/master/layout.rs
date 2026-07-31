@@ -159,37 +159,6 @@ fn three_windows_layout() {
 }
 
 #[test]
-fn focus_direction_left_right() {
-    let mut hub = TestHubBuilder::new()
-        .with_layout(
-            LayoutConfigBuilder::new()
-                .with_strategy(Strategy::Master)
-                .build(),
-        )
-        .build();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w6")); // W0 = master
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w7")); // W1 = stack (focused)
-
-    // Focus is on W1 (stack). Move left to master.
-    hub.focus_left();
-    let ws = hub.current_workspace();
-    assert_eq!(hub.focused_window(ws), Some(w0));
-
-    // Move right back to stack.
-    hub.focus_right();
-    assert_eq!(hub.focused_window(ws), Some(w1));
-
-    // Right from stack is no-op.
-    hub.focus_right();
-    assert_eq!(hub.focused_window(ws), Some(w1));
-
-    // Focus master, then left from master is no-op.
-    hub.focus_left();
-    hub.focus_left();
-    assert_eq!(hub.focused_window(ws), Some(w0));
-}
-
-#[test]
 fn focus_direction_up_down() {
     let mut hub = TestHubBuilder::new()
         .with_layout(

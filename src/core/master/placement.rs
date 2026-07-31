@@ -87,7 +87,7 @@ impl MasterStrategy {
         let mut windows = Vec::with_capacity(state.master.len() + state.secondary.len());
 
         let focused_id = if focused && !ws.is_float_focused {
-            state.focus
+            state.focused_window()
         } else {
             None
         };

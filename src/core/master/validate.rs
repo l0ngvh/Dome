@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::core::{
     Length, WindowId,
     hub::HubAccess,
@@ -8,7 +10,7 @@ use crate::core::{
 impl ValidateStrategy for MasterStrategy {
     fn validate(&self, hub: &HubAccess) {
         for (&ws_id, state) in &self.workspaces {
-            let mut seen = std::collections::HashSet::new();
+            let mut seen = HashSet::new();
             for &wid in state.master.iter().chain(state.secondary.iter()) {
                 hub.windows.get(wid);
                 assert!(
@@ -23,21 +25,20 @@ impl ValidateStrategy for MasterStrategy {
                 state.master.len()
             );
 
-            match state.focus {
-                Some(fid) => {
-                    let exists = state.master.contains(&fid) || state.secondary.contains(&fid);
-                    assert!(
-                        exists,
-                        "master-stack workspace {ws_id}: focused window {fid:?} not found"
-                    );
-                }
-                None => {
-                    assert!(
-                        state.master.is_empty() && state.secondary.is_empty(),
-                        "master-stack workspace {ws_id}: focus is None but windows exist"
-                    );
-                }
-            }
+            assert_eq!(
+                state.focus_history.len(),
+                seen.len(),
+                "master-stack workspace {ws_id}: focus_history has {} entries for {} windows, \
+                 so it holds a duplicate or a stale window",
+                state.focus_history.len(),
+                seen.len()
+            );
+            let history_seen: HashSet<WindowId> = state.focus_history.iter().copied().collect();
+            assert_eq!(
+                history_seen, seen,
+                "master-stack workspace {ws_id}: focus_history does not match master plus secondary \
+                 (a duplicate entry also shows up here)"
+            );
 
             for &wid in state.master.iter().chain(state.secondary.iter()) {
                 assert!(

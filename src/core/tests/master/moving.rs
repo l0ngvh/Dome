@@ -1,9 +1,9 @@
-use crate::config::{MasterConfig, Strategy, WindowMatcher};
-use crate::core::WindowMetadata;
+use crate::config::{Strategy, WindowMatcher};
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, TestMetadata,
     setup_logger_with_level, snapshot, titled,
 };
+use crate::core::{Hub, MonitorLayout, WindowId, WindowMetadata};
 use insta::assert_snapshot;
 
 #[test]
@@ -114,6 +114,46 @@ fn move_direction_up_down() {
     |                                                                         ||                                                                         |
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     ");
+}
+
+#[test]
+fn move_direction_up_down_wraps_within_three_window_pane() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master_count(2)
+                .build(),
+        ])
+        .build();
+    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    let _w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
+    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    let ws = hub.current_workspace();
+
+    // Three windows in the secondary pane. On a two-window pane both vertical directions resolve
+    // to the same index, so the two moves could not be told apart.
+    hub.set_focus(w3);
+    assert_eq!(top_to_bottom(&hub, &[w2, w3, w4]), vec![w2, w3, w4]);
+
+    hub.move_down();
+    assert_eq!(hub.focused_window(ws), Some(w3));
+    assert_eq!(top_to_bottom(&hub, &[w2, w3, w4]), vec![w2, w4, w3]);
+
+    hub.move_up();
+    assert_eq!(hub.focused_window(ws), Some(w3));
+    assert_eq!(top_to_bottom(&hub, &[w2, w3, w4]), vec![w2, w3, w4]);
+
+    hub.move_up();
+    assert_eq!(hub.focused_window(ws), Some(w3));
+    assert_eq!(top_to_bottom(&hub, &[w2, w3, w4]), vec![w3, w2, w4]);
 }
 
 #[test]
@@ -728,6 +768,25 @@ fn move_matched_secondary_to_master_rematches() {
     |                                                                         ||                                                                         |
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     ");
+}
+
+/// `ids` sorted by on-screen y, which is the only observable that exposes pane order.
+fn top_to_bottom(hub: &Hub, ids: &[WindowId]) -> Vec<WindowId> {
+    let placements = hub.get_visible_placements();
+    let mut found: Vec<(f32, WindowId)> = Vec::new();
+    for monitor in &placements.monitors {
+        let MonitorLayout::Normal { tiling_windows, .. } = &monitor.layout else {
+            continue;
+        };
+        for placement in tiling_windows {
+            if ids.contains(&placement.id) {
+                found.push((placement.visible_frame.y.value(), placement.id));
+            }
+        }
+    }
+    assert_eq!(found.len(), ids.len(), "every id must have a placement");
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    found.into_iter().map(|(_, id)| id).collect()
 }
 
 fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {

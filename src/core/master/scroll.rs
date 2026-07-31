@@ -1,5 +1,5 @@
 use crate::core::{
-    Length, WindowId,
+    Length,
     hub::HubAccess,
     master::{MasterStrategy, Pane},
     node::WorkspaceId,
@@ -8,12 +8,8 @@ use crate::core::{
 impl MasterStrategy {
     pub(super) fn scroll_into_view(&mut self, hub: &HubAccess, ws_id: WorkspaceId) {
         let state = self.workspaces.get(&ws_id).unwrap();
-        let Some(focus_id) = state.focus else {
+        let Some((pane, idx)) = state.focused_position() else {
             return;
-        };
-        let (pane, idx) = match state.find_window(focus_id) {
-            Some(v) => v,
-            None => return,
         };
         let pane_height = hub
             .monitors
@@ -21,12 +17,12 @@ impl MasterStrategy {
             .dimension
             .height;
 
-        let (pane_windows, offset): (Vec<WindowId>, Length) = match pane {
-            Pane::Master => (state.master.clone(), state.master_y_offset),
-            Pane::Secondary => (state.secondary.clone(), state.stack_y_offset),
+        let offset = match pane {
+            Pane::Master => state.master_y_offset,
+            Pane::Secondary => state.stack_y_offset,
         };
 
-        let slot_heights = self.pane_slot_heights(hub, &pane_windows, pane_height);
+        let slot_heights = self.pane_slot_heights(hub, state.pane_vec(pane), pane_height);
         let content_h: Length = slot_heights.iter().copied().sum();
         let max_offset = (content_h - pane_height).max(Length::ZERO);
 

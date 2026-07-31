@@ -45,7 +45,7 @@ impl TilingStrategy for MasterStrategy {
                     secondary: Vec::new(),
                     master_matchers: Vec::new(),
                     secondary_matchers: Vec::new(),
-                    focus: None,
+                    focus_history: Vec::new(),
                     master_y_offset: Length::ZERO,
                     stack_y_offset: Length::ZERO,
                     master_count: None,
@@ -91,7 +91,7 @@ impl TilingStrategy for MasterStrategy {
                 secondary: Vec::new(),
                 master_matchers: master_ids,
                 secondary_matchers: secondary_ids,
-                focus: None,
+                focus_history: Vec::new(),
                 master_y_offset: Length::ZERO,
                 stack_y_offset: Length::ZERO,
                 master_count: *master_count,
@@ -156,13 +156,15 @@ impl TilingStrategy for MasterStrategy {
         if !exists {
             return;
         }
-        state.focus = Some(window_id);
+        state.record_focus(window_id);
         hub.workspaces.get_mut(ws_id).is_float_focused = false;
         self.scroll_into_view(hub, ws_id);
     }
 
     fn focused_tiling_window(&self, ws_id: WorkspaceId) -> Option<WindowId> {
-        self.workspaces.get(&ws_id).and_then(|s| s.focus)
+        self.workspaces
+            .get(&ws_id)
+            .and_then(WorkspaceState::focused_window)
     }
 
     fn collect_tiling_placements(
@@ -181,12 +183,9 @@ impl TilingStrategy for MasterStrategy {
             let Some(state) = self.workspaces.get(&ws_id) else {
                 return;
             };
-            let Some(focus_id) = state.focus else {
+            let Some((pane, idx)) = state.focused_position() else {
                 return;
             };
-            let (pane, idx) = state
-                .find_window(focus_id)
-                .unwrap_or_else(|| panic!("focus {focus_id:?} not found in workspace {ws_id}"));
             (pane, idx, state.master.len(), state.secondary.len())
         };
 
@@ -199,50 +198,28 @@ impl TilingStrategy for MasterStrategy {
                     (Direction::Horizontal, false) => {
                         if pane == Pane::Secondary && master_len > 0 {
                             let state = self.workspaces.get_mut(&ws_id).unwrap();
-                            state.focus = state.master.first().copied();
+                            let target = state.last_focused_in(Pane::Master);
+                            state.record_focus(target);
                         }
                     }
                     (Direction::Horizontal, true) => {
                         if pane == Pane::Master && stack_len > 0 {
                             let state = self.workspaces.get_mut(&ws_id).unwrap();
-                            state.focus = state.secondary.first().copied();
+                            let target = state.last_focused_in(Pane::Secondary);
+                            state.record_focus(target);
                         }
                     }
-                    (Direction::Vertical, false) => {
-                        let len = match pane {
-                            Pane::Master => master_len,
-                            Pane::Secondary => stack_len,
-                        };
+                    (Direction::Vertical, _) => {
+                        let state = self.workspaces.get_mut(&ws_id).unwrap();
+                        let len = state.pane_vec(pane).len();
                         if len <= 1 {
                             return;
                         }
-                        let new_idx = if idx == 0 { len - 1 } else { idx - 1 };
-                        let state = self.workspaces.get_mut(&ws_id).unwrap();
-                        state.focus = match pane {
-                            Pane::Master => state.master.get(new_idx).copied(),
-                            Pane::Secondary => state.secondary.get(new_idx).copied(),
-                        };
-                    }
-                    (Direction::Vertical, true) => {
-                        let len = match pane {
-                            Pane::Master => master_len,
-                            Pane::Secondary => stack_len,
-                        };
-                        if len <= 1 {
-                            return;
-                        }
-                        let new_idx = if idx == len - 1 { 0 } else { idx + 1 };
-                        let state = self.workspaces.get_mut(&ws_id).unwrap();
-                        state.focus = match pane {
-                            Pane::Master => state.master.get(new_idx).copied(),
-                            Pane::Secondary => state.secondary.get(new_idx).copied(),
-                        };
+                        let target = state.pane_vec(pane)[wrap_index(idx, len, forward)];
+                        state.record_focus(target);
                     }
                 }
-                let state = self.workspaces.get(&ws_id).unwrap();
-                if state.focus.is_some() {
-                    self.scroll_into_view(hub, ws_id);
-                }
+                self.scroll_into_view(hub, ws_id);
             }
             TilingAction::MoveDirection { direction, forward } => {
                 if master_len + stack_len <= 1 {
@@ -259,14 +236,12 @@ impl TilingStrategy for MasterStrategy {
                                 let swapped = state.master.pop().unwrap();
                                 state.master.push(moved);
                                 state.secondary.push(swapped);
-                                state.focus = Some(moved);
                                 let moved_slots = state.master_matchers.clone();
                                 let swapped_slots = state.secondary_matchers.clone();
                                 self.remap_slot_on_pane_change(hub, ws_id, moved, &moved_slots);
                                 self.remap_slot_on_pane_change(hub, ws_id, swapped, &swapped_slots);
                             } else if state.master.len() < effective {
                                 state.master.push(moved);
-                                state.focus = Some(moved);
                                 let moved_slots = state.master_matchers.clone();
                                 self.remap_slot_on_pane_change(hub, ws_id, moved, &moved_slots);
                             }
@@ -278,44 +253,20 @@ impl TilingStrategy for MasterStrategy {
                             let swapped = state.secondary.remove(0);
                             state.master.push(swapped);
                             state.secondary.push(moved);
-                            state.focus = Some(moved);
                             let moved_slots = state.secondary_matchers.clone();
                             let swapped_slots = state.master_matchers.clone();
                             self.remap_slot_on_pane_change(hub, ws_id, moved, &moved_slots);
                             self.remap_slot_on_pane_change(hub, ws_id, swapped, &swapped_slots);
                         }
                     }
-                    (Direction::Vertical, false) => {
-                        let len = match pane {
-                            Pane::Master => state.master.len(),
-                            Pane::Secondary => state.secondary.len(),
-                        };
+                    (Direction::Vertical, _) => {
+                        let len = state.pane_vec(pane).len();
                         if len <= 1 {
                             return;
                         }
-                        let target = if idx == 0 { len - 1 } else { idx - 1 };
-                        let vec = match pane {
-                            Pane::Master => &mut state.master,
-                            Pane::Secondary => &mut state.secondary,
-                        };
+                        let target = wrap_index(idx, len, forward);
+                        let vec = state.pane_vec_mut(pane);
                         vec.swap(idx, target);
-                        state.focus = Some(vec[target]);
-                    }
-                    (Direction::Vertical, true) => {
-                        let len = match pane {
-                            Pane::Master => state.master.len(),
-                            Pane::Secondary => state.secondary.len(),
-                        };
-                        if len <= 1 {
-                            return;
-                        }
-                        let target = if idx == len - 1 { 0 } else { idx + 1 };
-                        let vec = match pane {
-                            Pane::Master => &mut state.master,
-                            Pane::Secondary => &mut state.secondary,
-                        };
-                        vec.swap(idx, target);
-                        state.focus = Some(vec[target]);
                     }
                 }
                 self.compute_placement(hub, ws_id);
@@ -377,7 +328,7 @@ impl TilingStrategy for MasterStrategy {
 
     fn detach_focused_child(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child> {
         let state = self.workspaces.get_mut(&ws_id)?;
-        let focus_id = state.focus?;
+        let focus_id = state.focused_window()?;
 
         state.remove_window(focus_id);
 
@@ -474,7 +425,7 @@ impl MasterStrategy {
         let occupy = self.sort_window_into_pane(ws_id, id, metadata);
 
         let state = self.workspaces.get_mut(&ws_id).unwrap();
-        state.focus = Some(id);
+        state.record_focus(id);
 
         self.window_states.insert(
             id,
@@ -556,7 +507,9 @@ struct WorkspaceState {
     secondary: Vec<WindowId>,
     master_matchers: Vec<SlotId>,
     secondary_matchers: Vec<SlotId>,
-    focus: Option<WindowId>,
+    /// Windows of this workspace from most to least recently focused. Always set-equal to
+    /// `master` plus `secondary`.
+    focus_history: Vec<WindowId>,
     master_y_offset: Length,
     stack_y_offset: Length,
     master_count: Option<usize>,
@@ -564,37 +517,82 @@ struct WorkspaceState {
 }
 
 impl WorkspaceState {
-    fn remove_window(&mut self, window_id: WindowId) -> Length {
-        let (pane, idx) = self.find_window(window_id).unwrap();
+    fn focused_window(&self) -> Option<WindowId> {
+        self.focus_history.first().copied()
+    }
 
-        let (active, other, y_offset) = match pane {
-            Pane::Master => (&mut self.master, &self.secondary, self.master_y_offset),
-            Pane::Secondary => (&mut self.secondary, &self.master, self.stack_y_offset),
+    /// `None` only for an empty workspace. A focused window outside both panes panics.
+    fn focused_position(&self) -> Option<(Pane, usize)> {
+        let focus_id = self.focused_window()?;
+        Some(self.find_window(focus_id))
+    }
+
+    fn record_focus(&mut self, window_id: WindowId) {
+        self.drop_from_history(window_id);
+        self.focus_history.insert(0, window_id);
+    }
+
+    fn drop_from_history(&mut self, window_id: WindowId) {
+        if let Some(pos) = self.focus_history.iter().position(|&w| w == window_id) {
+            self.focus_history.remove(pos);
+        }
+    }
+
+    fn clear_focus_history(&mut self) {
+        self.focus_history.clear();
+    }
+
+    /// Membership is read from the pane vector on every call, so a window that migrated between
+    /// panes answers for the pane it occupies now and migration sites need no fix-up.
+    fn last_focused_in(&self, pane: Pane) -> WindowId {
+        let members = self.pane_vec(pane);
+        self.focus_history
+            .iter()
+            .find(|w| members.contains(w))
+            .copied()
+            .or_else(|| members.first().copied())
+            .unwrap_or_else(|| panic!("last_focused_in called on empty {pane:?} pane"))
+    }
+
+    fn pane_vec(&self, pane: Pane) -> &[WindowId] {
+        match pane {
+            Pane::Master => &self.master,
+            Pane::Secondary => &self.secondary,
+        }
+    }
+
+    fn pane_vec_mut(&mut self, pane: Pane) -> &mut Vec<WindowId> {
+        match pane {
+            Pane::Master => &mut self.master,
+            Pane::Secondary => &mut self.secondary,
+        }
+    }
+
+    /// Focus repair needs no ladder here. Dropping `window_id` from the history leaves the head
+    /// on the surviving window focused before it, whichever pane that window lives in.
+    fn remove_window(&mut self, window_id: WindowId) -> Length {
+        let (pane, idx) = self.find_window(window_id);
+
+        let y_offset = match pane {
+            Pane::Master => self.master_y_offset,
+            Pane::Secondary => self.stack_y_offset,
         };
 
-        active.remove(idx);
-
-        if self.focus == Some(window_id) {
-            self.focus = active
-                .get(idx)
-                .copied()
-                .or_else(|| idx.checked_sub(1).and_then(|i| active.get(i).copied()))
-                .or_else(|| other.first().copied());
-        }
+        self.pane_vec_mut(pane).remove(idx);
+        self.drop_from_history(window_id);
         y_offset
     }
 
-    fn find_window(&self, id: WindowId) -> Option<(Pane, usize)> {
-        self.master
+    fn find_window(&self, id: WindowId) -> (Pane, usize) {
+        if let Some(i) = self.master.iter().position(|&w| w == id) {
+            return (Pane::Master, i);
+        }
+        let i = self
+            .secondary
             .iter()
             .position(|&w| w == id)
-            .map(|i| (Pane::Master, i))
-            .or_else(|| {
-                self.secondary
-                    .iter()
-                    .position(|&w| w == id)
-                    .map(|i| (Pane::Secondary, i))
-            })
+            .unwrap_or_else(|| panic!("window {id:?} is in neither master nor secondary pane"));
+        (Pane::Secondary, i)
     }
 }
 
@@ -610,6 +608,16 @@ struct WindowState {
 enum Pane {
     Master,
     Secondary,
+}
+
+fn wrap_index(idx: usize, len: usize, forward: bool) -> usize {
+    if forward {
+        if idx + 1 == len { 0 } else { idx + 1 }
+    } else if idx == 0 {
+        len - 1
+    } else {
+        idx - 1
+    }
 }
 
 fn effective_constraints(

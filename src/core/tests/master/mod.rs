@@ -1,5 +1,6 @@
 mod detach;
 mod export;
+mod focus;
 mod layout;
 mod moving;
 mod preferred_layout;

@@ -98,7 +98,7 @@ impl MasterStrategy {
                 .collect();
             state.master.clear();
             state.secondary.clear();
-            state.focus = None;
+            state.clear_focus_history();
             state.master_count = new_count_opt;
             state.master_ratio = new_ratio_opt;
 
