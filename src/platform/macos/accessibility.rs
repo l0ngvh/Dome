@@ -352,7 +352,9 @@ impl AXWindow {
         if !is_window {
             crate::trace_once!(
                 key: (cg_id, pid),
-                window = %self, "not manageable: role is not AXWindow"
+                window = %self,
+                role = ?role.as_ref().map(|r| r.to_string()),
+                "not manageable: role is not AXWindow"
             );
             return true;
         }
@@ -365,7 +367,9 @@ impl AXWindow {
         if !is_standard {
             crate::trace_once!(
                 key: (cg_id, pid),
-                window = %self, "not manageable: subrole is not standard"
+                window = %self,
+                subrole = ?subrole.as_ref().map(|sr| sr.to_string()),
+                "not manageable: subrole is not standard"
             );
             return true;
         }
