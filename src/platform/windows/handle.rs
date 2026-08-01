@@ -5,7 +5,9 @@ use windows::Win32::Foundation::{LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
-use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+};
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
@@ -516,11 +518,36 @@ impl InspectExternalWindow for ExternalHwnd {
         if style & WS_POPUP.0 != 0
             && style & (WS_THICKFRAME.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0) == 0
         {
-            crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: WS_POPUP without frame"
-            );
-            return true;
+            let hmonitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+            // Fullscreen games usually use these styles, so we need to filter out for them
+            let fullscreen = if hmonitor.0.is_null() {
+                false
+            } else {
+                let mut info = MONITORINFO {
+                    cbSize: size_of::<MONITORINFO>() as u32,
+                    ..Default::default()
+                };
+                if unsafe { GetMonitorInfoW(hmonitor, &mut info) }.as_bool() {
+                    let dim = get_dimension(hwnd);
+                    let left = Length::new(info.rcWork.left as f32);
+                    let top = Length::new(info.rcWork.top as f32);
+                    let right = Length::new(info.rcWork.right as f32);
+                    let bottom = Length::new(info.rcWork.bottom as f32);
+                    dim.x <= left
+                        && dim.y <= top
+                        && dim.x + dim.width >= right
+                        && dim.y + dim.height >= bottom
+                } else {
+                    false
+                }
+            };
+            if !fullscreen {
+                crate::trace_once!(
+                    key: (hwnd_id, pid),
+                    ?hwnd_id, ?title, ?pid, "not manageable: WS_POPUP without frame"
+                );
+                return true;
+            }
         }
         // Mirror the Windows Shell's taskbar/Alt-Tab rule: a top-level app window
         // is either ownerless or sets WS_EX_APPWINDOW. Owned windows without that

@@ -412,36 +412,6 @@ impl Dome {
         }
     }
 
-    pub(super) fn set_constraints(&mut self, id: WindowId, constraints: (f32, f32, f32, f32)) {
-        // FIXME: resolve_window_monitor is best effort, so it can return the wrong monitor. If the
-        // window is immediately minimized after spawn, then we'd get the wrong border
-        let monitor = self.resolve_window_monitor(id);
-        let border = self
-            .monitors
-            .physical_border(monitor, self.config.border_size)
-            .value();
-        let (min_w, min_h, max_w, max_h) = constraints;
-        if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
-            let to_frame = |v: f32| {
-                if v > 0.0 {
-                    Some(v + 2.0 * border)
-                } else {
-                    None
-                }
-            };
-            // No pre-check against stored values: calling set_window_constraint with
-            // unchanged values is cheap (the runner's apply_layout diffs against cached
-            // placements and skips windows whose target is unchanged).
-            self.hub.set_window_constraint(
-                id,
-                to_frame(min_w),
-                to_frame(min_h),
-                to_frame(max_w),
-                to_frame(max_h),
-            );
-        }
-    }
-
     pub(super) fn set_constraints_for(
         &mut self,
         hwnd_id: HwndId,
@@ -576,6 +546,7 @@ impl Dome {
         self.hub.handle_tiling_action(action);
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn unminimize_window(&mut self, id: WindowId) {
         self.hub.unminimize_window(id);
         let Some(entry) = self.registry.get_mut(id) else {
@@ -692,7 +663,6 @@ impl Dome {
             self.monitors.set_displayed_windows(mid, dm);
         }
 
-        // Hide
         for &id in &to_hide {
             // Keep taskbar tab for user-minimized windows so the user can
             // click it to restore. Dome-hidden windows get their tab removed.
@@ -935,6 +905,36 @@ impl Dome {
         let window_ids: Vec<(HwndId, WindowId)> = self.registry.iter().collect();
         for (_hwnd_id, window_id) in window_ids {
             self.retry_drift(window_id);
+        }
+    }
+
+    fn set_constraints(&mut self, id: WindowId, constraints: (f32, f32, f32, f32)) {
+        // FIXME: resolve_window_monitor is best effort, so it can return the wrong monitor. If the
+        // window is immediately minimized after spawn, then we'd get the wrong border
+        let monitor = self.resolve_window_monitor(id);
+        let border = self
+            .monitors
+            .physical_border(monitor, self.config.border_size)
+            .value();
+        let (min_w, min_h, max_w, max_h) = constraints;
+        if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
+            let to_frame = |v: f32| {
+                if v > 0.0 {
+                    Some(v + 2.0 * border)
+                } else {
+                    None
+                }
+            };
+            // No pre-check against stored values: calling set_window_constraint with
+            // unchanged values is cheap (the runner's apply_layout diffs against cached
+            // placements and skips windows whose target is unchanged).
+            self.hub.set_window_constraint(
+                id,
+                to_frame(min_w),
+                to_frame(min_h),
+                to_frame(max_w),
+                to_frame(max_h),
+            );
         }
     }
 }

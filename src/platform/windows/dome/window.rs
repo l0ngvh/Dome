@@ -483,12 +483,12 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn hide_window(&mut self, id: WindowId) {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        if entry.is_minimized || matches!(entry.state, WindowState::BorderlessMinimized { .. }) {
-            // Already hidden via minimize (by user or by Dome); nothing to do.
+        if entry.is_minimized {
             return;
         }
         match entry.state {
@@ -521,14 +521,13 @@ impl Dome {
                     entry.ext.move_offscreen();
                 }
             }
-            WindowState::BorderlessMinimized { .. } => {
-                unreachable!("handled by early return above")
-            }
+            WindowState::BorderlessMinimized { .. } => {}
             WindowState::ExclusiveFullscreen => {}
         }
     }
 
     /// Apply a fresh visible-rect observation from the OS.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(in crate::platform::windows) fn window_moved(
         &mut self,
         id: WindowId,
@@ -717,6 +716,7 @@ impl Dome {
     /// Called periodically by the drift retry timer.
     /// Re-issues the last placement if the window has not yet
     /// acknowledged it, up to `MAX_DRIFT_RETRIES` attempts.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn retry_drift(&mut self, id: WindowId) {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
@@ -752,6 +752,7 @@ impl Dome {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(super) fn enter_fullscreen_exclusive(&mut self, id: WindowId) {
         let was_minimized = self
             .registry
