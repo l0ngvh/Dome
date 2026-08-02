@@ -434,88 +434,36 @@ impl RawConfig {
     }
 }
 
+/// Deserialization target for a bundled ignore file.
+#[derive(Deserialize)]
+struct BundledIgnore {
+    #[serde(default)]
+    ignore: Vec<WindowMatcher>,
+}
+
+// These files are compiled into the binary, so a parse failure is a build bug,
+// not user error. It panics rather than taking the warn-and-recover path the
+// rest of config loading uses.
+fn parse_bundled_ignore(toml_src: &str) -> Vec<WindowMatcher> {
+    toml::from_str::<BundledIgnore>(toml_src)
+        .expect("bundled ignore defaults must be valid TOML")
+        .ignore
+}
+
 #[cfg(target_os = "macos")]
 fn default_ignore() -> Vec<WindowMatcher> {
-    vec![
-        WindowMatcher {
-            bundle_id: Some("com.apple.dock".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            bundle_id: Some("com.apple.controlcenter".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            bundle_id: Some("com.apple.notificationcenterui".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            bundle_id: Some("com.apple.loginwindow".into()),
-            ..Default::default()
-        },
-    ]
+    parse_bundled_ignore(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/resources/ignore/macos.toml"
+    )))
 }
 
 #[cfg(target_os = "windows")]
 fn default_ignore() -> Vec<WindowMatcher> {
-    vec![
-        WindowMatcher {
-            process: Some("LockApp.exe".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            process: Some("SearchHost.exe".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            process: Some("StartMenuExperienceHost.exe".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            title: Some("MSCTFIME UI".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            title: Some("OLEChannelWnd".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            class: Some("Shell_TrayWnd".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            class: Some("Shell_SecondaryTrayWnd".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            class: Some("Progman".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            class: Some("WorkerW".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            class: Some("TaskListThumbnailWnd".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            class: Some("MultitaskingViewFrame".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            class: Some("Xaml_WindowedPopupClass".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            class: Some("TaskManagerWindow".into()),
-            ..Default::default()
-        },
-        WindowMatcher {
-            class: Some("Windows.UI.Core.CoreWindow".into()),
-            ..Default::default()
-        },
-    ]
+    parse_bundled_ignore(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/resources/ignore/windows.toml"
+    )))
 }
 
 impl WalkRecover for LayoutConfig {
@@ -1970,49 +1918,19 @@ mod tests {
         assert!(!config.keymaps.default.contains_key(&a));
     }
 
-    #[test]
-    #[cfg(windows)]
-    fn default_windows_ignore_contains_shell_tray() {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("dome_config_win_defaults_{nanos}.toml"));
-        std::fs::write(&path, "[windows]\n").unwrap();
-        let _cleanup = CleanupFile(path.clone());
-        let config = load_or_default(path.to_str().unwrap(), Config::load);
-        assert!(
-            config
-                .ignore
-                .iter()
-                .any(|r| r.class.as_deref() == Some("Shell_TrayWnd"))
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn default_windows_ignore_contains_core_window() {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("dome_config_win_core_window_{nanos}.toml"));
-        std::fs::write(&path, "[windows]\n").unwrap();
-        let _cleanup = CleanupFile(path.clone());
-        let config = load_or_default(path.to_str().unwrap(), Config::load);
-        let entry = config
-            .ignore
-            .iter()
-            .find(|r| r.class.as_deref() == Some("Windows.UI.Core.CoreWindow"));
-        assert!(entry.is_some());
-        let entry = entry.unwrap();
-        assert!(entry.title.is_none());
-        assert!(entry.aumid.is_none());
-    }
-
+    // The exact-count assertion is the cheap, high-signal guard. A dropped or
+    // duplicated [[ignore]] entry in the bundled data file fails the test.
     #[test]
     #[cfg(target_os = "macos")]
-    fn default_macos_ignore_contains_dock() {
+    fn macos_ignore_defaults() {
+        let rules = default_ignore();
+        assert_eq!(rules.len(), 4);
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.bundle_id.as_deref() == Some("com.apple.dock"))
+        );
+
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2027,6 +1945,45 @@ mod tests {
                 .iter()
                 .any(|r| r.bundle_id.as_deref() == Some("com.apple.dock"))
         );
+    }
+
+    // The exact-count assertion is the cheap, high-signal guard. A dropped or
+    // duplicated [[ignore]] entry in the bundled data file fails the test.
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn windows_ignore_defaults() {
+        let rules = default_ignore();
+        assert_eq!(rules.len(), 14);
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.class.as_deref() == Some("Shell_TrayWnd"))
+        );
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_win_defaults_{nanos}.toml"));
+        std::fs::write(&path, "[windows]\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
+        assert!(
+            config
+                .ignore
+                .iter()
+                .any(|r| r.class.as_deref() == Some("Shell_TrayWnd"))
+        );
+
+        // The CoreWindow entry omits title and aumid in the bundled file, so
+        // this also guards the serde field mapping for optional keys.
+        let core_window = config
+            .ignore
+            .iter()
+            .find(|r| r.class.as_deref() == Some("Windows.UI.Core.CoreWindow"))
+            .expect("CoreWindow ignore rule present in merged config");
+        assert!(core_window.title.is_none());
+        assert!(core_window.aumid.is_none());
     }
 
     #[test]
