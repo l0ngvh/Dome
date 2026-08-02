@@ -1,0 +1,43 @@
+# Default ignore rules for Windows. These windows are never managed by Dome.
+
+[[ignore]]
+process = "LockApp.exe"
+
+[[ignore]]
+process = "SearchHost.exe"
+
+[[ignore]]
+process = "StartMenuExperienceHost.exe"
+
+[[ignore]]
+title = "MSCTFIME UI"                     # IME hidden window
+
+[[ignore]]
+title = "OLEChannelWnd"                   # OLE hidden window
+
+[[ignore]]
+class = "Shell_TrayWnd"
+
+[[ignore]]
+class = "Shell_SecondaryTrayWnd"          # secondary-monitor taskbar
+
+[[ignore]]
+class = "Progman"                         # desktop window
+
+[[ignore]]
+class = "WorkerW"                         # desktop wallpaper host
+
+[[ignore]]
+class = "TaskListThumbnailWnd"
+
+[[ignore]]
+class = "MultitaskingViewFrame"           # Task View
+
+[[ignore]]
+class = "Xaml_WindowedPopupClass"         # XAML popup surface
+
+[[ignore]]
+class = "TaskManagerWindow"
+
+[[ignore]]
+class = "Windows.UI.Core.CoreWindow"      # UWP core window
