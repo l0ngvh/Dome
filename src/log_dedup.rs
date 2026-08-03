@@ -28,9 +28,9 @@ macro_rules! debug_once {
 }
 pub(crate) use debug_once;
 
-#[expect(
-    unused_macros,
-    reason = "reserved for future callers, symmetric with trace_once"
+#[cfg_attr(
+    not(target_os = "macos"),
+    expect(unused_macros, reason = "only the macOS external bar probe warns once")
 )]
 macro_rules! warn_once {
     (key: $key:expr, $($rest:tt)*) => {{

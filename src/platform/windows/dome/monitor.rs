@@ -18,6 +18,7 @@ pub(in crate::platform::windows) struct MonitorInfo {
     pub handle: isize,
     pub name: String,
     pub dimension: Dimension,
+    pub bounds: Dimension,
     pub is_primary: bool,
     /// DPI scale factor for this monitor (e.g. 1.5 for 150%). Always > 0.
     pub scale: f32,
@@ -306,6 +307,7 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
 
         if unsafe { GetMonitorInfoW(hmonitor, &mut info.monitorInfo) }.as_bool() {
             let rc = info.monitorInfo.rcWork;
+            let rc_monitor = info.monitorInfo.rcMonitor;
             let name = String::from_utf16_lossy(
                 &info
                     .szDevice
@@ -321,6 +323,7 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
                 handle: hmonitor.0 as isize,
                 name,
                 dimension: handle::rect_to_dimension(rc),
+                bounds: handle::rect_to_dimension(rc_monitor),
                 is_primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
                 scale,
             });

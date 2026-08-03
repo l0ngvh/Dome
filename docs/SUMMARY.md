@@ -6,6 +6,7 @@
 - [Layout](preferred-layout.md)
 - [Commands](commands.md)
 - [CLI](cli.md)
+- [Integration](integration.md)
 - [FAQ](faq.md)
 
 # Development

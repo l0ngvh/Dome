@@ -257,3 +257,66 @@ fn float_place_with_same_target_is_noop() {
         "expected zero set_frame calls for cg2 on same-target re-place, got {moves:?}"
     );
 }
+
+#[test]
+fn multi_monitor_per_display() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let second_monitor = MonitorInfo {
+        display_id: 2,
+        name: "External".to_string(),
+        work_area: Dimension::new(
+            Length::new(1920.0),
+            Length::ZERO,
+            Length::new(2560.0),
+            Length::new(1440.0),
+        ),
+        bounds: Dimension::new(
+            Length::new(1920.0),
+            Length::ZERO,
+            Length::new(2560.0),
+            Length::new(1440.0),
+        ),
+        full_height: 1440.0,
+        is_primary: false,
+        scale: 2.0,
+    };
+    dome.monitors_changed(vec![default_monitor(), second_monitor]);
+
+    let win1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    send(&mut dome, "focus monitor right");
+    let win2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win2)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    assert_eq!(macos.window_frame(win1), (4, 4, 1912, 1072));
+    assert_eq!(macos.window_frame(win2), (1924, 4, 2552, 1432));
+}
+
+#[test]
+fn set_reserved_bar_shrinks_and_restores_work_area() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let win = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, win)], &[], &[]);
+    macos.settle(&mut dome, 10);
+    assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
+
+    dome.set_reserved_bar(Some(BarGeometry::new(
+        Some(30.0),
+        Some("top".into()),
+        None,
+        None,
+    )));
+    macos.settle(&mut dome, 10);
+    assert_eq!(macos.window_frame(win), (4, 34, 1912, 1042));
+
+    dome.set_reserved_bar(None);
+    macos.settle(&mut dome, 10);
+    assert_eq!(macos.window_frame(win), (4, 4, 1912, 1072));
+}

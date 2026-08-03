@@ -6,6 +6,7 @@ use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{NSNumber, NSString};
 
 use crate::core::{Dimension, Hub, Length, MonitorId, Unit, WindowId};
+use crate::platform::reserve_for_bar;
 
 use super::{Dome, RoundedDimension};
 
@@ -365,7 +366,27 @@ impl MonitorRegistry {
 
 impl Dome {
     pub(super) fn update_monitors(&mut self, monitors: &[MonitorInfo]) {
-        self.monitor_registry.reconcile(&mut self.hub, monitors);
+        // Cache the unshrunk list. Re-shrinking an already-shrunk cache would
+        // compound the reservation on each call.
+        self.monitors = monitors.to_vec();
+        if self.status_bars.is_empty() {
+            self.monitor_registry.reconcile(&mut self.hub, monitors);
+        } else {
+            let shrunk: Vec<MonitorInfo> = monitors
+                .iter()
+                .map(|m| {
+                    let work_area = match self.status_bars.rect_for(m.display_id) {
+                        Some(bar) => reserve_for_bar(m.bounds, m.work_area, bar),
+                        None => m.work_area,
+                    };
+                    MonitorInfo {
+                        work_area,
+                        ..m.clone()
+                    }
+                })
+                .collect();
+            self.monitor_registry.reconcile(&mut self.hub, &shrunk);
+        }
         self.primary_full_height = self.monitor_registry.primary_full_height();
     }
 }

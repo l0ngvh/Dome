@@ -109,6 +109,12 @@ fn monitors_changed_updates_layout() {
             Length::new(1280.0),
             Length::new(720.0),
         ),
+        bounds: Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            Length::new(1280.0),
+            Length::new(720.0),
+        ),
         is_primary: true,
         scale: 1.0,
     };

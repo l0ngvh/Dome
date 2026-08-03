@@ -161,7 +161,6 @@ where
                 return Ok(());
             }
         };
-        tracing::debug!(?msg, "IPC message");
         match on_message(msg) {
             Ok(response) => {
                 if let Err(write_err) = writeln!(stream, "{response}") {

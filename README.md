@@ -80,18 +80,9 @@ launch to `~/Library/Logs/dome/dome.log` on macOS, or
 
 ## Status bar
 
-Dome doesn't ship with a status bar by default. Here's how you can configure
-SketchyBar to display Dome's status.
-
-```bash
-sketchybar --add item dome_focused left \
-  --set dome_focused label="--" \
-  --subscribe dome_focused dome_update
-
-sketchybar --add event dome_poll "1s" \
-  "dome query workspaces | jq -r '.[] | select(.is_focused) | .name' \
-   | xargs -I{} sketchybar --set dome_focused label={}"
-```
+Dome doesn't ship with a status bar, but it provides basic integration for
+SketchyBar on macOS and for YASB and Zebar on Windows. See the
+[Integration](docs/integration.md) guide for setup and examples.
 
 ## Configuring Dome
 
@@ -108,7 +99,8 @@ Dome is configured by editing two TOML files. The default locations are:
 - [Layout](docs/layout.md): layout strategy, window-size constraints, and per-strategy parameters
 - [Commands](docs/commands.md): full command reference
 - [CLI](docs/cli.md): command-line interface usage
-- [FQG](docs/faq.md): command-line interface usage
+- [Integration](docs/integration.md): status bar integration examples for SketchyBar, YASB, and Zebar
+- [FAQ](docs/faq.md): answers to common questions and gotchas
 
 ## Credits
 

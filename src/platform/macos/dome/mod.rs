@@ -1,4 +1,5 @@
 mod events;
+mod external_bar;
 mod inspect;
 mod layout;
 mod monitor;
@@ -7,6 +8,7 @@ mod registry;
 mod window;
 
 pub(super) use events::{ContainerShow, HubEvent, HubMessage};
+pub(in crate::platform::macos) use external_bar::{BarGeometry, ExternalBarProbe};
 pub(super) use inspect::{
     ExitNativeFullscreen, ExtRefresh, compute_reconcile_all, compute_reconciliation,
     compute_window_positions,
@@ -18,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use objc2_core_graphics::CGWindowID;
+use objc2_core_graphics::{CGDirectDisplayID, CGWindowID};
 
 use crate::action::{
     FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
@@ -26,8 +28,8 @@ use crate::action::{
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig, WindowMatcher, pattern_matches};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, Direction, Hub, Length, Logical, TilingAction, WindowId, WindowMetadata,
-    WindowRestrictions,
+    ContainerId, Dimension, Direction, Hub, Length, Logical, TilingAction, WindowId,
+    WindowMetadata, WindowRestrictions,
 };
 use crate::platform::macos::accessibility::ExternalWindow;
 
@@ -131,6 +133,31 @@ pub(in crate::platform::macos) enum PendingAdd {
     NativeFullscreen { new: NewWindow },
 }
 
+/// Keyed by display id so a bar that moves between monitors or draws on
+/// several at once is handled uniformly.
+#[derive(Default)]
+struct StatusBarTracker {
+    rects: HashMap<CGDirectDisplayID, Dimension>,
+}
+
+impl StatusBarTracker {
+    fn record(&mut self, id: CGDirectDisplayID, rect: Dimension) {
+        self.rects.insert(id, rect);
+    }
+
+    fn rect_for(&self, id: CGDirectDisplayID) -> Option<Dimension> {
+        self.rects.get(&id).copied()
+    }
+
+    fn clear(&mut self) {
+        self.rects.clear();
+    }
+
+    fn is_empty(&self) -> bool {
+        self.rects.is_empty()
+    }
+}
+
 /// Timestamps of the first and last AX move/resize notifications in a
 /// coalesced debounce burst (equal when only one fired). The first is
 /// compared against the post-placement debounce window (was this burst
@@ -174,6 +201,8 @@ pub(in crate::platform::macos) struct Dome {
     recovery: Recovery,
     pending_created: Vec<WindowId>,
     pending_deleted: Vec<WindowId>,
+    status_bars: StatusBarTracker,
+    monitors: Vec<MonitorInfo>,
 }
 
 impl Dome {
@@ -213,6 +242,8 @@ impl Dome {
             recovery: Recovery::new(),
             pending_created: Vec::new(),
             pending_deleted: Vec::new(),
+            status_bars: StatusBarTracker::default(),
+            monitors: monitors.to_vec(),
         }
     }
 
@@ -322,6 +353,26 @@ impl Dome {
                 );
             }
         }
+        self.flush_layout();
+    }
+
+    pub(in crate::platform::macos) fn set_reserved_bar(&mut self, geo: Option<BarGeometry>) {
+        let rects = match &geo {
+            Some(g) => {
+                let rects = external_bar::reserved_rects(g, &self.monitors);
+                tracing::info!(?g, displays = rects.len(), "Bar reservation applied");
+                rects
+            }
+            None => HashMap::new(),
+        };
+        self.status_bars.clear();
+        for (display_id, rect) in &rects {
+            self.status_bars.record(*display_id, *rect);
+        }
+        // update_monitors borrows &mut self, so self.monitors cannot be
+        // borrowed across the call. Cheap main-thread clone.
+        let cached = self.monitors.clone();
+        self.update_monitors(&cached);
         self.flush_layout();
     }
 

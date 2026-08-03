@@ -130,6 +130,7 @@ fn default_monitor() -> MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
         dimension: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
+        bounds: Dimension::new(Length::ZERO, Length::ZERO, SCREEN_WIDTH, SCREEN_HEIGHT),
         is_primary: true,
         scale: 1.0,
     }
@@ -140,6 +141,12 @@ fn second_monitor() -> MonitorInfo {
         handle: 2,
         name: "External".to_string(),
         dimension: Dimension::new(
+            SCREEN_WIDTH,
+            Length::ZERO,
+            Length::new(2560.0),
+            Length::new(1440.0),
+        ),
+        bounds: Dimension::new(
             SCREEN_WIDTH,
             Length::ZERO,
             Length::new(2560.0),
@@ -276,27 +283,29 @@ impl TestEnv {
         self.open_with(ext)
     }
 
-    /// Mirrors the runner's window-creation pipeline:
-    /// the inspection step (worker thread) gates on `check_unmanageable`, and only
-    /// manageable windows reach `Dome::add_window`. Unmanageable mocks are
-    /// only registered for `env.dim` lookup so tests can inspect their
-    /// untouched dimension.
+    /// Mirrors the runner's create-side fork instead of driving the real
+    /// `dispatch_window_created` closure, so keep the two in sync.
     fn open_with(&mut self, ext: Arc<MockExternalHwnd>) -> HwndId {
         let hwnd_id = ext.hwnd_id;
         self.mocks.insert(hwnd_id, ext.clone());
+        let metadata = WindowsMetadata {
+            title: ext.title.clone(),
+            process: ext.process.clone(),
+            process_path: None,
+            class: ext.class.clone(),
+            aumid: None,
+            app_name: ext.app_name.clone(),
+        };
+        if Dome::is_known_bar(&metadata) {
+            self.dome.capture_bar(hwnd_id, 1, ext.get_dim());
+            return hwnd_id;
+        }
         if !ext.manageable {
             return hwnd_id;
         }
         let new = NewWindow {
             ext: ext.clone(),
-            metadata: WindowsMetadata {
-                title: ext.title.clone(),
-                process: ext.process.clone(),
-                process_path: None,
-                class: ext.class.clone(),
-                aumid: None,
-                app_name: ext.app_name.clone(),
-            },
+            metadata,
             constraints: (
                 ext.min_size.0,
                 ext.min_size.1,
@@ -378,7 +387,9 @@ impl TestEnv {
 
     fn destroy_window(&mut self, hwnd: HwndId) {
         self.mocks.remove(&hwnd);
-        self.dome.window_destroyed(hwnd);
+        if !self.dome.remove_bar(hwnd) {
+            self.dome.window_destroyed(hwnd);
+        }
         self.z_stack.remove(hwnd);
         self.dome.apply_layout();
     }

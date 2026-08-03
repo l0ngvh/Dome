@@ -16,8 +16,8 @@ use crate::keymap::KeymapState;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::GcdDispatcher;
 use crate::platform::macos::dome::{
-    DebounceBurst, Dome, HubEvent, MacOSMetadata, NewWindow, PendingAdd, WindowMove,
-    compute_reconcile_all, compute_reconciliation, compute_window_positions,
+    DebounceBurst, Dome, ExternalBarProbe, HubEvent, MacOSMetadata, NewWindow, PendingAdd,
+    WindowMove, compute_reconcile_all, compute_reconciliation, compute_window_positions,
 };
 use crate::platform::macos::running_application::RunningApp;
 
@@ -75,6 +75,10 @@ pub(super) fn run_dome(
         .expect("Failed to insert channel source");
 
     dispatch_reconcile_all(&mut runner);
+    runner.dispatcher.dispatch(
+        move |_marker| ExternalBarProbe::query(),
+        |result, runner| runner.dome.set_reserved_bar(result.ok().flatten()),
+    );
     event_loop
         .run(None, &mut runner, |runner| {
             if SIGNAL_RECEIVED.load(Ordering::Relaxed) {
@@ -136,6 +140,10 @@ fn handle_event(runner: &mut DomeRunner, event: HubEvent) {
         HubEvent::MonitorsChanged(monitors) => {
             tracing::info!(count = monitors.len(), "Monitors changed");
             runner.dome.monitors_changed(monitors);
+            runner.dispatcher.dispatch(
+                move |_marker| ExternalBarProbe::query(),
+                |result, runner| runner.dome.set_reserved_bar(result.ok().flatten()),
+            );
         }
         HubEvent::MirrorClicked(cg_id) => {
             runner.dome.mirror_clicked(cg_id);

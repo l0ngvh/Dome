@@ -165,6 +165,12 @@ fn scaled_monitor(scale: f32) -> MonitorInfo {
             SCREEN_WIDTH * scale,
             SCREEN_HEIGHT * scale,
         ),
+        bounds: Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH * scale,
+            SCREEN_HEIGHT * scale,
+        ),
         is_primary: true,
         scale,
     }
@@ -218,6 +224,12 @@ fn show_tiling_places_at_200pct_offset_monitor() {
             Length::new(1920.0),
             Length::new(1080.0),
         ),
+        bounds: Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(1920.0),
+            Length::new(1080.0),
+        ),
         is_primary: true,
         scale: 1.0,
     };
@@ -226,6 +238,12 @@ fn show_tiling_places_at_200pct_offset_monitor() {
         handle: 2,
         name: "Secondary".to_string(),
         dimension: Dimension::new(
+            Length::new(1920.0),
+            Length::new(0.0),
+            Length::new(5120.0),
+            Length::new(2880.0),
+        ),
+        bounds: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
             Length::new(5120.0),
@@ -361,6 +379,12 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
             Length::new(1920.0),
             Length::new(1080.0),
         ),
+        bounds: Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(1920.0),
+            Length::new(1080.0),
+        ),
         is_primary: true,
         scale: 1.0,
     };
@@ -368,6 +392,12 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
         handle: 2,
         name: "Secondary".to_string(),
         dimension: Dimension::new(
+            Length::new(1920.0),
+            Length::new(0.0),
+            Length::new(3840.0),
+            Length::new(2160.0),
+        ),
+        bounds: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
             Length::new(3840.0),
@@ -414,6 +444,12 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
         handle: 1,
         name: "Test".to_string(),
         dimension: Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(1920.0),
+            Length::new(1080.0),
+        ),
+        bounds: Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
             Length::new(1920.0),
@@ -524,6 +560,12 @@ fn float_move_monitor_different_dpi_rescales_border() {
             Length::new(1920.0),
             Length::new(1080.0),
         ),
+        bounds: Dimension::new(
+            Length::new(0.0),
+            Length::new(0.0),
+            Length::new(1920.0),
+            Length::new(1080.0),
+        ),
         is_primary: true,
         scale: 1.0,
     };
@@ -531,6 +573,12 @@ fn float_move_monitor_different_dpi_rescales_border() {
         handle: 2,
         name: "Secondary".to_string(),
         dimension: Dimension::new(
+            Length::new(1920.0),
+            Length::new(0.0),
+            Length::new(5120.0),
+            Length::new(2880.0),
+        ),
+        bounds: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
             Length::new(5120.0),
@@ -590,6 +638,12 @@ fn dome_new_assigns_per_monitor_scale() {
             SCREEN_WIDTH * 1.5,
             SCREEN_HEIGHT * 1.5,
         ),
+        bounds: Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            SCREEN_WIDTH * 1.5,
+            SCREEN_HEIGHT * 1.5,
+        ),
         is_primary: true,
         scale: 1.5,
     };
@@ -597,6 +651,12 @@ fn dome_new_assigns_per_monitor_scale() {
         handle: 2,
         name: "Secondary".to_string(),
         dimension: Dimension::new(
+            SCREEN_WIDTH * 1.5,
+            Length::ZERO,
+            Length::new(5120.0),
+            Length::new(2880.0),
+        ),
+        bounds: Dimension::new(
             SCREEN_WIDTH * 1.5,
             Length::ZERO,
             Length::new(5120.0),
@@ -721,5 +781,153 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
     assert_eq!(
         after_settle, after_drift,
         "apply_layout after drift must not re-update the overlay (settled short-circuit)"
+    );
+}
+
+fn full_work_area(env: &TestEnv) -> Dimension {
+    let border = Length::new(env.config.border_size);
+    Dimension::new(
+        border,
+        border,
+        SCREEN_WIDTH - border * 2.0,
+        SCREEN_HEIGHT - border * 2.0,
+    )
+}
+
+#[test]
+fn capture_shrinks_work_area() {
+    let mut env = TestEnv::new();
+    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.settle(10);
+    env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
+    env.settle(10);
+
+    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
+}
+
+#[test]
+fn appbar_excluded_no_double_subtract() {
+    let mut env = TestEnv::new();
+    {
+        let mut monitors = env.monitors.lock().unwrap();
+        monitors[0].dimension = dim(0, 30, 1920, 1050);
+    }
+    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.settle(10);
+    env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
+    env.settle(10);
+
+    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
+}
+
+#[test]
+fn floating_shrink() {
+    let mut env = TestEnv::new();
+    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.settle(10);
+    env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 40));
+    env.settle(10);
+
+    assert_eq!(env.dim(win), dim(4, 44, 1912, 1032));
+}
+
+#[test]
+fn bar_move_updates() {
+    let mut env = TestEnv::new();
+    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.settle(10);
+    let bar = env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
+    env.settle(10);
+    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
+
+    env.dome.bar_moved(bar, 1, dim(0, 0, 1920, 60));
+    env.dome.apply_layout();
+    env.settle(10);
+
+    assert_eq!(env.dim(win), dim(4, 64, 1912, 1012));
+}
+
+#[test]
+fn destroy_restores() {
+    let mut env = TestEnv::new();
+    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.settle(10);
+    let bar = env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
+    env.settle(10);
+    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
+
+    env.destroy_window(bar);
+    env.settle(10);
+
+    assert_eq!(env.dim(win), full_work_area(&env));
+}
+
+#[test]
+fn multi_monitor_per_display() {
+    let mut env = TestEnv::new_with_monitors(
+        Config::default(),
+        LayoutConfig::default(),
+        vec![default_monitor(), second_monitor()],
+    );
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.settle(10);
+    env.run_actions("focus monitor right");
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    env.settle(10);
+
+    env.open(3, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
+    env.settle(10);
+
+    assert_eq!(env.dim(w1), dim(4, 34, 1912, 1042));
+    assert_eq!(env.dim(w2), dim(1924, 4, 2552, 1432));
+}
+
+#[test]
+fn startup_before_bar() {
+    let mut env = TestEnv::new();
+    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.settle(10);
+    assert_eq!(env.dim(win), full_work_area(&env));
+
+    env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
+    env.settle(10);
+
+    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
+}
+
+#[test]
+fn tool_window_bar_reserved_at_fork() {
+    let mut env = TestEnv::new();
+    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
+    env.settle(10);
+
+    let bar = Arc::new(
+        MockExternalHwnd::with_title(
+            2,
+            "zebar",
+            "zebar.exe",
+            env.moves.clone(),
+            env.z_stack.clone(),
+            env.focus_target.clone(),
+        )
+        .with_manageable(false)
+        .with_dimension(dim(0, 0, 1920, 30)),
+    );
+    let bar_id = env.open_with(bar);
+    env.settle(10);
+
+    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
+    assert_eq!(env.dim(bar_id), dim(0, 0, 1920, 30));
+
+    let TilingOverlayState::Visible { windows, .. } = env.tiling_overlays()[0].state.clone() else {
+        panic!(
+            "tiling overlay should be visible with the app window, got {:?}",
+            env.tiling_overlays()[0].state
+        );
+    };
+    assert_eq!(
+        windows.len(),
+        1,
+        "only the app window is tiled, the recognized bar must not be"
     );
 }

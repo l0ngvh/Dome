@@ -19,8 +19,8 @@ use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 use crate::platform::macos::dispatcher::DispatcherMarker;
 use crate::platform::macos::dome::{
-    DebounceBurst, Dome, ExitNativeFullscreen, FrameSender, HubMessage, MacOSMetadata, NewWindow,
-    PendingAdd, RoundedDimension, WindowMove,
+    BarGeometry, DebounceBurst, Dome, ExitNativeFullscreen, FrameSender, HubMessage, MacOSMetadata,
+    NewWindow, PendingAdd, RoundedDimension, WindowMove,
 };
 
 const SCREEN_WIDTH: Length = Length::new(1920.0);

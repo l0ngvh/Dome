@@ -77,6 +77,7 @@ impl crate::core::WindowMetadata for WindowsMetadata {
     }
 
     fn matches_window_matcher(&self, matcher: &WindowMatcher) -> bool {
+        let app = self.app_name.as_deref();
         let title = self.title.as_deref();
         let class = self.class.as_deref();
         let aumid = self.aumid.as_deref();
@@ -98,6 +99,11 @@ impl crate::core::WindowMetadata for WindowsMetadata {
         }
         if let Some(p) = matcher.aumid.as_deref()
             && !aumid.is_some_and(|a| pattern_matches(p, a))
+        {
+            return false;
+        }
+        if let Some(p) = matcher.app.as_deref()
+            && !app.is_some_and(|a| pattern_matches(p, a))
         {
             return false;
         }

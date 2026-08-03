@@ -5,6 +5,7 @@ use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostQuitMessage, PostThreadMessageW, WM_QUIT};
 
 use crate::action::{Action, Actions};
+use crate::core::{Dimension, Physical};
 use crate::keymap::KeymapState;
 use crate::platform::windows::WM_APP_DISPATCH_RESULT;
 use crate::platform::windows::dome::{Dome, HubEvent, NewWindow, WindowsMetadata};
@@ -86,7 +87,9 @@ impl Runner {
                 self.dispatch_window_created(hwnd_id);
             }
             HubEvent::WindowDestroyed(hwnd_id) => {
-                self.dome.window_destroyed(hwnd_id);
+                if !self.dome.remove_bar(hwnd_id) {
+                    self.dome.window_destroyed(hwnd_id);
+                }
             }
             HubEvent::WindowMinimized(hwnd_id) => {
                 self.dome.window_minimized(hwnd_id);
@@ -126,7 +129,19 @@ impl Runner {
                 hwnd_id,
                 observed_at,
             } => {
-                if self.dome.location_changed(hwnd_id) {
+                if self.dome.is_tracked_bar(hwnd_id) {
+                    let inspect: Arc<dyn InspectExternalWindow> =
+                        Arc::new(ExternalHwnd::new(hwnd_id.into()));
+                    self.dispatcher.dispatch(
+                        move || Some((inspect.get_visible_rect(), inspect.get_monitor())),
+                        move |observation, runner| {
+                            let Some((rect, monitor)) = observation else {
+                                return;
+                            };
+                            runner.dome.bar_moved(hwnd_id, monitor, rect);
+                        },
+                    );
+                } else if self.dome.location_changed(hwnd_id) {
                     self.timers
                         .schedule_move_settle(hwnd_id, observed_at, DEBOUNCE_INTERVAL);
                 }
@@ -212,36 +227,51 @@ impl Runner {
         let manage: Arc<dyn ManageExternalWindow> = ext;
         self.dispatcher.dispatch(
             move || {
-                if inspect.check_unmanageable() {
-                    return None;
+                let metadata = WindowsMetadata {
+                    title: inspect.get_window_title(),
+                    process: inspect.get_process_name().unwrap_or_default(),
+                    process_path: inspect.get_process_path().ok(),
+                    class: inspect.get_class_name(),
+                    aumid: inspect.get_aumid(),
+                    app_name: inspect.get_app_display_name(),
+                };
+                if Dome::is_known_bar(&metadata) {
+                    let rect = inspect.get_visible_rect();
+                    let monitor = inspect.get_monitor();
+                    tracing::info!(
+                        hwnd = %manage.id(),
+                        ?rect,
+                        monitor,
+                        ?metadata,
+                        "Known bar window recognized"
+                    );
+                    return CreatedWindow::KnownBar {
+                        ext: manage,
+                        rect,
+                        monitor,
+                    };
                 }
-                let class = inspect.get_class_name();
-                let aumid = inspect.get_aumid();
-                let process = inspect.get_process_name().unwrap_or_default();
-                let process_path = inspect.get_process_path().ok();
-                let title = inspect.get_window_title();
-                Some((
+                if inspect.check_unmanageable() {
+                    return CreatedWindow::Skip;
+                }
+                CreatedWindow::Manageable(
                     NewWindow {
                         ext: manage,
-                        metadata: WindowsMetadata {
-                            title,
-                            process,
-                            process_path,
-                            class,
-                            aumid,
-                            app_name: inspect.get_app_display_name(),
-                        },
+                        metadata,
                         constraints: inspect.get_size_constraints(),
                     },
                     inspect.get_visible_rect(),
                     inspect.get_monitor(),
-                ))
+                )
             },
-            move |result, runner| {
-                let Some((new, rect, monitor)) = result else {
-                    return;
-                };
-                runner.dome.add_window(new, rect, monitor);
+            move |result, runner| match result {
+                CreatedWindow::KnownBar { ext, rect, monitor } => {
+                    runner.dome.capture_bar(ext.id(), monitor, rect);
+                }
+                CreatedWindow::Manageable(new, rect, monitor) => {
+                    runner.dome.add_window(new, rect, monitor);
+                }
+                CreatedWindow::Skip => {}
             },
         );
     }
@@ -306,6 +336,15 @@ impl Runner {
 
 pub(super) type ApplyFn = Box<dyn FnOnce(&mut Runner)>;
 
+enum CreatedWindow {
+    KnownBar {
+        ext: Arc<dyn ManageExternalWindow>,
+        rect: Dimension<Physical>,
+        monitor: isize,
+    },
+    Manageable(NewWindow, Dimension<Physical>, isize),
+    Skip,
+}
 struct ReadDispatcher {
     pool: rayon::ThreadPool,
     thread_id: u32,

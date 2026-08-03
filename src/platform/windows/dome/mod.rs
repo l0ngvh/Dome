@@ -1,4 +1,5 @@
 pub(super) mod app_window;
+mod external_bar;
 pub(super) mod monitor;
 pub(super) mod overlay;
 mod placement_tracker;
@@ -34,6 +35,8 @@ use self::window::{PositionedState, WindowState};
 
 pub(super) use self::window::NewWindow;
 pub(super) use self::window::WindowsMetadata;
+
+use self::external_bar::StatusBars;
 
 use self::monitor::MonitorRegistry;
 use super::external::{HwndId, ShowCmd};
@@ -123,6 +126,7 @@ pub(super) struct Dome {
     placement_tracker: PlacementTracker,
     recovery: Recovery,
     app_window: Box<dyn AppWindowApi>,
+    status_bars: StatusBars,
 }
 
 impl Drop for Dome {
@@ -214,6 +218,7 @@ impl Dome {
             placement_tracker: PlacementTracker::new(),
             recovery: Recovery::new(taskbar),
             app_window,
+            status_bars: StatusBars::default(),
         })
     }
 
@@ -858,11 +863,12 @@ impl Dome {
         self.apply_layout();
     }
 
-    fn update_monitors(&mut self, monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
+    fn update_monitors(&mut self, mut monitors: Vec<MonitorInfo>) -> Vec<HwndId> {
         if monitors.is_empty() {
             tracing::warn!("Empty monitor list, skipping update");
             return Vec::new();
         }
+        self.status_bars.reserve(&mut monitors, &self.monitors);
         let change = self.monitors.reconcile(&mut self.hub, &monitors);
         for id in change.added {
             let m = self.monitors.monitor(id);
@@ -888,6 +894,60 @@ impl Dome {
             })
             .map(|(hwnd_id, _)| hwnd_id)
             .collect()
+    }
+
+    pub(super) fn capture_bar(
+        &mut self,
+        hwnd_id: HwndId,
+        monitor: isize,
+        rect: Dimension<Physical>,
+    ) {
+        if let Some(mid) = self.monitors.id_for_handle(monitor) {
+            self.status_bars.capture(hwnd_id, mid, rect);
+            tracing::info!(%hwnd_id, %mid, ?rect, "Status bar recognized, reserving work area");
+            self.recompute_work_areas();
+        } else {
+            tracing::warn!(handle = monitor, "known bar on unknown monitor handle");
+        }
+    }
+
+    pub(super) fn remove_bar(&mut self, hwnd_id: HwndId) -> bool {
+        if self.status_bars.remove(hwnd_id).is_some() {
+            self.recompute_work_areas();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(super) fn is_known_bar(metadata: &WindowsMetadata) -> bool {
+        StatusBars::is_known_bar(metadata)
+    }
+
+    pub(super) fn is_tracked_bar(&self, hwnd_id: HwndId) -> bool {
+        self.status_bars.is_tracked(hwnd_id)
+    }
+
+    pub(in crate::platform::windows) fn bar_moved(
+        &mut self,
+        hwnd_id: HwndId,
+        monitor_handle: isize,
+        rect: Dimension<Physical>,
+    ) {
+        if let Some(mid) = self.monitors.id_for_handle(monitor_handle) {
+            self.status_bars.move_to(hwnd_id, mid, rect);
+            self.recompute_work_areas();
+        }
+    }
+
+    fn recompute_work_areas(&mut self) {
+        match self.display.get_all_monitors() {
+            Ok(monitors) => {
+                self.update_monitors(monitors);
+                self.apply_layout();
+            }
+            Err(e) => tracing::warn!("Failed to enumerate monitors for bar reservation: {e}"),
+        }
     }
 
     /// Updates the DPI scale for a monitor identified by its Win32 HMONITOR handle.
