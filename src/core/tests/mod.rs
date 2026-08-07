@@ -1,3 +1,4 @@
+mod export;
 mod float_window;
 mod focus_workspace;
 mod fullscreen;
@@ -1059,6 +1060,22 @@ impl WindowMetadata for TestMetadata {
 pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         title: Some(t.to_owned()),
+        ..Default::default()
+    })
+}
+
+/// Build metadata with the given title.
+pub(crate) fn titled_meta(t: &str) -> Box<dyn WindowMetadata> {
+    Box::new(TestMetadata {
+        title: Some(t.into()),
+        ..Default::default()
+    })
+}
+
+/// Build metadata with the given process name.
+pub(crate) fn process_meta(p: &str) -> Box<dyn WindowMetadata> {
+    Box::new(TestMetadata {
+        process: Some(p.into()),
         ..Default::default()
     })
 }

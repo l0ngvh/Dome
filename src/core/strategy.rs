@@ -4,7 +4,9 @@ use crate::config::{LayoutWorkspaceConfig, Strategy, TreeLayoutNode, WindowMatch
 use crate::core::GlobalLayoutConfig;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
-use crate::core::node::{Child, ContainerId, Dimension, Direction, Length, WindowId, WorkspaceId};
+use crate::core::node::{
+    Child, ContainerId, Dimension, Direction, Length, WindowId, WindowMetadata, WorkspaceId,
+};
 use crate::core::partition_tree::PartitionTreeStrategy;
 
 /// Actions that are specific to the tiling strategy.
@@ -51,21 +53,18 @@ pub(crate) struct WorkspaceExport {
     pub(crate) master_count: Option<usize>,
     pub(crate) master: Vec<WindowMatcher>,
     pub(crate) secondary: Vec<WindowMatcher>,
+    pub(crate) float: Vec<WindowMatcher>,
+    pub(crate) fullscreen: Vec<WindowMatcher>,
 }
 
 impl WorkspaceExport {
-    pub(crate) fn to_layout_workspace_config(
-        &self,
-        name: &str,
-        float: Vec<WindowMatcher>,
-        fullscreen: Vec<WindowMatcher>,
-    ) -> LayoutWorkspaceConfig {
+    pub(crate) fn to_layout_workspace_config(&self, name: &str) -> LayoutWorkspaceConfig {
         match self.strategy.as_str() {
             "partition_tree" => LayoutWorkspaceConfig::PartitionTree {
                 name: name.to_owned(),
                 tree: self.tree.clone(),
-                float,
-                fullscreen,
+                float: self.float.clone(),
+                fullscreen: self.fullscreen.clone(),
             },
             "master" => LayoutWorkspaceConfig::Master {
                 name: name.to_owned(),
@@ -73,8 +72,8 @@ impl WorkspaceExport {
                 master_count: self.master_count,
                 master: self.master.clone(),
                 secondary: self.secondary.clone(),
-                float,
-                fullscreen,
+                float: self.float.clone(),
+                fullscreen: self.fullscreen.clone(),
             },
             _ => unreachable!("unknown strategy"),
         }
@@ -130,6 +129,11 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
     /// Returns the number of tiling windows in the workspace.
     fn tiling_window_count(&self, ws_id: WorkspaceId) -> usize;
 
+    /// Return true if this workspace's tiling layout has a matcher that matches
+    /// the given window. Read-only routing query used by resolve_matcher on
+    /// window insert.
+    fn matches_tiling(&self, ws_id: WorkspaceId, metadata: &dyn WindowMetadata) -> bool;
+
     /// Re-attach a previously-detached `Child` into `ws_id`. Sets focus
     /// to the attached child. No-op when `child` is not applicable to
     /// this strategy (e.g. `Child::Container` for MasterStrategy).
@@ -157,7 +161,7 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
 
     /// Export the current layout for a workspace, updating the strategy's
     /// internal preferred-layout representation to match the live tree.
-    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WorkspaceExport>;
+    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> WorkspaceExport;
 }
 
 #[cfg(test)]

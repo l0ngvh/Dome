@@ -350,14 +350,15 @@ impl PartitionTreeStrategy {
         &mut self,
         hub: &HubAccess,
         ws_id: WorkspaceId,
-    ) -> Option<WorkspaceExport> {
-        let root = self.build_from_live_tree(hub, ws_id)?;
-        let tree = self.build_layout_node(root);
-        Some(WorkspaceExport {
+    ) -> WorkspaceExport {
+        let tree = self
+            .build_from_live_tree(hub, ws_id)
+            .map(|root| self.build_layout_node(root));
+        WorkspaceExport {
             strategy: "partition_tree".into(),
-            tree: Some(tree),
+            tree,
             ..Default::default()
-        })
+        }
     }
 
     pub(super) fn sync_preferred_layout(

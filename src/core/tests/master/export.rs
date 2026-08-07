@@ -20,10 +20,10 @@ fn export_master_empty_workspace() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "master".into(),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -43,14 +43,14 @@ fn export_master_single_window() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "master".into(),
             master: vec![WindowMatcher {
                 title: Some("w0".into()),
                 ..Default::default()
             }],
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -80,12 +80,12 @@ fn export_master_matched_preserves_slot_matcher() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "master".into(),
             master: vec![slot_matcher],
             secondary: vec![],
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -117,7 +117,7 @@ fn export_master_mixed_matched_and_unmatched() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "master".into(),
             master: vec![slot_matcher],
             secondary: vec![WindowMatcher {
@@ -125,7 +125,7 @@ fn export_master_mixed_matched_and_unmatched() {
                 ..Default::default()
             }],
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -153,7 +153,7 @@ fn export_two_windows_one_slot_emits_single_matcher() {
     hub.insert_tiling(ws_id, titled_process("Browser A", "browser.exe"));
     hub.insert_tiling(ws_id, titled_process("Browser B", "browser.exe"));
 
-    let result = hub.export_workspace(ws_id).unwrap();
+    let result = hub.export_workspace(ws_id);
     // Two windows share one slot, so the slot's matcher must be emitted once.
     assert_eq!(result.master.len(), 1);
     assert_eq!(

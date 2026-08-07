@@ -15,8 +15,10 @@ impl MasterStrategy {
         &mut self,
         hub: &HubAccess,
         ws_id: WorkspaceId,
-    ) -> Option<WorkspaceExport> {
-        let state = self.workspaces.get(&ws_id)?;
+    ) -> WorkspaceExport {
+        let Some(state) = self.workspaces.get(&ws_id) else {
+            panic!("master: export_workspace called for {ws_id} but workspace has no state")
+        };
 
         let master_groups = self.group_pane(hub, &state.master.clone());
         let secondary_groups = self.group_pane(hub, &state.secondary.clone());
@@ -63,14 +65,14 @@ impl MasterStrategy {
         state.master_matchers = master_slots;
         state.secondary_matchers = secondary_slots;
 
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "master".into(),
             master_ratio: state.master_ratio,
             master_count: state.master_count,
             master,
             secondary,
             ..Default::default()
-        })
+        }
     }
 
     fn group_pane(

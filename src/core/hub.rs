@@ -1,10 +1,11 @@
 use crate::action::MonitorTarget;
 use crate::config::{
     Config, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraints, Strategy,
-    TreeLayoutNode, WindowMatcher, WindowMode,
+    WindowMatcher, WindowMode,
 };
 
 use super::allocator::{Allocator, NodeId};
+use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
 use super::node::{
     ContainerId, Dimension, DisplayMode, Length, Logical, Monitor, MonitorId, Window, WindowId,
     WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
@@ -159,11 +160,9 @@ pub(crate) struct Hub {
     pub(super) access: HubAccess,
     pub(super) strategies: StrategySet,
     pub(super) minimized_windows: Vec<WindowId>,
-    /// Flat matcher lists for window-on-open routing (fullscreen, float).
-    /// Per-workspace matchers: filled from LayoutWorkspaceConfig entries. First match wins.
-    ws_fullscreen_matchers: Vec<(WindowMatcher, WorkspaceId)>,
-    ws_float_matchers: Vec<(WindowMatcher, WorkspaceId)>,
-    ws_tiling_matchers: Vec<(WindowMatcher, WorkspaceId)>,
+    pub(super) float_fullscreen_matchers: Allocator<WindowMatcher>,
+    pub(super) global_float_matchers: Vec<FloatFullscreenMatcherId>,
+    pub(super) global_fullscreen_matchers: Vec<FloatFullscreenMatcherId>,
 }
 
 impl Hub {
@@ -187,9 +186,9 @@ impl Hub {
             },
             strategies,
             minimized_windows: Vec::new(),
-            ws_fullscreen_matchers: Vec::new(),
-            ws_float_matchers: Vec::new(),
-            ws_tiling_matchers: Vec::new(),
+            float_fullscreen_matchers: Allocator::new(),
+            global_float_matchers: Vec::new(),
+            global_fullscreen_matchers: Vec::new(),
         };
 
         let primary_id = hub.add_monitor("primary".to_string(), primary_screen, primary_scale);
@@ -308,7 +307,7 @@ impl Hub {
             .workspace()
             .expect("non-minimized window has a workspace");
         match window.mode {
-            DisplayMode::Fullscreen => {
+            DisplayMode::Fullscreen { .. } => {
                 let fs = &mut self.access.workspaces.get_mut(ws).fullscreen_windows;
                 if let Some(pos) = fs.iter().position(|&w| w == window_id) {
                     fs.remove(pos);
@@ -368,29 +367,36 @@ impl Hub {
         tiling_count + ws.float_windows.len() + ws.fullscreen_windows.len()
     }
 
-    pub(crate) fn export_workspace(&mut self, ws_id: WorkspaceId) -> Option<WorkspaceExport> {
+    pub(crate) fn export_workspace(&mut self, ws_id: WorkspaceId) -> WorkspaceExport {
         let ws_name = self.access.workspaces.get(ws_id).name.clone();
-        let export = self
+        let mut export = self
             .strategies
             .for_workspace_mut(ws_id)
-            .export_workspace(&self.access, ws_id)?;
+            .export_workspace(&self.access, ws_id);
 
-        // FIXME: nope, we will need to export float and fullscreen as well
-        let (float, fullscreen) = self
-            .access
-            .preferred_layouts
-            .iter()
-            .find(|e| e.name() == ws_name)
-            .map(|e| (e.float().to_vec(), e.fullscreen().to_vec()))
-            .unwrap_or_default();
+        let ws = self.access.workspaces.get(ws_id);
+        let float_windows: Vec<WindowId> = ws.float_windows.clone();
+        let fullscreen_windows: Vec<WindowId> = ws.fullscreen_windows.clone();
 
-        let config = export.to_layout_workspace_config(&ws_name, float, fullscreen);
+        let float = self.collect_display_matchers(&float_windows, |mode| match mode {
+            DisplayMode::Float { occupy, .. } => *occupy,
+            _ => None,
+        });
+        let fullscreen = self.collect_display_matchers(&fullscreen_windows, |mode| match mode {
+            DisplayMode::Fullscreen { occupy } => *occupy,
+            _ => None,
+        });
+
+        export.float = float;
+        export.fullscreen = fullscreen;
+
+        let config = export.to_layout_workspace_config(&ws_name);
         self.access
             .preferred_layouts
             .retain(|e| e.name() != ws_name);
         self.access.preferred_layouts.push(config);
 
-        Some(export)
+        export
     }
 
     pub(crate) fn add_monitor(
@@ -494,6 +500,7 @@ impl Hub {
             .resync(&mut self.access, &preferred_layouts, layout.strategy);
 
         self.access.layout = layout;
+        self.index_matchers(&preferred_layouts);
     }
 
     pub(crate) fn sync_preferred_layout(&mut self, preferred_layouts: Vec<LayoutWorkspaceConfig>) {
@@ -527,13 +534,17 @@ impl Hub {
         }
         let matcher = self.resolve_matcher(&*metadata);
         let target_ws = matcher
-            .and_then(|(ws_id, _)| ws_id)
+            .as_ref()
+            .and_then(|hit| hit.ws_id)
             .unwrap_or_else(|| self.current_workspace());
 
         // Restrictions == None: use matcher mode if present, else default to tiling.
         // Restrictions != None: always fullscreen (matcher only routes workspace).
         if restrictions == WindowRestrictions::None {
-            if let Some((_, mode)) = matcher {
+            if let Some(MatcherHit {
+                mode, matcher_id, ..
+            }) = matcher
+            {
                 let id = match mode {
                     WindowMode::Fullscreen => {
                         self.insert_fullscreen(target_ws, WindowRestrictions::None, metadata)
@@ -541,6 +552,13 @@ impl Hub {
                     WindowMode::Float => self.insert_float(target_ws, dimension, metadata),
                     WindowMode::Tiling => self.insert_tiling(target_ws, metadata),
                 };
+                // Link the created window back to the matcher that routed it.
+                // Tiling mode has no occupy field, so skip it.
+                match &mut self.access.windows.get_mut(id).mode {
+                    DisplayMode::Float { occupy, .. } => *occupy = matcher_id,
+                    DisplayMode::Fullscreen { occupy } => *occupy = matcher_id,
+                    DisplayMode::Tiling => {}
+                }
                 return Some(id);
             }
             let id = self.insert_tiling(target_ws, metadata);
@@ -593,7 +611,7 @@ impl Hub {
                 let mut float_windows = Vec::new();
                 for &id in &ws.float_windows {
                     let window = self.access.windows.get(id);
-                    let DisplayMode::Float { dim } = window.mode else {
+                    let DisplayMode::Float { dim, .. } = window.mode else {
                         panic!("window {id} in float_windows but mode is not Float");
                     };
                     let frame = dim;
@@ -658,7 +676,10 @@ impl Hub {
             .windows
             .allocate(Window::float(target_ws, dimension, metadata));
         tracing::debug!(%window_id, ?dimension, "Inserting float window");
-        self.attach_float_to_workspace(target_ws, window_id, dimension);
+        // Frozen helper cannot carry a matcher occupy. For a matched insert the
+        // real id is written by the inline occupy write in insert_window after
+        // this returns. This is the initial classification, not a workspace hop.
+        self.attach_float_to_workspace(target_ws, window_id, dimension, None);
         window_id
     }
 
@@ -673,7 +694,7 @@ impl Hub {
             self.access
                 .windows
                 .allocate(Window::fullscreen(target_ws, restrictions, metadata));
-        self.attach_fullscreen_to_workspace(target_ws, window_id);
+        self.attach_fullscreen_to_workspace(target_ws, window_id, None);
         self.set_focus(window_id);
         window_id
     }
@@ -694,7 +715,7 @@ impl Hub {
                 DisplayMode::Float { .. } => {
                     self.detach_float_from_workspace(id);
                 }
-                DisplayMode::Fullscreen => self.detach_fullscreen_from_workspace(id),
+                DisplayMode::Fullscreen { .. } => self.detach_fullscreen_from_workspace(id),
                 DisplayMode::Tiling => {
                     let strategy = self.strategies.for_workspace_mut(ws_id);
                     strategy.detach_window(&self.access, id);
@@ -798,14 +819,16 @@ impl Hub {
             panic!("Minimized window can't be moved");
         }
         match window.mode {
-            DisplayMode::Fullscreen => {
+            DisplayMode::Fullscreen { .. } => {
                 self.detach_fullscreen_from_workspace(window_id);
-                self.attach_fullscreen_to_workspace(target_ws, window_id);
+                self.attach_fullscreen_to_workspace(target_ws, window_id, None);
                 self.access.workspaces.get_mut(target_ws).is_float_focused = false;
             }
             DisplayMode::Float { .. } => {
+                // Cross-workspace hop: drop occupy so the destination does not
+                // export the origin workspace's authored matcher.
                 let dim = self.detach_float_from_workspace(window_id);
-                self.attach_float_to_workspace(target_ws, window_id, dim);
+                self.attach_float_to_workspace(target_ws, window_id, dim, None);
             }
             DisplayMode::Tiling => {
                 self.move_focused_across_workspaces(current_ws, target_ws);
@@ -890,110 +913,5 @@ impl Hub {
         self.strategies
             .for_workspace_mut(to)
             .reattach_child(&mut self.access, child, to);
-    }
-
-    /// Find workspace + mode via matchers.
-    /// Returns (workspace, mode). `None` workspace = stay on current.
-    fn resolve_matcher(
-        &self,
-        metadata: &dyn WindowMetadata,
-    ) -> Option<(Option<WorkspaceId>, WindowMode)> {
-        // Per-workspace matchers first (override global)
-        for (m, ws_id) in &self.ws_fullscreen_matchers {
-            if metadata.matches_window_matcher(m) {
-                return Some((Some(*ws_id), WindowMode::Fullscreen));
-            }
-        }
-        for (m, ws_id) in &self.ws_float_matchers {
-            if metadata.matches_window_matcher(m) {
-                return Some((Some(*ws_id), WindowMode::Float));
-            }
-        }
-        for (m, ws_id) in &self.ws_tiling_matchers {
-            if metadata.matches_window_matcher(m) {
-                return Some((Some(*ws_id), WindowMode::Tiling));
-            }
-        }
-        // Global matchers (fallback, no workspace routing)
-        for m in &self.access.layout.fullscreen {
-            if metadata.matches_window_matcher(m) {
-                return Some((None, WindowMode::Fullscreen));
-            }
-        }
-        for m in &self.access.layout.float {
-            if metadata.matches_window_matcher(m) {
-                return Some((None, WindowMode::Float));
-            }
-        }
-        None
-    }
-
-    fn index_matchers(&mut self, preferred_layouts: &[LayoutWorkspaceConfig]) {
-        self.ws_fullscreen_matchers.clear();
-        self.ws_float_matchers.clear();
-        self.ws_tiling_matchers.clear();
-
-        for entry in preferred_layouts {
-            let ws_id = self.get_or_create_workspace(entry.name());
-            let matchers = workspace_matchers(entry);
-            for m in matchers.fullscreen {
-                self.ws_fullscreen_matchers.push((m, ws_id));
-            }
-            for m in matchers.float {
-                self.ws_float_matchers.push((m, ws_id));
-            }
-            for m in matchers.tiling {
-                self.ws_tiling_matchers.push((m, ws_id));
-            }
-        }
-    }
-}
-
-struct Matchers {
-    fullscreen: Vec<WindowMatcher>,
-    float: Vec<WindowMatcher>,
-    tiling: Vec<WindowMatcher>,
-}
-
-fn workspace_matchers(entry: &LayoutWorkspaceConfig) -> Matchers {
-    match entry {
-        LayoutWorkspaceConfig::PartitionTree {
-            fullscreen,
-            float,
-            tree,
-            ..
-        } => {
-            let mut tiling = Vec::new();
-            if let Some(tree) = tree {
-                collect_tree_matchers(tree, &mut tiling);
-            }
-            Matchers {
-                fullscreen: fullscreen.clone(),
-                float: float.clone(),
-                tiling,
-            }
-        }
-        LayoutWorkspaceConfig::Master {
-            fullscreen,
-            float,
-            master,
-            secondary,
-            ..
-        } => Matchers {
-            fullscreen: fullscreen.clone(),
-            float: float.clone(),
-            tiling: master.iter().chain(secondary.iter()).cloned().collect(),
-        },
-    }
-}
-
-fn collect_tree_matchers(node: &TreeLayoutNode, out: &mut Vec<WindowMatcher>) {
-    match node {
-        TreeLayoutNode::Leaf(m) => out.push(m.clone()),
-        TreeLayoutNode::Container { children, .. } => {
-            for child in children {
-                collect_tree_matchers(child, out);
-            }
-        }
     }
 }

@@ -12,7 +12,9 @@ use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::master::preferred_layout::{Slot, SlotId};
-use crate::core::node::{Child, Constraints, Dimension, Direction, Length, WindowId, WorkspaceId};
+use crate::core::node::{
+    Child, Constraints, Dimension, Direction, Length, WindowId, WindowMetadata, WorkspaceId,
+};
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space,
 };
@@ -326,6 +328,17 @@ impl TilingStrategy for MasterStrategy {
             .map_or(0, |ws| ws.master.len() + ws.secondary.len())
     }
 
+    fn matches_tiling(&self, ws_id: WorkspaceId, metadata: &dyn WindowMetadata) -> bool {
+        let Some(state) = self.workspaces.get(&ws_id) else {
+            return false;
+        };
+        state
+            .master_matchers
+            .iter()
+            .chain(state.secondary_matchers.iter())
+            .any(|&sid| metadata.matches_window_matcher(&self.slots.get(sid).matcher))
+    }
+
     fn detach_focused_child(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<Child> {
         let state = self.workspaces.get_mut(&ws_id)?;
         let focus_id = state.focused_window()?;
@@ -399,7 +412,7 @@ impl TilingStrategy for MasterStrategy {
         }
     }
 
-    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WorkspaceExport> {
+    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> WorkspaceExport {
         self.export_workspace(hub, ws_id)
     }
 }

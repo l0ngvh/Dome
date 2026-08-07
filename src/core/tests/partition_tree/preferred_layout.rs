@@ -4,7 +4,7 @@ use crate::config::{SplitMode, TreeLayoutNode, WindowMatcher};
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, setup_logger_with_level,
-    snapshot, titled,
+    snapshot, titled, titled_meta,
 };
 use crate::core::{Dimension, Length, WindowRestrictions};
 
@@ -1152,7 +1152,7 @@ fn reset_to_empty_preferred_layout_dont_disturb_layout() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Container {
                 split: Some(SplitMode::Horizontal),
@@ -1177,7 +1177,7 @@ fn reset_to_empty_preferred_layout_dont_disturb_layout() {
                 ],
             }),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -1543,7 +1543,7 @@ fn same_slot_windows_share_container_with_other_window_slot_under_same_preferred
     let export = hub.export_workspace(hub.current_workspace());
     assert_eq!(
         export,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Container {
                 split: Some(SplitMode::Horizontal),
@@ -1568,7 +1568,7 @@ fn same_slot_windows_share_container_with_other_window_slot_under_same_preferred
                 ],
             }),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -1643,7 +1643,7 @@ fn single_window_slot_in_container_slot() {
     let export = hub.export_workspace(hub.current_workspace());
     assert_eq!(
         export,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Container {
                 split: Some(SplitMode::Horizontal),
@@ -1666,7 +1666,7 @@ fn single_window_slot_in_container_slot() {
                 ],
             }),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -1735,7 +1735,7 @@ fn bare_window_slot() {
     let export = hub.export_workspace(hub.current_workspace());
     assert_eq!(
         export,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Container {
                 split: Some(SplitMode::Horizontal),
@@ -1751,7 +1751,7 @@ fn bare_window_slot() {
                 ],
             }),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -1902,7 +1902,7 @@ fn export_container_with_single_multi_matched_slot() {
 
     assert_eq!(
         export,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Container {
                 split: Some(SplitMode::Horizontal),
@@ -1942,6 +1942,36 @@ fn export_container_with_single_multi_matched_slot() {
                 ]
             }),
             ..Default::default()
-        })
+        }
     );
+}
+
+#[test]
+fn matches_tiling_leaf_matcher() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("1")
+                .with_tree(TreeLayoutNode::Leaf(WindowMatcher {
+                    title: Some("editor".into()),
+                    ..Default::default()
+                }))
+                .build(),
+        ])
+        .build();
+    hub.focus_workspace("1");
+    let ws = hub.current_workspace();
+    let strategy = hub.strategies.for_workspace(ws);
+    assert!(strategy.matches_tiling(ws, titled_meta("editor").as_ref()));
+    assert!(!strategy.matches_tiling(ws, titled_meta("other").as_ref()));
+}
+
+#[test]
+fn matches_tiling_no_preferred_root() {
+    let hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .build();
+    let ws = hub.current_workspace();
+    let strategy = hub.strategies.for_workspace(ws);
+    assert!(!strategy.matches_tiling(ws, titled_meta("editor").as_ref()));
 }

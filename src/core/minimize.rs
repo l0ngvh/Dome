@@ -50,7 +50,7 @@ impl Hub {
             DisplayMode::Float { .. } => {
                 self.detach_float_from_workspace(window_id);
             }
-            DisplayMode::Fullscreen => {
+            DisplayMode::Fullscreen { .. } => {
                 self.detach_fullscreen_from_workspace(window_id);
             }
         }
@@ -84,11 +84,15 @@ impl Hub {
                     .for_workspace_mut(target_workspace)
                     .attach_window(&mut self.access, window_id, target_workspace);
             }
-            DisplayMode::Float { dim } => {
-                self.attach_float_to_workspace(target_workspace, window_id, dim);
+            DisplayMode::Float { dim, .. } => {
+                // unminimize restores to current_workspace(), and minimize
+                // clears the origin, so the restore target may differ from the
+                // origin workspace. Drop occupy unconditionally to avoid
+                // leaking the origin's matcher into a different export section.
+                self.attach_float_to_workspace(target_workspace, window_id, dim, None);
             }
-            DisplayMode::Fullscreen => {
-                self.attach_fullscreen_to_workspace(target_workspace, window_id);
+            DisplayMode::Fullscreen { .. } => {
+                self.attach_fullscreen_to_workspace(target_workspace, window_id, None);
             }
         }
         tracing::info!(?prior_mode, "Window unminimized");

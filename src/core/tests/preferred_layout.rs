@@ -1,7 +1,10 @@
 use super::LayoutWorkspaceConfigBuilder;
 use crate::config::{Strategy, WindowMatcher};
-use crate::core::node::{Dimension, Length, WindowRestrictions};
-use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, snapshot};
+use crate::core::node::{Dimension, DisplayMode, Length, WindowRestrictions};
+use crate::core::strategy::WorkspaceExport;
+use crate::core::tests::{
+    LayoutConfigBuilder, TestHubBuilder, process_meta, snapshot, titled_meta,
+};
 use insta::assert_snapshot;
 
 #[test]
@@ -939,20 +942,203 @@ fn no_tiling_match_falls_back_to_current() {
     ");
 }
 
-/// Build metadata with the given title.
-fn titled_meta(t: &str) -> Box<dyn crate::core::WindowMetadata> {
-    use crate::core::tests::TestMetadata;
-    Box::new(TestMetadata {
-        title: Some(t.into()),
+#[test]
+fn sync_preferred_layout_reemits_matched_float_when_matcher_survives() {
+    let float_matcher = WindowMatcher {
+        process: Some("/float.*/".into()),
         ..Default::default()
-    })
+    };
+
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("dev")
+                .with_float(vec![float_matcher.clone()])
+                .build(),
+        ])
+        .build();
+    hub.focus_workspace("dev");
+    let ws_id = hub.current_workspace();
+
+    hub.insert_window(
+        process_meta("float-live-window"),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+        WindowRestrictions::None,
+    );
+
+    hub.sync_preferred_layout(vec![
+        LayoutWorkspaceConfigBuilder::new("dev")
+            .with_float(vec![float_matcher.clone()])
+            .build(),
+    ]);
+
+    assert_eq!(
+        hub.export_workspace(ws_id),
+        WorkspaceExport {
+            strategy: "partition_tree".into(),
+            float: vec![float_matcher],
+            ..WorkspaceExport::default()
+        }
+    );
 }
 
-/// Build metadata with the given process name.
-fn process_meta(p: &str) -> Box<dyn crate::core::WindowMetadata> {
-    use crate::core::tests::TestMetadata;
-    Box::new(TestMetadata {
-        process: Some(p.into()),
+#[test]
+fn sync_preferred_layout_synthesises_float_when_matcher_removed() {
+    let float_matcher = WindowMatcher {
+        process: Some("/float.*/".into()),
         ..Default::default()
-    })
+    };
+
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("dev")
+                .with_float(vec![float_matcher.clone()])
+                .build(),
+        ])
+        .build();
+    hub.focus_workspace("dev");
+    let ws_id = hub.current_workspace();
+
+    hub.insert_window(
+        process_meta("float-live-window"),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+        WindowRestrictions::None,
+    );
+
+    hub.sync_preferred_layout(vec![LayoutWorkspaceConfigBuilder::new("dev").build()]);
+
+    assert_eq!(
+        hub.export_workspace(ws_id),
+        WorkspaceExport {
+            strategy: "partition_tree".into(),
+            float: vec![WindowMatcher {
+                process: Some("float-live-window".into()),
+                ..Default::default()
+            }],
+            ..WorkspaceExport::default()
+        }
+    );
+}
+
+#[test]
+fn sync_preferred_layout_adopts_manual_float_when_matcher_added() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(LayoutConfigBuilder::new().build())
+        .with_preferred_layout(vec![LayoutWorkspaceConfigBuilder::new("dev").build()])
+        .build();
+    hub.focus_workspace("dev");
+    let ws_id = hub.current_workspace();
+
+    let window_id = hub
+        .insert_window(
+            process_meta("float-live-window"),
+            Dimension::new(
+                Length::new(10.0),
+                Length::new(5.0),
+                Length::new(30.0),
+                Length::new(20.0),
+            ),
+            WindowRestrictions::None,
+        )
+        .expect("window inserted");
+    hub.set_focus(window_id);
+    hub.toggle_float();
+
+    match hub.access.windows.get(window_id).mode {
+        DisplayMode::Float { occupy, .. } => assert_eq!(occupy, None),
+        other => panic!("expected manual float, got {other:?}"),
+    }
+
+    let float_matcher = WindowMatcher {
+        process: Some("/float.*/".into()),
+        ..Default::default()
+    };
+    hub.sync_preferred_layout(vec![
+        LayoutWorkspaceConfigBuilder::new("dev")
+            .with_float(vec![float_matcher.clone()])
+            .build(),
+    ]);
+
+    assert_eq!(
+        hub.export_workspace(ws_id),
+        WorkspaceExport {
+            strategy: "partition_tree".into(),
+            float: vec![float_matcher],
+            ..WorkspaceExport::default()
+        }
+    );
+}
+
+#[test]
+fn tiling_insert_routes_against_post_export_state() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("dev")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
+                .build(),
+        ])
+        .build();
+
+    hub.focus_workspace("dev");
+    let dev = hub
+        .access
+        .workspaces
+        .find(|w| w.name == "dev")
+        .expect("workspace exists");
+
+    hub.insert_window(
+        process_meta("other.exe"),
+        Dimension::new(
+            Length::new(10.0),
+            Length::new(5.0),
+            Length::new(30.0),
+            Length::new(20.0),
+        ),
+        WindowRestrictions::None,
+    )
+    .expect("foreign tiling window inserted");
+
+    assert!(
+        !hub.strategies
+            .for_workspace(dev)
+            .matches_tiling(dev, process_meta("other.exe").as_ref())
+    );
+
+    hub.export_workspace(dev);
+
+    hub.focus_workspace("0");
+    let new_window = hub
+        .insert_window(
+            process_meta("other.exe"),
+            Dimension::new(
+                Length::new(10.0),
+                Length::new(5.0),
+                Length::new(30.0),
+                Length::new(20.0),
+            ),
+            WindowRestrictions::None,
+        )
+        .expect("routed window inserted");
+
+    assert_eq!(hub.access.windows.get(new_window).workspace(), Some(dev));
 }
