@@ -79,7 +79,7 @@ fn known_bars() -> &'static [WindowMatcher] {
             // Match Zebar by process only, never by class. It shares a
             // generic WebView2 window class with unrelated apps.
             process: Some("zebar.exe".into()),
-            title: Some("/Zebar.*/".into()),
+            title: Some("/^Zebar -.*/".into()),
             class: Some("Tauri Window".into()),
             app: Some("Zebar".into()),
             ..Default::default()
