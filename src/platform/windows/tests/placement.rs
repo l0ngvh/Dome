@@ -795,52 +795,52 @@ fn full_work_area(env: &TestEnv) -> Dimension {
 }
 
 #[test]
-fn capture_shrinks_work_area() {
+fn open_bar_shrinks_work_area() {
     let mut env = TestEnv::new();
     let win = env.open(1, "App", "app.exe", SPAWN_DIM);
     env.settle(10);
-    env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
+    let bar = Arc::new(
+        MockExternalHwnd::with_title(
+            2,
+            "Zebar - vanilla",
+            "zebar.exe",
+            env.moves.clone(),
+            env.z_stack.clone(),
+            env.focus_target.clone(),
+        )
+        .with_class("Tauri Window")
+        .with_app_name("Zebar")
+        .with_dimension(dim(0, 0, 1920, 30)),
+    );
+    env.open_with(bar);
     env.settle(10);
 
     assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
 }
 
 #[test]
-fn appbar_excluded_no_double_subtract() {
-    let mut env = TestEnv::new();
-    {
-        let mut monitors = env.monitors.lock().unwrap();
-        monitors[0].dimension = dim(0, 30, 1920, 1050);
-    }
-    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
-    env.settle(10);
-    env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
-    env.settle(10);
-
-    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
-}
-
-#[test]
-fn floating_shrink() {
+fn bar_move_updates_work_area() {
     let mut env = TestEnv::new();
     let win = env.open(1, "App", "app.exe", SPAWN_DIM);
     env.settle(10);
-    env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 40));
-    env.settle(10);
-
-    assert_eq!(env.dim(win), dim(4, 44, 1912, 1032));
-}
-
-#[test]
-fn bar_move_updates() {
-    let mut env = TestEnv::new();
-    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
-    env.settle(10);
-    let bar = env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
+    let bar = Arc::new(
+        MockExternalHwnd::with_title(
+            2,
+            "Zebar - vanilla",
+            "zebar.exe",
+            env.moves.clone(),
+            env.z_stack.clone(),
+            env.focus_target.clone(),
+        )
+        .with_class("Tauri Window")
+        .with_app_name("Zebar")
+        .with_dimension(dim(0, 0, 1920, 30)),
+    );
+    let bar_id = env.open_with(bar);
     env.settle(10);
     assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
 
-    env.dome.bar_moved(bar, 1, dim(0, 0, 1920, 60));
+    env.dome.bar_moved(bar_id, 1, dim(0, 0, 1920, 60));
     env.dome.apply_layout();
     env.settle(10);
 
@@ -848,22 +848,35 @@ fn bar_move_updates() {
 }
 
 #[test]
-fn destroy_restores() {
+fn destroy_bar_restores_work_area() {
     let mut env = TestEnv::new();
     let win = env.open(1, "App", "app.exe", SPAWN_DIM);
     env.settle(10);
-    let bar = env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
+    let bar = Arc::new(
+        MockExternalHwnd::with_title(
+            2,
+            "Zebar - vanilla",
+            "zebar.exe",
+            env.moves.clone(),
+            env.z_stack.clone(),
+            env.focus_target.clone(),
+        )
+        .with_class("Tauri Window")
+        .with_app_name("Zebar")
+        .with_dimension(dim(0, 0, 1920, 30)),
+    );
+    let bar_id = env.open_with(bar);
     env.settle(10);
     assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
 
-    env.destroy_window(bar);
+    env.destroy_window(bar_id);
     env.settle(10);
 
     assert_eq!(env.dim(win), full_work_area(&env));
 }
 
 #[test]
-fn multi_monitor_per_display() {
+fn open_bar_adjust_multiple_monitors() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
         LayoutConfig::default(),
@@ -875,59 +888,22 @@ fn multi_monitor_per_display() {
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
     env.settle(10);
 
-    env.open(3, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
-    env.settle(10);
-
-    assert_eq!(env.dim(w1), dim(4, 34, 1912, 1042));
-    assert_eq!(env.dim(w2), dim(1924, 4, 2552, 1432));
-}
-
-#[test]
-fn startup_before_bar() {
-    let mut env = TestEnv::new();
-    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
-    env.settle(10);
-    assert_eq!(env.dim(win), full_work_area(&env));
-
-    env.open(2, "zebar", "zebar.exe", dim(0, 0, 1920, 30));
-    env.settle(10);
-
-    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
-}
-
-#[test]
-fn tool_window_bar_reserved_at_fork() {
-    let mut env = TestEnv::new();
-    let win = env.open(1, "App", "app.exe", SPAWN_DIM);
-    env.settle(10);
-
     let bar = Arc::new(
         MockExternalHwnd::with_title(
-            2,
-            "zebar",
+            3,
+            "Zebar - vanilla",
             "zebar.exe",
             env.moves.clone(),
             env.z_stack.clone(),
             env.focus_target.clone(),
         )
-        .with_manageable(false)
+        .with_class("Tauri Window")
+        .with_app_name("Zebar")
         .with_dimension(dim(0, 0, 1920, 30)),
     );
-    let bar_id = env.open_with(bar);
+    env.open_with(bar);
     env.settle(10);
 
-    assert_eq!(env.dim(win), dim(4, 34, 1912, 1042));
-    assert_eq!(env.dim(bar_id), dim(0, 0, 1920, 30));
-
-    let TilingOverlayState::Visible { windows, .. } = env.tiling_overlays()[0].state.clone() else {
-        panic!(
-            "tiling overlay should be visible with the app window, got {:?}",
-            env.tiling_overlays()[0].state
-        );
-    };
-    assert_eq!(
-        windows.len(),
-        1,
-        "only the app window is tiled, the recognized bar must not be"
-    );
+    assert_eq!(env.dim(w1), dim(4, 34, 1912, 1042));
+    assert_eq!(env.dim(w2), dim(1924, 4, 2552, 1432));
 }

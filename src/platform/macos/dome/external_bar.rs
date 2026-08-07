@@ -301,7 +301,7 @@ mod tests {
         let a = monitor(1, 0.0, 0.0, 1920.0, 1080.0);
         let geo = BarGeometry::new(Some(30.0), Some("bottom".into()), None, None);
 
-        let rects = reserved_rects(&geo, &[a.clone()]);
+        let rects = reserved_rects(&geo, std::slice::from_ref(&a));
 
         let h = Length::new(30.0);
         assert_eq!(

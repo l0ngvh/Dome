@@ -744,6 +744,11 @@ impl MockExternalHwnd {
         self
     }
 
+    fn with_app_name(mut self, app_name: &str) -> Self {
+        self.app_name = Some(app_name.to_string());
+        self
+    }
+
     fn with_dimension(self, dim: Dimension) -> Self {
         *self.dimension.lock().unwrap() = dim;
         self
