@@ -1,0 +1,96 @@
+@import 'https://www.nerdfonts.com/assets/css/webfont.css';
+
+body {
+  color: #cdd6f4;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  margin: 0;
+}
+
+i {
+  color: #7f849c;
+  margin-right: 7px;
+  font-size: 12px;
+}
+
+div,
+span {
+  cursor: default;
+  user-select: none;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+#root {
+  background: #181825;
+  border-bottom: 1px solid #11111b;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: center;
+  height: 100%;
+  padding: 0 1.5vw;
+}
+
+.left,
+.center,
+.right {
+  display: flex;
+  align-items: center;
+}
+
+.center {
+  justify-self: center;
+}
+
+.right {
+  justify-self: end;
+}
+
+.network,
+.memory,
+.cpu,
+.battery,
+.weather {
+  margin-right: 20px;
+}
+
+.workspaces {
+  display: flex;
+  align-items: center;
+}
+
+.ws {
+  padding: 4px 8px;
+  margin-right: 4px;
+  border-radius: 2px;
+  color: #cdd6f4;
+  background: #313244;
+}
+
+.ws.focused {
+  color: #11111b;
+  background: #cba6f7;
+}
+
+.cpu .high-usage {
+  color: #f38ba8;
+}
+
+.battery {
+  position: relative;
+}
+
+.battery .charging-icon {
+  position: absolute;
+  font-size: 7px;
+  left: -8px;
+  top: 3px;
+}
