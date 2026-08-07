@@ -1,6 +1,7 @@
 use crate::core::{
     Hub, WindowId,
     hub::RestrictedAction,
+    matcher::FloatFullscreenMatcherId,
     node::{DisplayMode, WindowRestrictions, WorkspaceId},
 };
 
@@ -19,9 +20,9 @@ impl Hub {
                     .detach_window(&self.access, window_id);
             }
             DisplayMode::Float { .. } => {
-                let _dim = self.detach_float_from_workspace(window_id);
+                self.detach_float_from_workspace(window_id);
             }
-            DisplayMode::Fullscreen => {
+            DisplayMode::Fullscreen { .. } => {
                 tracing::debug!("Updating restrictions on already-fullscreen window");
                 self.access.windows.get_mut(window_id).restrictions = restrictions;
                 return;
@@ -29,9 +30,8 @@ impl Hub {
         }
 
         let window = self.access.windows.get_mut(window_id);
-        window.mode = DisplayMode::Fullscreen;
         window.restrictions = restrictions;
-        self.attach_fullscreen_to_workspace(ws, window_id);
+        self.attach_fullscreen_to_workspace(ws, window_id, None);
         self.access.workspaces.get_mut(ws).is_float_focused = false;
         tracing::info!("Fullscreen set");
     }
@@ -39,7 +39,7 @@ impl Hub {
     #[tracing::instrument(skip(self))]
     pub(crate) fn unset_fullscreen(&mut self, window_id: WindowId) {
         let window = self.access.windows.get(window_id);
-        if window.mode != DisplayMode::Fullscreen {
+        if !matches!(window.mode, DisplayMode::Fullscreen { .. }) {
             return;
         }
 
@@ -57,8 +57,14 @@ impl Hub {
         tracing::info!("Fullscreen unset");
     }
 
-    pub(super) fn attach_fullscreen_to_workspace(&mut self, ws: WorkspaceId, id: WindowId) {
+    pub(super) fn attach_fullscreen_to_workspace(
+        &mut self,
+        ws: WorkspaceId,
+        id: WindowId,
+        occupy: Option<FloatFullscreenMatcherId>,
+    ) {
         let window = self.access.windows.get_mut(id);
+        window.mode = DisplayMode::Fullscreen { occupy };
         window.set_workspace(Some(ws));
         self.access
             .workspaces
@@ -90,7 +96,7 @@ impl Hub {
         };
 
         match self.access.windows.get(window_id).mode {
-            DisplayMode::Fullscreen => self.unset_fullscreen(window_id),
+            DisplayMode::Fullscreen { .. } => self.unset_fullscreen(window_id),
             DisplayMode::Tiling | DisplayMode::Float { .. } => {
                 self.set_fullscreen(window_id, WindowRestrictions::None)
             }

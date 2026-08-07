@@ -4,9 +4,11 @@ use serde::Serialize;
 use toml_edit::ser::ValueSerializer;
 use toml_edit::{ArrayOfTables, DocumentMut, Item};
 
-use super::Hub;
-use super::node::WorkspaceId;
+use super::matcher::FloatFullscreenMatcherId;
+use super::node::{DisplayMode, WorkspaceId};
 use super::strategy::WorkspaceExport;
+use super::{Hub, WindowId};
+use crate::config::WindowMatcher;
 
 pub(super) fn write_layout(
     layout_path: &Path,
@@ -86,10 +88,51 @@ fn fill_entry(table: &mut toml_edit::Table, ws: &WorkspaceExport) -> anyhow::Res
         }
         _ => {}
     }
+    if !ws.float.is_empty() {
+        table.insert(
+            "float",
+            Item::Value(ws.float.serialize(ValueSerializer::new())?),
+        );
+    } else {
+        table.remove("float");
+    }
+    if !ws.fullscreen.is_empty() {
+        table.insert(
+            "fullscreen",
+            Item::Value(ws.fullscreen.serialize(ValueSerializer::new())?),
+        );
+    } else {
+        table.remove("fullscreen");
+    }
     Ok(())
 }
 
 impl Hub {
+    /// Re-emits a deduped clone of the occupying matcher for matcher-placed windows and
+    /// synthesises one from live window metadata otherwise, in window-id order.
+    pub(super) fn collect_display_matchers(
+        &self,
+        window_ids: &[WindowId],
+        occupy_of: impl Fn(&DisplayMode) -> Option<FloatFullscreenMatcherId>,
+    ) -> Vec<WindowMatcher> {
+        let mut out: Vec<WindowMatcher> = Vec::new();
+        let mut seen: Vec<FloatFullscreenMatcherId> = Vec::new();
+        for &wid in window_ids {
+            let window = self.access.windows.get(wid);
+            match occupy_of(&window.mode) {
+                Some(mid) => {
+                    if seen.contains(&mid) {
+                        continue;
+                    }
+                    seen.push(mid);
+                    out.push(self.float_fullscreen_matchers.get(mid).clone());
+                }
+                None => out.push(window.metadata.to_window_matcher()),
+            }
+        }
+        out
+    }
+
     pub(crate) fn export_layout(&mut self, layout_path: &Path) -> anyhow::Result<()> {
         let ws_ids: Vec<(WorkspaceId, String)> = self
             .access
@@ -101,7 +144,7 @@ impl Hub {
 
         let workspaces: Vec<(String, WorkspaceExport)> = ws_ids
             .into_iter()
-            .filter_map(|(ws_id, name)| self.export_workspace(ws_id).map(|export| (name, export)))
+            .map(|(ws_id, name)| (name, self.export_workspace(ws_id)))
             .collect();
 
         let toml_string = write_layout(layout_path, &workspaces)?;

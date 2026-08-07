@@ -5,7 +5,7 @@ use crate::core::tests::{
 };
 
 #[test]
-fn export_empty_workspace_returns_none() {
+fn export_empty_workspace_returns_empty_export() {
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())
         .build();
@@ -13,7 +13,13 @@ fn export_empty_workspace_returns_none() {
     let ws_id = hub.current_workspace();
 
     let result = hub.export_workspace(ws_id);
-    assert!(result.is_none());
+    assert_eq!(
+        result,
+        WorkspaceExport {
+            strategy: "partition_tree".into(),
+            ..WorkspaceExport::default()
+        }
+    );
 }
 
 #[test]
@@ -28,14 +34,14 @@ fn export_single_foreign_window() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Leaf(WindowMatcher {
                 title: Some("w0".into()),
                 ..Default::default()
             })),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -61,11 +67,11 @@ fn export_occupied_window_slot_uses_slot_matcher() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Leaf(slot_matcher)),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -83,7 +89,7 @@ fn export_foreign_container_with_two_windows() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Container {
                 split: Some(SplitMode::Vertical),
@@ -99,7 +105,7 @@ fn export_foreign_container_with_two_windows() {
                 ],
             }),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -118,7 +124,7 @@ fn export_tabbed_container() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Container {
                 split: Some(SplitMode::Tabbed),
@@ -134,7 +140,7 @@ fn export_tabbed_container() {
                 ],
             }),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -156,7 +162,7 @@ fn export_nested_containers() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Container {
                 split: Some(SplitMode::Tabbed),
@@ -181,7 +187,7 @@ fn export_nested_containers() {
                 ],
             }),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }
 
@@ -216,7 +222,7 @@ fn export_mixed_occupied_and_foreign() {
     let result = hub.export_workspace(ws_id);
     assert_eq!(
         result,
-        Some(WorkspaceExport {
+        WorkspaceExport {
             strategy: "partition_tree".into(),
             tree: Some(TreeLayoutNode::Container {
                 split: Some(SplitMode::Horizontal),
@@ -241,6 +247,6 @@ fn export_mixed_occupied_and_foreign() {
                 ],
             }),
             ..WorkspaceExport::default()
-        })
+        }
     );
 }

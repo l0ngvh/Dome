@@ -2,8 +2,8 @@ use insta::assert_snapshot;
 
 use crate::config::{Strategy, WindowMatcher};
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, TestMetadata, snapshot,
-    titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, TestMetadata, process_meta,
+    snapshot, titled,
 };
 use crate::core::{Direction, TilingAction, WindowMetadata};
 
@@ -1109,7 +1109,7 @@ fn insert_multiple_matched_windows_to_the_same_slot() {
     +-------------------------------------------------------------------------+***************************************************************************
     ");
 
-    let exported = hub.export_workspace(ws_id).unwrap();
+    let exported = hub.export_workspace(ws_id);
 
     hub.sync_preferred_layout(vec![
         LayoutWorkspaceConfigBuilder::new("1")
@@ -1207,4 +1207,66 @@ fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
         title: Some(title.into()),
         process: Some(process.into()),
     })
+}
+
+#[test]
+fn matches_tiling_master_matcher() {
+    let hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_master(vec![WindowMatcher {
+                    process: Some("editor.exe".into()),
+                    ..Default::default()
+                }])
+                .build(),
+        ])
+        .build();
+    let ws = hub.current_workspace();
+    let strategy = hub.strategies.for_workspace(ws);
+    assert!(strategy.matches_tiling(ws, process_meta("editor.exe").as_ref()));
+    assert!(!strategy.matches_tiling(ws, process_meta("other.exe").as_ref()));
+}
+
+#[test]
+fn matches_tiling_secondary_matcher() {
+    let hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .with_preferred_layout(vec![
+            LayoutWorkspaceConfigBuilder::new("0")
+                .with_strategy(Strategy::Master)
+                .with_secondary(vec![WindowMatcher {
+                    process: Some("terminal.exe".into()),
+                    ..Default::default()
+                }])
+                .build(),
+        ])
+        .build();
+    let ws = hub.current_workspace();
+    let strategy = hub.strategies.for_workspace(ws);
+    assert!(strategy.matches_tiling(ws, process_meta("terminal.exe").as_ref()));
+    assert!(!strategy.matches_tiling(ws, process_meta("editor.exe").as_ref()));
+}
+
+#[test]
+fn matches_tiling_no_preferred_layout() {
+    let hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
+    let ws = hub.current_workspace();
+    let strategy = hub.strategies.for_workspace(ws);
+    assert!(!strategy.matches_tiling(ws, process_meta("editor.exe").as_ref()));
 }

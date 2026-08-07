@@ -5,6 +5,7 @@ mod float;
 mod fullscreen;
 mod hub;
 mod master;
+mod matcher;
 mod minimize;
 mod node;
 mod partition_tree;

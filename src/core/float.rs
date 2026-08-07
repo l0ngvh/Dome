@@ -1,6 +1,7 @@
 use crate::core::{
     Hub, WindowId,
     hub::RestrictedAction,
+    matcher::FloatFullscreenMatcherId,
     node::{Dimension, DisplayMode, MonitorId, WorkspaceId},
 };
 
@@ -25,9 +26,10 @@ impl Hub {
         workspace_id: WorkspaceId,
         id: WindowId,
         dim: Dimension,
+        occupy: Option<FloatFullscreenMatcherId>,
     ) {
         let window = self.access.windows.get_mut(id);
-        window.mode = DisplayMode::Float { dim };
+        window.mode = DisplayMode::Float { dim, occupy };
         window.set_workspace(Some(workspace_id));
         let workspace = self.access.workspaces.get_mut(workspace_id);
         workspace.float_windows.push(id);
@@ -36,7 +38,7 @@ impl Hub {
 
     pub(super) fn detach_float_from_workspace(&mut self, id: WindowId) -> Dimension {
         let window = self.access.windows.get(id);
-        let DisplayMode::Float { dim } = window.mode else {
+        let DisplayMode::Float { dim, .. } = window.mode else {
             panic!("detach_float_from_workspace: {id} is not Float");
         };
         let ws_id = window
@@ -83,7 +85,12 @@ impl Hub {
             let ws = window
                 .workspace()
                 .expect("non-minimized float window has a workspace");
-            window.mode = DisplayMode::Float { dim };
+            // Same-monitor drag settle stays on the same workspace, so preserve
+            // occupy. Only a cross-workspace hop below drops it.
+            let DisplayMode::Float { occupy, .. } = window.mode else {
+                unreachable!("is_float asserted above")
+            };
+            window.mode = DisplayMode::Float { dim, occupy };
             ws
         };
 
@@ -92,8 +99,10 @@ impl Hub {
         if monitor_id != old_monitor {
             let target_ws = self.access.monitors.get(monitor_id).active_workspace;
             if target_ws != old_ws {
+                // Cross-workspace hop: drop occupy. Carrying it would leak
+                // old_ws's authored matcher into target_ws's export section.
                 let stored_dim = self.detach_float_from_workspace(window_id);
-                self.attach_float_to_workspace(target_ws, window_id, stored_dim);
+                self.attach_float_to_workspace(target_ws, window_id, stored_dim, None);
             }
         }
     }
@@ -111,9 +120,9 @@ impl Hub {
         };
 
         match self.access.windows.get(window_id).mode {
-            DisplayMode::Fullscreen => (),
+            DisplayMode::Fullscreen { .. } => (),
             DisplayMode::Float { .. } => {
-                let _dim = self.detach_float_from_workspace(window_id);
+                self.detach_float_from_workspace(window_id);
                 self.access.windows.get_mut(window_id).mode = DisplayMode::Tiling;
                 self.strategies.for_workspace_mut(current_ws).attach_window(
                     &mut self.access,
@@ -128,7 +137,7 @@ impl Hub {
                     .strategies
                     .for_workspace_mut(current_ws)
                     .detach_window(&self.access, window_id);
-                self.attach_float_to_workspace(current_ws, window_id, dim);
+                self.attach_float_to_workspace(current_ws, window_id, dim, None);
                 tracing::debug!(%window_id, "Window is now floating");
             }
         }

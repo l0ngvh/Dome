@@ -4,6 +4,7 @@ use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
 use crate::config::WindowMatcher;
 use crate::core::allocator::{Node, NodeId};
+use crate::core::matcher::FloatFullscreenMatcherId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MonitorId(usize);
@@ -63,6 +64,8 @@ pub(crate) struct Workspace {
     /// All fullscreen windows in this workspace, order by z-index with the last is the top most
     /// window. Only the top most fullscreen window is displayed.
     pub(super) fullscreen_windows: Vec<WindowId>,
+    pub(super) float_matchers: Vec<FloatFullscreenMatcherId>,
+    pub(super) fullscreen_matchers: Vec<FloatFullscreenMatcherId>,
 }
 
 impl Node for Workspace {
@@ -77,6 +80,8 @@ impl Workspace {
             monitor,
             float_windows: Vec::new(),
             fullscreen_windows: Vec::new(),
+            float_matchers: Vec::new(),
+            fullscreen_matchers: Vec::new(),
         }
     }
 }
@@ -98,13 +103,16 @@ impl std::fmt::Display for Direction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub(crate) enum DisplayMode {
+pub(super) enum DisplayMode {
     #[default]
     Tiling,
     Float {
         dim: Dimension,
+        occupy: Option<FloatFullscreenMatcherId>,
     },
-    Fullscreen,
+    Fullscreen {
+        occupy: Option<FloatFullscreenMatcherId>,
+    },
 }
 
 impl std::fmt::Display for DisplayMode {
@@ -112,7 +120,7 @@ impl std::fmt::Display for DisplayMode {
         match self {
             Self::Tiling => write!(f, "tiling"),
             Self::Float { .. } => write!(f, "float"),
-            Self::Fullscreen => write!(f, "fullscreen"),
+            Self::Fullscreen { .. } => write!(f, "fullscreen"),
         }
     }
 }
@@ -232,7 +240,7 @@ impl Window {
     ) -> Self {
         Self {
             workspace: Some(workspace),
-            mode: DisplayMode::Float { dim },
+            mode: DisplayMode::Float { dim, occupy: None },
             restrictions: WindowRestrictions::None,
             is_minimized: false,
             metadata,
@@ -250,7 +258,7 @@ impl Window {
     ) -> Self {
         Self {
             workspace: Some(workspace),
-            mode: DisplayMode::Fullscreen,
+            mode: DisplayMode::Fullscreen { occupy: None },
             restrictions,
             is_minimized: false,
             metadata,
@@ -278,7 +286,7 @@ impl Window {
     }
 
     pub(crate) fn is_fullscreen(&self) -> bool {
-        matches!(self.mode, DisplayMode::Fullscreen)
+        matches!(self.mode, DisplayMode::Fullscreen { .. })
     }
 }
 

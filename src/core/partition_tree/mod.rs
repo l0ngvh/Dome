@@ -20,7 +20,7 @@ use crate::config::SizeConstraints;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
-use crate::core::node::{Dimension, Length, Logical, WindowId, WorkspaceId};
+use crate::core::node::{Dimension, Length, Logical, WindowId, WindowMetadata, WorkspaceId};
 use crate::core::strategy::{TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport};
 
 /// i3-style manual tiling strategy. Manages a container tree where windows are
@@ -223,6 +223,13 @@ impl TilingStrategy for PartitionTreeStrategy {
             .count()
     }
 
+    fn matches_tiling(&self, ws_id: WorkspaceId, metadata: &dyn WindowMetadata) -> bool {
+        let Some(root) = self.workspaces.get(&ws_id).and_then(|w| w.preferred_root) else {
+            return false;
+        };
+        self.find_window_slot(root, metadata).is_some()
+    }
+
     fn migrate(&mut self, ws_id: WorkspaceId) -> (Vec<WindowId>, Option<WindowId>) {
         let focused = self.focused_tiling_window(ws_id);
         let mut tiling: Vec<WindowId> = self
@@ -262,7 +269,7 @@ impl TilingStrategy for PartitionTreeStrategy {
         }
     }
 
-    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> Option<WorkspaceExport> {
+    fn export_workspace(&mut self, hub: &HubAccess, ws_id: WorkspaceId) -> WorkspaceExport {
         PartitionTreeStrategy::export_workspace(self, hub, ws_id)
     }
 }

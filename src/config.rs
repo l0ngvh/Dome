@@ -993,20 +993,6 @@ impl LayoutWorkspaceConfig {
             | LayoutWorkspaceConfig::Master { name, .. } => name,
         }
     }
-
-    pub(crate) fn float(&self) -> &[WindowMatcher] {
-        match self {
-            LayoutWorkspaceConfig::PartitionTree { float, .. }
-            | LayoutWorkspaceConfig::Master { float, .. } => float,
-        }
-    }
-
-    pub(crate) fn fullscreen(&self) -> &[WindowMatcher] {
-        match self {
-            LayoutWorkspaceConfig::PartitionTree { fullscreen, .. }
-            | LayoutWorkspaceConfig::Master { fullscreen, .. } => fullscreen,
-        }
-    }
 }
 
 impl WalkRule for LayoutWorkspaceConfig {
