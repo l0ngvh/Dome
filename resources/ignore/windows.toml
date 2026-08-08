@@ -41,3 +41,6 @@ class = "TaskManagerWindow"
 
 [[ignore]]
 class = "Windows.UI.Core.CoreWindow"      # UWP core window
+
+[[ignore]]
+class = '/^MessageWindowClass\+/'

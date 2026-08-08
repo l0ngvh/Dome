@@ -1939,7 +1939,7 @@ mod tests {
     #[cfg(target_os = "windows")]
     fn windows_ignore_defaults() {
         let rules = default_ignore();
-        assert_eq!(rules.len(), 14);
+        assert_eq!(rules.len(), 15);
         assert!(
             rules
                 .iter()
