@@ -16,8 +16,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
+use crate::action::WorkspaceInfo;
 use crate::action::{Action, Actions, FocusTarget};
-use crate::core::WorkspaceInfo;
 use crate::platform::windows::HubSender;
 use crate::platform::windows::dome::HubEvent;
 
@@ -242,6 +242,7 @@ pub(super) fn command_to_action(cmd: u32, workspaces: &[WorkspaceInfo]) -> Optio
         if let Some(ws) = workspaces.get(idx) {
             return Some(Action::Focus(FocusTarget::Workspace {
                 name: ws.name.clone(),
+                monitor: None,
             }));
         }
     }
@@ -257,10 +258,13 @@ fn to_wide_null(s: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action::WorkspaceState;
 
     fn ws(name: &str, focused: bool, visible: bool) -> WorkspaceInfo {
         WorkspaceInfo {
             name: name.into(),
+            monitor: name.into(),
+            state: WorkspaceState::Attached,
             is_focused: focused,
             is_visible: visible,
             window_count: 0,
@@ -333,7 +337,7 @@ mod tests {
         let list = vec![ws("Alpha", false, true), ws("Beta", true, true)];
         let action = command_to_action(TRAY_CMD_WORKSPACE_BASE + 1, &list).unwrap();
         match action {
-            Action::Focus(FocusTarget::Workspace { name }) => assert_eq!(name, "Beta"),
+            Action::Focus(FocusTarget::Workspace { name, .. }) => assert_eq!(name, "Beta"),
             other => panic!("wrong variant: {other:?}"),
         }
     }

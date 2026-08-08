@@ -195,7 +195,7 @@ fn move_window_to_workspace() {
         hub.insert_tiling(hub.current_workspace(), titled("w28")); // W0 = master
         hub.insert_tiling(hub.current_workspace(), titled("w29")); // W1 = stack (focused)
         hub.focus_left();
-        hub.move_focused_to_workspace("1");
+        hub.move_focused_to_workspace("1", None);
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(1))
           Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -234,7 +234,7 @@ fn move_window_to_workspace() {
         ******************************************************************************************************************************************************
         ");
 
-        hub.focus_workspace("1");
+        hub.focus_workspace("1", None);
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(0))
           Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -286,7 +286,7 @@ fn move_window_to_workspace() {
         hub.insert_tiling(hub.current_workspace(), titled("w30")); // W0 = master
         hub.insert_tiling(hub.current_workspace(), titled("w31")); // W1 = stack
         hub.insert_tiling(hub.current_workspace(), titled("w32")); // W2 = stack (focused)
-        hub.move_focused_to_workspace("1");
+        hub.move_focused_to_workspace("1", None);
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(1))
           Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -326,7 +326,7 @@ fn move_window_to_workspace() {
         +-------------------------------------------------------------------------+***************************************************************************
         ");
 
-        hub.focus_workspace("1");
+        hub.focus_workspace("1", None);
         assert_snapshot!(snapshot(&hub), @"
         Hub(focused=WindowId(2))
           Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -378,7 +378,7 @@ fn move_only_window_to_workspace() {
         .build();
     hub.insert_tiling(hub.current_workspace(), titled("w33")); // W0
 
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
 
     // Source workspace: empty
     assert_snapshot!(snapshot(&hub), @"
@@ -386,7 +386,7 @@ fn move_only_window_to_workspace() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     // Target workspace: W0 fills screen
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))

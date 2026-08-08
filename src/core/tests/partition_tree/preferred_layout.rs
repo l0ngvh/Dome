@@ -30,7 +30,7 @@ fn insert_first_preferred_window_next_to_focused_window() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     hub.insert_tiling(hub.current_workspace(), titled("w0"));
     hub.toggle_spawn_mode();
@@ -130,7 +130,7 @@ fn insert_second_preferred_window_forming_lowest_common_ancestor() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
     hub.toggle_spawn_mode();
@@ -231,7 +231,7 @@ fn insert_three_preferred_window_to_lowest_common_ancestor() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("DDD"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
@@ -322,7 +322,7 @@ fn insert_nested_preferred_layout_tree() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("DDD"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
@@ -419,7 +419,7 @@ fn delete_and_reinsert_the_same_matching_window() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("DDD"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
@@ -564,7 +564,7 @@ fn clean_up_and_reforming_preferred_contaner() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("DDD"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
@@ -703,7 +703,7 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
     hub.toggle_spawn_mode();
@@ -835,12 +835,12 @@ fn move_preferred_root_to_another_workspace() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
     hub.focus_parent();
-    hub.move_focused_to_workspace("10");
+    hub.move_focused_to_workspace("10", None);
     let _w2 = hub.insert_tiling(hub.current_workspace(), titled("CCC"));
     let _w3 = hub.insert_tiling(hub.current_workspace(), titled("DDD"));
     assert_snapshot!(snapshot(&hub), @r"
@@ -924,7 +924,7 @@ fn move_preferred_container_to_another_workspace() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
@@ -932,7 +932,7 @@ fn move_preferred_container_to_another_workspace() {
     let _w3 = hub.insert_tiling(hub.current_workspace(), titled("YYY"));
     let _w4 = hub.insert_tiling(hub.current_workspace(), titled("TTT"));
     hub.focus_parent();
-    hub.move_focused_to_workspace("10");
+    hub.move_focused_to_workspace("10", None);
     let _w5 = hub.insert_tiling(hub.current_workspace(), titled("CCC"));
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(5))
@@ -1017,7 +1017,7 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("TTT"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
@@ -1139,7 +1139,7 @@ fn reset_to_empty_preferred_layout_dont_disturb_layout() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_tiling(ws_id, titled("w0"));
     hub.insert_tiling(ws_id, titled("BBB"));
@@ -1229,7 +1229,7 @@ fn insert_preferred_window_to_non_focused_workspace() {
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
 
-    hub.focus_workspace("10");
+    hub.focus_workspace("10", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1315,7 +1315,7 @@ fn insert_same_slot_windows_as_sibling() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("ABC"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("CCC"));
@@ -1487,7 +1487,7 @@ fn same_slot_windows_share_container_with_other_window_slot_under_same_preferred
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("BCD"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("CCC"));
@@ -1589,7 +1589,7 @@ fn single_window_slot_in_container_slot() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("ABC"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("CCC"));
@@ -1684,7 +1684,7 @@ fn bare_window_slot() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("ABC"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
@@ -1801,7 +1801,7 @@ fn sync_preferred_layout_preserves_siblings_order() {
         .with_layout(LayoutConfigBuilder::new().build())
         .with_preferred_layout(layout.clone())
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("EEE"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("DEF"));
@@ -1891,7 +1891,7 @@ fn export_container_with_single_multi_matched_slot() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
     let _w1 = hub.insert_tiling(hub.current_workspace(), titled("AAA"));
@@ -1959,7 +1959,7 @@ fn matches_tiling_leaf_matcher() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws = hub.current_workspace();
     let strategy = hub.strategies.for_workspace(ws);
     assert!(strategy.matches_tiling(ws, titled_meta("editor").as_ref()));

@@ -159,6 +159,7 @@ fn scaled_monitor(scale: f32) -> MonitorInfo {
     MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
+        gdi_device: "\\\\.\\DISPLAY1".to_string(),
         dimension: Dimension::new(
             Length::ZERO,
             Length::ZERO,
@@ -218,6 +219,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
     let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
+        gdi_device: "\\\\.\\DISPLAY1".to_string(),
         dimension: Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -237,6 +239,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
     let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
+        gdi_device: "\\\\.\\DISPLAY2".to_string(),
         dimension: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
@@ -373,6 +376,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
     let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
+        gdi_device: "\\\\.\\DISPLAY1".to_string(),
         dimension: Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -391,6 +395,7 @@ fn window_drifted_float_ignores_unknown_monitor_handle() {
     let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
+        gdi_device: "\\\\.\\DISPLAY2".to_string(),
         dimension: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
@@ -443,6 +448,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
     let monitor = MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
+        gdi_device: "\\\\.\\DISPLAY1".to_string(),
         dimension: Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -554,6 +560,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
+        gdi_device: "\\\\.\\DISPLAY1".to_string(),
         dimension: Dimension::new(
             Length::new(0.0),
             Length::new(0.0),
@@ -572,6 +579,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
+        gdi_device: "\\\\.\\DISPLAY2".to_string(),
         dimension: Dimension::new(
             Length::new(1920.0),
             Length::new(0.0),
@@ -632,6 +640,7 @@ fn dome_new_assigns_per_monitor_scale() {
     let primary = MonitorInfo {
         handle: 1,
         name: "Primary".to_string(),
+        gdi_device: "\\\\.\\DISPLAY1".to_string(),
         dimension: Dimension::new(
             Length::ZERO,
             Length::ZERO,
@@ -650,6 +659,7 @@ fn dome_new_assigns_per_monitor_scale() {
     let secondary = MonitorInfo {
         handle: 2,
         name: "Secondary".to_string(),
+        gdi_device: "\\\\.\\DISPLAY2".to_string(),
         dimension: Dimension::new(
             SCREEN_WIDTH * 1.5,
             Length::ZERO,

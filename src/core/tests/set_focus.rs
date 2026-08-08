@@ -151,7 +151,7 @@ fn set_focus_switches_workspace() {
     // Tiling: switch workspace via set_focus
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w4"));
     hub.set_focus(w0);
     assert_snapshot!(snapshot(&hub), @"
@@ -204,7 +204,7 @@ fn set_focus_switches_workspace() {
         ),
         titled("w5"),
     );
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w6"));
     hub.set_focus(f0);
     assert_snapshot!(snapshot(&hub), @r"
@@ -236,7 +236,7 @@ fn set_focus_in_other_workspace_keeps_origin_workspace() {
     let mut hub = setup();
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w7"));
 
-    hub.move_focused_to_workspace("2");
+    hub.move_focused_to_workspace("2", None);
     hub.set_focus(w0);
 
     assert_snapshot!(snapshot(&hub), @"

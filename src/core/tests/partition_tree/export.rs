@@ -9,7 +9,7 @@ fn export_empty_workspace_returns_empty_export() {
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     let result = hub.export_workspace(ws_id);
@@ -27,7 +27,7 @@ fn export_single_foreign_window() {
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_tiling(ws_id, titled("w0"));
 
@@ -59,7 +59,7 @@ fn export_occupied_window_slot_uses_slot_matcher() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     hub.insert_tiling(ws_id, titled("preferred-title"));
@@ -80,7 +80,7 @@ fn export_foreign_container_with_two_windows() {
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_tiling(ws_id, titled("w0"));
     hub.toggle_spawn_mode();
@@ -114,7 +114,7 @@ fn export_tabbed_container() {
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_tiling(ws_id, titled("w0"));
     hub.toggle_spawn_mode();
@@ -149,7 +149,7 @@ fn export_nested_containers() {
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     hub.insert_tiling(ws_id, titled("w0"));
@@ -213,7 +213,7 @@ fn export_mixed_occupied_and_foreign() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_tiling(ws_id, titled("w0"));
     hub.insert_tiling(ws_id, titled("BBB"));

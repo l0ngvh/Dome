@@ -1051,7 +1051,7 @@ fn insert_multiple_matched_windows_to_the_same_slot() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     let _w0 = hub.insert_tiling(ws_id, titled_process("Terminal A", "terminal.exe"));
     let _w1 = hub.insert_tiling(ws_id, titled_process("Editor A", "editor.exe"));

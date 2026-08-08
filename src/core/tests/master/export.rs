@@ -14,7 +14,7 @@ fn export_master_empty_workspace() {
                 .build(),
         )
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     let result = hub.export_workspace(ws_id);
@@ -36,7 +36,7 @@ fn export_master_single_window() {
                 .build(),
         )
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_tiling(ws_id, titled("w0"));
 
@@ -73,7 +73,7 @@ fn export_master_matched_preserves_slot_matcher() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_tiling(ws_id, titled("AAA"));
 
@@ -108,7 +108,7 @@ fn export_master_mixed_matched_and_unmatched() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     hub.insert_tiling(ws_id, titled("AAA"));
@@ -148,7 +148,7 @@ fn export_two_windows_one_slot_emits_single_matcher() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_tiling(ws_id, titled_process("Browser A", "browser.exe"));
     hub.insert_tiling(ws_id, titled_process("Browser B", "browser.exe"));

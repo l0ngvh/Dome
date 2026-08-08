@@ -336,7 +336,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
     hub.insert_tiling(hub.current_workspace(), titled("w17"));
     hub.insert_tiling(hub.current_workspace(), titled("w18"));
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w19"));
     hub.insert_tiling(hub.current_workspace(), titled("w20"));
     hub.insert_tiling(hub.current_workspace(), titled("w21"));
@@ -350,7 +350,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
     let _float_id = hub.insert_float(hub.current_workspace(), float_dim, titled("w23"));
 
     // Go back to workspace "0" so post-swap snapshot shows it.
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
 
     let l = layout(Strategy::Master, 0.5, 1);
     hub.sync_configuration(l);
@@ -397,7 +397,7 @@ fn sync_config_swap_iterates_every_active_workspace() {
     +-------------------------------------------------------------------------+***************************************************************************
     ");
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(7))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -459,7 +459,7 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
     hub.insert_tiling(hub.current_workspace(), titled("w26"));
     hub.insert_tiling(hub.current_workspace(), titled("w27"));
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w28"));
     hub.insert_tiling(hub.current_workspace(), titled("w29"));
 
@@ -508,7 +508,7 @@ fn per_workspace_switch_leaves_sibling_unchanged() {
     ");
 
     // Workspace "0" still uses partition-tree (equal horizontal split).
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -563,10 +563,10 @@ fn same_kind_cross_workspace_move_preserves_container() {
     hub.focus_parent();
 
     // Move to workspace "1" (same kind: both partition-tree by default).
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
 
     // The container should arrive intact on workspace "1".
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),

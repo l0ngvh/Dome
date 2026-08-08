@@ -190,8 +190,18 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
         None => "focused=None".to_string(),
     };
     let mut s = format!("Hub({focused})\n");
+    // Gated behind 2+ monitors so pre-existing single-monitor snapshots stay byte-identical.
+    let monitor_count = vp.monitors.len();
     for mp in &vp.monitors {
         let screen = hub.access.monitors.get(mp.monitor_id).dimension;
+        let name_seg = if monitor_count > 1 {
+            format!(
+                ", name={:?}",
+                hub.access.monitors.get(mp.monitor_id).unique_name
+            )
+        } else {
+            String::new()
+        };
         match &mp.layout {
             MonitorLayout::Normal {
                 tiling_windows,
@@ -200,13 +210,13 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
             } => {
                 if tiling_windows.is_empty() && float_windows.is_empty() && containers.is_empty() {
                     s.push_str(&format!(
-                        "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}))\n",
-                        mp.monitor_id, screen.x, screen.y, screen.width, screen.height
+                        "  Monitor(id={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}))\n",
+                        mp.monitor_id, name_seg, screen.x, screen.y, screen.width, screen.height
                     ));
                 } else {
                     s.push_str(&format!(
-                        "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
-                        mp.monitor_id, screen.x, screen.y, screen.width, screen.height
+                        "  Monitor(id={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
+                        mp.monitor_id, name_seg, screen.x, screen.y, screen.width, screen.height
                     ));
                     for wp in tiling_windows {
                         s.push_str(&fmt_tiling_placement(wp));
@@ -222,8 +232,8 @@ pub(super) fn snapshot_text(hub: &Hub) -> String {
             }
             MonitorLayout::Fullscreen(id) => {
                 s.push_str(&format!(
-                    "  Monitor(id={}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
-                    mp.monitor_id, screen.x, screen.y, screen.width, screen.height
+                    "  Monitor(id={}{}, screen=(x={:.2} y={:.2} w={:.2} h={:.2}),\n",
+                    mp.monitor_id, name_seg, screen.x, screen.y, screen.width, screen.height
                 ));
                 s.push_str(&format!("    Fullscreen(id={})\n", id));
                 s.push_str("  )\n");

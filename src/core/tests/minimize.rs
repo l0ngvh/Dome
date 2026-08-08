@@ -167,7 +167,7 @@ fn unminimize_restores_to_current_workspace() {
     let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w7"));
     let w1 = hub.insert_tiling(hub.current_workspace(), titled("w8"));
     hub.minimize_window(w1);
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.unminimize_window(w1);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))

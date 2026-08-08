@@ -29,6 +29,32 @@ pub struct MinimizedWindow {
     pub executable_path: Option<String>,
 }
 
+/// Serializable workspace metadata for IPC queries. External tools (status bars,
+/// scripts) consume this as JSON over IPC -- the JSON field names are the
+/// stability contract, not this Rust type.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkspaceInfo {
+    pub name: String,
+    /// The owning monitor's stored `unique_name`, the position-ranked name
+    /// shown to the user. For a Parked workspace this is the ORIGIN
+    /// monitor's stored `unique_name`, frozen at unplug, which is NOT
+    /// currently connected -- that is exactly why the workspace is not
+    /// Attached. Consumers derive "origin detached" from `state != Attached`,
+    /// there is no separate bool. A consumer can further derive "visiting" as
+    /// a Parked row that is also its host monitor's active workspace.
+    pub monitor: String,
+    pub state: WorkspaceState,
+    pub is_focused: bool,
+    pub is_visible: bool,
+    pub window_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum WorkspaceState {
+    Attached,
+    Parked,
+}
+
 /// Every user-visible action Dome can perform. This is the single source of
 /// truth for the action set. CLI (`src/cli.rs`), IPC JSON, and TOML keymap
 /// strings all parse into this enum. Adding a new action requires editing only
@@ -154,9 +180,16 @@ pub enum FocusTarget {
     Left,
     Right,
     Parent,
-    Tab { direction: TabDirection },
-    Workspace { name: String },
-    Monitor { target: MonitorTarget },
+    Tab {
+        direction: TabDirection,
+    },
+    Workspace {
+        name: String,
+        monitor: Option<String>,
+    },
+    Monitor {
+        target: MonitorTarget,
+    },
 }
 
 impl fmt::Display for FocusTarget {
@@ -168,7 +201,10 @@ impl fmt::Display for FocusTarget {
             FocusTarget::Right => write!(f, "right"),
             FocusTarget::Parent => write!(f, "parent"),
             FocusTarget::Tab { direction } => write!(f, "tab {direction}"),
-            FocusTarget::Workspace { name } => write!(f, "workspace {name}"),
+            FocusTarget::Workspace { name, monitor } => match monitor {
+                Some(m) => write!(f, "workspace {name} --monitor {m}"),
+                None => write!(f, "workspace {name}"),
+            },
             FocusTarget::Monitor { target } => write!(f, "monitor {target}"),
         }
     }
@@ -180,8 +216,13 @@ pub enum MoveTarget {
     Down,
     Left,
     Right,
-    Workspace { name: String },
-    Monitor { target: MonitorTarget },
+    Workspace {
+        name: String,
+        monitor: Option<String>,
+    },
+    Monitor {
+        target: MonitorTarget,
+    },
 }
 
 impl fmt::Display for MoveTarget {
@@ -191,7 +232,10 @@ impl fmt::Display for MoveTarget {
             MoveTarget::Down => write!(f, "down"),
             MoveTarget::Left => write!(f, "left"),
             MoveTarget::Right => write!(f, "right"),
-            MoveTarget::Workspace { name } => write!(f, "workspace {name}"),
+            MoveTarget::Workspace { name, monitor } => match monitor {
+                Some(m) => write!(f, "workspace {name} --monitor {m}"),
+                None => write!(f, "workspace {name}"),
+            },
             MoveTarget::Monitor { target } => write!(f, "monitor {target}"),
         }
     }
@@ -271,6 +315,19 @@ impl FromStr for Action {
             }
         }
 
+        // Workspace names and monitor names can both contain spaces, so the
+        // split_whitespace slice match below cannot carry the optional
+        // --monitor selector. Parse the tail with a monitor-pinned-last split
+        // before the slice match, mirroring exec and mode above.
+        if let Some(rest) = s.strip_prefix("focus workspace ") {
+            let (name, monitor) = parse_workspace_selector(rest);
+            return Ok(Action::Focus(FocusTarget::Workspace { name, monitor }));
+        }
+        if let Some(rest) = s.strip_prefix("move workspace ") {
+            let (name, monitor) = parse_workspace_selector(rest);
+            return Ok(Action::Move(MoveTarget::Workspace { name, monitor }));
+        }
+
         let parts: Vec<&str> = s.split_whitespace().collect();
         match parts.as_slice() {
             ["focus", "up"] => Ok(Action::Focus(FocusTarget::Up)),
@@ -278,9 +335,6 @@ impl FromStr for Action {
             ["focus", "left"] => Ok(Action::Focus(FocusTarget::Left)),
             ["focus", "right"] => Ok(Action::Focus(FocusTarget::Right)),
             ["focus", "parent"] => Ok(Action::Focus(FocusTarget::Parent)),
-            ["focus", "workspace", n] => Ok(Action::Focus(FocusTarget::Workspace {
-                name: n.to_string(),
-            })),
             ["focus", "tab", "next"] => Ok(Action::Focus(FocusTarget::Tab {
                 direction: TabDirection::Next,
             })),
@@ -294,9 +348,6 @@ impl FromStr for Action {
             ["move", "down"] => Ok(Action::Move(MoveTarget::Down)),
             ["move", "left"] => Ok(Action::Move(MoveTarget::Left)),
             ["move", "right"] => Ok(Action::Move(MoveTarget::Right)),
-            ["move", "workspace", n] => Ok(Action::Move(MoveTarget::Workspace {
-                name: n.to_string(),
-            })),
             ["move", "monitor", target] => Ok(Action::Move(MoveTarget::Monitor {
                 target: parse_monitor_target(target)?,
             })),
@@ -331,6 +382,17 @@ pub(crate) fn parse_monitor_target(s: &str) -> Result<MonitorTarget> {
     }
 }
 
+// Monitor is pinned last: everything after the first " --monitor " is the
+// monitor name, everything before is the workspace name. This lets both the
+// workspace name and the monitor name contain spaces, which a
+// split_whitespace match could not.
+fn parse_workspace_selector(rest: &str) -> (String, Option<String>) {
+    match rest.split_once(" --monitor ") {
+        Some((name, monitor)) => (name.trim().to_string(), Some(monitor.trim().to_string())),
+        None => (rest.trim().to_string(), None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,8 +402,11 @@ mod tests {
         let cases = vec![
             (Action::Focus(FocusTarget::Up), r#"{"Focus":"Up"}"#),
             (
-                Action::Move(MoveTarget::Workspace { name: "1".into() }),
-                r#"{"Move":{"Workspace":{"name":"1"}}}"#,
+                Action::Move(MoveTarget::Workspace {
+                    name: "1".into(),
+                    monitor: None,
+                }),
+                r#"{"Move":{"Workspace":{"name":"1","monitor":null}}}"#,
             ),
             (Action::Toggle(ToggleTarget::Float), r#"{"Toggle":"Float"}"#),
             (Action::Master(MasterTarget::Grow), r#"{"Master":"Grow"}"#),
@@ -426,6 +491,7 @@ mod tests {
             "focus tab next",
             "focus tab prev",
             "focus workspace 3",
+            "focus workspace 3 --monitor DELL U2720Q #1",
             "focus monitor left",
             "focus monitor foo",
             "move up",
@@ -433,6 +499,7 @@ mod tests {
             "move left",
             "move right",
             "move workspace 3",
+            "move workspace 3 --monitor HDMI",
             "move monitor left",
             "toggle spawn",
             "toggle direction",
@@ -457,6 +524,15 @@ mod tests {
                 "round-trip mismatch: from_str({input:?}).to_string() = {formatted:?}"
             );
         }
+    }
+
+    #[test]
+    fn workspace_selector_parse() {
+        assert_eq!(parse_workspace_selector("3"), ("3".to_string(), None));
+        assert_eq!(
+            parse_workspace_selector("my ws --monitor DELL #1"),
+            ("my ws".to_string(), Some("DELL #1".to_string()))
+        );
     }
 
     #[test]

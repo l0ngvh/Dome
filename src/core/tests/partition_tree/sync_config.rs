@@ -92,7 +92,7 @@ fn sync_config_recalculates_all_workspaces() {
     hub.insert_tiling_titled();
     hub.toggle_container_layout();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();
     hub.toggle_container_layout();
@@ -108,7 +108,7 @@ fn sync_config_recalculates_all_workspaces() {
             .build(),
     );
 
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
