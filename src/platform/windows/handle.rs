@@ -442,13 +442,16 @@ impl InspectExternalWindow for ExternalHwnd {
         // We don't check for empty title here, as most some text editor apps open windows with
         // empty title for untitled documents
         let hwnd = self.0;
-        let hwnd_id: HwndId = hwnd.into();
         let pid = self.pid();
         let title = self.get_window_title();
         if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+            // Those windows that shouldn't be managed have quite preditable title.
+            // e.g. OLEChannelWnd or Default IME
+            // Previous attempt to key by hwnd proved to be futile, those windows are spawned
+            // multiple times with different hwnd. windows with same title and pid should be rare
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: not visible"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: not visible"
             );
             return true;
         }
@@ -459,22 +462,22 @@ impl InspectExternalWindow for ExternalHwnd {
             // tiling-vs-float state. Picked back up by the standard create path
             // when the user restores the window via WM_RESTORE / unminimize.
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: iconic"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: iconic"
             );
             return true;
         }
         if is_cloaked(hwnd) {
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: cloaked"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: cloaked"
             );
             return true;
         }
         if unsafe { GetAncestor(hwnd, GA_ROOT) } != hwnd {
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: not top-level ancestor"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: not top-level ancestor"
             );
             return true;
         }
@@ -482,36 +485,36 @@ impl InspectExternalWindow for ExternalHwnd {
         let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
         if style & WS_CHILD.0 != 0 {
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: WS_CHILD"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: WS_CHILD"
             );
             return true;
         }
         if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: WS_EX_TOOLWINDOW"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: WS_EX_TOOLWINDOW"
             );
             return true;
         }
         if ex_style & WS_EX_NOACTIVATE.0 != 0 {
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: WS_EX_NOACTIVATE"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: WS_EX_NOACTIVATE"
             );
             return true;
         }
         if ex_style & WS_EX_TRANSPARENT.0 != 0 {
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: WS_EX_TRANSPARENT"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: WS_EX_TRANSPARENT"
             );
             return true;
         }
         if ex_style & WS_EX_DLGMODALFRAME.0 != 0 {
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: WS_EX_DLGMODALFRAME"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: WS_EX_DLGMODALFRAME"
             );
             return true;
         }
@@ -543,8 +546,8 @@ impl InspectExternalWindow for ExternalHwnd {
             };
             if !fullscreen {
                 crate::trace_once!(
-                    key: (hwnd_id, pid),
-                    ?hwnd_id, ?title, ?pid, "not manageable: WS_POPUP without frame"
+                    key: (title.clone(), pid),
+                    ?title, ?pid, "not manageable: WS_POPUP without frame"
                 );
                 return true;
             }
@@ -565,16 +568,16 @@ impl InspectExternalWindow for ExternalHwnd {
         );
         if has_owner && ex_style & WS_EX_APPWINDOW.0 == 0 {
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: owned window without WS_EX_APPWINDOW"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: owned window without WS_EX_APPWINDOW"
             );
             return true;
         }
         let dim = get_dimension(hwnd);
         if dim.width == Length::ZERO || dim.height == Length::ZERO {
             crate::trace_once!(
-                key: (hwnd_id, pid),
-                ?hwnd_id, ?title, ?pid, "not manageable: zero dimension"
+                key: (title.clone(), pid),
+                ?title, ?pid, "not manageable: zero dimension"
             );
             return true;
         }
