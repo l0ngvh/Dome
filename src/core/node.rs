@@ -24,68 +24,6 @@ impl std::fmt::Display for MonitorId {
     }
 }
 
-/// Core is coordinate-system-agnostic: `dimension` holds whatever rect
-/// the platform supplies in its own native frame (logical on macOS,
-/// physical on Windows). Core never characterises or converts the
-/// unit -- all layout math is unit-agnostic.
-#[derive(Debug, Clone)]
-pub(crate) struct Monitor {
-    pub(super) name: String,
-    pub(super) dimension: Dimension,
-    /// Multiplier applied to config-denominated lengths before use in
-    /// layout math on this monitor. Stored here so `SizeConstraint::resolve`
-    /// can convert logical config values without re-reading platform state.
-    ///
-    /// - macOS: always `1.0`. AppKit, AX, and Core Graphics all express
-    ///   window geometry in logical points, which is also the config unit.
-    /// - Windows: the monitor's DPI scale (e.g. `1.5` at 150%). PMv2
-    ///   reports rects in physical pixels, but config values are logical
-    ///   pixels, so they must be multiplied to reach the frame unit.
-    pub(super) scale: f32,
-    pub(super) active_workspace: WorkspaceId,
-}
-
-impl Node for Monitor {
-    type Id = MonitorId;
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Workspace {
-    pub(super) name: String,
-    pub(super) monitor: MonitorId,
-    /// When true, the focused window is float_windows.last().
-    /// Wouldn't have any effect when any fullscreen window is present, but for consistency would be
-    /// set to false in that case
-    pub(super) is_float_focused: bool,
-    /// Float ids in this workspace, ordered by z-index (last is topmost).
-    /// Each id's screen-absolute dim lives on the window itself, in
-    /// `DisplayMode::Float { dim }`. Focusing a float moves it to the end.
-    pub(super) float_windows: Vec<WindowId>,
-    /// All fullscreen windows in this workspace, order by z-index with the last is the top most
-    /// window. Only the top most fullscreen window is displayed.
-    pub(super) fullscreen_windows: Vec<WindowId>,
-    pub(super) float_matchers: Vec<FloatFullscreenMatcherId>,
-    pub(super) fullscreen_matchers: Vec<FloatFullscreenMatcherId>,
-}
-
-impl Node for Workspace {
-    type Id = WorkspaceId;
-}
-
-impl Workspace {
-    pub(super) fn new(name: String, monitor: MonitorId) -> Self {
-        Self {
-            is_float_focused: false,
-            name,
-            monitor,
-            float_windows: Vec::new(),
-            fullscreen_windows: Vec::new(),
-            float_matchers: Vec::new(),
-            fullscreen_matchers: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Direction {
     #[default]

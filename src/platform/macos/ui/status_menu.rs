@@ -10,8 +10,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSData, NSInteger, NSObject, NSObjectProtocol, NSSize, NSString};
 
-use crate::action::{Action, Actions, FocusTarget};
-use crate::core::WorkspaceInfo;
+use crate::action::{Action, Actions, FocusTarget, WorkspaceInfo, WorkspaceState};
 use crate::platform::macos::dome::HubEvent;
 
 const STATUS_TOOLTIP_MAX_CHARS: usize = 20;
@@ -21,7 +20,7 @@ pub(super) struct StatusMenu {
     button: Retained<NSStatusBarButton>,
     menu: Retained<NSMenu>,
     target: Retained<StatusMenuTarget>,
-    last_workspaces: RefCell<Vec<(String, bool)>>,
+    last_workspaces: RefCell<Vec<(String, String, bool, WorkspaceState)>>,
 }
 
 impl StatusMenu {
@@ -79,32 +78,65 @@ impl StatusMenu {
 
         if changed {
             self.menu.removeAllItems();
-            let names: Vec<String> = workspaces.iter().map(|w| w.name.clone()).collect();
-            self.target.set_workspace_names(names);
+            // Manual enabled-state control so a disabled (grayed) detached submenu
+            // title still expands. Without this, AppKit auto-disables items whose
+            // action is unhandled.
+            self.menu.setAutoenablesItems(false);
 
-            for (i, ws) in workspaces.iter().enumerate() {
-                let title = NSString::from_str(&ws.name);
-                let empty = NSString::from_str("");
-                let alloc = NSMenuItem::alloc(mtm);
-                let item: Retained<NSMenuItem> = unsafe {
+            let groups = group_workspaces(workspaces);
+            self.target.set_click_targets(click_targets(workspaces));
+
+            let empty = NSString::from_str("");
+            for group in &groups {
+                let mut title = group.monitor.clone();
+                if group.detached {
+                    title.push_str(" (detached)");
+                }
+                let ns_title = NSString::from_str(&title);
+
+                let parent_alloc = NSMenuItem::alloc(mtm);
+                let parent: Retained<NSMenuItem> = unsafe {
                     NSMenuItem::initWithTitle_action_keyEquivalent(
-                        alloc,
-                        &title,
-                        Some(sel!(workspaceClicked:)),
+                        parent_alloc,
+                        &ns_title,
+                        None,
                         &empty,
                     )
                 };
-                item.setTag(i as NSInteger);
-                unsafe {
-                    item.setTarget(Some(&self.target));
+
+                let submenu = NSMenu::new(mtm);
+                submenu.setAutoenablesItems(false);
+                for entry in &group.entries {
+                    let item_title = NSString::from_str(&entry.name);
+                    let alloc = NSMenuItem::alloc(mtm);
+                    let item: Retained<NSMenuItem> = unsafe {
+                        NSMenuItem::initWithTitle_action_keyEquivalent(
+                            alloc,
+                            &item_title,
+                            Some(sel!(workspaceClicked:)),
+                            &empty,
+                        )
+                    };
+                    item.setTag(entry.tag as NSInteger);
+                    unsafe {
+                        item.setTarget(Some(&self.target));
+                    }
+                    submenu.addItem(&item);
                 }
-                self.menu.addItem(&item);
+                parent.setSubmenu(Some(&submenu));
+                if group.detached {
+                    // Grayed-but-expandable: the title dims but the submenu still
+                    // opens because setAutoenablesItems(false) is set above. The
+                    // " (detached)" suffix is the guaranteed marker, the gray-out
+                    // is the secondary cue.
+                    parent.setEnabled(false);
+                }
+                self.menu.addItem(&parent);
             }
 
             self.menu.addItem(&NSMenuItem::separatorItem(mtm));
 
             let exit_title = NSString::from_str("Exit Dome");
-            let empty = NSString::from_str("");
             let exit_alloc = NSMenuItem::alloc(mtm);
             let exit_item: Retained<NSMenuItem> = unsafe {
                 NSMenuItem::initWithTitle_action_keyEquivalent(
@@ -121,18 +153,28 @@ impl StatusMenu {
 
             *self.last_workspaces.borrow_mut() = workspaces
                 .iter()
-                .map(|w| (w.name.clone(), w.is_visible))
+                .map(|w| {
+                    (
+                        w.name.clone(),
+                        w.monitor.clone(),
+                        w.is_visible,
+                        w.state.clone(),
+                    )
+                })
                 .collect();
         }
 
-        for (i, ws) in workspaces.iter().enumerate() {
-            if let Some(item) = self.menu.itemAtIndex(i as NSInteger) {
-                let state = if ws.is_focused {
-                    NSControlStateValueOn
-                } else {
-                    NSControlStateValueOff
-                };
-                item.setState(state);
+        let focused_index = workspaces.iter().position(|w| w.is_focused);
+        for top in self.menu.itemArray().iter() {
+            if let Some(sub) = top.submenu() {
+                for item in sub.itemArray().iter() {
+                    let on = Some(item.tag() as usize) == focused_index;
+                    item.setState(if on {
+                        NSControlStateValueOn
+                    } else {
+                        NSControlStateValueOff
+                    });
+                }
             }
         }
     }
@@ -146,7 +188,7 @@ impl Drop for StatusMenu {
 
 struct StatusMenuTargetIvars {
     hub_sender: Sender<HubEvent>,
-    workspace_names: RefCell<Vec<String>>,
+    click_targets: RefCell<Vec<ClickTarget>>,
 }
 
 define_class!(
@@ -160,14 +202,18 @@ define_class!(
         #[unsafe(method(workspaceClicked:))]
         fn workspace_clicked(&self, sender: &NSMenuItem) {
             let tag = sender.tag() as usize;
-            let names = self.ivars().workspace_names.borrow();
-            if let Some(name) = names.get(tag) {
-                let action = Action::Focus(FocusTarget::Workspace { name: name.clone() });
-                self.ivars()
-                    .hub_sender
-                    .send(HubEvent::Action(Actions::new(vec![action])))
-                    .ok();
-            }
+            let targets = self.ivars().click_targets.borrow();
+            let Some(target) = targets.get(tag) else {
+                return;
+            };
+            let action = Action::Focus(FocusTarget::Workspace {
+                name: target.name.clone(),
+                monitor: Some(target.monitor.clone()),
+            });
+            self.ivars()
+                .hub_sender
+                .send(HubEvent::Action(Actions::new(vec![action])))
+                .ok();
         }
 
         #[unsafe(method(exitClicked:))]
@@ -186,13 +232,13 @@ impl StatusMenuTarget {
     fn new(mtm: MainThreadMarker, hub_sender: Sender<HubEvent>) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(StatusMenuTargetIvars {
             hub_sender,
-            workspace_names: RefCell::new(Vec::new()),
+            click_targets: RefCell::new(Vec::new()),
         });
         unsafe { msg_send![super(this), init] }
     }
 
-    fn set_workspace_names(&self, names: Vec<String>) {
-        *self.ivars().workspace_names.borrow_mut() = names;
+    fn set_click_targets(&self, targets: Vec<ClickTarget>) {
+        *self.ivars().click_targets.borrow_mut() = targets;
     }
 }
 
@@ -206,23 +252,91 @@ fn truncate_tooltip(name: &str) -> String {
 
 // is_visible is a diff key so a focus switch on a single-monitor host rebuilds
 // the menu when the departing workspace becomes invisible. Cost is a dozen
-// NSMenuItem allocs per switch, acceptable.
-fn workspaces_layout_changed(old: &[(String, bool)], new: &[WorkspaceInfo]) -> bool {
+// NSMenuItem allocs per switch, acceptable. monitor and state are diff keys so a
+// regrouping or a park/attach transition also rebuilds.
+fn workspaces_layout_changed(
+    old: &[(String, String, bool, WorkspaceState)],
+    new: &[WorkspaceInfo],
+) -> bool {
     if old.len() != new.len() {
         return true;
     }
-    old.iter()
-        .zip(new.iter())
-        .any(|((n, v), w)| n != &w.name || *v != w.is_visible)
+    old.iter().zip(new.iter()).any(|((n, m, v, s), w)| {
+        n != &w.name || m != &w.monitor || *v != w.is_visible || *s != w.state
+    })
+}
+
+#[derive(Debug, PartialEq)]
+struct MonitorGroup {
+    monitor: String,
+    detached: bool,
+    entries: Vec<GroupEntry>,
+}
+
+#[derive(Debug, PartialEq)]
+struct GroupEntry {
+    tag: usize,
+    name: String,
+}
+
+#[derive(Debug, PartialEq)]
+struct ClickTarget {
+    name: String,
+    // Live disambiguated name when Attached, origin name otherwise.
+    monitor: String,
+}
+
+// Preserves first-appearance order of monitor strings, and workspace order within
+// each group, so the menu layout is deterministic across rebuilds. A group is
+// detached exactly when no row in it is Attached.
+fn group_workspaces(workspaces: &[WorkspaceInfo]) -> Vec<MonitorGroup> {
+    let mut groups: Vec<MonitorGroup> = Vec::new();
+    for (i, ws) in workspaces.iter().enumerate() {
+        let attached = ws.state == WorkspaceState::Attached;
+        let entry = GroupEntry {
+            tag: i,
+            name: ws.name.clone(),
+        };
+        match groups.iter_mut().find(|g| g.monitor == ws.monitor) {
+            Some(g) => {
+                g.detached = g.detached && !attached;
+                g.entries.push(entry);
+            }
+            None => groups.push(MonitorGroup {
+                monitor: ws.monitor.clone(),
+                detached: !attached,
+                entries: vec![entry],
+            }),
+        }
+    }
+    groups
+}
+
+fn click_targets(workspaces: &[WorkspaceInfo]) -> Vec<ClickTarget> {
+    workspaces
+        .iter()
+        .map(|ws| ClickTarget {
+            name: ws.name.clone(),
+            monitor: ws.monitor.clone(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn ws(name: &str, focused: bool, visible: bool) -> WorkspaceInfo {
+    fn ws(
+        name: &str,
+        monitor: &str,
+        state: WorkspaceState,
+        focused: bool,
+        visible: bool,
+    ) -> WorkspaceInfo {
         WorkspaceInfo {
             name: name.into(),
+            monitor: monitor.into(),
+            state,
             is_focused: focused,
             is_visible: visible,
             window_count: 0,
@@ -263,29 +377,182 @@ mod tests {
 
     #[test]
     fn layout_same_seq_unchanged() {
-        let old = vec![("1".into(), true), ("2".into(), false)];
-        let new = vec![ws("1", true, true), ws("2", false, false)];
+        let old = vec![
+            ("1".into(), "1".into(), true, WorkspaceState::Attached),
+            ("2".into(), "2".into(), false, WorkspaceState::Attached),
+        ];
+        let new = vec![
+            ws("1", "1", WorkspaceState::Attached, true, true),
+            ws("2", "2", WorkspaceState::Attached, false, false),
+        ];
         assert!(!workspaces_layout_changed(&old, &new));
     }
 
     #[test]
     fn layout_different_len_changed() {
-        let old = vec![("1".into(), true)];
-        let new = vec![ws("1", true, true), ws("2", false, false)];
+        let old = vec![("1".into(), "1".into(), true, WorkspaceState::Attached)];
+        let new = vec![
+            ws("1", "1", WorkspaceState::Attached, true, true),
+            ws("2", "2", WorkspaceState::Attached, false, false),
+        ];
         assert!(workspaces_layout_changed(&old, &new));
     }
 
     #[test]
     fn layout_different_name_changed() {
-        let old = vec![("1".into(), true)];
-        let new = vec![ws("2", true, true)];
+        let old = vec![("1".into(), "1".into(), true, WorkspaceState::Attached)];
+        let new = vec![ws("2", "1", WorkspaceState::Attached, true, true)];
         assert!(workspaces_layout_changed(&old, &new));
     }
 
     #[test]
     fn layout_different_visible_changed() {
-        let old = vec![("1".into(), true)];
-        let new = vec![ws("1", true, false)];
+        let old = vec![("1".into(), "1".into(), true, WorkspaceState::Attached)];
+        let new = vec![ws("1", "1", WorkspaceState::Attached, true, false)];
         assert!(workspaces_layout_changed(&old, &new));
+    }
+
+    #[test]
+    fn layout_changed_on_monitor_change() {
+        let old = vec![("1".into(), "DELL".into(), true, WorkspaceState::Attached)];
+        let new = vec![ws("1", "LG", WorkspaceState::Attached, true, true)];
+        assert!(workspaces_layout_changed(&old, &new));
+    }
+
+    #[test]
+    fn layout_changed_on_state_change() {
+        let old = vec![("1".into(), "DELL".into(), true, WorkspaceState::Attached)];
+        let new = vec![ws("1", "DELL", WorkspaceState::Parked, true, true)];
+        assert!(workspaces_layout_changed(&old, &new));
+    }
+
+    #[test]
+    fn group_single_monitor_one_group() {
+        let workspaces = vec![
+            ws("1", "DELL", WorkspaceState::Attached, false, false),
+            ws("2", "DELL", WorkspaceState::Attached, false, false),
+            ws("3", "DELL", WorkspaceState::Attached, false, false),
+        ];
+        let groups = group_workspaces(&workspaces);
+        assert_eq!(
+            groups,
+            vec![MonitorGroup {
+                monitor: "DELL".into(),
+                detached: false,
+                entries: vec![
+                    GroupEntry {
+                        tag: 0,
+                        name: "1".into()
+                    },
+                    GroupEntry {
+                        tag: 1,
+                        name: "2".into()
+                    },
+                    GroupEntry {
+                        tag: 2,
+                        name: "3".into()
+                    },
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn group_two_monitors_two_groups() {
+        let workspaces = vec![
+            ws("1", "DELL", WorkspaceState::Attached, false, false),
+            ws("2", "LG", WorkspaceState::Attached, false, false),
+            ws("3", "DELL", WorkspaceState::Attached, false, false),
+            ws("4", "LG", WorkspaceState::Attached, false, false),
+        ];
+        let groups = group_workspaces(&workspaces);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].monitor, "DELL");
+        assert!(!groups[0].detached);
+        assert_eq!(
+            groups[0].entries,
+            vec![
+                GroupEntry {
+                    tag: 0,
+                    name: "1".into()
+                },
+                GroupEntry {
+                    tag: 2,
+                    name: "3".into()
+                },
+            ]
+        );
+        assert_eq!(groups[1].monitor, "LG");
+        assert!(!groups[1].detached);
+        assert_eq!(
+            groups[1].entries,
+            vec![
+                GroupEntry {
+                    tag: 1,
+                    name: "2".into()
+                },
+                GroupEntry {
+                    tag: 3,
+                    name: "4".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn group_identical_names_stay_separate() {
+        let workspaces = vec![
+            ws("1", "DELL #1", WorkspaceState::Attached, false, false),
+            ws("2", "DELL #2", WorkspaceState::Attached, false, false),
+        ];
+        let groups = group_workspaces(&workspaces);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].monitor, "DELL #1");
+        assert_eq!(groups[1].monitor, "DELL #2");
+    }
+
+    #[test]
+    fn group_parked_marked_detached() {
+        let all_parked = vec![
+            ws("1", "DELL", WorkspaceState::Parked, false, false),
+            ws("2", "DELL", WorkspaceState::Parked, false, false),
+        ];
+        let groups = group_workspaces(&all_parked);
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].detached);
+
+        let mixed = vec![
+            ws("1", "DELL", WorkspaceState::Parked, false, false),
+            ws("2", "DELL", WorkspaceState::Attached, false, false),
+        ];
+        let groups = group_workspaces(&mixed);
+        assert_eq!(groups.len(), 1);
+        assert!(!groups[0].detached);
+    }
+
+    #[test]
+    fn click_target_attached_carries_monitor() {
+        let workspaces = vec![ws("1", "DELL", WorkspaceState::Attached, false, false)];
+        let targets = click_targets(&workspaces);
+        assert_eq!(
+            targets,
+            vec![ClickTarget {
+                name: "1".into(),
+                monitor: "DELL".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn click_target_parked_carries_origin_monitor() {
+        let workspaces = vec![ws("1", "DELL", WorkspaceState::Parked, false, false)];
+        let targets = click_targets(&workspaces);
+        assert_eq!(
+            targets,
+            vec![ClickTarget {
+                name: "1".into(),
+                monitor: "DELL".into(),
+            }]
+        );
     }
 }

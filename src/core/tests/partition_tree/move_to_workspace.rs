@@ -12,7 +12,7 @@ fn move_container_to_workspace() {
     hub.toggle_spawn_mode();
     hub.insert_tiling(hub.current_workspace(), titled("w2"));
     hub.focus_parent();
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -51,7 +51,7 @@ fn move_container_to_workspace() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -101,18 +101,18 @@ fn move_container_to_workspace_with_matching_direction() {
     hub.insert_tiling(hub.current_workspace(), titled("w4"));
     hub.focus_parent();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w5"));
     hub.insert_tiling(hub.current_workspace(), titled("w6"));
 
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -165,17 +165,17 @@ fn move_horizontal_container_to_workspace_with_one_window() {
     hub.insert_tiling(hub.current_workspace(), titled("w8"));
     hub.focus_parent();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w9"));
 
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -228,17 +228,17 @@ fn move_vertical_container_to_workspace_with_one_window() {
     hub.insert_tiling(hub.current_workspace(), titled("w11"));
     hub.focus_parent();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w12"));
 
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -291,19 +291,19 @@ fn move_container_to_workspace_with_container_direction_matching_workspace_spawn
     hub.insert_tiling(hub.current_workspace(), titled("w14"));
     hub.focus_parent();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w15"));
     hub.insert_tiling(hub.current_workspace(), titled("w16"));
     hub.toggle_spawn_mode();
 
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -359,7 +359,7 @@ fn move_container_to_tabbed_workspace() {
     hub.focus_parent();
 
     // Create tabbed container on workspace 1
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling_titled();
     hub.insert_tiling_titled();
     hub.toggle_container_layout();
@@ -367,14 +367,14 @@ fn move_container_to_tabbed_workspace() {
     hub.toggle_spawn_mode();
 
     // Go back and move container to workspace 1
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -435,8 +435,8 @@ fn move_to_empty_workspace_resets_spawn_mode() {
     hub.toggle_spawn_mode();
     hub.insert_tiling(hub.current_workspace(), titled("w18"));
 
-    hub.move_focused_to_workspace("1");
-    hub.focus_workspace("1");
+    hub.move_focused_to_workspace("1", None);
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w19"));
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -497,8 +497,8 @@ fn move_to_empty_workspace_resets_spawn_mode() {
     hub.insert_tiling(hub.current_workspace(), titled("w21"));
     hub.focus_parent();
 
-    hub.move_focused_to_workspace("1");
-    hub.focus_workspace("1");
+    hub.move_focused_to_workspace("1", None);
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w22"));
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -559,7 +559,7 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
         .build();
 
     let w0 = hub.insert_tiling(hub.current_workspace(), titled("w23"));
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w24"));
     hub.insert_tiling(hub.current_workspace(), titled("w25"));
     hub.toggle_spawn_mode();
@@ -573,8 +573,8 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
 
     hub.set_focus(w0);
 
-    hub.move_focused_to_workspace("1");
-    hub.focus_workspace("1");
+    hub.move_focused_to_workspace("1", None);
+    hub.focus_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
@@ -631,7 +631,7 @@ fn move_container_to_same_workspace_noop() {
     hub.insert_tiling(hub.current_workspace(), titled("w31"));
     hub.focus_parent();
     // Target == current workspace ("0" is the default). Should be a no-op.
-    hub.move_focused_to_workspace("0");
+    hub.move_focused_to_workspace("0", None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)

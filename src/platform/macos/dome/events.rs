@@ -7,10 +7,11 @@ use objc2_foundation::NSRect;
 
 use crate::action::Actions;
 use crate::action::Query;
+use crate::action::WorkspaceInfo;
 use crate::config::{Config, LayoutConfig};
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, FloatWindowPlacement, Length, Logical, MonitorId,
-    TilingWindowPlacement, WindowId, WorkspaceInfo,
+    TilingWindowPlacement, WindowId,
 };
 
 use super::super::MonitorInfo;

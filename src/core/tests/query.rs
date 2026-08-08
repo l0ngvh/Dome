@@ -1,5 +1,5 @@
 use crate::action::MonitorTarget;
-use crate::core::WorkspaceInfo;
+use crate::action::{WorkspaceInfo, WorkspaceState};
 use crate::core::node::{Dimension, Length, WindowRestrictions};
 use crate::core::tests::{setup, titled};
 
@@ -32,7 +32,7 @@ fn multiple_workspaces() {
     let mut hub = setup();
     hub.insert_tiling(hub.current_workspace(), titled("w3"));
     hub.insert_tiling(hub.current_workspace(), titled("w4"));
-    hub.focus_workspace("web");
+    hub.focus_workspace("web", None);
     hub.insert_tiling(hub.current_workspace(), titled("w5"));
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
@@ -89,23 +89,22 @@ fn focused_vs_visible_multi_monitor() {
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
 
-    let ws0 = ws.iter().find(|w| w.name == "0").unwrap();
-    assert!(ws0.is_visible);
-    assert!(!ws0.is_focused);
-    assert_eq!(ws0.window_count, 1);
+    // Both monitors default to a workspace named "0", so disambiguate by focus.
+    let unfocused = ws.iter().find(|w| !w.is_focused).unwrap();
+    assert!(unfocused.is_visible);
+    assert_eq!(unfocused.window_count, 1);
 
-    let sec = ws.iter().find(|w| w.name == "secondary").unwrap();
-    assert!(sec.is_visible);
-    assert!(sec.is_focused);
-    assert_eq!(sec.window_count, 1);
+    let focused = ws.iter().find(|w| w.is_focused).unwrap();
+    assert!(focused.is_visible);
+    assert_eq!(focused.window_count, 1);
 }
 
 #[test]
 fn empty_non_active_workspace_persists() {
     let mut hub = setup();
     hub.insert_tiling(hub.current_workspace(), titled("w11"));
-    hub.focus_workspace("empty");
-    hub.focus_workspace("0");
+    hub.focus_workspace("empty", None);
+    hub.focus_workspace("0", None);
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
     let ws0 = ws.iter().find(|w| w.name == "0").unwrap();
@@ -118,12 +117,16 @@ fn empty_non_active_workspace_persists() {
 fn workspace_info_json_shape() {
     let info = WorkspaceInfo {
         name: "main".to_string(),
+        monitor: "DELL #1".to_string(),
+        state: WorkspaceState::Attached,
         is_focused: true,
         is_visible: false,
         window_count: 3,
     };
     let v: serde_json::Value = serde_json::to_value(&info).unwrap();
     assert_eq!(v["name"], "main");
+    assert_eq!(v["monitor"], "DELL #1");
+    assert_eq!(v["state"], "Attached");
     assert_eq!(v["is_focused"], true);
     assert_eq!(v["is_visible"], false);
     assert_eq!(v["window_count"], 3);
@@ -188,13 +191,12 @@ fn multi_monitor_no_windows() {
     let ws = hub.query_workspaces();
     assert_eq!(ws.len(), 2);
 
-    let ws0 = ws.iter().find(|w| w.name == "0").unwrap();
-    assert!(ws0.is_focused);
-    assert!(ws0.is_visible);
-    assert_eq!(ws0.window_count, 0);
+    // Both monitors default to a workspace named "0", so disambiguate by focus.
+    let focused = ws.iter().find(|w| w.is_focused).unwrap();
+    assert!(focused.is_visible);
+    assert_eq!(focused.window_count, 0);
 
-    let sec = ws.iter().find(|w| w.name == "secondary").unwrap();
-    assert!(!sec.is_focused);
-    assert!(sec.is_visible);
-    assert_eq!(sec.window_count, 0);
+    let unfocused = ws.iter().find(|w| !w.is_focused).unwrap();
+    assert!(unfocused.is_visible);
+    assert_eq!(unfocused.window_count, 0);
 }

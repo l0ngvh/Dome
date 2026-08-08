@@ -12,7 +12,7 @@ Move keyboard focus to a different window, container, tab, workspace, or monitor
 | `focus parent` | Focus the parent container. Subsequent `move` and `toggle` actions then target the whole group. |
 | `focus tab next` | Focus the next tab in a tabbed container. |
 | `focus tab prev` | Focus the previous tab. |
-| `focus workspace <name>` | Switch to the named workspace, e.g. `focus workspace 2`. Workspaces are created on demand and any string is a valid name. |
+| `focus workspace <name>` | Switch to the named workspace, e.g. `focus workspace 2`. Workspaces are created on demand and any string is a valid name. Add `--monitor <monitor>` to target that workspace on a specific monitor instead of the focused one. |
 | `focus monitor up`, `focus monitor down`, `focus monitor left`, `focus monitor right` | Focus the nearest monitor in that direction. |
 | `focus monitor <name>` | Focus the monitor with the given name. |
 
@@ -23,7 +23,7 @@ Move the focused window or container within the tiling tree, or to a different w
 | Action | Effect |
 |--------|--------|
 | `move up`, `move down`, `move left`, `move right` | Move the focused window in the tiling tree. |
-| `move workspace <name>` | Move the focused window to the named workspace. |
+| `move workspace <name>` | Move the focused window to the named workspace. Add `--monitor <monitor>` to target that workspace on a specific monitor instead of the focused one. |
 | `move monitor up`, `move monitor down`, `move monitor left`, `move monitor right` | Move the focused window to the nearest monitor in that direction. |
 | `move monitor <name>` | Move the focused window to the named monitor. |
 

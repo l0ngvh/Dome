@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-use crate::core::WorkspaceInfo;
+use crate::action::WorkspaceInfo;
 use crate::platform::windows::dome::overlay::OwnedHwnd;
 use crate::platform::windows::dome::tray::{TRAY_CALLBACK_MSG, TrayIndicator};
 use crate::platform::windows::{HubSender, WM_APP_DISPLAY_CHANGE, WM_APP_WORKAREA_CHANGE};

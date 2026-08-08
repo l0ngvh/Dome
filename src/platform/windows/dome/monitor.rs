@@ -1,6 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use windows::Win32::Foundation::{LPARAM, RECT};
+use windows::Win32::Devices::Display::{
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+    DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo,
+    GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+};
+use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
 };
@@ -15,13 +21,18 @@ use crate::platform::windows::handle;
 
 #[derive(Clone)]
 pub(in crate::platform::windows) struct MonitorInfo {
-    pub handle: isize,
-    pub name: String,
-    pub dimension: Dimension,
-    pub bounds: Dimension,
-    pub is_primary: bool,
+    pub(in crate::platform::windows) handle: isize,
+    /// EDID friendly name (e.g. "DELL U2720Q") when one is available, else the
+    /// GDI device string (`\\.\DISPLAY1`) as a last-resort human-usable label.
+    pub(in crate::platform::windows) name: String,
+    /// GDI device string (`\\.\DISPLAY1`). Used purely as the join key to look
+    /// up the EDID friendly name after enumeration. Not a display label.
+    pub(in crate::platform::windows) gdi_device: String,
+    pub(in crate::platform::windows) dimension: Dimension,
+    pub(in crate::platform::windows) bounds: Dimension,
+    pub(in crate::platform::windows) is_primary: bool,
     /// DPI scale factor for this monitor (e.g. 1.5 for 150%). Always > 0.
-    pub scale: f32,
+    pub(in crate::platform::windows) scale: f32,
 }
 
 pub(in crate::platform::windows) trait QueryDisplay {
@@ -51,12 +62,21 @@ impl QueryDisplay for Win32Display {
 pub(super) struct Monitor {
     id: MonitorId,
     handle: isize,
+    name: String,
     dimension: Dimension,
     scale: f32,
     displayed: HashSet<WindowId>,
 }
 
 impl Monitor {
+    #[expect(
+        dead_code,
+        reason = "read by the monitor-name selector filter for --monitor targeting"
+    )]
+    pub(super) fn name(&self) -> &str {
+        &self.name
+    }
+
     pub(super) fn dimension(&self) -> Dimension {
         self.dimension
     }
@@ -104,6 +124,7 @@ impl MonitorRegistry {
         &mut self,
         handle: isize,
         id: MonitorId,
+        name: String,
         dimension: Dimension,
         scale: f32,
     ) {
@@ -112,6 +133,7 @@ impl MonitorRegistry {
             Monitor {
                 id,
                 handle,
+                name,
                 dimension,
                 scale,
                 displayed: HashSet::new(),
@@ -184,7 +206,13 @@ impl MonitorRegistry {
             let already_tracked = self.monitors.values().any(|m| m.handle == monitor.handle);
             if !already_tracked {
                 let id = hub.add_monitor(monitor.name.clone(), monitor.dimension, monitor.scale);
-                self.insert(monitor.handle, id, monitor.dimension, monitor.scale);
+                self.insert(
+                    monitor.handle,
+                    id,
+                    monitor.name.clone(),
+                    monitor.dimension,
+                    monitor.scale,
+                );
                 added.push(id);
                 tracing::info!(
                     name = %monitor.name,
@@ -208,15 +236,18 @@ impl MonitorRegistry {
             .and_then(|s| self.id_for_handle(s.handle));
         self.primary = fallback;
 
-        for monitor_id in to_remove {
-            if let Some(fallback_id) = fallback
-                && fallback_id != monitor_id
-            {
-                hub.remove_monitor(monitor_id, fallback_id);
-                self.monitors.remove(&monitor_id);
-                removed.push(monitor_id);
-                tracing::info!(%monitor_id, fallback = %fallback_id, "Monitor removed");
+        let primary = self
+            .primary
+            .expect("a primary monitor must exist after reconcile");
+        for monitor_id in &to_remove {
+            self.monitors.remove(monitor_id);
+        }
+        if !to_remove.is_empty() {
+            for monitor_id in &to_remove {
+                hub.remove_monitor(*monitor_id, primary);
             }
+            removed.extend(&to_remove);
+            tracing::info!(?to_remove, primary = %primary, "Monitors removed");
         }
 
         for monitor in monitors {
@@ -288,7 +319,7 @@ fn scale_for_monitor(hmonitor: HMONITOR) -> f32 {
 }
 
 fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
-    let mut monitors = Vec::new();
+    let mut monitors: Vec<MonitorInfo> = Vec::new();
 
     unsafe extern "system" fn enum_proc(
         hmonitor: HMONITOR,
@@ -308,20 +339,17 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
         if unsafe { GetMonitorInfoW(hmonitor, &mut info.monitorInfo) }.as_bool() {
             let rc = info.monitorInfo.rcWork;
             let rc_monitor = info.monitorInfo.rcMonitor;
-            let name = String::from_utf16_lossy(
-                &info
-                    .szDevice
-                    .iter()
-                    .take_while(|&&c| c != 0)
-                    .copied()
-                    .collect::<Vec<_>>(),
-            );
+            let gdi_device = utf16_to_string(&info.szDevice);
 
             let scale = scale_for_monitor(hmonitor);
 
+            // name is resolved once, after enumeration, from the friendly-name
+            // map keyed on gdi_device. It is left empty here so it never
+            // transiently holds the GDI device string.
             monitors.push(MonitorInfo {
                 handle: hmonitor.0 as isize,
-                name,
+                name: String::new(),
+                gdi_device,
                 dimension: handle::rect_to_dimension(rc),
                 bounds: handle::rect_to_dimension(rc_monitor),
                 is_primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
@@ -340,10 +368,145 @@ fn get_all_monitors() -> anyhow::Result<Vec<MonitorInfo>> {
         )
     };
     anyhow::ensure!(success.as_bool(), "EnumDisplayMonitors failed");
+
+    // Resolve each monitor's name exactly once, now that enumeration is done.
+    // The DisplayConfig API is path-keyed rather than per-HMONITOR, so the
+    // friendly-name map can only be built after enumeration and correlated
+    // back via the GDI device string. Use the EDID friendly name when present,
+    // else fall back to the GDI device string (`\\.\DISPLAY1`). The fallback is
+    // required: an empty monitorFriendlyDeviceName is a documented case for
+    // headless/forced targets, virtual/RDP displays, and pass-through panels
+    // with no readable EDID, so name must always carry something human-usable.
+    let friendly = friendly_names_by_gdi_device();
+    for monitor in &mut monitors {
+        monitor.name = friendly
+            .get(&monitor.gdi_device)
+            .cloned()
+            .unwrap_or_else(|| monitor.gdi_device.clone());
+    }
+
     Ok(monitors)
+}
+
+/// Maps each active monitor's GDI device name (`\\.\DISPLAY1`) to its EDID
+/// friendly name (e.g. "DELL U2720Q") via one QueryDisplayConfig pass. Monitors
+/// with an empty friendly name or a failed path lookup are omitted, so callers
+/// fall back to the GDI device name.
+fn friendly_names_by_gdi_device() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+
+    // Display config can change between GetDisplayConfigBufferSizes and
+    // QueryDisplayConfig, which then returns ERROR_INSUFFICIENT_BUFFER. Retry a
+    // bounded number of times rather than risk an unbounded loop.
+    // See https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-querydisplayconfig
+    const MAX_RETRIES: u32 = 5;
+    for _ in 0..MAX_RETRIES {
+        let mut path_count: u32 = 0;
+        let mut mode_count: u32 = 0;
+        let sizes = unsafe {
+            GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count)
+        };
+        if sizes != ERROR_SUCCESS {
+            tracing::warn!(
+                error = ?sizes,
+                "GetDisplayConfigBufferSizes failed, falling back to GDI device names"
+            );
+            return map;
+        }
+
+        let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
+        let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
+        let query = unsafe {
+            QueryDisplayConfig(
+                QDC_ONLY_ACTIVE_PATHS,
+                &mut path_count,
+                paths.as_mut_ptr(),
+                &mut mode_count,
+                modes.as_mut_ptr(),
+                None,
+            )
+        };
+        if query == ERROR_INSUFFICIENT_BUFFER {
+            continue;
+        }
+        if query != ERROR_SUCCESS {
+            tracing::warn!(
+                error = ?query,
+                "QueryDisplayConfig failed, falling back to GDI device names"
+            );
+            return map;
+        }
+
+        paths.truncate(path_count as usize);
+        for path in &paths {
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                    adapterId: path.sourceInfo.adapterId,
+                    id: path.sourceInfo.id,
+                },
+                ..Default::default()
+            };
+            if unsafe { DisplayConfigGetDeviceInfo(&mut source.header) } != ERROR_SUCCESS.0 as i32 {
+                continue;
+            }
+            let gdi_device = utf16_to_string(&source.viewGdiDeviceName);
+            if gdi_device.is_empty() {
+                continue;
+            }
+
+            let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                    size: size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32,
+                    adapterId: path.targetInfo.adapterId,
+                    id: path.targetInfo.id,
+                },
+                ..Default::default()
+            };
+            if unsafe { DisplayConfigGetDeviceInfo(&mut target.header) } != ERROR_SUCCESS.0 as i32 {
+                continue;
+            }
+            let friendly = utf16_to_string(&target.monitorFriendlyDeviceName);
+            if !friendly.is_empty() {
+                map.insert(gdi_device, friendly);
+            }
+        }
+        return map;
+    }
+
+    map
+}
+
+fn utf16_to_string(units: &[u16]) -> String {
+    let end = units.iter().take_while(|&&c| c != 0).count();
+    String::from_utf16_lossy(&units[..end])
 }
 
 fn is_d3d_exclusive_fullscreen_active() -> bool {
     unsafe { SHQueryUserNotificationState() }
         .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf16_to_string_stops_at_nul() {
+        let units: Vec<u16> = "AB\0CD".encode_utf16().collect();
+        assert_eq!(utf16_to_string(&units), "AB");
+    }
+
+    #[test]
+    fn utf16_to_string_empty_input() {
+        assert_eq!(utf16_to_string(&[]), "");
+    }
+
+    #[test]
+    fn utf16_to_string_no_nul_decodes_whole_slice() {
+        let units: Vec<u16> = "ABCD".encode_utf16().collect();
+        assert_eq!(utf16_to_string(&units), "ABCD");
+    }
 }

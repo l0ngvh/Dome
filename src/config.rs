@@ -71,6 +71,7 @@ fn default_keymaps() -> ModalKeymaps {
             },
             Actions::new(vec![Action::Focus(FocusTarget::Workspace {
                 name: i.to_string(),
+                monitor: None,
             })]),
         );
         keymaps.insert(
@@ -80,6 +81,7 @@ fn default_keymaps() -> ModalKeymaps {
             },
             Actions::new(vec![Action::Move(MoveTarget::Workspace {
                 name: i.to_string(),
+                monitor: None,
             })]),
         );
     }

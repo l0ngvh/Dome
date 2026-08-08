@@ -45,12 +45,16 @@ Prints one JSON entry per active workspace, ordered by creation:
 [
   {
     "name": "0",           // workspace name from the config
+    "monitor": "DELL #1",  // owning monitor's unique name
+    "state": "Attached",   // "Attached" or "Parked" (origin monitor gone)
     "is_focused": true,    // true for the workspace on the focused monitor
     "is_visible": true,    // true for the workspace shown on each monitor, one per monitor
     "window_count": 3      // tiling + float + fullscreen, no double-count, stays 0 for empty workspaces until Dome exits
   },
   {
     "name": "web",
+    "monitor": "DELL #1",
+    "state": "Attached",
     "is_focused": false,
     "is_visible": false,
     "window_count": 1

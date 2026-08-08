@@ -100,7 +100,7 @@ fn sync_config_drop_masters() {
         .build();
     hub.sync_configuration(l);
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w41"));
     hub.insert_tiling(hub.current_workspace(), titled("w42"));
     hub.insert_tiling(hub.current_workspace(), titled("w43"));

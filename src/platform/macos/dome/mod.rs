@@ -675,7 +675,9 @@ impl Dome {
                     forward: matches!(direction, TabDirection::Next),
                 })
             }
-            FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
+            FocusTarget::Workspace { name, monitor } => {
+                self.hub.focus_workspace(name, monitor.as_deref())
+            }
             FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
         }
     }
@@ -699,7 +701,9 @@ impl Dome {
                 direction: Direction::Horizontal,
                 forward: true,
             }),
-            MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
+            MoveTarget::Workspace { name, monitor } => {
+                self.hub.move_focused_to_workspace(name, monitor.as_deref())
+            }
             MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
         }
     }

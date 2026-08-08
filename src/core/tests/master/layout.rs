@@ -546,14 +546,14 @@ fn more_master_only_affects_focused_workspace() {
     hub.insert_tiling(hub.current_workspace(), titled("w55"));
     hub.insert_tiling(hub.current_workspace(), titled("w56"));
     // Switch to workspace "1": 2 windows.
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_tiling(hub.current_workspace(), titled("w57"));
     hub.insert_tiling(hub.current_workspace(), titled("w58"));
     // MoreMaster on workspace "1".
     hub.handle_tiling_action(TilingAction::MoreMaster);
 
     // Switch back to workspace "0". Its layout reflects original master_count=1.
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -611,7 +611,7 @@ fn attach_window_falls_back_to_global_when_no_per_workspace_override() {
         })
         .build();
     hub.sync_configuration(l);
-    hub.focus_workspace("2");
+    hub.focus_workspace("2", None);
     hub.insert_tiling(hub.current_workspace(), titled("w63"));
     hub.insert_tiling(hub.current_workspace(), titled("w64"));
     hub.insert_tiling(hub.current_workspace(), titled("w65"));

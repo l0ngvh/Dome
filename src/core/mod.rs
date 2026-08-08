@@ -1,5 +1,4 @@
 mod allocator;
-mod dto;
 mod export;
 mod float;
 mod fullscreen;
@@ -7,6 +6,7 @@ mod hub;
 mod master;
 mod matcher;
 mod minimize;
+mod monitor;
 mod node;
 mod partition_tree;
 mod strategy;
@@ -29,8 +29,6 @@ pub(crate) use node::{
     WindowRestrictions,
 };
 pub(crate) use strategy::TilingAction;
-
-pub(crate) use dto::WorkspaceInfo;
 
 const MAX_ITERATIONS: usize = 10000;
 

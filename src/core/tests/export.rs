@@ -49,7 +49,7 @@ fn export_reemits_config_matchers_across_float_and_fullscreen() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     hub.insert_window(
@@ -92,7 +92,7 @@ fn export_synthesises_from_live_across_float_and_fullscreen() {
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     let float_wid = hub
@@ -137,7 +137,7 @@ fn export_synthesises_from_live_for_global_matched_float() {
                 .build(),
         )
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     hub.insert_window(
@@ -174,7 +174,7 @@ fn export_drops_matcher_on_cross_workspace_move() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     let wid = hub
         .insert_window(
@@ -184,9 +184,9 @@ fn export_drops_matcher_on_cross_workspace_move() {
         )
         .unwrap();
     hub.set_focus(wid);
-    hub.move_focused_to_workspace("2");
+    hub.move_focused_to_workspace("2", None);
 
-    hub.focus_workspace("2");
+    hub.focus_workspace("2", None);
     let ws2_id = hub.current_workspace();
     let result = hub.export_workspace(ws2_id);
     assert_eq!(
@@ -217,7 +217,7 @@ fn export_drops_matcher_on_unminimize() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     let wid = hub
@@ -259,7 +259,7 @@ fn export_returns_empty_export_for_empty_workspace() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     let wid = hub
@@ -282,8 +282,8 @@ fn export_layout_writes_entry_for_empty_workspace() {
     let mut hub = TestHubBuilder::new()
         .with_layout(LayoutConfigBuilder::new().build())
         .build();
-    hub.focus_workspace("1");
-    hub.focus_workspace("2");
+    hub.focus_workspace("1", None);
+    hub.focus_workspace("2", None);
     hub.insert_window(titled("tiled-alpha"), dim(), WindowRestrictions::None);
 
     let nanos = std::time::SystemTime::now()
@@ -329,7 +329,7 @@ fn export_float_toggled_to_tiling_returns_to_tree() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     let wid = hub
