@@ -103,7 +103,7 @@ fn sync_config_drop_masters() {
         .build();
     hub.sync_configuration(l);
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w41"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w42"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w43"), default_rect(), WindowRestrictions::None);

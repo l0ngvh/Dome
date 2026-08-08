@@ -96,6 +96,7 @@ fn monitors_changed_updates_layout() {
     let new_monitor = MonitorInfo {
         handle: 1,
         name: "Test".to_string(),
+        gdi_device: "\\\\.\\DISPLAY1".to_string(),
         work_area: PixelRect::new(0, 0, 1280, 720),
         bounds: Dimension::new(
             Length::ZERO,
@@ -117,6 +118,52 @@ fn monitors_changed_updates_layout() {
     assert!(
         after.height < before.height,
         "window should be shorter after monitor shrink"
+    );
+}
+
+#[test]
+fn parked_monitor_windows_hide_on_unplug() {
+    let mut env = TestEnv::new();
+    env.add_monitor(second_monitor());
+    let w = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.run_actions("move monitor right");
+    assert!(
+        !env.is_offscreen(w),
+        "window should be visible on the second monitor before unplug"
+    );
+
+    env.remove_monitor(second_monitor().handle);
+
+    assert!(
+        env.is_offscreen(w),
+        "parked workspace's window rides the hide diff after unplug, no workspace switch"
+    );
+}
+
+#[test]
+fn parked_monitor_windows_unhide_on_visit() {
+    let mut env = TestEnv::new();
+    env.add_monitor(second_monitor());
+    let w = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.run_actions("move monitor right");
+    assert!(
+        !env.is_offscreen(w),
+        "window should be visible on the second monitor before unplug"
+    );
+
+    env.remove_monitor(second_monitor().handle);
+    assert!(
+        env.is_offscreen(w),
+        "parked workspace's window rides the hide diff after unplug"
+    );
+
+    // Visiting the parked workspace by its name plus origin monitor points the
+    // primary's active workspace at it, so the window surfaces on the primary
+    // with no reattach to a monitor.
+    env.run_actions("focus workspace 0 --monitor External");
+    assert!(
+        !env.is_offscreen(w),
+        "visiting the parked workspace surfaces its window on the primary"
     );
 }
 

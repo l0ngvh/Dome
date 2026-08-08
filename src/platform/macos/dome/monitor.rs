@@ -331,9 +331,16 @@ impl MonitorRegistry {
             }
         }
 
-        for monitor_id in self.remove_stale(&current_keys) {
-            hub.remove_monitor(monitor_id, self.primary_monitor_id());
-            tracing::info!(%monitor_id, fallback = %self.primary_monitor_id(), "Monitor removed");
+        let removed = self.remove_stale(&current_keys);
+        if !removed.is_empty() {
+            // Capture the primary once before the loop: it is never in `removed`
+            // (the primary is always a survivor), so the parked workspaces rent
+            // to a stable present id even as monitors are deleted per iteration.
+            let primary = self.primary_monitor_id();
+            for monitor_id in &removed {
+                hub.remove_monitor(*monitor_id, primary);
+            }
+            tracing::info!(?removed, %primary, "Monitors removed");
         }
 
         for monitor in monitors {

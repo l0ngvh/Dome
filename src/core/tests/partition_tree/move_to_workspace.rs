@@ -14,7 +14,7 @@ fn move_container_to_workspace() {
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
-    hub.move_focused_to_workspace("1");
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -53,7 +53,7 @@ fn move_container_to_workspace() {
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -103,18 +103,18 @@ fn move_container_to_workspace_with_matching_direction() {
     hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
 
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -167,17 +167,17 @@ fn move_horizontal_container_to_workspace_with_one_window() {
     hub.insert_window(titled("w8"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w9"), default_rect(), WindowRestrictions::None);
 
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -230,17 +230,17 @@ fn move_vertical_container_to_workspace_with_one_window() {
     hub.insert_window(titled("w11"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w12"), default_rect(), WindowRestrictions::None);
 
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -293,19 +293,19 @@ fn move_container_to_workspace_with_container_direction_matching_workspace_spawn
     hub.insert_window(titled("w14"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w15"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w16"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
 
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -361,7 +361,7 @@ fn move_container_to_tabbed_workspace() {
     hub.focus_parent();
 
     // Create tabbed container on workspace 1
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("W2"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("W3"), default_rect(), WindowRestrictions::None);
     hub.toggle_container_layout();
@@ -369,14 +369,14 @@ fn move_container_to_tabbed_workspace() {
     hub.toggle_spawn_mode();
 
     // Go back and move container to workspace 1
-    hub.focus_workspace("0");
-    hub.move_focused_to_workspace("1");
+    hub.focus_workspace("0", None);
+    hub.move_focused_to_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -437,8 +437,8 @@ fn move_to_empty_workspace_resets_spawn_mode() {
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w18"), default_rect(), WindowRestrictions::None);
 
-    hub.move_focused_to_workspace("1");
-    hub.focus_workspace("1");
+    hub.move_focused_to_workspace("1", None);
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w19"), default_rect(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -499,7 +499,7 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
     let w0 = hub
         .insert_window(titled("w23"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w24"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w25"), default_rect(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
@@ -513,8 +513,8 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
 
     hub.set_focus(w0);
 
-    hub.move_focused_to_workspace("1");
-    hub.focus_workspace("1");
+    hub.move_focused_to_workspace("1", None);
+    hub.focus_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -571,7 +571,7 @@ fn move_container_to_same_workspace_noop() {
     hub.insert_window(titled("w31"), default_rect(), WindowRestrictions::None);
     hub.focus_parent();
     // Target == current workspace ("0" is the default). Should be a no-op.
-    hub.move_focused_to_workspace("0");
+    hub.move_focused_to_workspace("0", None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=None)
@@ -629,8 +629,8 @@ fn move_nested_container_to_empty_workspace_maintains_direction_invariance() {
     // stays valid whether or not the rebuild re-derives direction.
     assert_eq!(hub.access.containers.all_active().len(), 2);
 
-    hub.move_focused_to_workspace("1");
-    hub.focus_workspace("1");
+    hub.move_focused_to_workspace("1", None);
+    hub.focus_workspace("1", None);
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)

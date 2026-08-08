@@ -58,7 +58,7 @@ impl PartitionTreeStrategy {
         &self,
         hub: &HubAccess,
         workspace_id: WorkspaceId,
-        _workspace: &crate::core::node::Workspace,
+        _workspace: &crate::core::workspace::Workspace,
     ) {
         use crate::core::node::DisplayMode;
 

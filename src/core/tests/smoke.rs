@@ -917,10 +917,10 @@ fn apply_op(
             hub.unminimize_window(windows[pos]);
         }
         RecordedOp::MoveToWorkspace { name } => {
-            hub.move_focused_to_workspace(name);
+            hub.move_focused_to_workspace(name, None);
         }
         RecordedOp::FocusWorkspace { name } => {
-            hub.focus_workspace(name);
+            hub.focus_workspace(name, None);
         }
         RecordedOp::FocusMonitor { target } => {
             hub.focus_monitor(target);
@@ -1267,10 +1267,10 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 hub.unminimize_window(id);
             }
             RecordedOp::MoveToWorkspace { name } => {
-                hub.move_focused_to_workspace(name);
+                hub.move_focused_to_workspace(name, None);
             }
             RecordedOp::FocusWorkspace { name } => {
-                hub.focus_workspace(name);
+                hub.focus_workspace(name, None);
             }
             RecordedOp::FocusMonitor { target } => {
                 hub.focus_monitor(target);

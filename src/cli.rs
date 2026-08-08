@@ -143,7 +143,10 @@ impl From<CliFocus> for FocusTarget {
             CliFocus::Tab { direction } => FocusTarget::Tab {
                 direction: direction.into(),
             },
-            CliFocus::Workspace { name } => FocusTarget::Workspace { name },
+            CliFocus::Workspace { name } => FocusTarget::Workspace {
+                name,
+                monitor: None,
+            },
             CliFocus::Monitor { target } => FocusTarget::Monitor { target },
         }
     }
@@ -156,7 +159,10 @@ impl From<CliMove> for MoveTarget {
             CliMove::Down => MoveTarget::Down,
             CliMove::Left => MoveTarget::Left,
             CliMove::Right => MoveTarget::Right,
-            CliMove::Workspace { name } => MoveTarget::Workspace { name },
+            CliMove::Workspace { name } => MoveTarget::Workspace {
+                name,
+                monitor: None,
+            },
             CliMove::Monitor { target } => MoveTarget::Monitor { target },
         }
     }

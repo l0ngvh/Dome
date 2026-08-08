@@ -9,12 +9,12 @@ fn switch_workspace_attaches_windows_correctly() {
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
 
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
 
     hub.insert_window(titled("w2"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w3"), default_rect(), WindowRestrictions::None);
 
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
 
     hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
 
@@ -66,7 +66,7 @@ fn focus_same_workspace() {
 
     hub.insert_window(titled("w5"), default_rect(), WindowRestrictions::None);
     let initial_workspace = hub.current_workspace();
-    hub.focus_workspace("0");
+    hub.focus_workspace("0", None);
 
     assert_eq!(hub.current_workspace(), initial_workspace);
     assert_snapshot!(snapshot(&hub), @"
