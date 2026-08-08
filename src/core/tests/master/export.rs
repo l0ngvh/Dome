@@ -16,7 +16,7 @@ fn export_master_empty_workspace() {
                 .build(),
         )
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     let result = hub.export_workspace(ws_id);
@@ -38,7 +38,7 @@ fn export_master_single_window() {
                 .build(),
         )
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
 
@@ -75,7 +75,7 @@ fn export_master_matched_preserves_slot_matcher() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None);
 
@@ -110,7 +110,7 @@ fn export_master_mixed_matched_and_unmatched() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
 
     hub.insert_window(titled("AAA"), default_rect(), WindowRestrictions::None);
@@ -150,7 +150,7 @@ fn export_two_windows_one_slot_emits_single_matcher() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws_id = hub.current_workspace();
     hub.insert_window(
         titled_process("Browser A", "browser.exe"),
@@ -190,7 +190,7 @@ fn export_reload_restores_tabbed_pane() {
                 .build(),
         ])
         .build();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     let ws = hub.current_workspace();
     hub.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     hub.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);
@@ -208,7 +208,7 @@ fn export_reload_restores_tabbed_pane() {
         )
         .with_preferred_layout(vec![config])
         .build();
-    reloaded.focus_workspace("1");
+    reloaded.focus_workspace("1", None);
     let rws = reloaded.current_workspace();
     reloaded.insert_window(titled("w0"), default_rect(), WindowRestrictions::None);
     reloaded.insert_window(titled("w1"), default_rect(), WindowRestrictions::None);

@@ -126,7 +126,7 @@ impl Hub {
         let global_float = self.access.layout.float.clone();
 
         for entry in preferred_layouts {
-            let ws_id = self.get_or_create_workspace(entry.name());
+            let ws_id = self.get_or_create_workspace_on(entry.name(), None);
             let matchers = workspace_matchers(entry);
             for m in matchers.fullscreen {
                 let id = self.float_fullscreen_matchers.allocate(m);

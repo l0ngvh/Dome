@@ -17,13 +17,14 @@ use std::time::Instant;
 use crate::action::Query;
 use crate::action::{
     Actions, FocusTarget, MasterTarget, MinimizedWindow, MoveTarget, TabDirection, ToggleTarget,
+    WorkspaceInfo,
 };
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Direction, FloatWindowPlacement, Hub, LimitObservation,
     MonitorId, MonitorLayout, Physical, PixelRect, Pixels, TilingAction, TilingWindowPlacement,
-    WindowId, WindowRestrictions, WorkspaceInfo,
+    WindowId, WindowRestrictions,
 };
 
 use self::app_window::AppWindowApi;
@@ -162,6 +163,7 @@ impl Dome {
         monitors_reg.insert(
             primary.handle,
             primary_monitor_id,
+            primary.name.clone(),
             primary.work_area,
             primary.scale,
         );
@@ -180,7 +182,13 @@ impl Dome {
         for monitor in &monitors {
             if monitor.handle != primary.handle {
                 let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, monitor.scale);
-                monitors_reg.insert(monitor.handle, id, monitor.work_area, monitor.scale);
+                monitors_reg.insert(
+                    monitor.handle,
+                    id,
+                    monitor.name.clone(),
+                    monitor.work_area,
+                    monitor.scale,
+                );
                 if let Ok(overlay) = overlay_factory.create_tiling_overlay(
                     config.clone(),
                     monitor.work_area,
@@ -475,7 +483,9 @@ impl Dome {
                     forward: matches!(direction, TabDirection::Next),
                 })
             }
-            FocusTarget::Workspace { name } => self.hub.focus_workspace(name),
+            FocusTarget::Workspace { name, monitor } => {
+                self.hub.focus_workspace(name, monitor.as_deref())
+            }
             FocusTarget::Monitor { target } => self.hub.focus_monitor(target),
         }
     }
@@ -498,7 +508,9 @@ impl Dome {
                 direction: Direction::Horizontal,
                 forward: true,
             }),
-            MoveTarget::Workspace { name } => self.hub.move_focused_to_workspace(name),
+            MoveTarget::Workspace { name, monitor } => {
+                self.hub.move_focused_to_workspace(name, monitor.as_deref())
+            }
             MoveTarget::Monitor { target } => self.hub.move_focused_to_monitor(target),
         }
     }

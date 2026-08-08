@@ -10,8 +10,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSData, NSInteger, NSObject, NSObjectProtocol, NSSize, NSString};
 
-use crate::action::{Action, Actions, FocusTarget};
-use crate::core::WorkspaceInfo;
+use crate::action::{Action, Actions, FocusTarget, WorkspaceInfo};
 use crate::platform::macos::dome::HubEvent;
 
 const STATUS_TOOLTIP_MAX_CHARS: usize = 20;
@@ -162,7 +161,10 @@ define_class!(
             let tag = sender.tag() as usize;
             let names = self.ivars().workspace_names.borrow();
             if let Some(name) = names.get(tag) {
-                let action = Action::Focus(FocusTarget::Workspace { name: name.clone() });
+                let action = Action::Focus(FocusTarget::Workspace {
+                    name: name.clone(),
+                    monitor: None,
+                });
                 self.ivars()
                     .hub_sender
                     .send(HubEvent::Action(Actions::new(vec![action])))
@@ -219,10 +221,13 @@ fn workspaces_layout_changed(old: &[(String, bool)], new: &[WorkspaceInfo]) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action::WorkspaceState;
 
     fn ws(name: &str, focused: bool, visible: bool) -> WorkspaceInfo {
         WorkspaceInfo {
             name: name.into(),
+            monitor: name.into(),
+            state: WorkspaceState::Attached,
             is_focused: focused,
             is_visible: visible,
             window_count: 0,

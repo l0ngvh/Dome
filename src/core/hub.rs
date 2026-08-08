@@ -1,4 +1,3 @@
-use crate::action::MonitorTarget;
 use crate::config::{
     Config, LayoutWorkspaceConfig, MasterConfig, PartitionTreeConfig, SizeConstraints, Strategy,
     WindowMatcher, WindowMode, default_border_size, default_master_config,
@@ -7,13 +6,14 @@ use crate::config::{
 
 use super::allocator::{Allocator, NodeId};
 use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
+use super::monitor::Monitor;
 use super::node::{
-    Container, ContainerId, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, Monitor,
-    MonitorId, PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions,
-    Workspace, WorkspaceId,
+    Container, ContainerId, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, MonitorId,
+    PixelRect, Pixels, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::strategy::{StrategySet, TilingAction, WorkspaceExport};
+use super::workspace::{Attachment, Workspace};
 
 pub(crate) struct VisiblePlacements {
     pub(crate) focused_window: Option<WindowId>,
@@ -341,43 +341,6 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    pub(crate) fn focus_monitor(&mut self, target: &MonitorTarget) {
-        if self.is_restricted(RestrictedAction::TilingNavigation) {
-            return;
-        }
-        let Some(target_id) = self.find_monitor_by_target(target) else {
-            return;
-        };
-        if target_id == self.access.focused_monitor {
-            return;
-        }
-        tracing::debug!("Focusing monitor");
-        self.access.focused_monitor = target_id;
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub(crate) fn move_focused_to_monitor(&mut self, target: &MonitorTarget) {
-        if self.is_restricted(RestrictedAction::MonitorMove) {
-            return;
-        }
-        let Some(target_id) = self.find_monitor_by_target(target) else {
-            return;
-        };
-        if target_id == self.access.focused_monitor {
-            return;
-        }
-
-        let target_ws = self.access.monitors.get(target_id).active_workspace;
-        tracing::debug!("Moving to monitor");
-        let current_ws = self.current_workspace();
-        if let Some(window_id) = self.focused_window(current_ws) {
-            self.move_child_to_workspace_with_id(window_id, target_ws);
-        } else {
-            self.move_focused_across_workspaces(current_ws, target_ws);
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
     pub(crate) fn set_focus(&mut self, window_id: WindowId) {
         tracing::debug!("Setting focus to window");
         let ws = self
@@ -433,7 +396,7 @@ impl Hub {
     /// Returns metadata for all active workspaces, ordered by WorkspaceId
     /// (creation order). Workspaces persist for the lifetime of the Hub once
     /// created, so emptied workspaces continue to appear with `window_count == 0`.
-    pub(crate) fn query_workspaces(&self) -> Vec<super::WorkspaceInfo> {
+    pub(crate) fn query_workspaces(&self) -> Vec<crate::action::WorkspaceInfo> {
         let focused_ws = self.current_workspace();
         let visible: Vec<WorkspaceId> = self.visible_workspaces();
         self.access
@@ -442,8 +405,19 @@ impl Hub {
             .into_iter()
             .map(|ws_id| {
                 let ws = self.access.workspaces.get(ws_id);
-                super::WorkspaceInfo {
+                let (monitor, state) = match &ws.attachment {
+                    Attachment::Attached => (
+                        self.access.monitors.get(ws.monitor).unique_name.clone(),
+                        crate::action::WorkspaceState::Attached,
+                    ),
+                    Attachment::Parked { origin } => {
+                        (origin.clone(), crate::action::WorkspaceState::Parked)
+                    }
+                };
+                crate::action::WorkspaceInfo {
                     name: ws.name.clone(),
+                    monitor,
+                    state,
                     is_focused: ws_id == focused_ws,
                     is_visible: visible.contains(&ws_id),
                     window_count: self.count_workspace_windows(ws_id, ws),
@@ -490,85 +464,6 @@ impl Hub {
         self.access.preferred_layouts.push(config);
 
         export
-    }
-
-    pub(crate) fn add_monitor(
-        &mut self,
-        name: String,
-        work_area: PixelRect,
-        scale: f32,
-    ) -> MonitorId {
-        let monitor_id = self.access.monitors.allocate(Monitor {
-            name: name.clone(),
-            work_area,
-            scale,
-            active_workspace: WorkspaceId::new(0),
-        });
-        // FIXME: each monitor have a dedicated set of workspaces, might be sharing the same name with the primary monitor
-        let workspace_name = if name == "primary" {
-            "0".to_string()
-        } else {
-            name.clone()
-        };
-        let ws_id = self
-            .access
-            .workspaces
-            .allocate(Workspace::new(workspace_name.clone(), monitor_id));
-        self.access.monitors.get_mut(monitor_id).active_workspace = ws_id;
-        self.strategies.register(&mut self.access, ws_id);
-        monitor_id
-    }
-
-    pub(crate) fn remove_monitor(&mut self, monitor_id: MonitorId, fallback_id: MonitorId) {
-        assert!(
-            fallback_id != monitor_id,
-            "fallback must differ from removed monitor"
-        );
-
-        let workspaces_to_migrate: Vec<WorkspaceId> = self
-            .access
-            .workspaces
-            .sorted_ids()
-            .into_iter()
-            .filter(|&id| self.access.workspaces.get(id).monitor == monitor_id)
-            .collect();
-
-        for ws_id in workspaces_to_migrate {
-            self.access.workspaces.get_mut(ws_id).monitor = fallback_id;
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .compute_placement(&self.access, ws_id);
-        }
-
-        if self.access.focused_monitor == monitor_id {
-            self.access.focused_monitor = fallback_id;
-        }
-        self.access.monitors.delete(monitor_id);
-    }
-
-    pub(crate) fn update_monitor(
-        &mut self,
-        monitor_id: MonitorId,
-        work_area: PixelRect,
-        scale: f32,
-    ) {
-        let monitor = self.access.monitors.get_mut(monitor_id);
-        monitor.work_area = work_area;
-        monitor.scale = scale;
-        // Collect IDs first to avoid borrowing self.access.workspaces while
-        // passing &mut self.access to the strategy.
-        let ws_ids: Vec<WorkspaceId> = self
-            .access
-            .workspaces
-            .sorted_ids()
-            .into_iter()
-            .filter(|&id| self.access.workspaces.get(id).monitor == monitor_id)
-            .collect();
-        for ws_id in ws_ids {
-            self.strategies
-                .for_workspace_mut(ws_id)
-                .compute_placement(&self.access, ws_id);
-        }
     }
 
     pub(crate) fn sync_configuration(&mut self, layout: GlobalLayoutConfig) {
@@ -854,119 +749,6 @@ impl Hub {
             self.strategies
                 .for_workspace_mut(ws)
                 .compute_placement(&self.access, ws);
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub(super) fn move_child_to_workspace_with_id(
-        &mut self,
-        window_id: WindowId,
-        target_ws: WorkspaceId,
-    ) {
-        let current_ws = self.current_workspace();
-        if current_ws == target_ws {
-            return;
-        }
-
-        let window = self.access.windows.get(window_id);
-        if window.is_minimized() {
-            panic!("Minimized window can't be moved");
-        }
-        match window.mode {
-            DisplayMode::Fullscreen { .. } => {
-                self.detach_fullscreen_from_workspace(window_id);
-                self.attach_fullscreen_to_workspace(target_ws, window_id, None);
-                self.access.workspaces.get_mut(target_ws).is_float_focused = false;
-            }
-            DisplayMode::Float { .. } => {
-                // Cross-workspace hop: drop occupy so the destination does not
-                // export the origin workspace's authored matcher.
-                let dim = self.detach_float_from_workspace(window_id);
-                self.attach_float_to_workspace(target_ws, window_id, dim, None);
-            }
-            DisplayMode::Tiling => {
-                self.move_focused_across_workspaces(current_ws, target_ws);
-            }
-        }
-
-        tracing::debug!("Moved to workspace");
-    }
-
-    pub(super) fn get_or_create_workspace(&mut self, name: &str) -> WorkspaceId {
-        if let Some(id) = self.access.workspaces.find(|w| w.name == name) {
-            return id;
-        }
-        let ws_id = self.access.workspaces.allocate(Workspace::new(
-            name.to_string(),
-            self.access.focused_monitor,
-        ));
-        self.strategies.register(&mut self.access, ws_id);
-        ws_id
-    }
-
-    pub(super) fn find_monitor_by_target(&self, target: &MonitorTarget) -> Option<MonitorId> {
-        match target {
-            MonitorTarget::Name(name) => self
-                .access
-                .monitors
-                .sorted_ids()
-                .into_iter()
-                .find(|&id| self.access.monitors.get(id).name == *name),
-            direction => {
-                let current = self
-                    .access
-                    .monitors
-                    .get(self.access.focused_monitor)
-                    .work_area;
-                // Doubled centres, so an odd extent does not lose half a unit to integer
-                // division. Only differences of centres are used, so the factor cancels.
-                let cx2 = 2 * current.x() + current.width();
-                let cy2 = 2 * current.y() + current.height();
-
-                self.access
-                    .monitors
-                    .sorted_ids()
-                    .into_iter()
-                    .filter(|&id| id != self.access.focused_monitor)
-                    .filter_map(|id| {
-                        let m = self.access.monitors.get(id).work_area;
-                        let dx = 2 * m.x() + m.width() - cx2;
-                        let dy = 2 * m.y() + m.height() - cy2;
-
-                        let valid = match direction {
-                            MonitorTarget::Left => dx < Pixels::ZERO,
-                            MonitorTarget::Right => dx > Pixels::ZERO,
-                            MonitorTarget::Up => dy < Pixels::ZERO,
-                            MonitorTarget::Down => dy > Pixels::ZERO,
-                            MonitorTarget::Name(_) => false,
-                        };
-                        let dx = i64::from(dx.value());
-                        let dy = i64::from(dy.value());
-                        valid.then_some((id, dx * dx + dy * dy))
-                    })
-                    .min_by_key(|(_, dist_sq)| *dist_sq)
-                    .map(|(id, _)| id)
-            }
-        }
-    }
-
-    pub(super) fn move_focused_across_workspaces(&mut self, from: WorkspaceId, to: WorkspaceId) {
-        let strategy = self.strategies.for_workspace_mut(from);
-        let child = strategy.detach_focused_child(&mut self.access, from);
-        let Some(child) = child else {
-            return;
-        };
-        if strategy.tiling_window_count(&self.access, from) == 0 {
-            let ws = self.access.workspaces.get_mut(from);
-            if ws.fullscreen_windows.is_empty() {
-                ws.is_float_focused = !ws.float_windows.is_empty();
-            }
-        }
-        self.strategies
-            .for_workspace_mut(to)
-            .reattach_child(&mut self.access, child, to);
-        if let Child::Window(window_id) = child {
-            self.set_workspace_focus(window_id);
         }
     }
 }

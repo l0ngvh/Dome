@@ -164,7 +164,7 @@ fn set_focus_switches_workspace() {
     let w0 = hub
         .insert_window(titled("w3"), default_rect(), WindowRestrictions::None)
         .unwrap();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w4"), default_rect(), WindowRestrictions::None);
     hub.set_focus(w0);
     assert_snapshot!(snapshot(&hub), @"
@@ -214,7 +214,7 @@ fn set_focus_switches_workspace() {
             WindowRestrictions::None,
         )
         .unwrap();
-    hub.focus_workspace("1");
+    hub.focus_workspace("1", None);
     hub.insert_window(titled("w6"), default_rect(), WindowRestrictions::None);
     hub.set_focus(f0);
     assert_snapshot!(snapshot(&hub), @r"
@@ -248,7 +248,7 @@ fn set_focus_in_other_workspace_keeps_origin_workspace() {
         .insert_window(titled("w7"), default_rect(), WindowRestrictions::None)
         .unwrap();
 
-    hub.move_focused_to_workspace("2");
+    hub.move_focused_to_workspace("2", None);
     hub.set_focus(w0);
 
     assert_snapshot!(snapshot(&hub), @"
