@@ -111,11 +111,11 @@ impl Runner {
                 }
             },
             HubEvent::MoveSizeStart(hwnd_id) => {
-                self.dome.move_size_started(hwnd_id);
-                // schedule_move_settle cancels any existing entry internally. The move-size-started
-                // notification is independent of the cancel and may run first.
-                self.timers
-                    .schedule_move_settle(hwnd_id, Instant::now(), DRAG_SAFETY_TIMEOUT);
+                if self.dome.is_managed(hwnd_id) {
+                    self.dome.move_size_started(hwnd_id);
+                    self.timers
+                        .schedule_move_settle(hwnd_id, Instant::now(), DRAG_SAFETY_TIMEOUT);
+                }
             }
             HubEvent::MoveSizeEnd {
                 hwnd_id,
@@ -123,7 +123,11 @@ impl Runner {
             } => {
                 self.timers.cancel_move_settle(hwnd_id);
                 self.dome.clear_move_state(hwnd_id);
-                self.dispatch_placement_read(hwnd_id, observed_at);
+                if self.dome.is_managed(hwnd_id) {
+                    self.dispatch_placement_read(hwnd_id, observed_at);
+                } else {
+                    self.dispatch_window_created(hwnd_id);
+                }
             }
             HubEvent::LocationChanged {
                 hwnd_id,

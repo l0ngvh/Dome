@@ -997,6 +997,10 @@ impl Dome {
             );
         }
     }
+
+    pub(super) fn is_managed(&self, id_key: HwndId) -> bool {
+        self.registry.contains_hwnd(id_key)
+    }
 }
 
 // Fallback display string derived from the executable name. Prefer
