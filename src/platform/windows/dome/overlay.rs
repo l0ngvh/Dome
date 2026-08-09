@@ -425,7 +425,7 @@ impl TilingOverlay {
         // click-through so pointer events reach managed windows below.
         let mut window = OwnedHwnd::new(
             TILING_OVERLAY_CLASS,
-            WS_EX_LAYERED | WS_EX_TRANSPARENT,
+            WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT,
             x_phys,
             y_phys,
             init_w,
