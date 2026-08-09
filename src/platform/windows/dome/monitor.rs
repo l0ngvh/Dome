@@ -25,8 +25,9 @@ pub(in crate::platform::windows) struct MonitorInfo {
     /// EDID friendly name (e.g. "DELL U2720Q") when one is available, else the
     /// GDI device string (`\\.\DISPLAY1`) as a last-resort human-usable label.
     pub(in crate::platform::windows) name: String,
-    /// GDI device string (`\\.\DISPLAY1`). Used purely as the join key to look
-    /// up the EDID friendly name after enumeration. Not a display label.
+    /// GDI device string (`\\.\DISPLAY1`). Join key for the EDID friendly name
+    /// lookup after enumeration, and published on `dome query monitors`. Not a
+    /// display label.
     pub(in crate::platform::windows) gdi_device: String,
     pub(in crate::platform::windows) work_area: PixelRect,
     /// Stays fractional because its only consumer is `reserve_for_bar`, whose
@@ -241,8 +242,13 @@ impl MonitorRegistry {
         }
 
         for monitor in monitors {
-            if let Some(id) = self.id_for_handle(monitor.handle)
-                && let Some(ms) = self.monitors.get(&id)
+            let Some(id) = self.id_for_handle(monitor.handle) else {
+                continue;
+            };
+            // Ahead of the change check, because Windows can move a szDevice to
+            // another display without the work area or scale moving with it.
+            hub.set_monitor_gdi_device(id, monitor.gdi_device.clone());
+            if let Some(ms) = self.monitors.get(&id)
                 && (ms.work_area != monitor.work_area || ms.scale != monitor.scale)
             {
                 let old_work_area = Some(ms.work_area);

@@ -3,7 +3,7 @@ use crate::action::{WorkspaceInfo, WorkspaceState};
 use crate::core::GlobalLayoutConfig;
 use crate::core::node::{PixelRect, WindowRestrictions};
 use crate::core::tests::{
-    LayoutConfigBuilder, default_rect, setup, setup_with_layout, titled, titled_matcher,
+    LayoutConfigBuilder, default_rect, dim_at, setup, setup_with_layout, titled, titled_matcher,
 };
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
@@ -193,4 +193,88 @@ fn multi_monitor_no_windows() {
     let unfocused = ws.iter().find(|w| !w.is_focused).unwrap();
     assert!(unfocused.is_visible);
     assert_eq!(unfocused.window_count, 0);
+}
+
+#[test]
+fn monitors_report_stamped_cg_display_id() {
+    let mut hub = setup();
+    let primary = hub.focused_monitor();
+    let external = hub.add_monitor("external".to_string(), dim_at(150, 0), 1.0);
+    hub.set_monitor_cg_display_id(primary, Some(1));
+    hub.set_monitor_cg_display_id(external, Some(7));
+
+    let monitors = hub.query_monitors();
+    assert_eq!(monitors.len(), 2);
+    let p = monitors
+        .iter()
+        .find(|m| m.unique_name == "primary")
+        .unwrap();
+    assert_eq!(p.cg_display_id, Some(1));
+    assert_eq!(p.gdi_device, None);
+    let e = monitors
+        .iter()
+        .find(|m| m.unique_name == "external")
+        .unwrap();
+    assert_eq!(e.cg_display_id, Some(7));
+}
+
+#[test]
+fn monitors_report_no_identifiers_before_stamping() {
+    let mut hub = setup();
+    hub.add_monitor("external".to_string(), dim_at(150, 0), 1.0);
+
+    // Every monitor passes through this state between add_monitor and its stamp.
+    for m in hub.query_monitors() {
+        assert_eq!(m.cg_display_id, None);
+        assert_eq!(m.gdi_device, None);
+    }
+}
+
+#[test]
+fn restamping_gdi_device_replaces_the_previous_value() {
+    let mut hub = setup();
+    let primary = hub.focused_monitor();
+    hub.set_monitor_gdi_device(primary, "\\\\.\\DISPLAY1".to_string());
+    hub.set_monitor_gdi_device(primary, "\\\\.\\DISPLAY2".to_string());
+
+    // Windows can move a device string between displays, so the newest wins.
+    let monitors = hub.query_monitors();
+    assert_eq!(monitors[0].gdi_device.as_deref(), Some("\\\\.\\DISPLAY2"));
+}
+
+#[test]
+fn recomputing_monitor_names_preserves_identifiers() {
+    let mut hub = setup();
+    let a = hub.add_monitor("twin".to_string(), dim_at(150, 0), 1.0);
+    let b = hub.add_monitor("twin".to_string(), dim_at(300, 0), 1.0);
+    hub.set_monitor_cg_display_id(a, Some(11));
+    hub.set_monitor_cg_display_id(b, Some(22));
+
+    // A third twin lands between them and reranks every suffix. The stamps must
+    // not travel with the names.
+    let c = hub.add_monitor("twin".to_string(), dim_at(225, 0), 1.0);
+    hub.set_monitor_cg_display_id(c, Some(33));
+
+    let monitors = hub.query_monitors();
+    let stamped = |name: &str| {
+        monitors
+            .iter()
+            .find(|m| m.unique_name == name)
+            .unwrap()
+            .cg_display_id
+    };
+    assert_eq!(stamped("twin #1"), Some(11));
+    assert_eq!(stamped("twin #2"), Some(33));
+    assert_eq!(stamped("twin #3"), Some(22));
+}
+
+#[test]
+fn monitors_are_ordered_by_screen_position() {
+    let mut hub = setup();
+    hub.add_monitor("right".to_string(), dim_at(300, 0), 1.0);
+    hub.add_monitor("middle".to_string(), dim_at(150, 0), 1.0);
+
+    let monitors = hub.query_monitors();
+    let names: Vec<&str> = monitors.iter().map(|m| m.unique_name.as_str()).collect();
+    assert_eq!(names, ["primary", "middle", "right"]);
 }

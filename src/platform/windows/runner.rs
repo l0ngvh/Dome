@@ -169,6 +169,7 @@ impl Runner {
                     crate::action::Query::MinimizedWindows => {
                         self.dome.query_minimized_windows_json()
                     }
+                    crate::action::Query::Monitors => self.dome.query_monitors_json(),
                 };
                 if sender.send(json).is_err() {
                     tracing::debug!("Query response dropped -- receiver gone");

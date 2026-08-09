@@ -14,7 +14,7 @@ use crate::core::node::Pixels;
 use crate::core::node::{PixelRect, WindowRestrictions};
 
 use crate::core::tests::{
-    default_rect, setup, setup_with_layout, snapshot, snapshot_text, titled, titled_matcher,
+    default_rect, dim_at, setup, setup_with_layout, snapshot, snapshot_text, titled, titled_matcher,
 };
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
@@ -995,10 +995,6 @@ fn monitor_noop_cases() {
         hub.move_focused_to_monitor(&MonitorTarget::Right);
         assert_eq!(snapshot_text(&hub), before);
     }
-}
-
-fn dim_at(x: i32, y: i32) -> PixelRect {
-    PixelRect::new(x, y, 100, 30)
 }
 
 #[test]

@@ -123,6 +123,7 @@ enum CliQuery {
     Workspaces,
     #[command(name = "minimized")]
     MinimizedWindows,
+    Monitors,
 }
 
 #[derive(Debug)]
@@ -191,6 +192,7 @@ impl From<CliQuery> for Query {
         match cq {
             CliQuery::Workspaces => Query::Workspaces,
             CliQuery::MinimizedWindows => Query::MinimizedWindows,
+            CliQuery::Monitors => Query::Monitors,
         }
     }
 }
@@ -414,6 +416,15 @@ mod tests {
         match d {
             Dispatch::Query(Query::Workspaces) => {}
             other => panic!("expected Query(Workspaces), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_query_monitors() {
+        let d = dispatch_from_argv(&["dome", "query", "monitors"]);
+        match d {
+            Dispatch::Query(Query::Monitors) => {}
+            other => panic!("expected Query(Monitors), got {other:?}"),
         }
     }
 

@@ -1055,6 +1055,12 @@ pub(crate) fn default_rect() -> PixelRect {
     PixelRect::new(0, 0, 100, 100)
 }
 
+/// Convenience: a 100x30 monitor rect at the given origin.
+pub(super) fn dim_at(x: i32, y: i32) -> PixelRect {
+    PixelRect::new(x, y, 100, 30)
+}
+
+/// Convenience: create a boxed `TestMetadata` with the given title.
 pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         title: Some(t.to_owned()),

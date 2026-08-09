@@ -33,7 +33,7 @@ use crate::core::{
 };
 use crate::platform::macos::accessibility::ExternalWindow;
 
-use monitor::MonitorRegistry;
+use monitor::{MonitorRegistry, publishable_display_id};
 use recovery::Recovery;
 use registry::{ManagedWindow, WindowRegistry};
 
@@ -222,10 +222,17 @@ impl Dome {
             workspace_overrides.clone(),
         );
         let primary_monitor_id = hub.focused_monitor();
+        // The primary bypasses `add_monitor`, so without its own stamp a
+        // single-display Mac would publish no display id at all.
+        hub.set_monitor_cg_display_id(
+            primary_monitor_id,
+            publishable_display_id(primary.display_id),
+        );
         let mut monitor_registry = MonitorRegistry::new(primary, primary_monitor_id);
         for monitor in monitors {
             if monitor.display_id != primary.display_id {
                 let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
+                hub.set_monitor_cg_display_id(id, publishable_display_id(monitor.display_id));
                 monitor_registry.insert(monitor, id);
             }
         }
@@ -590,6 +597,11 @@ impl Dome {
     pub(in crate::platform::macos) fn query_workspaces_json(&self) -> String {
         serde_json::to_string(&self.hub.query_workspaces())
             .expect("WorkspaceInfo is infallibly serializable")
+    }
+
+    pub(in crate::platform::macos) fn query_monitors_json(&self) -> String {
+        serde_json::to_string(&self.hub.query_monitors())
+            .expect("MonitorDetails is infallibly serializable")
     }
 
     pub(in crate::platform::macos) fn query_minimized_windows_json(&self) -> String {

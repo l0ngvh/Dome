@@ -89,6 +89,14 @@ fn get_display_id(screen: &NSScreen) -> CGDirectDisplayID {
         .unwrap_or(0)
 }
 
+/// Maps the `kCGNullDirectDisplay` sentinel `get_display_id` falls back to onto
+/// an absent id, so core never stores a zero that looks real.
+pub(in crate::platform::macos) fn publishable_display_id(
+    display_id: CGDirectDisplayID,
+) -> Option<u32> {
+    (display_id != 0).then_some(display_id)
+}
+
 type DisplayId = u32;
 
 /// True when a display was added or removed, or a surviving display's bounds
@@ -332,6 +340,12 @@ impl MonitorRegistry {
             if !self.contains(new_primary.display_id) {
                 self.replace_primary(new_primary);
                 hub.update_monitor(self.primary_monitor_id(), new_primary.work_area, 1.0);
+                // `replace_primary` rebinds this MonitorId onto a different
+                // panel, so the previous stamp is now wrong.
+                hub.set_monitor_cg_display_id(
+                    self.primary_monitor_id(),
+                    publishable_display_id(new_primary.display_id),
+                );
             } else {
                 self.set_primary_display_id(new_primary.display_id);
             }
@@ -341,6 +355,7 @@ impl MonitorRegistry {
         for monitor in monitors {
             if !self.contains(monitor.display_id) {
                 let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, 1.0);
+                hub.set_monitor_cg_display_id(id, publishable_display_id(monitor.display_id));
                 self.insert(monitor, id);
                 tracing::info!(%monitor, "Monitor added");
             }
