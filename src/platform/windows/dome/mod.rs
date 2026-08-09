@@ -158,6 +158,9 @@ impl Dome {
             workspace_overrides.clone(),
         );
         let primary_monitor_id = hub.focused_monitor();
+        // The primary bypasses `add_monitor`, so without its own stamp a
+        // single-display box would publish no GDI device at all.
+        hub.set_monitor_gdi_device(primary_monitor_id, primary.gdi_device.clone());
         let mut monitors_reg = MonitorRegistry::new();
         let mut tiling_overlays: HashMap<MonitorId, Box<dyn TilingOverlayApi>> = HashMap::new();
         monitors_reg.insert(
@@ -182,6 +185,7 @@ impl Dome {
         for monitor in &monitors {
             if monitor.handle != primary.handle {
                 let id = hub.add_monitor(monitor.name.clone(), monitor.work_area, monitor.scale);
+                hub.set_monitor_gdi_device(id, monitor.gdi_device.clone());
                 monitors_reg.insert(
                     monitor.handle,
                     id,
@@ -440,6 +444,11 @@ impl Dome {
     pub(super) fn query_workspaces_json(&self) -> String {
         serde_json::to_string(&self.hub.query_workspaces())
             .expect("WorkspaceInfo is infallibly serializable")
+    }
+
+    pub(super) fn query_monitors_json(&self) -> String {
+        serde_json::to_string(&self.hub.query_monitors())
+            .expect("MonitorDetails is infallibly serializable")
     }
 
     pub(super) fn query_minimized_windows_json(&self) -> String {

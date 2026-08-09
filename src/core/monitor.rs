@@ -23,6 +23,13 @@ pub(super) struct Monitor {
     /// assigned consistently by screen position from left to right, so the same
     /// set of monitors in the same arrangement always yields the same names.
     pub(super) unique_name: String,
+    // Stamped by the owning platform, not derived from the monitor set, so
+    // `recompute_monitor_names` leaves them alone.
+    /// `CGDirectDisplayID`. Windows has no stable counterpart, so `None` there.
+    pub(super) cg_display_id: Option<u32>,
+    /// Win32 szDevice (`\\.\DISPLAY1`). `None` on macOS. Restamped every
+    /// reconcile because Windows can move it to another display.
+    pub(super) gdi_device: Option<String>,
     pub(super) work_area: PixelRect,
     /// Multiplier applied to config-denominated lengths before use in
     /// layout math on this monitor. Stored here so `SizeConstraint::resolve`
@@ -88,6 +95,8 @@ impl Hub {
         let monitor_id = self.access.monitors.allocate(Monitor {
             device_name: name.clone(),
             unique_name: name.clone(),
+            cg_display_id: None,
+            gdi_device: None,
             work_area,
             scale,
             // Overwritten below. Workspace::new needs the monitor id, so
@@ -286,6 +295,26 @@ impl Hub {
                 .compute_placement(&self.access, ws_id);
         }
         self.recompute_monitor_names();
+    }
+
+    #[cfg_attr(
+        all(not(target_os = "macos"), not(test)),
+        expect(dead_code, reason = "stamped only by the macOS display list")
+    )]
+    pub(crate) fn set_monitor_cg_display_id(
+        &mut self,
+        monitor_id: MonitorId,
+        cg_display_id: Option<u32>,
+    ) {
+        self.access.monitors.get_mut(monitor_id).cg_display_id = cg_display_id;
+    }
+
+    #[cfg_attr(
+        all(not(target_os = "windows"), not(test)),
+        expect(dead_code, reason = "stamped only by the Windows monitor reconcile")
+    )]
+    pub(crate) fn set_monitor_gdi_device(&mut self, monitor_id: MonitorId, gdi_device: String) {
+        self.access.monitors.get_mut(monitor_id).gdi_device = Some(gdi_device);
     }
 
     pub(super) fn monitor_id_by_disambiguated_name(&self, name: &str) -> Option<MonitorId> {

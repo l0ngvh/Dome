@@ -16,6 +16,7 @@ pub enum IpcMessage {
 pub enum Query {
     Workspaces,
     MinimizedWindows,
+    Monitors,
 }
 
 /// Wire DTO for `Query::MinimizedWindows`. `bundle_id` is populated on
@@ -27,6 +28,30 @@ pub struct MinimizedWindow {
     pub app_name: Option<String>,
     pub bundle_id: Option<String>,
     pub executable_path: Option<String>,
+}
+
+/// Wire DTO for `Query::Monitors`. Not `MonitorInfo`, which both platform layers
+/// already define.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MonitorDetails {
+    pub device_name: String,
+    pub unique_name: String,
+    /// Session-scoped.
+    pub cg_display_id: Option<u32>,
+    /// Windows can reassign it to another display, so it is restamped every
+    /// reconcile.
+    pub gdi_device: Option<String>,
+    pub work_area: MonitorFrame,
+}
+
+/// The monitor work area. Core's `PixelRect` is generic over a unit tag, so it
+/// does not serialize.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MonitorFrame {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 /// Serializable workspace metadata for IPC queries. External tools (status bars,
@@ -462,6 +487,10 @@ mod tests {
             (
                 IpcMessage::Query(Query::MinimizedWindows),
                 r#"{"Query":"MinimizedWindows"}"#,
+            ),
+            (
+                IpcMessage::Query(Query::Monitors),
+                r#"{"Query":"Monitors"}"#,
             ),
         ];
         for (msg, expected) in &cases {
