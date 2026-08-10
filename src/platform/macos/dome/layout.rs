@@ -5,7 +5,6 @@ use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
 use super::events::{ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderFrame};
-use super::window::clip_to_bounds;
 
 /// Top `tab_bar_height` strip of a tabbed container's frame, in logical points.
 fn tab_bar_dimension(
@@ -156,21 +155,31 @@ impl Dome {
                 let mut float_shows = Vec::new();
 
                 for wp in tiling_windows {
-                    // Clip to visible_border_box bounds -- macOS doesn't reliably allow
-                    // placing windows partially off-screen (especially above menu bar)
-                    let visible_content = clip_to_bounds(wp.content_box, wp.visible_border_box);
-                    let Some(target) = visible_content else {
-                        let _span = tracing::debug_span!("empty_visible_content", content_box = ?wp.content_box, visible_border_box = ?wp.visible_border_box).entered();
+                    // macOS doesn't reliably allow placing windows partially off-screen
+                    // (especially above the menu bar), so place the trimmed rect.
+                    // Tiling placements are always Positioned, so parking is legal here.
+                    if wp.visible_content_box.is_empty() {
+                        tracing::debug!(
+                            window_id = %wp.id,
+                            border_box = ?wp.border_box,
+                            content_box = ?wp.content_box,
+                            "No visible content box, parking window"
+                        );
                         self.move_window_offscreen(wp.id);
                         continue;
-                    };
-                    self.show_tiling(wp.id, target);
+                    }
+                    self.show_tiling(wp.id, wp.visible_content_box);
                     placed_tiling.push(*wp);
                 }
 
                 for wp in float_windows {
                     // Float dimensions are screen-absolute. The OS clips at screen
                     // edges, so we use wp.border_box for everything (no visible_border_box).
+                    if wp.content_box.is_empty() {
+                        tracing::debug!(window_id = %wp.id, "Float content box entirely border, parking window");
+                        self.move_window_offscreen(wp.id);
+                        continue;
+                    }
                     if focused_window != Some(wp.id) {
                         self.move_window_offscreen(wp.id);
                     } else {

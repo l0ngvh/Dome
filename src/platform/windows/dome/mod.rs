@@ -609,9 +609,21 @@ impl Dome {
                     let mut placed_floats = Vec::new();
                     let mut container_data = Vec::new();
 
+                    // Windows places tiles unclipped, so a tile extending past the work
+                    // area stays where core put it. That is a current choice, not an
+                    // invariant -- macOS trims instead (macos/dome/layout.rs).
                     for wp in tiling_windows {
                         window_ids.insert(wp.id);
                         if self.registry.get(wp.id).is_none() {
+                            continue;
+                        }
+                        if wp.content_box.is_empty() {
+                            tracing::debug!(
+                                window_id = %wp.id,
+                                border_box = ?wp.border_box,
+                                "Content box entirely border, hiding window"
+                            );
+                            self.hide_window(wp.id);
                             continue;
                         }
                         placed_tiling.push(*wp);
@@ -619,6 +631,15 @@ impl Dome {
                     for wp in fw {
                         window_ids.insert(wp.id);
                         if self.registry.get(wp.id).is_none() {
+                            continue;
+                        }
+                        if wp.content_box.is_empty() {
+                            tracing::debug!(
+                                window_id = %wp.id,
+                                border_box = ?wp.border_box,
+                                "Float content box entirely border, hiding window"
+                            );
+                            self.hide_window(wp.id);
                             continue;
                         }
                         placed_floats.push(*wp);

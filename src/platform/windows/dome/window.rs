@@ -256,6 +256,10 @@ impl Dome {
         is_focused: bool,
         monitor: MonitorId,
     ) {
+        debug_assert!(
+            !wp.content_box.is_empty(),
+            "caller must guard against an empty content box"
+        );
         let scale = self.monitors.monitor(monitor).scale();
         let Some(entry) = self.registry.get_mut(id) else {
             return;
@@ -329,6 +333,10 @@ impl Dome {
         wp: &TilingWindowPlacement,
         monitor: MonitorId,
     ) {
+        debug_assert!(
+            !wp.content_box.is_empty(),
+            "caller must guard against an empty content box"
+        );
         let overlay = self
             .tiling_overlays
             .get_mut(&monitor)

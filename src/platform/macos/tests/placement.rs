@@ -14,6 +14,22 @@ fn single_window_placed_in_view() {
 }
 
 #[test]
+fn degenerate_content_box_parks_window() {
+    let mut macos = MacOS::new();
+    // 600 per edge against a 1080-tall work area leaves no content height at all.
+    let mut dome = macos.setup_dome_with_config(Config {
+        border_size: Length::new(600.0),
+        ..Config::default()
+    });
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    assert!(macos.is_offscreen(cg1));
+}
+
+#[test]
 fn two_windows_split_horizontally() {
     let mut macos = MacOS::new();
     let mut dome = macos.setup_dome();
@@ -36,6 +52,34 @@ fn two_windows_split_horizontally() {
     assert!(w1 > 0 && w2 > 0);
     assert!(!macos.is_offscreen(cg1));
     assert!(!macos.is_offscreen(cg2));
+}
+
+#[test]
+fn tile_past_work_area_is_trimmed() {
+    let mut macos = MacOS::new();
+    let mut dome = macos.setup_dome();
+
+    let cg1 = macos.spawn_window(100, "Safari", "Google");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg1)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    start_drag(&mut dome, 100);
+    macos.window(cg1).position.set((500, 300));
+    macos.window(cg1).size.set((400, 400));
+
+    let cg2 = macos.spawn_window(101, "Terminal", "zsh");
+    dome.reconcile_windows(&[], &[], &[], vec![new_window(&macos, cg2)], &[], &[]);
+    macos.settle(&mut dome, 10);
+
+    end_drag(&mut dome, &macos, 100, cg1, 500, 300, 400, 400);
+    macos.settle(&mut dome, 10);
+
+    // The drop leaves the tree wider than the work area, so cg1 is scrolled off the
+    // left edge and core's content_box for it starts at -92 with width 1912. macOS
+    // must place the trimmed rect rather than that.
+    let (x, _, w, _) = macos.window_frame(cg1);
+    assert_eq!(x, 0, "left edge clamped to the work area");
+    assert_eq!(w, 1820, "width trimmed down from the untrimmed 1912");
 }
 
 #[test]

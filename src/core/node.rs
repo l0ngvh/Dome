@@ -608,6 +608,12 @@ impl<U> Dimension<U> {
         Self::new(left, top, right - left, bottom - top)
     }
 
+    /// `<=` rather than `==` so an inverted extent counts as empty, matching what
+    /// `strategy::clip` rejects.
+    pub(crate) fn is_empty(self) -> bool {
+        self.width <= Length::ZERO || self.height <= Length::ZERO
+    }
+
     /// Clamps extent at zero rather than going negative. The origin is still
     /// pushed inward, so a box narrower than `2 * border` ends up empty at an
     /// origin past its own far edge.
@@ -767,5 +773,16 @@ mod tests {
         assert_eq!(d.x, Length::new(4.0));
         assert_eq!(d.width, Length::ZERO);
         assert_eq!(d.height, Length::new(1072.0));
+    }
+
+    #[test]
+    fn is_empty_is_true_when_either_extent_is_zero() {
+        assert!(dim(10.0, 10.0, 0.0, 50.0).is_empty());
+        assert!(dim(10.0, 10.0, 50.0, 0.0).is_empty());
+    }
+
+    #[test]
+    fn is_empty_is_false_for_a_positive_box() {
+        assert!(!dim(10.0, 10.0, 1.0, 1.0).is_empty());
     }
 }

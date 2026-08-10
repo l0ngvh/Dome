@@ -99,11 +99,13 @@ impl MasterStrategy {
                 let border_box = translate(dim, Length::ZERO, y_offset, screen).round();
                 if let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round) {
                     let is_highlighted = focused_id == Some(wid);
+                    let content_box = border_box.inset_by(border);
                     windows.push(TilingWindowPlacement {
                         id: wid,
                         border_box,
                         visible_border_box,
-                        content_box: border_box.inset_by(border),
+                        content_box,
+                        visible_content_box: clip(content_box, screen).unwrap_or_default(),
                         is_highlighted,
                         spawn_indicator: None,
                     });

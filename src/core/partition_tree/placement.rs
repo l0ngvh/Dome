@@ -111,11 +111,13 @@ impl PartitionTreeStrategy {
                     if let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round)
                     {
                         let is_highlighted = focused == Some(Child::Window(id));
+                        let content_box = border_box.inset_by(border);
                         windows.push(TilingWindowPlacement {
                             id,
                             border_box,
                             visible_border_box,
-                            content_box: border_box.inset_by(border),
+                            content_box,
+                            visible_content_box: clip(content_box, screen).unwrap_or_default(),
                             is_highlighted,
                             spawn_indicator: if is_highlighted {
                                 Some(SpawnIndicator::from(self.child_spawn_mode(child)))

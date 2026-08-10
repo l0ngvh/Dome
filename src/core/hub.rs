@@ -27,6 +27,16 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) border_box: Dimension,
     pub(crate) visible_border_box: Dimension,
     pub(crate) content_box: Dimension,
+    /// `content_box` trimmed to the monitor. Zero-area when nothing remains.
+    /// macOS places this. Windows places `content_box` and ignores it.
+    #[cfg_attr(
+        target_os = "windows",
+        expect(
+            dead_code,
+            reason = "macOS trims tiling placements to the work area, Windows places them unclipped"
+        )
+    )]
+    pub(crate) visible_content_box: Dimension,
     /// Whether to highlight the window, for example when the window is focused. Doesn't require
     /// that the window has keyboard focus.
     pub(crate) is_highlighted: bool,

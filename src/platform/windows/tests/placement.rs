@@ -13,6 +13,23 @@ fn single_window_fills_screen() {
 }
 
 #[test]
+fn degenerate_content_box_hides_window() {
+    // 600 physical per edge against a 1080-tall monitor leaves no content height,
+    // so core hands the shell an empty content box.
+    let mut env = TestEnv::new_with_monitors(
+        Config {
+            border_size: Length::new(600.0),
+            ..Config::default()
+        },
+        LayoutConfig::default(),
+        vec![scaled_monitor(1.0)],
+    );
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+
+    assert!(env.is_offscreen(w1));
+}
+
+#[test]
 fn two_windows_split_screen() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
