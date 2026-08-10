@@ -254,6 +254,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         )
                     });
                     overlay.set_tab_bar_height(frame.tab_bar_height);
+                    overlay.set_border_thickness(data.border_thickness);
                     if data.windows.is_empty() && data.containers.is_empty() {
                         overlay.clear();
                     } else {
@@ -290,14 +291,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                                 hub_sender.clone(),
                             )
                         });
-                        entry.render(
-                            cs.tab_bar_cocoa_frame,
-                            data.scale,
-                            cs.tab_bar_dim,
-                            cs.placement.titles.clone(),
-                            cs.placement.active_tab_index,
-                            cs.placement.is_highlighted,
-                        );
+                        entry.render(cs, data.scale, data.border_thickness);
                         active_tab_bars.insert(cs.placement.id);
                     }
                 }
@@ -324,6 +318,7 @@ unsafe extern "C-unwind" fn frame_callback(info: *mut c_void) {
                         &show.placement,
                         show.cocoa_frame,
                         show.scale,
+                        show.border_thickness,
                         frame.focused_window == Some(show.placement.id),
                     );
 

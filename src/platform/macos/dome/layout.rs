@@ -136,6 +136,7 @@ impl Dome {
                             dim,
                         ),
                         scale: monitor.egui_scale(),
+                        border_thickness: mp.border_thickness,
                         windows: Vec::new(),
                         containers: Vec::new(),
                     },
@@ -196,6 +197,7 @@ impl Dome {
                             wp.border_box,
                         ),
                         scale,
+                        border_thickness: mp.border_thickness,
                         content_dim: wp.content_box,
                     });
                 }
@@ -224,6 +226,7 @@ impl Dome {
                             monitor_dim,
                         ),
                         scale,
+                        border_thickness: mp.border_thickness,
                         windows: placed_tiling,
                         containers: container_data,
                     },

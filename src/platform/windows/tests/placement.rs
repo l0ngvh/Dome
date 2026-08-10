@@ -194,7 +194,7 @@ fn scaled_monitor(scale: f32) -> MonitorInfo {
 }
 
 fn only_recorded_tiling(env: &TestEnv) -> TilingWindowPlacement {
-    let TilingOverlayState::Visible { windows } = env.tiling_overlays()[0].state.clone() else {
+    let TilingOverlayState::Visible { windows, .. } = env.tiling_overlays()[0].state.clone() else {
         panic!(
             "tiling overlay should be visible, got {:?}",
             env.tiling_overlays()[0].state
@@ -255,6 +255,37 @@ fn show_tiling_scales_border_at_125pct() {
 
     assert_eq!(wp.content_box.x - wp.border_box.x, Length::new(5.0));
     assert_eq!(env.dim(w1), wp.content_box);
+}
+
+#[test]
+fn painted_thickness_equals_border_box_minus_content_box() {
+    let mut env = TestEnv::new_with_monitors(
+        Config::default(),
+        LayoutConfig::default(),
+        vec![scaled_monitor(1.25)],
+    );
+    env.open(1, "App1", "app1.exe", SPAWN_DIM);
+
+    let TilingOverlayState::Visible {
+        windows,
+        border_thickness,
+    } = env.tiling_overlays()[0].state.clone()
+    else {
+        panic!(
+            "tiling overlay should be visible, got {:?}",
+            env.tiling_overlays()[0].state
+        );
+    };
+    assert_eq!(windows.len(), 1, "expected exactly one recorded window");
+    let wp = windows[0];
+
+    // The painter strokes a band of exactly this thickness inside border_box, so any
+    // disagreement with the inset core already applied shows up as a hairline.
+    assert_eq!(border_thickness, wp.content_box.x - wp.border_box.x);
+    assert_eq!(
+        border_thickness * 2.0,
+        wp.border_box.width - wp.content_box.width
+    );
 }
 
 #[test]

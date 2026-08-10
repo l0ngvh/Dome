@@ -76,6 +76,7 @@ pub(super) enum HubEvent {
 struct MonitorPositionData {
     monitor_id: MonitorId,
     dimension: Dimension,
+    border_thickness: Length<Physical>,
     tiling_windows: Vec<TilingWindowPlacement>,
     float_windows: Vec<FloatWindowPlacement>,
     containers: Vec<(ContainerPlacement, Vec<String>)>,
@@ -655,6 +656,7 @@ impl Dome {
                     per_monitor.push(MonitorPositionData {
                         monitor_id: mp.monitor_id,
                         dimension,
+                        border_thickness: mp.border_thickness,
                         tiling_windows: placed_tiling,
                         float_windows: placed_floats,
                         containers: container_data,
@@ -781,6 +783,7 @@ impl Dome {
                     focus_changed,
                     focused == Some(wp.id),
                     data.monitor_id,
+                    data.border_thickness,
                 );
             }
 
@@ -815,6 +818,7 @@ impl Dome {
                     &data.tiling_windows,
                     &data.containers,
                     scale,
+                    data.border_thickness,
                 );
             let tab_bar_h_logical = self.config.partition_tree.tab_bar_height;
             for (placement, titles) in data.containers.iter().filter(|(p, _)| p.is_tabbed) {
@@ -842,6 +846,7 @@ impl Dome {
                     placement.active_tab_index,
                     placement.is_highlighted,
                     scale,
+                    data.border_thickness,
                 );
             }
         }

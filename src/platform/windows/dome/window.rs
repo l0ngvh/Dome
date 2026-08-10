@@ -255,6 +255,7 @@ impl Dome {
         focus_changed: bool,
         is_focused: bool,
         monitor: MonitorId,
+        border_thickness: Length<Physical>,
     ) {
         debug_assert!(
             !wp.content_box.is_empty(),
@@ -296,14 +297,26 @@ impl Dome {
         if let Some(overlay) = self.float_overlays.get_mut(&id) {
             if needs_topmost {
                 entry.ext.set_position(ZOrder::Topmost, new_target);
-                overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()), scale);
+                overlay.update(
+                    wp,
+                    &self.config,
+                    ZOrder::After(entry.ext.id()),
+                    scale,
+                    border_thickness,
+                );
             } else if !settled {
                 // Window is already Topmost, so we shouldn't set topmost again to avoid bringing it
                 // up the z-order stack
                 entry.ext.set_position(ZOrder::Unchanged, new_target);
-                overlay.update(wp, &self.config, ZOrder::After(entry.ext.id()), scale);
+                overlay.update(
+                    wp,
+                    &self.config,
+                    ZOrder::After(entry.ext.id()),
+                    scale,
+                    border_thickness,
+                );
             } else if focus_changed {
-                overlay.update(wp, &self.config, ZOrder::Unchanged, scale);
+                overlay.update(wp, &self.config, ZOrder::Unchanged, scale, border_thickness);
             }
         }
 
@@ -686,7 +699,7 @@ impl Dome {
                     is_highlighted: self.last_focused == Some(id),
                 };
                 if let Some(overlay) = self.float_overlays.get_mut(&id) {
-                    overlay.update(&wp, &self.config, ZOrder::After(hwnd), scale);
+                    overlay.update(&wp, &self.config, ZOrder::After(hwnd), scale, border);
                 }
             }
 

@@ -37,7 +37,10 @@ use crate::theme::Flavor;
 #[derive(Clone, Debug)]
 enum TilingOverlayState {
     Hidden,
-    Visible { windows: Vec<TilingWindowPlacement> },
+    Visible {
+        windows: Vec<TilingWindowPlacement>,
+        border_thickness: Length<Physical>,
+    },
 }
 
 /// Mirrors what the real float overlay shows on screen. `update` writes
@@ -941,6 +944,7 @@ impl FloatOverlayApi for MockFloatOverlay {
         _: &Config,
         z_order: ZOrder,
         _scale: f32,
+        _border_thickness: Length<Physical>,
     ) {
         self.shared.state.set(FloatOverlayState::Visible {
             window_id: wp.id,
@@ -1024,6 +1028,7 @@ impl TilingOverlayApi for MockTilingOverlay {
         windows: &[TilingWindowPlacement],
         _containers: &[(ContainerPlacement, Vec<String>)],
         _scale: f32,
+        border_thickness: Length<Physical>,
     ) {
         if self.monitor.get() != monitor {
             self.monitor.set(monitor);
@@ -1034,6 +1039,7 @@ impl TilingOverlayApi for MockTilingOverlay {
         // where show_tiling's per-window lift maintains the invariant.
         *self.state.borrow_mut() = TilingOverlayState::Visible {
             windows: windows.to_vec(),
+            border_thickness,
         };
     }
     fn clear(&mut self) {
@@ -1103,6 +1109,7 @@ impl TabBarOverlayApi for MockTabBarHandle {
         active_index: usize,
         _is_highlighted: bool,
         _scale: f32,
+        _border_thickness: Length<Physical>,
     ) {
         *self.inner.last_update.borrow_mut() = Some(TabBarUpdate {
             titles,

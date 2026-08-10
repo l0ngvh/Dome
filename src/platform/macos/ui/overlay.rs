@@ -72,6 +72,7 @@ pub(super) struct FloatOverlay {
     is_focused: Cell<bool>,
     placement: Option<FloatWindowPlacement>,
     scale: f64,
+    border_thickness: Length<Logical>,
     config: Config,
 }
 
@@ -152,6 +153,7 @@ impl FloatOverlay {
             is_focused: Cell::new(false),
             placement: None,
             scale: 1.0,
+            border_thickness: Length::new(0.0),
             config,
         }
     }
@@ -161,10 +163,12 @@ impl FloatOverlay {
         placement: &FloatWindowPlacement,
         cocoa_frame: NSRect,
         scale: f64,
+        border_thickness: Length<Logical>,
         is_focused: bool,
     ) {
         self.placement = Some(*placement);
         self.scale = scale;
+        self.border_thickness = border_thickness;
         self.is_focused.set(is_focused);
 
         self.window.setFrame_display(cocoa_frame, true);
@@ -181,7 +185,7 @@ impl FloatOverlay {
         }
 
         let config = &self.config;
-        let border = BorderMetrics::from_thickness(config.border_size);
+        let border = BorderMetrics::from_thickness(self.border_thickness);
         let theme = config.theme();
         self.renderer.render(scale as f32, Vec::new(), |ui| {
             // layer_painter bypasses egui's Area sizing pass, avoiding
@@ -224,7 +228,9 @@ impl FloatOverlay {
         self.config = config.clone();
         if let Some(placement) = self.placement {
             let config = &self.config;
-            let border = BorderMetrics::from_thickness(config.border_size);
+            // The stored thickness is one frame stale after a config change. The
+            // following flush_layout carries the new one.
+            let border = BorderMetrics::from_thickness(self.border_thickness);
             let theme = config.theme();
             self.renderer.render(self.scale as f32, Vec::new(), |ui| {
                 let painter = ui.ctx().layer_painter(egui::LayerId::new(
@@ -340,6 +346,10 @@ impl TilingOverlay {
         self.view.ivars().tab_bar_height.set(h);
     }
 
+    pub(super) fn set_border_thickness(&self, t: Length<Logical>) {
+        self.view.ivars().border_thickness.set(t);
+    }
+
     pub(super) fn clear(&self) {
         self.view.clear();
         self.view.render_now();
@@ -435,6 +445,7 @@ pub(super) struct TilingOverlayViewIvars {
     containers: RefCell<Vec<ContainerShow>>,
     config: RefCell<Config>,
     tab_bar_height: Cell<Length<Logical>>,
+    border_thickness: Cell<Length<Logical>>,
     scale: Cell<f64>,
 }
 
@@ -474,6 +485,7 @@ impl TilingOverlayView {
             containers: RefCell::new(Vec::new()),
             config: RefCell::new(config),
             tab_bar_height: Cell::new(tab_bar_height),
+            border_thickness: Cell::new(Length::new(0.0)),
             scale: Cell::new(scale),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
@@ -559,7 +571,7 @@ impl TilingOverlayView {
                 titles: cs.placement.titles.clone(),
             })
             .collect();
-        let border = BorderMetrics::from_thickness(config.border_size);
+        let border = BorderMetrics::from_thickness(ivars.border_thickness.get());
         let metrics = OverlayMetrics {
             border,
             tab_bar_height: ivars.tab_bar_height.get(),
@@ -653,18 +665,16 @@ impl TabBarOverlay {
         Self { window, view }
     }
 
-    pub(super) fn render(
-        &self,
-        cocoa_frame: NSRect,
-        scale: f64,
-        bar: Dimension<Logical>,
-        titles: Vec<String>,
-        active_tab_index: usize,
-        is_highlighted: bool,
-    ) {
-        self.window.setFrame_display(cocoa_frame, false);
-        self.view
-            .update(scale, bar, titles, active_tab_index, is_highlighted);
+    pub(super) fn render(&self, cs: &ContainerShow, scale: f64, border_thickness: Length<Logical>) {
+        self.window.setFrame_display(cs.tab_bar_cocoa_frame, false);
+        self.view.update(
+            scale,
+            cs.tab_bar_dim,
+            border_thickness,
+            cs.placement.titles.clone(),
+            cs.placement.active_tab_index,
+            cs.placement.is_highlighted,
+        );
         self.window.setIsVisible(true);
     }
 
@@ -685,6 +695,7 @@ pub(super) struct TabBarOverlayViewIvars {
     events: RefCell<Vec<egui::Event>>,
     renderer: RefCell<Renderer>,
     bar: Cell<Dimension<Logical>>,
+    border_thickness: Cell<Length<Logical>>,
     titles: RefCell<Vec<String>>,
     active_tab_index: Cell<usize>,
     is_highlighted: Cell<bool>,
@@ -764,6 +775,7 @@ impl TabBarOverlayView {
             events: RefCell::new(Vec::new()),
             renderer: RefCell::new(renderer),
             bar: Cell::new(Dimension::default()),
+            border_thickness: Cell::new(Length::new(0.0)),
             titles: RefCell::new(Vec::new()),
             active_tab_index: Cell::new(0),
             is_highlighted: Cell::new(false),
@@ -784,12 +796,14 @@ impl TabBarOverlayView {
         &self,
         scale: f64,
         bar: Dimension<Logical>,
+        border_thickness: Length<Logical>,
         titles: Vec<String>,
         active_tab_index: usize,
         is_highlighted: bool,
     ) {
         let ivars = self.ivars();
         ivars.bar.set(bar);
+        ivars.border_thickness.set(border_thickness);
         ivars.scale.set(scale);
         *ivars.titles.borrow_mut() = titles;
         ivars.active_tab_index.set(active_tab_index);
@@ -831,7 +845,7 @@ impl TabBarOverlayView {
         let scale = ivars.scale.get();
         let container_id = ivars.container_id;
 
-        let border = BorderMetrics::from_thickness(config.border_size);
+        let border = BorderMetrics::from_thickness(ivars.border_thickness.get());
         let metrics = OverlayMetrics {
             border,
             tab_bar_height: bar.height,

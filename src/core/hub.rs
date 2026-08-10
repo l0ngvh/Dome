@@ -66,6 +66,9 @@ pub(crate) struct ContainerPlacement {
 
 pub(crate) struct MonitorPlacements {
     pub(crate) monitor_id: MonitorId,
+    /// Resolved once per monitor. Emitted so the overlay paints the exact gap the
+    /// inset left rather than re-deriving it from config.
+    pub(crate) border_thickness: Length<Unit>,
     pub(crate) layout: MonitorLayout,
 }
 
@@ -656,6 +659,7 @@ impl Hub {
                 if let Some(&fs_id) = ws.fullscreen_windows.last() {
                     return MonitorPlacements {
                         monitor_id: ws.monitor,
+                        border_thickness: self.access.border(ws.monitor),
                         layout: MonitorLayout::Fullscreen(fs_id),
                     };
                 }
@@ -696,6 +700,7 @@ impl Hub {
 
                 MonitorPlacements {
                     monitor_id: ws.monitor,
+                    border_thickness: border,
                     layout: MonitorLayout::Normal {
                         tiling_windows,
                         float_windows,

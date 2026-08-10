@@ -393,6 +393,7 @@ pub(in crate::platform::windows) struct TilingOverlay {
     containers: Vec<(ContainerPlacement, Vec<String>)>,
     config: Config,
     tab_bar_height: Length<Logical>,
+    border_thickness: Length<Physical>,
     window: OwnedHwnd,
     scale: f32,
 }
@@ -459,6 +460,7 @@ impl TilingOverlay {
             height_phys: init_h,
             windows: Vec::new(),
             containers: Vec::new(),
+            border_thickness: Length::new(0.0),
             config,
             tab_bar_height,
             window,
@@ -498,7 +500,7 @@ impl TilingOverlay {
         let config = &self.config;
         let theme = config.theme();
         let metrics = overlay::OverlayMetrics {
-            border: overlay::BorderMetrics::from_thickness(config.border_size),
+            border: overlay::BorderMetrics::from_thickness(self.border_thickness.to_logical(scale)),
             tab_bar_height: self.tab_bar_height,
         };
         let w_phys = self.width_phys;
@@ -526,6 +528,7 @@ impl TilingOverlayApi for TilingOverlay {
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
         scale: f32,
+        border_thickness: Length<Physical>,
     ) {
         let (x_phys, y_phys, w_phys, h_phys) = monitor.to_surface_size();
 
@@ -557,6 +560,7 @@ impl TilingOverlayApi for TilingOverlay {
         self.windows = windows.to_vec();
         self.containers = containers.to_vec();
         self.scale = scale;
+        self.border_thickness = border_thickness;
         self.rerender();
     }
 
@@ -664,7 +668,14 @@ pub(in crate::platform::windows) unsafe extern "system" fn tiling_overlay_wnd_pr
 }
 
 pub(in crate::platform::windows) trait FloatOverlayApi {
-    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder, scale: f32);
+    fn update(
+        &mut self,
+        wp: &FloatWindowPlacement,
+        config: &Config,
+        z: ZOrder,
+        scale: f32,
+        border_thickness: Length<Physical>,
+    );
     fn hide(&mut self);
     fn set_config(&mut self, config: &Config);
 }
@@ -676,6 +687,7 @@ pub(in crate::platform::windows) trait TilingOverlayApi {
         windows: &[TilingWindowPlacement],
         containers: &[(ContainerPlacement, Vec<String>)],
         scale: f32,
+        border_thickness: Length<Physical>,
     );
     fn clear(&mut self);
     fn set_config(&mut self, config: &Config);
@@ -757,7 +769,14 @@ impl FloatOverlay {
 }
 
 impl FloatOverlayApi for FloatOverlay {
-    fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder, scale: f32) {
+    fn update(
+        &mut self,
+        wp: &FloatWindowPlacement,
+        config: &Config,
+        z: ZOrder,
+        scale: f32,
+        border_thickness: Length<Physical>,
+    ) {
         let vf = wp.visible_border_box;
         let (x_phys, y_phys, w_phys, h_phys) = vf.to_surface_size();
 
@@ -792,7 +811,7 @@ impl FloatOverlayApi for FloatOverlay {
         let vf_logical = vf.to_logical(scale);
         let frame_logical = wp.border_box.to_logical(scale);
         let theme = config.theme();
-        let border = overlay::BorderMetrics::from_thickness(config.border_size);
+        let border = overlay::BorderMetrics::from_thickness(border_thickness.to_logical(scale));
         let is_highlighted = wp.is_highlighted;
 
         self.renderer.render(w_phys, h_phys, scale, vec![], |ui| {
@@ -926,6 +945,20 @@ trait PhysicalDimensionExt {
     fn to_surface_size(self) -> (i32, i32, u32, u32);
 }
 
+trait PhysicalLengthExt {
+    fn to_logical(self, scale: f32) -> Length<Logical>;
+}
+
+impl PhysicalLengthExt for Length<Physical> {
+    /// Deliberately does not round. Core insets by an integral physical thickness, so
+    /// dividing recovers it exactly on multiplication back, and rounding here would
+    /// reintroduce the disagreement between the painted band and the inset.
+    fn to_logical(self, scale: f32) -> Length<Logical> {
+        debug_assert!(scale > 0.0, "scale must be positive, got {scale}");
+        Length::new(self.value() / scale)
+    }
+}
+
 impl PhysicalDimensionExt for Dimension<Physical> {
     fn to_logical(self, scale: f32) -> Dimension<Logical> {
         debug_assert!(scale > 0.0, "scale must be positive, got {scale}");
@@ -961,6 +994,7 @@ pub(in crate::platform::windows) trait TabBarOverlayApi {
         active_index: usize,
         is_highlighted: bool,
         scale: f32,
+        border_thickness: Length<Physical>,
     );
     #[expect(
         dead_code,
@@ -986,6 +1020,7 @@ pub(in crate::platform::windows) struct TabBarOverlay {
     hub_sender: HubSender,
     window: OwnedHwnd,
     scale: f32,
+    border_thickness: Length<Physical>,
     // First update positions and shows. Later updates skip SWP_SHOWWINDOW so a
     // hide() does not get clobbered by the next paint pass.
     placed: bool,
@@ -1036,6 +1071,7 @@ impl TabBarOverlay {
             container_id,
             width_phys: w_phys,
             height_phys: h_phys,
+            border_thickness: Length::new(0.0),
             titles: Vec::new(),
             active_index: 0,
             is_highlighted: false,
@@ -1068,7 +1104,7 @@ impl TabBarOverlay {
         let bar_h_logical = Length::<Logical>::new(h_phys as f32 / scale);
         let bar_w_logical = Length::<Logical>::new(w_phys as f32 / scale);
         let metrics = overlay::OverlayMetrics {
-            border: overlay::BorderMetrics::from_thickness(config.border_size),
+            border: overlay::BorderMetrics::from_thickness(self.border_thickness.to_logical(scale)),
             tab_bar_height: bar_h_logical,
         };
         let canvas_local =
@@ -1096,11 +1132,13 @@ impl TabBarOverlayApi for TabBarOverlay {
         active_index: usize,
         is_highlighted: bool,
         scale: f32,
+        border_thickness: Length<Physical>,
     ) {
         self.titles = titles;
         self.active_index = active_index;
         self.is_highlighted = is_highlighted;
         self.scale = scale;
+        self.border_thickness = border_thickness;
         let (x_phys, y_phys, w_phys, h_phys) = rect.to_surface_size();
         if w_phys != self.width_phys || h_phys != self.height_phys {
             self.renderer.resize(w_phys, h_phys);
