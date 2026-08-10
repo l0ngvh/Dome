@@ -31,6 +31,7 @@ use crate::core::{
 const ASCII_WIDTH: usize = 150;
 const ASCII_HEIGHT: usize = 30;
 const TAB_BAR_HEIGHT: f32 = 2.0;
+const BORDER_SIZE: f32 = 1.0;
 
 pub(super) fn snapshot(hub: &Hub) -> String {
     validate_hub(hub);
@@ -740,6 +741,7 @@ impl TestHubBuilder {
 
 struct LayoutConfigBuilder {
     strategy: Strategy,
+    border_size: Length<Logical>,
     master: MasterConfig,
     partition_tree: PartitionTreeConfig,
     size_constraints: SizeConstraints,
@@ -751,6 +753,7 @@ impl LayoutConfigBuilder {
     fn new() -> Self {
         Self {
             strategy: Strategy::PartitionTree,
+            border_size: Length::<Logical>::new(BORDER_SIZE),
             master: MasterConfig {
                 master_ratio: 0.5,
                 master_count: 1,
@@ -835,6 +838,7 @@ impl LayoutConfigBuilder {
     fn build(self) -> GlobalLayoutConfig {
         GlobalLayoutConfig {
             strategy: self.strategy,
+            border_size: self.border_size,
             partition_tree: self.partition_tree,
             master: self.master,
             size_constraints: self.size_constraints,

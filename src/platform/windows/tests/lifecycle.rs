@@ -474,7 +474,7 @@ fn dpi_change_then_apply_layout_places_at_new_scale() {
     // Hub delivers frames in physical pixels. DPI change scales border but
     // not the physical monitor dimension, so the content rect shrinks by
     // 2 * border * (scale - 1) per axis.
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
     let expected_x = (before.x * 1.5).round();
     let expected_y = (before.y * 1.5).round();
     let expected_w = (before.width - border).round();
@@ -537,7 +537,7 @@ fn handle_dpi_change_on_secondary_monitor_updates_secondary_only() {
     // not the physical monitor dimension, so the content rect shifts by
     // border * (new_scale - old_scale) per axis and shrinks by 2 * that.
     let after_b = env.dim(w_b);
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
     let expected_x = before_b.x + border;
     let expected_y = before_b.y + border;
     let expected_w = before_b.width - border * 2.0;

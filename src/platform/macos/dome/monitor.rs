@@ -5,7 +5,7 @@ use objc2_app_kit::NSScreen;
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGMainDisplayID};
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::core::{Dimension, Hub, Length, MonitorId, Unit, WindowId};
+use crate::core::{Dimension, Hub, Length, MonitorId, WindowId};
 use crate::platform::reserve_for_bar;
 
 use super::{Dome, RoundedDimension};
@@ -270,12 +270,6 @@ impl MonitorRegistry {
             }
         }
         best.map(|(m, _)| m)
-    }
-
-    /// macOS scale is always 1.0 (AppKit reports in points), so this returns
-    /// `border` unchanged. Exists for surface parity with Windows.
-    pub(super) fn physical_border(&self, _id: MonitorId, border: Length<Unit>) -> Length<Unit> {
-        border
     }
 
     pub(super) fn is_borderless_fullscreen_at(&self, dim: RoundedDimension) -> bool {

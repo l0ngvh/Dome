@@ -100,7 +100,7 @@ fn resize_detects_fullscreen() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
 
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
     let d = env.dim(w1);
     assert_eq!(d.x, border, "should start tiled with border inset");
 
@@ -150,8 +150,8 @@ fn dont_correct_float_move() {
 }
 
 // These tests verify that show_tiling, show_float, and show_fullscreen_window
-// pass physical-native frames from Hub directly to SetWindowPos. Border inset
-// uses `config.border_size * monitor.scale` (config-to-physical scaling).
+// pass physical-native frames from Hub directly to SetWindowPos. The shell no
+// longer insets anything: it places core's `content_box` verbatim.
 
 fn scaled_monitor(scale: f32) -> MonitorInfo {
     // MonitorInfo.dimension is physical pixels. At non-1.0 scales the physical
@@ -176,6 +176,26 @@ fn scaled_monitor(scale: f32) -> MonitorInfo {
     }
 }
 
+fn only_recorded_tiling(env: &TestEnv) -> TilingWindowPlacement {
+    let TilingOverlayState::Visible { windows } = env.tiling_overlays()[0].state.clone() else {
+        panic!(
+            "tiling overlay should be visible, got {:?}",
+            env.tiling_overlays()[0].state
+        );
+    };
+    assert_eq!(windows.len(), 1, "these tests tile exactly one window");
+    windows[0]
+}
+
+/// Holds whatever the border resolves to, so it pins the shape of the inset
+/// without restating the scale multiply the assertion is meant to check.
+fn assert_content_box_centered_in_border_box(wp: &TilingWindowPlacement) {
+    let inset = wp.content_box.x - wp.border_box.x;
+    assert_eq!(wp.content_box.y - wp.border_box.y, inset);
+    assert_eq!(wp.content_box.width, wp.border_box.width - inset * 2.0);
+    assert_eq!(wp.content_box.height, wp.border_box.height - inset * 2.0);
+}
+
 #[test]
 fn show_tiling_places_at_100pct() {
     let mut env = TestEnv::new_with_monitors(
@@ -184,13 +204,10 @@ fn show_tiling_places_at_100pct() {
         vec![scaled_monitor(1.0)],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let border = Length::new(env.config.border_size);
-    let d = env.dim(w1);
-    // At 1.0 scale, physical == logical. Border scaled by 1.0 is unchanged.
-    assert_eq!(d.x, border);
-    assert_eq!(d.y, border);
-    assert_eq!(d.width, SCREEN_WIDTH - 2.0 * border);
-    assert_eq!(d.height, SCREEN_HEIGHT - 2.0 * border);
+    let wp = only_recorded_tiling(&env);
+
+    assert_eq!(env.dim(w1), wp.content_box);
+    assert_content_box_centered_in_border_box(&wp);
 }
 
 #[test]
@@ -201,16 +218,26 @@ fn show_tiling_places_at_150pct() {
         vec![scaled_monitor(1.5)],
     );
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let border = Length::new(env.config.border_size);
-    let phys_w = SCREEN_WIDTH * 1.5;
-    let phys_h = SCREEN_HEIGHT * 1.5;
-    let scaled_border = border * 1.5;
-    let d = env.dim(w1);
-    // Hub places in physical; border is config.border_size * scale.
-    assert_eq!(d.x, (scaled_border).round());
-    assert_eq!(d.y, (scaled_border).round());
-    assert_eq!(d.width, (phys_w - 2.0 * scaled_border).round());
-    assert_eq!(d.height, (phys_h - 2.0 * scaled_border).round());
+    let wp = only_recorded_tiling(&env);
+
+    assert_eq!(env.dim(w1), wp.content_box);
+    assert_content_box_centered_in_border_box(&wp);
+}
+
+// 4.0 logical * 1.25 is exactly 5.0 physical, so the scaled border is
+// representable and the assertion needs no rounding slack.
+#[test]
+fn show_tiling_scales_border_at_125pct() {
+    let mut env = TestEnv::new_with_monitors(
+        Config::default(),
+        LayoutConfig::default(),
+        vec![scaled_monitor(1.25)],
+    );
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    let wp = only_recorded_tiling(&env);
+
+    assert_eq!(wp.content_box.x - wp.border_box.x, Length::new(5.0));
+    assert_eq!(env.dim(w1), wp.content_box);
 }
 
 #[test]
@@ -261,7 +288,7 @@ fn show_tiling_places_at_200pct_offset_monitor() {
     // Move to the secondary monitor
     env.run_actions("move monitor right");
     env.settle(10);
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
     let scaled_border = border * 2.0;
     let d = env.dim(w1);
     // Hub places directly in physical coords on the secondary monitor.
@@ -291,7 +318,7 @@ fn show_float_places_at_125pct() {
     env.settle(10);
 
     // Under physical-native core, the observation (200,150,600,400) is stored
-    // directly (after reverse_inset for Hub, then apply_inset for show_float).
+    // directly (reverse_inset on the way into Hub, then core's inset back out).
     // Round-trip is identity: no conversion.
     let d = env.dim(w1);
     assert_eq!(d.x, Length::new(200.0));
@@ -477,7 +504,7 @@ fn monitor_dpi_changed_reruns_layout_with_new_scale() {
 
     let d_before = env.dim(w2);
     // At scale 1.0, tab bar is 30px: y == border + 30, height == 1080 - 2*border - 30
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
     let tab_h_1x = Length::new(30.0);
     assert_eq!(d_before.y, (border + tab_h_1x).round());
 
@@ -523,7 +550,7 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
         panic!("Float invisible");
     };
 
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
     assert_eq!(overlay_dim.x, Length::new(200.0) - border);
     assert_eq!(overlay_dim.y, Length::new(150.0) - border);
     assert_eq!(overlay_dim.width, Length::new(600.0) + 2.0 * border);
@@ -601,7 +628,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     env.dome.apply_layout();
     env.settle(10);
 
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
     env.moves.lock().unwrap().clear();
     env.move_window_to(w1, dim(2020, 100, 400, 300));
 
@@ -617,9 +644,8 @@ fn float_move_monitor_different_dpi_rescales_border() {
         panic!("Float invisible");
     };
 
-    // On the target monitor at scale 2.0, physical_border = border * 2.0. The content rect is
-    // apply_inset(outer, border * 2.0) which differs from the original apply_inset(outer, border *
-    // 1.0).
+    // On the target monitor at scale 2.0 core resolves the border to border * 2.0, so the content
+    // rect is the outer box inset by that, which differs from the inset it had at scale 1.0.
     let scaled_border = border * 2.0;
     assert_eq!(overlay_dim.x, Length::new(2020.0) - scaled_border);
     assert_eq!(overlay_dim.y, Length::new(100.0) - scaled_border);
@@ -670,7 +696,7 @@ fn dome_new_assigns_per_monitor_scale() {
         LayoutConfig::default(),
         vec![primary, secondary],
     );
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
 
     // Verify primary monitor uses 1.5x scale via window placement.
     let w_a = env.open(1, "AppA", "a.exe", SPAWN_DIM);
@@ -720,7 +746,7 @@ fn float_drift_repositions_overlay() {
     env.flush_moves();
 
     // The overlay receives the border-expanded outer_dim, not the raw managed-window rect.
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
     let expected_outer = Dimension::new(
         Length::new(500.0) - border,
         Length::new(300.0) - border,
@@ -788,7 +814,7 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
 }
 
 fn full_work_area(env: &TestEnv) -> Dimension {
-    let border = Length::new(env.config.border_size);
+    let border = Length::new(env.config.border_size.logical());
     Dimension::new(
         border,
         border,

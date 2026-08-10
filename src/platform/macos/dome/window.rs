@@ -213,16 +213,7 @@ impl Placement {
     }
 }
 
-pub(super) fn apply_inset(dim: Dimension, border: Length<Unit>) -> Dimension {
-    Dimension::new(
-        dim.x + border,
-        dim.y + border,
-        (dim.width - border * 2.0).max(Length::ZERO),
-        (dim.height - border * 2.0).max(Length::ZERO),
-    )
-}
-
-/// Inverse of `apply_inset`: converts an observed content rect (post-inset, i32)
+/// Inverse of `Dimension::inset_by`: converts an observed content rect (post-inset, i32)
 /// back to the outer frame stored in core's `float_windows`.
 // TODO: revisit if config.border_size is ever non-integer -- round-trip can drift by +/-1 px per edge
 fn reverse_inset(rounded: RoundedDimension, border: Length<Unit>) -> Dimension {
@@ -639,7 +630,7 @@ impl Dome {
                     // Frame dimensions have border inset applied. If in the original frame,
                     // window width is smaller than sum of borders, then we will request a size
                     // that can accommodate the borders here.
-                    let remove_inset = |v: f32| v + 2.0 * self.config.border_size;
+                    let remove_inset = |v: f32| v + 2.0 * self.config.border_size.logical();
                     self.hub.set_window_constraint(
                         window_id,
                         c.min_width.map(remove_inset),
@@ -679,8 +670,7 @@ impl Dome {
                 // Write target directly -- placed_at is NOT bumped because
                 // this is an observation, not an outbound set_frame.
                 fp.target = new_placement;
-                let outer_dim =
-                    reverse_inset(new_placement, Length::<Unit>::new(self.config.border_size));
+                let outer_dim = reverse_inset(new_placement, self.config.border_size.to_unit(1.0));
                 let dim = Dimension::new(
                     Length::new(new_placement.x as f32),
                     Length::new(new_placement.y as f32),

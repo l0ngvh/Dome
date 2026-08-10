@@ -83,6 +83,7 @@ impl MasterStrategy {
 
         let ws = hub.workspaces.get(ws_id);
         let screen = hub.monitors.get(ws.monitor).dimension;
+        let border = hub.border(ws.monitor);
 
         let mut windows = Vec::with_capacity(state.master.len() + state.secondary.len());
 
@@ -102,6 +103,7 @@ impl MasterStrategy {
                         id: wid,
                         border_box,
                         visible_border_box,
+                        content_box: border_box.inset_by(border),
                         is_highlighted,
                         spawn_indicator: None,
                     });

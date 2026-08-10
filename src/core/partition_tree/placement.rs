@@ -86,6 +86,7 @@ impl PartitionTreeStrategy {
         let ws = hub.workspaces.get(ws_id);
         let (offset_x, offset_y) = ws_state.viewport_offset;
         let screen = hub.monitors.get(ws.monitor).dimension;
+        let border = hub.border(ws.monitor);
         // Only highlight tiling focus when this is the current workspace AND
         // the workspace's effective focus is on tiling (not float). Fullscreen
         // workspaces never reach here (hub returns early with MonitorLayout::Fullscreen).
@@ -114,6 +115,7 @@ impl PartitionTreeStrategy {
                             id,
                             border_box,
                             visible_border_box,
+                            content_box: border_box.inset_by(border),
                             is_highlighted,
                             spawn_indicator: if is_highlighted {
                                 Some(SpawnIndicator::from(self.child_spawn_mode(child)))

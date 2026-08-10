@@ -607,6 +607,18 @@ impl<U> Dimension<U> {
 
         Self::new(left, top, right - left, bottom - top)
     }
+
+    /// Clamps extent at zero rather than going negative. The origin is still
+    /// pushed inward, so a box narrower than `2 * border` ends up empty at an
+    /// origin past its own far edge.
+    pub(crate) fn inset_by(self, border: Length<U>) -> Self {
+        Self::new(
+            self.x + border,
+            self.y + border,
+            (self.width - border * 2.0).max(Length::ZERO),
+            (self.height - border * 2.0).max(Length::ZERO),
+        )
+    }
 }
 
 /// Manual `Default` avoids a `U: Default` bound that `#[derive(Default)]` would
@@ -739,5 +751,21 @@ mod tests {
 
         assert_eq!(d.x, Length::new(10.0));
         assert_eq!(d.width, Length::ZERO);
+    }
+
+    #[test]
+    fn inset_by_shrinks_by_border_on_every_edge() {
+        let d = dim(0.0, 0.0, 1920.0, 1080.0).inset_by(Length::new(4.0));
+
+        assert_eq!(d, dim(4.0, 4.0, 1912.0, 1072.0));
+    }
+
+    #[test]
+    fn inset_by_clamps_extent_at_zero() {
+        let d = dim(0.0, 0.0, 6.0, 1080.0).inset_by(Length::new(4.0));
+
+        assert_eq!(d.x, Length::new(4.0));
+        assert_eq!(d.width, Length::ZERO);
+        assert_eq!(d.height, Length::new(1072.0));
     }
 }

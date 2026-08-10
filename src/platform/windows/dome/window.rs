@@ -257,14 +257,10 @@ impl Dome {
         monitor: MonitorId,
     ) {
         let scale = self.monitors.monitor(monitor).scale();
-        let border = self
-            .monitors
-            .physical_border(monitor, self.config.border_size);
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        let content = apply_inset(wp.border_box, border);
-        let new_target = content.round();
+        let new_target = wp.content_box;
 
         let (needs_topmost, settled) = match entry.state {
             WindowState::BorderlessFullscreen
@@ -333,11 +329,6 @@ impl Dome {
         wp: &TilingWindowPlacement,
         monitor: MonitorId,
     ) {
-        // Hub delivers frames in physical pixels on Windows.
-        let border = self
-            .monitors
-            .physical_border(monitor, self.config.border_size);
-
         let overlay = self
             .tiling_overlays
             .get_mut(&monitor)
@@ -347,8 +338,7 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        let content = apply_inset(wp.border_box, border);
-        let new_target = content.round();
+        let new_target = wp.content_box;
 
         let tiling_state = |actual: Dimension<Physical>| {
             WindowState::Positioned(PositionedState::Tiling(DriftState::new(
@@ -684,6 +674,7 @@ impl Dome {
                     id,
                     border_box: outer_dim,
                     visible_border_box: outer_dim,
+                    content_box: new_placement,
                     is_highlighted: self.last_focused == Some(id),
                 };
                 if let Some(overlay) = self.float_overlays.get_mut(&id) {
@@ -778,16 +769,7 @@ impl Dome {
     }
 }
 
-fn apply_inset(dim: Dimension<Physical>, border: Length<Physical>) -> Dimension<Physical> {
-    Dimension::new(
-        dim.x + border,
-        dim.y + border,
-        (dim.width - 2.0 * border).max(Length::ZERO),
-        (dim.height - 2.0 * border).max(Length::ZERO),
-    )
-}
-
-/// Inverse of `apply_inset`: converts a content rect back to the outer frame
+/// Inverse of `Dimension::inset_by`: converts a content rect back to the outer frame
 /// stored in core's `float_windows`. Both input and output are in physical
 /// pixels on Windows.
 fn reverse_inset(visible: Dimension<Physical>, border: Length<Physical>) -> Dimension<Physical> {

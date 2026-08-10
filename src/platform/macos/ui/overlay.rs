@@ -181,7 +181,7 @@ impl FloatOverlay {
         }
 
         let config = &self.config;
-        let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let border = BorderMetrics::from_thickness(config.border_size);
         let theme = config.theme();
         self.renderer.render(scale as f32, Vec::new(), |ui| {
             // layer_painter bypasses egui's Area sizing pass, avoiding
@@ -224,7 +224,7 @@ impl FloatOverlay {
         self.config = config.clone();
         if let Some(placement) = self.placement {
             let config = &self.config;
-            let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+            let border = BorderMetrics::from_thickness(config.border_size);
             let theme = config.theme();
             self.renderer.render(self.scale as f32, Vec::new(), |ui| {
                 let painter = ui.ctx().layer_painter(egui::LayerId::new(
@@ -559,7 +559,7 @@ impl TilingOverlayView {
                 titles: cs.placement.titles.clone(),
             })
             .collect();
-        let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let border = BorderMetrics::from_thickness(config.border_size);
         let metrics = OverlayMetrics {
             border,
             tab_bar_height: ivars.tab_bar_height.get(),
@@ -831,7 +831,7 @@ impl TabBarOverlayView {
         let scale = ivars.scale.get();
         let container_id = ivars.container_id;
 
-        let border = BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let border = BorderMetrics::from_thickness(config.border_size);
         let metrics = OverlayMetrics {
             border,
             tab_bar_height: bar.height,

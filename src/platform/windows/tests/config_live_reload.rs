@@ -12,7 +12,7 @@ fn border_size_changed_resize_managed_windows() {
     let prev_d2 = env.dim(w2);
     let prev_d3 = env.dim(w3);
     let mut new_config = env.config.clone();
-    new_config.border_size = env.config.border_size + 2.0;
+    new_config.border_size = env.config.border_size + Length::new(2.0);
     env.dome.config_changed(new_config);
     env.dome.apply_layout();
 

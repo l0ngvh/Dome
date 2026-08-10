@@ -7,8 +7,8 @@ use crate::config::{
 use super::allocator::{Allocator, NodeId};
 use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
 use super::node::{
-    ContainerId, Dimension, DisplayMode, Length, Logical, Monitor, MonitorId, Window, WindowId,
-    WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
+    ContainerId, Dimension, DisplayMode, Length, Logical, Monitor, MonitorId, Unit, Window,
+    WindowId, WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::strategy::{StrategySet, TilingAction, WorkspaceExport, clip};
@@ -26,6 +26,7 @@ pub(crate) struct TilingWindowPlacement {
     pub(crate) id: WindowId,
     pub(crate) border_box: Dimension,
     pub(crate) visible_border_box: Dimension,
+    pub(crate) content_box: Dimension,
     /// Whether to highlight the window, for example when the window is focused. Doesn't require
     /// that the window has keyboard focus.
     pub(crate) is_highlighted: bool,
@@ -37,6 +38,7 @@ pub(crate) struct FloatWindowPlacement {
     pub(crate) id: WindowId,
     pub(crate) border_box: Dimension,
     pub(crate) visible_border_box: Dimension,
+    pub(crate) content_box: Dimension,
     pub(crate) is_highlighted: bool,
 }
 
@@ -101,6 +103,7 @@ pub(super) enum RestrictedAction {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GlobalLayoutConfig {
     pub(crate) strategy: Strategy,
+    pub(crate) border_size: Length<Logical>,
     pub(crate) partition_tree: PartitionTreeConfig,
     pub(crate) master: MasterConfig,
     pub(crate) size_constraints: SizeConstraints,
@@ -113,6 +116,7 @@ impl From<&Config> for GlobalLayoutConfig {
     fn from(c: &Config) -> Self {
         Self {
             strategy: c.strategy,
+            border_size: c.border_size,
             partition_tree: c.partition_tree.clone(),
             master: c.master.clone(),
             size_constraints: c.size_constraints,
@@ -127,6 +131,7 @@ impl Default for GlobalLayoutConfig {
     fn default() -> Self {
         Self {
             strategy: Strategy::PartitionTree,
+            border_size: Length::<Logical>::new(4.0),
             partition_tree: PartitionTreeConfig {
                 tab_bar_height: Length::<Logical>::new(24.0),
                 automatic_tiling: true,
@@ -154,6 +159,19 @@ pub(crate) struct HubAccess {
     pub(super) preferred_layouts: Vec<LayoutWorkspaceConfig>,
     pub(super) workspaces: Allocator<Workspace>,
     pub(super) windows: Allocator<Window>,
+}
+
+impl HubAccess {
+    /// Rounding here rather than at the call sites is what makes
+    /// `border_box - content_box` exactly the thickness on every edge: a
+    /// thickness ending in `.5` would otherwise round the two opposite edges
+    /// apart by a pixel.
+    pub(super) fn border(&self, monitor: MonitorId) -> Length<Unit> {
+        self.layout
+            .border_size
+            .to_unit(self.monitors.get(monitor).scale)
+            .round()
+    }
 }
 
 #[derive(Debug)]
@@ -645,6 +663,7 @@ impl Hub {
                     None
                 };
 
+                let border = self.access.border(ws.monitor);
                 let mut float_windows = Vec::new();
                 for &id in &ws.float_windows {
                     let window = self.access.windows.get(id);
@@ -659,6 +678,7 @@ impl Hub {
                             id,
                             border_box,
                             visible_border_box,
+                            content_box: border_box.inset_by(border),
                             is_highlighted,
                         });
                     }

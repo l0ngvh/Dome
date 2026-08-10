@@ -498,9 +498,7 @@ impl TilingOverlay {
         let config = &self.config;
         let theme = config.theme();
         let metrics = overlay::OverlayMetrics {
-            border: overlay::BorderMetrics::from_thickness(Length::<Logical>::new(
-                config.border_size,
-            )),
+            border: overlay::BorderMetrics::from_thickness(config.border_size),
             tab_bar_height: self.tab_bar_height,
         };
         let w_phys = self.width_phys;
@@ -794,8 +792,7 @@ impl FloatOverlayApi for FloatOverlay {
         let vf_logical = vf.to_logical(scale);
         let frame_logical = wp.border_box.to_logical(scale);
         let theme = config.theme();
-        let border =
-            overlay::BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
+        let border = overlay::BorderMetrics::from_thickness(config.border_size);
         let is_highlighted = wp.is_highlighted;
 
         self.renderer.render(w_phys, h_phys, scale, vec![], |ui| {
@@ -1071,9 +1068,7 @@ impl TabBarOverlay {
         let bar_h_logical = Length::<Logical>::new(h_phys as f32 / scale);
         let bar_w_logical = Length::<Logical>::new(w_phys as f32 / scale);
         let metrics = overlay::OverlayMetrics {
-            border: overlay::BorderMetrics::from_thickness(Length::<Logical>::new(
-                config.border_size,
-            )),
+            border: overlay::BorderMetrics::from_thickness(config.border_size),
             tab_bar_height: bar_h_logical,
         };
         let canvas_local =

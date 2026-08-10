@@ -5,7 +5,7 @@ use crate::platform::macos::objc2_wrapper::dimension_to_ns_rect_cocoa;
 
 use super::Dome;
 use super::events::{ContainerShow, FloatShow, HubMessage, MonitorTilingData, RenderFrame};
-use super::window::{apply_inset, clip_to_bounds};
+use super::window::clip_to_bounds;
 
 /// Top `tab_bar_height` strip of a tabbed container's frame, in logical points.
 fn tab_bar_dimension(
@@ -148,9 +148,6 @@ impl Dome {
                 float_windows,
                 containers,
             } => {
-                let border_size = self
-                    .monitor_registry
-                    .physical_border(mp.monitor_id, Length::new(self.config.border_size));
                 let monitor = self.monitor_registry.monitor(mp.monitor_id);
                 let monitor_dim = monitor.work_area();
                 let scale = monitor.egui_scale();
@@ -159,12 +156,11 @@ impl Dome {
                 let mut float_shows = Vec::new();
 
                 for wp in tiling_windows {
-                    let content_dim = apply_inset(wp.border_box, border_size);
                     // Clip to visible_border_box bounds -- macOS doesn't reliably allow
                     // placing windows partially off-screen (especially above menu bar)
-                    let visible_content = clip_to_bounds(content_dim, wp.visible_border_box);
+                    let visible_content = clip_to_bounds(wp.content_box, wp.visible_border_box);
                     let Some(target) = visible_content else {
-                        let _span = tracing::debug_span!("empty_visible_content", ?content_dim, visible_border_box = ?wp.visible_border_box).entered();
+                        let _span = tracing::debug_span!("empty_visible_content", content_box = ?wp.content_box, visible_border_box = ?wp.visible_border_box).entered();
                         self.move_window_offscreen(wp.id);
                         continue;
                     };
@@ -175,11 +171,10 @@ impl Dome {
                 for wp in float_windows {
                     // Float dimensions are screen-absolute. The OS clips at screen
                     // edges, so we use wp.border_box for everything (no visible_border_box).
-                    let content_dim = apply_inset(wp.border_box, border_size);
                     if focused_window != Some(wp.id) {
                         self.move_window_offscreen(wp.id);
                     } else {
-                        self.show_float(wp.id, content_dim);
+                        self.show_float(wp.id, wp.content_box);
                     }
                     let Some(entry) = self.registry.by_id(wp.id) else {
                         continue;
@@ -192,7 +187,7 @@ impl Dome {
                             wp.border_box,
                         ),
                         scale,
-                        content_dim,
+                        content_dim: wp.content_box,
                     });
                 }
 

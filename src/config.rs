@@ -1032,7 +1032,7 @@ pub(crate) struct Config {
     #[serde(skip_deserializing, default = "default_keymaps")]
     pub(crate) keymaps: ModalKeymaps,
     #[serde(default = "default_border_size")]
-    pub(crate) border_size: f32,
+    pub(crate) border_size: Length<Logical>,
     #[serde(default)]
     pub(crate) theme: Flavor,
     #[serde(default)]
@@ -1080,8 +1080,8 @@ impl LogLevel {
     }
 }
 
-fn default_border_size() -> f32 {
-    4.0
+fn default_border_size() -> Length<Logical> {
+    Length::new(4.0)
 }
 
 fn default_tab_bar_height() -> Length<Logical> {
@@ -1454,7 +1454,20 @@ mod tests {
         std::fs::write(&path, "border_radius = 4\nborder_size = 5.0\n").unwrap();
         let _cleanup = CleanupFile(path.clone());
         let config = load_or_default(path.to_str().unwrap(), Config::load);
-        assert_eq!(config.border_size, 5.0);
+        assert_eq!(config.border_size.logical(), 5.0);
+    }
+
+    #[test]
+    fn negative_border_size_falls_back_to_default() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dome_config_border_negative_{nanos}.toml"));
+        std::fs::write(&path, "border_size = -1.0\n").unwrap();
+        let _cleanup = CleanupFile(path.clone());
+        let config = load_or_default(path.to_str().unwrap(), Config::load);
+        assert_eq!(config.border_size, default_border_size());
     }
 
     #[test]
@@ -1471,7 +1484,7 @@ mod tests {
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
         let config = load_or_default(path.to_str().unwrap(), Config::load);
-        assert_eq!(config.border_size, 5.0);
+        assert_eq!(config.border_size.logical(), 5.0);
     }
 
     #[test]
@@ -2080,7 +2093,7 @@ mod tests {
         .unwrap();
         let _cleanup = CleanupFile(path.clone());
         let config = Config::load(path.to_str().unwrap()).unwrap();
-        assert_eq!(config.border_size, 5.0);
+        assert_eq!(config.border_size.logical(), 5.0);
     }
 
     #[test]

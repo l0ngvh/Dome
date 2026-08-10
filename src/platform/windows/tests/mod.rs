@@ -858,14 +858,16 @@ impl Drop for MockExternalHwnd {
 }
 
 /// Assert that windows tile horizontally across the screen.
-fn assert_h_tiled(dims: &[Dimension], screen: Dimension, border: f32) {
-    let border_len = Length::new(border);
+fn assert_h_tiled(dims: &[Dimension], screen: Dimension, border: Length<Logical>) {
+    // Every caller passes the `default_monitor`/`TestEnv::new` fixture, which is
+    // scale 1.0, so the logical border is also the physical one.
+    let border_len = border.to_unit(1.0);
     assert!(!dims.is_empty());
     for (i, d) in dims.iter().enumerate() {
         assert_eq!(d.y, border_len, "window {i} y");
         assert_eq!(
             d.height,
-            screen.height - Length::new(2.0 * border),
+            screen.height - border_len * 2.0,
             "window {i} height"
         );
         assert!(d.width > Length::new(0.0), "window {i} width");
@@ -881,7 +883,7 @@ fn assert_h_tiled(dims: &[Dimension], screen: Dimension, border: f32) {
         let gap = dims[i].x - (dims[i - 1].x + dims[i - 1].width);
         assert_eq!(
             gap,
-            Length::new(2.0 * border),
+            border_len * 2.0,
             "gap between window {} and {}",
             i - 1,
             i

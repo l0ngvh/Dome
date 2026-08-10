@@ -98,7 +98,7 @@ fn float_window_moved_by_user() {
     assert_eq!(macos.window_frame(cg2), (200, 150, 600, 400));
 
     // Core should reflect the outer frame (reverse-inset of the observed content rect)
-    let border = Config::default().border_size;
+    let border = Config::default().border_size.logical();
     let snap = macos
         .last_float_snapshot(cg2)
         .expect("float snapshot should be present for focused float");
@@ -160,7 +160,7 @@ fn float_window_reshaped_on_border_size_change() {
     // Bump border_size from the default (4.0) to 12.0, giving an 8 px delta
     // well beyond rounding noise.
     let new_config = Config {
-        border_size: 12.0,
+        border_size: Length::new(12.0),
         ..Default::default()
     };
     dome.config_changed(new_config);
@@ -183,7 +183,7 @@ fn float_window_reshaped_on_border_size_change() {
 
     macos.settle(&mut dome, 10);
 
-    // After settle: OS window converged to apply_inset(outer_stored, 12.0).
+    // After settle: OS window converged to the stored border box inset by 12.0.
     // Outer-frame values are exact integers by construction (default float
     // placement rounds to whole pixels).
     let expected_x = snap_before.outer_frame.x.value() as i32 + 12;
