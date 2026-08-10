@@ -321,9 +321,9 @@ fn focus_tab_change_workspace_focus_to_active_tab_container_focused() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=0.00, y=20.67, w=150.00, h=9.33)
-        Window(id=WindowId(2), x=0.00, y=11.33, w=150.00, h=9.33, highlighted, spawn=bottom)
-        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=9.33)
+        Window(id=WindowId(3), x=0.00, y=21.00, w=150.00, h=9.00)
+        Window(id=WindowId(2), x=0.00, y=11.00, w=150.00, h=10.00, highlighted, spawn=bottom)
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=9.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[W0, Container])
         Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, titles=[W1, W2, W3])
       )
@@ -353,8 +353,8 @@ fn focus_tab_change_workspace_focus_to_active_tab_container_focused() {
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
-    |                                                                         W3                                                                         |
     |                                                                                                                                                    |
+    |                                                                         W3                                                                         |
     |                                                                                                                                                    |
     |                                                                                                                                                    |
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -596,8 +596,8 @@ fn container_in_tabbed_container() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(4), x=112.50, y=2.00, w=37.50, h=28.00, highlighted, spawn=right)
-        Window(id=WindowId(3), x=75.00, y=2.00, w=37.50, h=28.00)
+        Window(id=WindowId(4), x=113.00, y=2.00, w=37.00, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=75.00, y=2.00, w=38.00, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
         Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=2, titles=[W1, W2, Container])
@@ -620,7 +620,7 @@ fn container_in_tabbed_container() {
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
     |                                    W0                                   ||                                    |*                                   *
-    |                                                                         ||                 W3                 |*                W4                 *
+    |                                                                         ||                 W3                 |*                 W4                *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
@@ -724,7 +724,7 @@ fn change_tab_shows_container_focus() {
     |                                                                         ||                       |*                       *|                       |
     |                                                                         ||                       |*                       *|                       |
     |                                    W0                                   ||                       |*                       *|                       |
-    |                                                                         ||           W3          |*           W4          *|          W5           |
+    |                                                                         ||           W3          |*           W4          *|           W5          |
     |                                                                         ||                       |*                       *|                       |
     |                                                                         ||                       |*                       *|                       |
     |                                                                         ||                       |*                       *|                       |
@@ -814,7 +814,7 @@ fn change_tab_shows_container_focus() {
     |                                                                         ||                       |*                       *|                       |
     |                                                                         ||                       |*                       *|                       |
     |                                    W0                                   ||                       |*                       *|                       |
-    |                                                                         ||           W3          |*           W4          *|          W5           |
+    |                                                                         ||           W3          |*           W4          *|           W5          |
     |                                                                         ||                       |*                       *|                       |
     |                                                                         ||                       |*                       *|                       |
     |                                                                         ||                       |*                       *|                       |
@@ -1035,13 +1035,13 @@ fn toggle_tabbed_off_fixes_direction_conflict_with_parent_and_children() {
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
     +------------------------------------------------+**************************************************+------------------------------------------------+
     |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                       W4                       |
     |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                       W4                       |
     |                                                |*                                                *+------------------------------------------------+
     |                       W2                       |*                       W3                       *+------------------------------------------------+
     |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                       W5                       |
     |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                       W5                       |
     +------------------------------------------------+**************************************************+------------------------------------------------+
     ");
 }
@@ -1355,9 +1355,9 @@ fn toggle_tabbed_when_focused_is_inside_child_container() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(7), x=0.00, y=20.67, w=150.00, h=9.33)
-        Window(id=WindowId(6), x=0.00, y=11.33, w=150.00, h=9.33)
-        Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=9.33)
+        Window(id=WindowId(7), x=0.00, y=21.00, w=150.00, h=9.00)
+        Window(id=WindowId(6), x=0.00, y=11.00, w=150.00, h=10.00)
+        Window(id=WindowId(2), x=0.00, y=2.00, w=150.00, h=9.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=2, highlighted, spawn=right, titles=[W0, Container, Container])
         Container(id=ContainerId(2), x=0.00, y=2.00, w=150.00, h=28.00, titles=[W2, W6, W7])
       )
@@ -1387,8 +1387,8 @@ fn toggle_tabbed_when_focused_is_inside_child_container() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
-    *                                                                         W7                                                                         *
     *                                                                                                                                                    *
+    *                                                                         W7                                                                         *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************

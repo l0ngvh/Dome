@@ -123,11 +123,11 @@ fn toggle_spawn_mode_in_vertical_container() {
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=112.50, y=15.00, w=37.50, h=15.00, highlighted, spawn=right)
-        Window(id=WindowId(2), x=75.00, y=15.00, w=37.50, h=15.00)
+        Window(id=WindowId(3), x=113.00, y=15.00, w=37.00, h=15.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=75.00, y=15.00, w=38.00, h=15.00)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w5, Container])
@@ -158,7 +158,7 @@ fn toggle_spawn_mode_in_vertical_container() {
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
-    |                                                                         ||                 W2                 |*                W3                 *
+    |                                                                         ||                 W2                 |*                 W3                *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
@@ -603,9 +603,9 @@ fn spawn_non_tab_in_tabbed_parent_with_focused_container() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=0.00, y=20.67, w=150.00, h=9.33, highlighted, spawn=bottom)
-        Window(id=WindowId(2), x=0.00, y=11.33, w=150.00, h=9.33)
-        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=9.33)
+        Window(id=WindowId(3), x=0.00, y=21.00, w=150.00, h=9.00, highlighted, spawn=bottom)
+        Window(id=WindowId(2), x=0.00, y=11.00, w=150.00, h=10.00)
+        Window(id=WindowId(1), x=0.00, y=2.00, w=150.00, h=9.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, tabbed, active_tab=1, titles=[W0, Container])
         Container(id=ContainerId(1), x=0.00, y=2.00, w=150.00, h=28.00, titles=[W1, W2, W3])
       )
@@ -635,8 +635,8 @@ fn spawn_non_tab_in_tabbed_parent_with_focused_container() {
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
-    *                                                                         W3                                                                         *
     *                                                                                                                                                    *
+    *                                                                         W3                                                                         *
     *                                                                                                                                                    *
     *                                                                                                                                                    *
     ******************************************************************************************************************************************************

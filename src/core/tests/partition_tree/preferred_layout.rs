@@ -40,17 +40,17 @@ fn insert_first_preferred_window_next_to_focused_window() {
     hub.toggle_spawn_mode();
     hub.insert_window(titled("BBB"), default_dim(), WindowRestrictions::None);
     hub.insert_window(titled("AAA"), default_dim(), WindowRestrictions::None);
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(4), x=75.00, y=24.50, w=75.00, h=5.50, highlighted, spawn=top)
-        Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=7.50)
+        Window(id=WindowId(4), x=75.00, y=25.00, w=75.00, h=5.00, highlighted, spawn=top)
+        Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=8.00)
         Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, Container])
         Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, titles=[w1, Container])
         Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, titles=[w2, Container])
-        Container(id=ContainerId(3), x=75.00, y=22.50, w=75.00, h=7.50, tabbed, active_tab=0, titles=[AAA, BBB])
+        Container(id=ContainerId(3), x=75.00, y=23.00, w=75.00, h=7.00, tabbed, active_tab=0, titles=[AAA, BBB])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -80,8 +80,8 @@ fn insert_first_preferred_window_next_to_focused_window() {
     |                                                                         ||               [AAA]                |                BBB                 |
     |                                                                         |***************************************************************************
     |                                                                         |*                                                                         *
-    |                                                                         |*                                    W4                                   *
     |                                                                         |*                                                                         *
+    |                                                                         |*                                    W4                                   *
     +-------------------------------------------------------------------------+***************************************************************************
     ");
 }
@@ -150,18 +150,18 @@ fn insert_second_preferred_window_forming_lowest_common_ancestor() {
     let _w4 = hub
         .insert_window(titled("AAA"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=112.50, y=22.50, w=37.50, h=7.50)
-        Window(id=WindowId(4), x=75.00, y=22.50, w=37.50, h=7.50, highlighted, spawn=right)
-        Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=7.50)
+        Window(id=WindowId(3), x=113.00, y=23.00, w=37.00, h=7.00)
+        Window(id=WindowId(4), x=75.00, y=23.00, w=38.00, h=7.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=8.00)
         Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, Container])
         Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, titles=[w1, Container])
         Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, titles=[w2, Container])
-        Container(id=ContainerId(3), x=75.00, y=22.50, w=75.00, h=7.50, titles=[AAA, DDD])
+        Container(id=ContainerId(3), x=75.00, y=23.00, w=75.00, h=7.00, titles=[AAA, DDD])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -190,8 +190,8 @@ fn insert_second_preferred_window_forming_lowest_common_ancestor() {
     |                                    W1                                   |**************************************+-----------------------------------+
     |                                                                         |*                                    *|                                   |
     |                                                                         |*                                    *|                                   |
-    |                                                                         |*                 W4                 *|                W3                 |
     |                                                                         |*                                    *|                                   |
+    |                                                                         |*                 W4                 *|                 W3                |
     |                                                                         |*                                    *|                                   |
     +-------------------------------------------------------------------------+**************************************+-----------------------------------+
     ");
@@ -773,17 +773,17 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
     let _w4 = hub
         .insert_window(titled("BBB"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(4), x=75.00, y=24.50, w=75.00, h=5.50, highlighted, spawn=top)
-        Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=7.50)
+        Window(id=WindowId(4), x=75.00, y=25.00, w=75.00, h=5.00, highlighted, spawn=top)
+        Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=8.00)
         Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w0, Container])
         Container(id=ContainerId(1), x=0.00, y=15.00, w=150.00, h=15.00, titles=[w1, Container])
         Container(id=ContainerId(2), x=75.00, y=15.00, w=75.00, h=15.00, titles=[w2, Container])
-        Container(id=ContainerId(3), x=75.00, y=22.50, w=75.00, h=7.50, tabbed, active_tab=0, titles=[BBB, DDD])
+        Container(id=ContainerId(3), x=75.00, y=23.00, w=75.00, h=7.00, tabbed, active_tab=0, titles=[BBB, DDD])
       )
 
     +----------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -813,8 +813,8 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
     |                                                                         ||               [BBB]                |                DDD                 |
     |                                                                         |***************************************************************************
     |                                                                         |*                                                                         *
-    |                                                                         |*                                    W4                                   *
     |                                                                         |*                                                                         *
+    |                                                                         |*                                    W4                                   *
     +-------------------------------------------------------------------------+***************************************************************************
     ");
 
@@ -823,11 +823,11 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
     let _w5 = hub
         .insert_window(titled("AAA"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(5))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=100.00, y=22.50, w=50.00, h=7.50)
-        Window(id=WindowId(2), x=100.00, y=15.00, w=50.00, h=7.50)
+        Window(id=WindowId(3), x=100.00, y=23.00, w=50.00, h=7.00)
+        Window(id=WindowId(2), x=100.00, y=15.00, w=50.00, h=8.00)
         Window(id=WindowId(5), x=50.00, y=17.00, w=50.00, h=13.00, highlighted, spawn=top)
         Window(id=WindowId(1), x=0.00, y=15.00, w=50.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
@@ -863,8 +863,8 @@ fn attach_window_after_moving_preferred_window_out_of_preferred_container_reform
     |                       W1                       |*                                                *+------------------------------------------------+
     |                                                |*                       W5                       *|                                                |
     |                                                |*                                                *|                                                |
-    |                                                |*                                                *|                       W3                       |
     |                                                |*                                                *|                                                |
+    |                                                |*                                                *|                       W3                       |
     |                                                |*                                                *|                                                |
     +------------------------------------------------+**************************************************+------------------------------------------------+
     ");
@@ -1161,18 +1161,18 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
             })
             .build(),
     ]);
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=112.50, y=22.50, w=37.50, h=7.50)
-        Window(id=WindowId(0), x=112.50, y=15.00, w=37.50, h=7.50)
-        Window(id=WindowId(1), x=75.00, y=15.00, w=37.50, h=15.00)
+        Window(id=WindowId(3), x=113.00, y=23.00, w=37.00, h=7.00)
+        Window(id=WindowId(0), x=113.00, y=15.00, w=37.00, h=8.00)
+        Window(id=WindowId(1), x=75.00, y=15.00, w=38.00, h=15.00)
         Window(id=WindowId(2), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(4), x=0.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
         Container(id=ContainerId(4), x=0.00, y=0.00, w=150.00, h=30.00, titles=[DDD, Container])
         Container(id=ContainerId(2), x=75.00, y=0.00, w=75.00, h=30.00, titles=[YYY, Container])
         Container(id=ContainerId(5), x=75.00, y=15.00, w=75.00, h=15.00, titles=[AAA, Container])
-        Container(id=ContainerId(3), x=112.50, y=15.00, w=37.50, h=15.00, titles=[TTT, CCC])
+        Container(id=ContainerId(3), x=113.00, y=15.00, w=37.00, h=15.00, titles=[TTT, CCC])
       )
 
     ***************************************************************************+-------------------------------------------------------------------------+
@@ -1194,15 +1194,15 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
-    *                                                                         *|                                    ||                W0                 |
+    *                                                                         *|                                    ||                 W0                |
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    |+-----------------------------------+
     *                                                                         *|                 W1                 |+-----------------------------------+
     *                                                                         *|                                    ||                                   |
     *                                                                         *|                                    ||                                   |
-    *                                                                         *|                                    ||                W3                 |
     *                                                                         *|                                    ||                                   |
+    *                                                                         *|                                    ||                 W3                |
     *                                                                         *|                                    ||                                   |
     ***************************************************************************+------------------------------------++-----------------------------------+
     ");
@@ -1427,15 +1427,15 @@ fn insert_same_slot_windows_as_sibling() {
     let w5 = hub
         .insert_window(titled("ACD"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(5))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
-        Window(id=WindowId(2), x=0.00, y=22.50, w=50.00, h=7.50)
-        Window(id=WindowId(5), x=0.00, y=15.00, w=50.00, h=7.50, highlighted, spawn=bottom)
-        Window(id=WindowId(3), x=0.00, y=7.50, w=50.00, h=7.50)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=7.50)
+        Window(id=WindowId(2), x=0.00, y=23.00, w=50.00, h=7.00)
+        Window(id=WindowId(5), x=0.00, y=15.00, w=50.00, h=8.00, highlighted, spawn=bottom)
+        Window(id=WindowId(3), x=0.00, y=8.00, w=50.00, h=7.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=8.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, CCC, DDD])
         Container(id=ContainerId(1), x=0.00, y=0.00, w=50.00, h=30.00, titles=[ABC, AAA, ACD, BBB])
       )
@@ -1451,8 +1451,8 @@ fn insert_same_slot_windows_as_sibling() {
     +------------------------------------------------+|                                                ||                                                |
     |                                                ||                                                ||                                                |
     |                                                ||                                                ||                                                |
-    |                       W3                       ||                                                ||                                                |
     |                                                ||                                                ||                                                |
+    |                       W3                       ||                                                ||                                                |
     |                                                ||                                                ||                                                |
     +------------------------------------------------+|                                                ||                                                |
     **************************************************|                       W1                       ||                       W4                       |
@@ -1466,8 +1466,8 @@ fn insert_same_slot_windows_as_sibling() {
     +------------------------------------------------+|                                                ||                                                |
     |                                                ||                                                ||                                                |
     |                                                ||                                                ||                                                |
-    |                       W2                       ||                                                ||                                                |
     |                                                ||                                                ||                                                |
+    |                       W2                       ||                                                ||                                                |
     |                                                ||                                                ||                                                |
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     ");
@@ -1476,15 +1476,15 @@ fn insert_same_slot_windows_as_sibling() {
     let w6 = hub
         .insert_window(titled("ADE"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(6))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
-        Window(id=WindowId(2), x=0.00, y=22.50, w=50.00, h=7.50)
-        Window(id=WindowId(6), x=0.00, y=15.00, w=50.00, h=7.50, highlighted, spawn=bottom)
-        Window(id=WindowId(5), x=0.00, y=7.50, w=50.00, h=7.50)
-        Window(id=WindowId(3), x=0.00, y=0.00, w=50.00, h=7.50)
+        Window(id=WindowId(2), x=0.00, y=23.00, w=50.00, h=7.00)
+        Window(id=WindowId(6), x=0.00, y=15.00, w=50.00, h=8.00, highlighted, spawn=bottom)
+        Window(id=WindowId(5), x=0.00, y=8.00, w=50.00, h=7.00)
+        Window(id=WindowId(3), x=0.00, y=0.00, w=50.00, h=8.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[Container, CCC, DDD])
         Container(id=ContainerId(1), x=0.00, y=0.00, w=50.00, h=30.00, titles=[AAA, ACD, ADE, BBB])
       )
@@ -1500,8 +1500,8 @@ fn insert_same_slot_windows_as_sibling() {
     +------------------------------------------------+|                                                ||                                                |
     |                                                ||                                                ||                                                |
     |                                                ||                                                ||                                                |
-    |                       W5                       ||                                                ||                                                |
     |                                                ||                                                ||                                                |
+    |                       W5                       ||                                                ||                                                |
     |                                                ||                                                ||                                                |
     +------------------------------------------------+|                                                ||                                                |
     **************************************************|                       W1                       ||                       W4                       |
@@ -1515,8 +1515,8 @@ fn insert_same_slot_windows_as_sibling() {
     +------------------------------------------------+|                                                ||                                                |
     |                                                ||                                                ||                                                |
     |                                                ||                                                ||                                                |
-    |                       W2                       ||                                                ||                                                |
     |                                                ||                                                ||                                                |
+    |                       W2                       ||                                                ||                                                |
     |                                                ||                                                ||                                                |
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     ");
@@ -1830,13 +1830,13 @@ fn bare_window_slot() {
     let _w3 = hub
         .insert_window(titled("ACD"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(2), x=112.50, y=0.00, w=37.50, h=30.00)
-        Window(id=WindowId(3), x=75.00, y=0.00, w=37.50, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(1), x=37.50, y=0.00, w=37.50, h=30.00)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=37.50, h=30.00)
+        Window(id=WindowId(2), x=113.00, y=0.00, w=37.00, h=30.00)
+        Window(id=WindowId(3), x=75.00, y=0.00, w=38.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(1), x=38.00, y=0.00, w=37.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=38.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[ABC, AAA, ACD, BBB])
       )
 
@@ -1855,7 +1855,7 @@ fn bare_window_slot() {
     |                                    ||                                   |*                                    *|                                   |
     |                                    ||                                   |*                                    *|                                   |
     |                                    ||                                   |*                                    *|                                   |
-    |                 W0                 ||                W1                 |*                 W3                 *|                W2                 |
+    |                 W0                 ||                 W1                |*                 W3                 *|                 W2                |
     |                                    ||                                   |*                                    *|                                   |
     |                                    ||                                   |*                                    *|                                   |
     |                                    ||                                   |*                                    *|                                   |
@@ -1963,13 +1963,13 @@ fn sync_preferred_layout_preserves_siblings_order() {
         .unwrap();
 
     let hub_snapshot = snapshot(&hub);
-    assert_snapshot!(hub_snapshot, @r"
+    assert_snapshot!(hub_snapshot, @"
     Hub(focused=WindowId(5))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=100.00, y=22.50, w=50.00, h=7.50)
-        Window(id=WindowId(5), x=100.00, y=15.00, w=50.00, h=7.50, highlighted, spawn=right)
-        Window(id=WindowId(3), x=100.00, y=7.50, w=50.00, h=7.50)
-        Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=7.50)
+        Window(id=WindowId(0), x=100.00, y=23.00, w=50.00, h=7.00)
+        Window(id=WindowId(5), x=100.00, y=15.00, w=50.00, h=8.00, highlighted, spawn=right)
+        Window(id=WindowId(3), x=100.00, y=8.00, w=50.00, h=7.00)
+        Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=8.00)
         Window(id=WindowId(4), x=50.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(2), x=0.00, y=0.00, w=50.00, h=30.00)
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[AAA, CCC, Container])
@@ -1987,8 +1987,8 @@ fn sync_preferred_layout_preserves_siblings_order() {
     |                                                ||                                                |+------------------------------------------------+
     |                                                ||                                                ||                                                |
     |                                                ||                                                ||                                                |
-    |                                                ||                                                ||                       W3                       |
     |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                       W3                       |
     |                                                ||                                                ||                                                |
     |                                                ||                                                |+------------------------------------------------+
     |                       W2                       ||                       W4                       |**************************************************
@@ -2002,8 +2002,8 @@ fn sync_preferred_layout_preserves_siblings_order() {
     |                                                ||                                                |+------------------------------------------------+
     |                                                ||                                                ||                                                |
     |                                                ||                                                ||                                                |
-    |                                                ||                                                ||                       W0                       |
     |                                                ||                                                ||                                                |
+    |                                                ||                                                ||                       W0                       |
     |                                                ||                                                ||                                                |
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
     ");

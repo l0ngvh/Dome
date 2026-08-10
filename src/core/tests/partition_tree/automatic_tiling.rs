@@ -95,7 +95,7 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
     // Each window is 25x30, height > width, so spawn mode should be vertical
     hub.set_focus(w0);
     hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(6))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(5), x=125.00, y=0.00, w=25.00, h=30.00)
@@ -124,7 +124,7 @@ fn auto_tile_sets_vertical_spawn_mode_when_height_greater_than_width() {
     |                       ||                       ||                       ||                       ||                       ||                       |
     |                       ||                       ||                       ||                       ||                       ||                       |
     +-----------------------+|                       ||                       ||                       ||                       ||                       |
-    *************************|           W1          ||           W2          ||          W3           ||          W4           ||          W5           |
+    *************************|           W1          ||           W2          ||           W3          ||           W4          ||           W5          |
     *                       *|                       ||                       ||                       ||                       ||                       |
     *                       *|                       ||                       ||                       ||                       ||                       |
     *                       *|                       ||                       ||                       ||                       ||                       |

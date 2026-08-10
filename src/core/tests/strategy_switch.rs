@@ -185,13 +185,13 @@ fn sync_config_switches_master_to_partition_tree() {
 
     hub.sync_configuration(GlobalLayoutConfig::default());
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=112.50, y=0.00, w=37.50, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(2), x=75.00, y=0.00, w=37.50, h=30.00)
-        Window(id=WindowId(1), x=37.50, y=0.00, w=37.50, h=30.00)
-        Window(id=WindowId(0), x=0.00, y=0.00, w=37.50, h=30.00)
+        Window(id=WindowId(3), x=113.00, y=0.00, w=37.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=75.00, y=0.00, w=38.00, h=30.00)
+        Window(id=WindowId(1), x=38.00, y=0.00, w=37.00, h=30.00)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=38.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w8, w9, w10, w11])
       )
 
@@ -210,7 +210,7 @@ fn sync_config_switches_master_to_partition_tree() {
     |                                    ||                                   ||                                    |*                                   *
     |                                    ||                                   ||                                    |*                                   *
     |                                    ||                                   ||                                    |*                                   *
-    |                 W0                 ||                W1                 ||                 W2                 |*                W3                 *
+    |                 W0                 ||                 W1                ||                 W2                 |*                 W3                *
     |                                    ||                                   ||                                    |*                                   *
     |                                    ||                                   ||                                    |*                                   *
     |                                    ||                                   ||                                    |*                                   *

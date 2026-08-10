@@ -182,10 +182,10 @@ fn toggle_direction_inside_tabbed_only_affects_tabbed_subtree() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(7))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(7), x=137.50, y=2.00, w=12.50, h=28.00, highlighted, spawn=right)
-        Window(id=WindowId(6), x=125.00, y=2.00, w=12.50, h=28.00)
-        Window(id=WindowId(5), x=112.50, y=2.00, w=12.50, h=28.00)
-        Window(id=WindowId(4), x=100.00, y=2.00, w=12.50, h=28.00)
+        Window(id=WindowId(7), x=137.00, y=2.00, w=13.00, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(6), x=125.00, y=2.00, w=12.00, h=28.00)
+        Window(id=WindowId(5), x=112.00, y=2.00, w=13.00, h=28.00)
+        Window(id=WindowId(4), x=100.00, y=2.00, w=12.00, h=28.00)
         Window(id=WindowId(1), x=50.00, y=0.00, w=50.00, h=30.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, W1, Container])
@@ -319,7 +319,7 @@ fn toggle_direction_skips_nested_tabbed_container() {
     |                                                |*                                                *|                       ||                       |
     |                                                |*                                                *|                       ||                       |
     |                       W0                       |*                       W1                       *|                       ||                       |
-    |                                                |*                                                *|          W4           ||          W5           |
+    |                                                |*                                                *|           W4          ||           W5          |
     |                                                |*                                                *|                       ||                       |
     |                                                |*                                                *|                       ||                       |
     |                                                |*                                                *|                       ||                       |
@@ -415,17 +415,17 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     Hub(focused=WindowId(6))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
-        Window(id=WindowId(11), x=94.44, y=4.00, w=5.56, h=26.00)
-        Window(id=WindowId(10), x=88.89, y=4.00, w=5.56, h=26.00)
-        Window(id=WindowId(9), x=83.33, y=4.00, w=5.56, h=26.00)
-        Window(id=WindowId(6), x=66.67, y=2.00, w=16.67, h=28.00, highlighted, spawn=right)
-        Window(id=WindowId(5), x=50.00, y=2.00, w=16.67, h=28.00)
+        Window(id=WindowId(11), x=94.00, y=4.00, w=6.00, h=26.00)
+        Window(id=WindowId(10), x=89.00, y=4.00, w=5.00, h=26.00)
+        Window(id=WindowId(9), x=83.00, y=4.00, w=6.00, h=26.00)
+        Window(id=WindowId(6), x=67.00, y=2.00, w=16.00, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(5), x=50.00, y=2.00, w=17.00, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container, W2])
         Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=3, titles=[W1, W3, W4, Container])
         Container(id=ContainerId(2), x=50.00, y=2.00, w=50.00, h=28.00, titles=[W5, W6, Container])
-        Container(id=ContainerId(3), x=83.33, y=2.00, w=16.67, h=28.00, tabbed, active_tab=2, titles=[W7, W8, Container])
-        Container(id=ContainerId(4), x=83.33, y=4.00, w=16.67, h=26.00, titles=[W9, W10, W11])
+        Container(id=ContainerId(3), x=83.00, y=2.00, w=17.00, h=28.00, tabbed, active_tab=2, titles=[W7, W8, Container])
+        Container(id=ContainerId(4), x=83.00, y=4.00, w=17.00, h=26.00, titles=[W9, W10, W11])
       )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
@@ -444,7 +444,7 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     |                                                ||               |*              *|    ||   ||    ||                                                |
     |                                                ||               |*              *|    ||   ||    ||                                                |
     |                       W0                       ||               |*              *|    ||   ||    ||                       W2                       |
-    |                                                ||      W5       |*      W6      *|    ||   ||    ||                                                |
+    |                                                ||       W5      |*      W6      *|    ||   ||    ||                                                |
     |                                                ||               |*              *| W9 || W1|| W11||                                                |
     |                                                ||               |*              *|    ||   ||    ||                                                |
     |                                                ||               |*              *|    ||   ||    ||                                                |
@@ -466,17 +466,17 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     Hub(focused=WindowId(6))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=100.00, y=0.00, w=50.00, h=30.00)
-        Window(id=WindowId(11), x=83.33, y=22.67, w=16.67, h=7.33)
-        Window(id=WindowId(10), x=66.67, y=22.67, w=16.67, h=7.33)
-        Window(id=WindowId(9), x=50.00, y=22.67, w=16.67, h=7.33)
-        Window(id=WindowId(6), x=50.00, y=11.33, w=50.00, h=9.33, highlighted, spawn=right)
-        Window(id=WindowId(5), x=50.00, y=2.00, w=50.00, h=9.33)
+        Window(id=WindowId(11), x=83.00, y=23.00, w=17.00, h=7.00)
+        Window(id=WindowId(10), x=67.00, y=23.00, w=16.00, h=7.00)
+        Window(id=WindowId(9), x=50.00, y=23.00, w=17.00, h=7.00)
+        Window(id=WindowId(6), x=50.00, y=11.00, w=50.00, h=10.00, highlighted, spawn=right)
+        Window(id=WindowId(5), x=50.00, y=2.00, w=50.00, h=9.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=50.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container, W2])
         Container(id=ContainerId(1), x=50.00, y=0.00, w=50.00, h=30.00, tabbed, active_tab=3, titles=[W1, W3, W4, Container])
         Container(id=ContainerId(2), x=50.00, y=2.00, w=50.00, h=28.00, titles=[W5, W6, Container])
-        Container(id=ContainerId(3), x=50.00, y=20.67, w=50.00, h=9.33, tabbed, active_tab=2, titles=[W7, W8, Container])
-        Container(id=ContainerId(4), x=50.00, y=22.67, w=50.00, h=7.33, titles=[W9, W10, W11])
+        Container(id=ContainerId(3), x=50.00, y=21.00, w=50.00, h=9.00, tabbed, active_tab=2, titles=[W7, W8, Container])
+        Container(id=ContainerId(4), x=50.00, y=23.00, w=50.00, h=7.00, titles=[W9, W10, W11])
       )
 
     +------------------------------------------------++------------------------------------------------++------------------------------------------------+
@@ -505,8 +505,8 @@ fn toggle_direction_inside_tabbed_skips_nested_tabbed() {
     |                                                |+---------------++--------------++---------------+|                                                |
     |                                                ||               ||              ||               ||                                                |
     |                                                ||               ||              ||               ||                                                |
-    |                                                ||      W9       ||      W10     ||       W11     ||                                                |
     |                                                ||               ||              ||               ||                                                |
+    |                                                ||       W9      ||      W10     ||       W11     ||                                                |
     |                                                ||               ||              ||               ||                                                |
     +------------------------------------------------++---------------++--------------++---------------++------------------------------------------------+
     ");

@@ -306,11 +306,11 @@ fn move_container_to_workspace_with_container_direction_matching_workspace_spawn
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00))
     ");
     hub.focus_workspace("1");
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=None)
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(1), x=112.50, y=15.00, w=37.50, h=15.00)
-        Window(id=WindowId(0), x=75.00, y=15.00, w=37.50, h=15.00)
+        Window(id=WindowId(1), x=113.00, y=15.00, w=37.00, h=15.00)
+        Window(id=WindowId(0), x=75.00, y=15.00, w=38.00, h=15.00)
         Window(id=WindowId(3), x=75.00, y=0.00, w=75.00, h=15.00)
         Window(id=WindowId(2), x=0.00, y=0.00, w=75.00, h=30.00)
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w15, Container])
@@ -341,7 +341,7 @@ fn move_container_to_workspace_with_container_direction_matching_workspace_spawn
     |                                                                         |*                                    ||                                   *
     |                                                                         |*                                    ||                                   *
     |                                                                         |*                                    ||                                   *
-    |                                                                         |*                 W0                 ||                W1                 *
+    |                                                                         |*                 W0                 ||                 W1                *
     |                                                                         |*                                    ||                                   *
     |                                                                         |*                                    ||                                   *
     |                                                                         |*                                    ||                                   *
@@ -580,7 +580,7 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
     hub.move_focused_to_workspace("1");
     hub.focus_workspace("1");
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=125.00, y=20.00, w=25.00, h=10.00, highlighted, spawn=right)
@@ -620,7 +620,7 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
     |                                                                         ||                       ||                       ||                       |
     |                                                                         ||                       ||                       ||                       |
     |                                                                         ||                       ||                       ||                       |
-    |                                                                         ||           W4          ||           W5          ||          F6           |
+    |                                                                         ||           W4          ||           W5          ||           F6          |
     |                                                                         ||                       ||                       ||                       |
     |                                                                         ||                       ||                       ||                       |
     |                                                                         ||                       ||                       ||                       |

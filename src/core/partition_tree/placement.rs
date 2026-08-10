@@ -105,8 +105,9 @@ impl PartitionTreeStrategy {
             let Some(child) = stack.pop() else { break };
             match child {
                 Child::Window(id) => {
-                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
-                    if let Some(visible_frame) = clip(frame, screen) {
+                    let frame =
+                        translate(self.child_dimension(child), offset_x, offset_y, screen).round();
+                    if let Some(visible_frame) = clip(frame, screen).map(Dimension::round) {
                         let is_highlighted = focused == Some(Child::Window(id));
                         windows.push(TilingWindowPlacement {
                             id,
@@ -123,8 +124,9 @@ impl PartitionTreeStrategy {
                 }
                 Child::Container(id) => {
                     let container = self.containers.get(id);
-                    let frame = translate(self.child_dimension(child), offset_x, offset_y, screen);
-                    let Some(visible_frame) = clip(frame, screen) else {
+                    let frame =
+                        translate(self.child_dimension(child), offset_x, offset_y, screen).round();
+                    let Some(visible_frame) = clip(frame, screen).map(Dimension::round) else {
                         continue;
                     };
                     let is_highlighted = focused == Some(Child::Container(id));

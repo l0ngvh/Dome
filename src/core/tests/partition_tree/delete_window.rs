@@ -712,11 +712,11 @@ fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     hub.insert_window(titled("w40"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w41"), default_dim(), WindowRestrictions::None);
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(3), x=75.00, y=22.50, w=75.00, h=7.50, highlighted, spawn=bottom)
-        Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=7.50)
+        Window(id=WindowId(3), x=75.00, y=23.00, w=75.00, h=7.00, highlighted, spawn=bottom)
+        Window(id=WindowId(2), x=75.00, y=15.00, w=75.00, h=8.00)
         Window(id=WindowId(1), x=0.00, y=15.00, w=75.00, h=15.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=150.00, h=15.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w38, Container])
@@ -750,8 +750,8 @@ fn promoted_container_toggles_direction_to_differ_from_grandparent() {
     |                                    W1                                   |***************************************************************************
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
-    |                                                                         |*                                    W3                                   *
     |                                                                         |*                                                                         *
+    |                                                                         |*                                    W3                                   *
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
     ");

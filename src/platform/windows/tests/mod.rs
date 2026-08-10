@@ -872,14 +872,16 @@ fn assert_h_tiled(dims: &[Dimension], screen: Dimension, border: f32) {
     }
     assert_eq!(dims[0].x, border_len, "first window x");
     let last = dims.last().unwrap();
-    assert!(
-        (last.x + last.width - (screen.width - border_len)).abs() < Length::new(1.0),
+    assert_eq!(
+        last.x + last.width,
+        screen.width - border_len,
         "last window right edge"
     );
     for i in 1..dims.len() {
         let gap = dims[i].x - (dims[i - 1].x + dims[i - 1].width);
-        assert!(
-            (gap - Length::new(2.0 * border)).abs() < Length::new(2.0),
+        assert_eq!(
+            gap,
+            Length::new(2.0 * border),
             "gap between window {} and {}",
             i - 1,
             i

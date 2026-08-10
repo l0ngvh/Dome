@@ -651,8 +651,8 @@ impl Hub {
                     let DisplayMode::Float { dim, .. } = window.mode else {
                         panic!("window {id} in float_windows but mode is not Float");
                     };
-                    let frame = dim;
-                    if let Some(visible_frame) = clip(frame, screen) {
+                    let frame = dim.round();
+                    if let Some(visible_frame) = clip(frame, screen).map(Dimension::round) {
                         let is_highlighted = focused == Some(id);
                         float_windows.push(FloatWindowPlacement {
                             id,

@@ -332,7 +332,7 @@ fn move_right_at_edge_goes_to_horizontal_grandparent() {
     hub.insert_window(titled("w22"), default_dim(), WindowRestrictions::None);
 
     hub.move_right();
-    insta::assert_snapshot!(snapshot(&hub), @r"
+    insta::assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
@@ -368,7 +368,7 @@ fn move_right_at_edge_goes_to_horizontal_grandparent() {
     |                                                ||                       ||                       |*                                                *
     |                                                ||                       ||                       |*                                                *
     |                                                ||                       ||                       |*                                                *
-    |                                                ||           W2          ||          W3           |*                                                *
+    |                                                ||           W2          ||           W3          |*                                                *
     |                                                ||                       ||                       |*                                                *
     |                                                ||                       ||                       |*                                                *
     |                                                ||                       ||                       |*                                                *
@@ -392,7 +392,7 @@ fn move_left_at_edge_goes_to_horizontal_grandparent() {
     hub.focus_left();
 
     hub.move_left();
-    insta::assert_snapshot!(snapshot(&hub), @r"
+    insta::assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=125.00, y=15.00, w=25.00, h=15.00)
@@ -428,7 +428,7 @@ fn move_left_at_edge_goes_to_horizontal_grandparent() {
     |                                                |*                                                *|                       ||                       |
     |                                                |*                                                *|                       ||                       |
     |                                                |*                                                *|                       ||                       |
-    |                                                |*                                                *|          W3           ||          W4           |
+    |                                                |*                                                *|           W3          ||           W4          |
     |                                                |*                                                *|                       ||                       |
     |                                                |*                                                *|                       ||                       |
     |                                                |*                                                *|                       ||                       |
@@ -451,7 +451,7 @@ fn move_down_at_edge_goes_to_vertical_grandparent() {
     hub.insert_window(titled("w32"), default_dim(), WindowRestrictions::None);
 
     hub.move_down();
-    insta::assert_snapshot!(snapshot(&hub), @r"
+    insta::assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=0.00, y=20.00, w=150.00, h=10.00, highlighted, spawn=bottom)
@@ -481,8 +481,8 @@ fn move_down_at_edge_goes_to_vertical_grandparent() {
     |                                                                         |+-------------------------------------------------------------------------+
     |                                    W1                                   |+-------------------------------------------------------------------------+
     |                                                                         ||                                                                         |
-    |                                                                         ||                                    W3                                   |
     |                                                                         ||                                                                         |
+    |                                                                         ||                                    W3                                   |
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     ******************************************************************************************************************************************************
     *                                                                                                                                                    *
@@ -512,7 +512,7 @@ fn move_up_at_edge_goes_to_vertical_grandparent() {
     hub.focus_up();
 
     hub.move_up();
-    insta::assert_snapshot!(snapshot(&hub), @r"
+    insta::assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(4), x=75.00, y=25.00, w=75.00, h=5.00)
@@ -547,13 +547,13 @@ fn move_up_at_edge_goes_to_vertical_grandparent() {
     ******************************************************************************************************************************************************
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     |                                                                         ||                                                                         |
-    |                                                                         ||                                    W3                                   |
     |                                                                         ||                                                                         |
+    |                                                                         ||                                    W3                                   |
     |                                                                         |+-------------------------------------------------------------------------+
     |                                    W1                                   |+-------------------------------------------------------------------------+
     |                                                                         ||                                                                         |
-    |                                                                         ||                                    W4                                   |
     |                                                                         ||                                                                         |
+    |                                                                         ||                                    W4                                   |
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     ");
 }
@@ -727,8 +727,8 @@ fn move_from_nested_container_skip_tabbed_grandparent() {
     insta::assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(4), x=112.50, y=2.00, w=37.50, h=28.00, highlighted, spawn=right)
-        Window(id=WindowId(2), x=75.00, y=2.00, w=37.50, h=28.00)
+        Window(id=WindowId(4), x=113.00, y=2.00, w=37.00, h=28.00, highlighted, spawn=right)
+        Window(id=WindowId(2), x=75.00, y=2.00, w=38.00, h=28.00)
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[W0, Container])
         Container(id=ContainerId(1), x=75.00, y=0.00, w=75.00, h=30.00, tabbed, active_tab=1, titles=[W1, Container, W3])
@@ -751,7 +751,7 @@ fn move_from_nested_container_skip_tabbed_grandparent() {
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
     |                                    W0                                   ||                                    |*                                   *
-    |                                                                         ||                 W2                 |*                W4                 *
+    |                                                                         ||                 W2                 |*                 W4                *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *
     |                                                                         ||                                    |*                                   *

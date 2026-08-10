@@ -416,21 +416,21 @@ fn laying_out_max_constrained_windows_leaves_no_hole() {
     hub.insert_window(titled("w32"), default_dim(), WindowRestrictions::None);
     hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None);
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(10))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(10), x=120.00, y=17.50, w=30.00, h=12.50, highlighted, spawn=right)
-        Window(id=WindowId(9), x=90.00, y=17.50, w=30.00, h=12.50)
-        Window(id=WindowId(8), x=60.00, y=17.50, w=30.00, h=12.50)
-        Window(id=WindowId(7), x=30.00, y=17.50, w=30.00, h=12.50)
-        Window(id=WindowId(6), x=0.00, y=17.50, w=30.00, h=12.50)
-        Window(id=WindowId(4), x=0.00, y=5.00, w=150.00, h=12.50)
+        Window(id=WindowId(10), x=120.00, y=18.00, w=30.00, h=12.00, highlighted, spawn=right)
+        Window(id=WindowId(9), x=90.00, y=18.00, w=30.00, h=12.00)
+        Window(id=WindowId(8), x=60.00, y=18.00, w=30.00, h=12.00)
+        Window(id=WindowId(7), x=30.00, y=18.00, w=30.00, h=12.00)
+        Window(id=WindowId(6), x=0.00, y=18.00, w=30.00, h=12.00)
+        Window(id=WindowId(4), x=0.00, y=5.00, w=150.00, h=13.00)
         Window(id=WindowId(1), x=15.00, y=0.00, w=120.00, h=5.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w23, Container])
         Container(id=ContainerId(1), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w24, Container])
         Container(id=ContainerId(2), x=0.00, y=5.00, w=150.00, h=25.00, titles=[w25, w26, Container])
         Container(id=ContainerId(3), x=0.00, y=5.00, w=150.00, h=25.00, titles=[w27, Container])
-        Container(id=ContainerId(4), x=0.00, y=17.50, w=150.00, h=12.50, titles=[w28, w29, w30, w31, w32, w33])
+        Container(id=ContainerId(4), x=0.00, y=18.00, w=150.00, h=12.00, titles=[w28, w29, w30, w31, w32, w33])
       )
 
                    |                                                                                                                      |               
@@ -444,8 +444,8 @@ fn laying_out_max_constrained_windows_leaves_no_hole() {
                                                                                                                                                          |
                                                                                                                                                          |
                                                                                                                                                          |
-                                                                              W4                                                                         |
                                                                                                                                                          |
+                                                                              W4                                                                         |
                                                                                                                                                          |
                                                                                                                                                          |
                                                                                                                                                          |
@@ -470,12 +470,12 @@ fn laying_out_max_constrained_windows_leaves_no_hole() {
 
     hub.set_focus(w5);
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(5))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(6), x=140.00, y=17.50, w=10.00, h=12.50)
-        Window(id=WindowId(5), x=110.00, y=17.50, w=30.00, h=12.50, highlighted, spawn=right)
-        Window(id=WindowId(4), x=110.00, y=5.00, w=40.00, h=12.50)
+        Window(id=WindowId(6), x=140.00, y=18.00, w=10.00, h=12.00)
+        Window(id=WindowId(5), x=110.00, y=18.00, w=30.00, h=12.00, highlighted, spawn=right)
+        Window(id=WindowId(4), x=110.00, y=5.00, w=40.00, h=13.00)
         Window(id=WindowId(3), x=60.00, y=5.00, w=50.00, h=25.00)
         Window(id=WindowId(2), x=30.00, y=5.00, w=30.00, h=25.00)
         Window(id=WindowId(1), x=30.00, y=0.00, w=120.00, h=5.00)
@@ -484,7 +484,7 @@ fn laying_out_max_constrained_windows_leaves_no_hole() {
         Container(id=ContainerId(1), x=30.00, y=0.00, w=120.00, h=30.00, titles=[w24, Container])
         Container(id=ContainerId(2), x=30.00, y=5.00, w=120.00, h=25.00, titles=[w25, w26, Container])
         Container(id=ContainerId(3), x=110.00, y=5.00, w=40.00, h=25.00, titles=[w27, Container])
-        Container(id=ContainerId(4), x=110.00, y=17.50, w=40.00, h=12.50, titles=[w28, w29, w30, w31, w32, w33])
+        Container(id=ContainerId(4), x=110.00, y=18.00, w=40.00, h=12.00, titles=[w28, w29, w30, w31, w32, w33])
       )
 
     +----------------------------+|                                                                                                                      |
@@ -498,8 +498,8 @@ fn laying_out_max_constrained_windows_leaves_no_hole() {
     |                            ||                            ||                                                ||                                       
     |                            ||                            ||                                                ||                                       
     |                            ||                            ||                                                ||                                       
-    |                            ||                            ||                                                ||                  W4                   
     |                            ||                            ||                                                ||                                       
+    |                            ||                            ||                                                ||                  W4                   
     |                            ||                            ||                                                ||                                       
     |                            ||                            ||                                                ||                                       
     |             W0             ||                            ||                                                ||                                       

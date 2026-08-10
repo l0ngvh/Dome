@@ -70,7 +70,7 @@ fn set_min_size_distributes_remaining_space_equally() {
 
     hub.set_window_constraint(w0, Some(100.0), None, None, None);
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(2), x=125.00, y=0.00, w=25.00, h=30.00, highlighted, spawn=right)
@@ -94,7 +94,7 @@ fn set_min_size_distributes_remaining_space_equally() {
     |                                                                                                  ||                       |*                       *
     |                                                                                                  ||                       |*                       *
     |                                                                                                  ||                       |*                       *
-    |                                                W0                                                ||           W1          |*          W2           *
+    |                                                W0                                                ||           W1          |*           W2          *
     |                                                                                                  ||                       |*                       *
     |                                                                                                  ||                       |*                       *
     |                                                                                                  ||                       |*                       *
@@ -606,11 +606,11 @@ fn max_height_centers_window_vertically_in_horizontal_split() {
 
     hub.set_window_constraint(w0, None, None, None, Some(15.0));
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(0), x=0.00, y=7.50, w=75.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=8.00, w=75.00, h=15.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w22, w23])
       )
 
@@ -629,8 +629,8 @@ fn max_height_centers_window_vertically_in_horizontal_split() {
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
-    |                                    W0                                   |*                                    W1                                   *
-    |                                                                         |*                                                                         *
+    |                                                                         |*                                    W1                                   *
+    |                                    W0                                   |*                                                                         *
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
@@ -1030,10 +1030,10 @@ fn single_window_with_max_size_centered() {
 
     hub.set_window_constraint(w0, None, None, Some(60.0), Some(15.0));
 
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=45.00, y=7.50, w=60.00, h=15.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=45.00, y=8.00, w=60.00, h=15.00, highlighted, spawn=right)
       )
 
                                                                                                                                                           
@@ -1051,8 +1051,8 @@ fn single_window_with_max_size_centered() {
                                                  *                                                          *                                             
                                                  *                                                          *                                             
                                                  *                                                          *                                             
-                                                 *                            W0                            *                                             
                                                  *                                                          *                                             
+                                                 *                            W0                            *                                             
                                                  *                                                          *                                             
                                                  *                                                          *                                             
                                                  *                                                          *                                             
@@ -1309,11 +1309,11 @@ fn raising_min_above_existing_max_raises_max() {
     // is contradictory and the implementation must raise max to 15.
     // Observable: w0 height is now 15, not 10 and not 30.
     hub.set_window_constraint(w0, None, Some(15.0), None, None);
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted, spawn=right)
-        Window(id=WindowId(0), x=0.00, y=7.50, w=75.00, h=15.00)
+        Window(id=WindowId(0), x=0.00, y=8.00, w=75.00, h=15.00)
         Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w43, w44])
       )
 
@@ -1332,8 +1332,8 @@ fn raising_min_above_existing_max_raises_max() {
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
-    |                                    W0                                   |*                                    W1                                   *
-    |                                                                         |*                                                                         *
+    |                                                                         |*                                    W1                                   *
+    |                                    W0                                   |*                                                                         *
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *

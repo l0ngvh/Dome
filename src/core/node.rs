@@ -597,18 +597,15 @@ impl<U> Dimension<U> {
         }
     }
 
-    /// Pixel-snap all four fields via `Length::round`. This is a semantics
-    /// choice ("snap placement to whole pixels before writing to the OS"),
-    /// not a unit crossing. Keeping it here rather than inside the FFI
-    /// wrapper lets the shell decide when to snap and preserves
-    /// `Dimension<U>` as the shared boundary currency.
+    /// `round(x) + round(width)` can disagree with `round(x + width)`, which opens
+    /// gaps between adjacent boxes and overshoots the monitor on the last one.
     pub(crate) fn round(self) -> Self {
-        Self::new(
-            self.x.round(),
-            self.y.round(),
-            self.width.round(),
-            self.height.round(),
-        )
+        let left = self.x.round();
+        let top = self.y.round();
+        let right = (self.x + self.width).round();
+        let bottom = (self.y + self.height).round();
+
+        Self::new(left, top, right - left, bottom - top)
     }
 }
 
@@ -690,5 +687,57 @@ impl NodeId for WorkspaceId {
     }
     fn get(self) -> usize {
         self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dim(x: f32, y: f32, width: f32, height: f32) -> Dimension<Logical> {
+        Dimension::new(
+            Length::new(x),
+            Length::new(y),
+            Length::new(width),
+            Length::new(height),
+        )
+    }
+
+    #[test]
+    fn round_keeps_adjacent_edges_flush() {
+        let a = dim(0.0, 0.0, 959.5, 1080.0).round();
+        let b = dim(959.5, 0.0, 960.5, 1080.0).round();
+
+        assert_eq!(a.width, Length::new(960.0));
+        assert_eq!(b.x, Length::new(960.0));
+        assert_eq!(b.width, Length::new(960.0));
+        assert_eq!(b.x + b.width, Length::new(1920.0));
+    }
+
+    #[test]
+    fn round_is_idempotent_on_integral_rect() {
+        let integral = dim(4.0, 4.0, 274.0, 1072.0);
+        assert_eq!(integral.round(), integral);
+
+        let fractional = dim(10.4, 10.6, 100.3, 99.5);
+        assert_eq!(fractional.round().round(), fractional.round());
+    }
+
+    #[test]
+    fn round_snaps_all_four_edges() {
+        let d = dim(10.4, 10.6, 100.3, 99.5).round();
+
+        assert_eq!(d.x, Length::new(10.0));
+        assert_eq!(d.y, Length::new(11.0));
+        assert_eq!(d.width, Length::new(101.0));
+        assert_eq!(d.height, Length::new(99.0));
+    }
+
+    #[test]
+    fn round_collapses_subpixel_box() {
+        let d = dim(10.1, 0.0, 0.2, 50.0).round();
+
+        assert_eq!(d.x, Length::new(10.0));
+        assert_eq!(d.width, Length::ZERO);
     }
 }

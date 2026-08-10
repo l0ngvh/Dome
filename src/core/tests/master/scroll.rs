@@ -482,11 +482,11 @@ fn max_width_centers_window_in_stack_pane() {
         .insert_window(titled("w27"), default_dim(), WindowRestrictions::None)
         .unwrap();
     hub.set_window_constraint(w1, None, None, Some(30.0), None);
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
         Window(id=WindowId(0), x=0.00, y=0.00, w=75.00, h=30.00)
-        Window(id=WindowId(1), x=97.50, y=0.00, w=30.00, h=30.00, highlighted)
+        Window(id=WindowId(1), x=98.00, y=0.00, w=30.00, h=30.00, highlighted)
       )
 
     +-------------------------------------------------------------------------+                       ******************************                      
@@ -541,7 +541,7 @@ fn max_width_centers_window_in_master_pane() {
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=17.50, y=0.00, w=40.00, h=30.00)
+        Window(id=WindowId(0), x=18.00, y=0.00, w=40.00, h=30.00)
         Window(id=WindowId(1), x=75.00, y=0.00, w=75.00, h=30.00, highlighted)
       )
 
