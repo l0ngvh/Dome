@@ -677,18 +677,6 @@ impl Hub {
     pub(crate) fn toggle_container_layout(&mut self) {
         self.handle_tiling_action(TilingAction::ToggleContainerLayout);
     }
-
-    /// Inserts a tiling window and seeds its title to `W<id>` so the ASCII
-    /// tab bar in `snapshot()` (which reads `ContainerPlacement::titles`)
-    /// shows readable per-tab labels. Call this instead of `insert_tiling` in
-    /// `#[test]` functions whose inline snapshot contains `tabbed, active_tab=`.
-    /// Non-tabbed tests should keep calling `insert_tiling` directly to avoid
-    /// churning the `titles=[...]` textual line in their snapshots.
-    pub(crate) fn insert_tiling_titled(&mut self) -> WindowId {
-        let id = self.insert_tiling(self.current_workspace(), titled("w0"));
-        self.set_window_title(id, format!("W{}", id.get()));
-        id
-    }
 }
 
 pub(super) fn setup_logger_with_level(level: &str) {
@@ -990,6 +978,21 @@ pub(super) fn setup() -> Hub {
     setup_hub()
 }
 
+/// `setup()` with a caller-supplied layout config. An open-coded
+/// `TestHubBuilder` chain would lose the logger initialisation.
+pub(super) fn setup_with_layout(layout: GlobalLayoutConfig) -> Hub {
+    setup_logger_with_level("warn");
+    TestHubBuilder::new().with_layout(layout).build()
+}
+
+/// A matcher on one exact window title, not a pattern.
+pub(super) fn titled_matcher(title: &str) -> WindowMatcher {
+    WindowMatcher {
+        title: Some(title.to_string()),
+        ..Default::default()
+    }
+}
+
 /// Minimal test metadata with no structure — title set via `titled` or
 /// left blank.
 #[derive(Debug, Clone, Default)]
@@ -1056,18 +1059,20 @@ impl WindowMetadata for TestMetadata {
     }
 }
 
+/// Dimension for test inserts where geometry is not under assertion. Tiling ignores it.
+pub(crate) fn default_dim() -> Dimension {
+    Dimension::new(
+        Length::new(0.0),
+        Length::new(0.0),
+        Length::new(100.0),
+        Length::new(100.0),
+    )
+}
+
 /// Convenience: create a boxed `TestMetadata` with the given title.
 pub(crate) fn titled(t: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         title: Some(t.to_owned()),
-        ..Default::default()
-    })
-}
-
-/// Build metadata with the given title.
-pub(crate) fn titled_meta(t: &str) -> Box<dyn WindowMetadata> {
-    Box::new(TestMetadata {
-        title: Some(t.into()),
         ..Default::default()
     })
 }
@@ -1077,5 +1082,13 @@ pub(crate) fn process_meta(p: &str) -> Box<dyn WindowMetadata> {
     Box::new(TestMetadata {
         process: Some(p.into()),
         ..Default::default()
+    })
+}
+
+/// Build metadata with the given title and process name.
+pub(crate) fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
+    Box::new(TestMetadata {
+        title: Some(title.into()),
+        process: Some(process.into()),
     })
 }

@@ -1,7 +1,9 @@
 use crate::config::{MasterConfig, Strategy, WindowMatcher};
+use crate::core::WindowRestrictions;
 use crate::core::strategy::TilingAction;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, snapshot, titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, snapshot,
+    titled,
 };
 use insta::assert_snapshot;
 
@@ -14,7 +16,7 @@ fn single_window_layout() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -63,8 +65,8 @@ fn two_windows_default_ratio() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -114,9 +116,9 @@ fn three_windows_layout() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
-    hub.insert_tiling(hub.current_workspace(), titled("w5"));
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -167,9 +169,13 @@ fn focus_direction_up_down() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w8")); // W0 = master
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w9")); // W1 = stack
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w10")); // W2 = stack (focused)
+    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None); // W0 = master
+    let w1 = hub
+        .insert_window(titled("w9"), default_dim(), WindowRestrictions::None)
+        .unwrap(); // W1 = stack
+    let w2 = hub
+        .insert_window(titled("w10"), default_dim(), WindowRestrictions::None)
+        .unwrap(); // W2 = stack (focused)
 
     let ws = hub.current_workspace();
 
@@ -199,8 +205,8 @@ fn increase_decrease_master_ratio() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w17"));
-    hub.insert_tiling(hub.current_workspace(), titled("w18"));
+    hub.insert_window(titled("w17"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w18"), default_dim(), WindowRestrictions::None);
 
     // Increase ratio: master gets wider
     hub.handle_tiling_action(TilingAction::GrowMaster);
@@ -381,9 +387,9 @@ fn increment_decrement_master_count() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w19")); // W0
-    hub.insert_tiling(hub.current_workspace(), titled("w20")); // W1
-    hub.insert_tiling(hub.current_workspace(), titled("w21")); // W2
+    hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None); // W0
+    hub.insert_window(titled("w20"), default_dim(), WindowRestrictions::None); // W1
+    hub.insert_window(titled("w21"), default_dim(), WindowRestrictions::None); // W2
 
     // Increment master_count to 2: two masters on left, one stack on right
     hub.handle_tiling_action(TilingAction::MoreMaster);
@@ -484,9 +490,9 @@ fn master_count_exceeds_window_count() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w22")); // W0
-    hub.insert_tiling(hub.current_workspace(), titled("w23")); // W1
-    hub.insert_tiling(hub.current_workspace(), titled("w24")); // W2
+    hub.insert_window(titled("w22"), default_dim(), WindowRestrictions::None); // W0
+    hub.insert_window(titled("w23"), default_dim(), WindowRestrictions::None); // W1
+    hub.insert_window(titled("w24"), default_dim(), WindowRestrictions::None); // W2
 
     // Set master_count to 5 (exceeds 3 windows): all windows fill screen
     for _ in 0..4 {
@@ -543,12 +549,12 @@ fn more_master_only_affects_focused_workspace() {
         )
         .build();
     // Workspace "0": 2 windows.
-    hub.insert_tiling(hub.current_workspace(), titled("w55"));
-    hub.insert_tiling(hub.current_workspace(), titled("w56"));
+    hub.insert_window(titled("w55"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w56"), default_dim(), WindowRestrictions::None);
     // Switch to workspace "1": 2 windows.
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w57"));
-    hub.insert_tiling(hub.current_workspace(), titled("w58"));
+    hub.insert_window(titled("w57"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w58"), default_dim(), WindowRestrictions::None);
     // MoreMaster on workspace "1".
     hub.handle_tiling_action(TilingAction::MoreMaster);
 
@@ -612,9 +618,9 @@ fn attach_window_falls_back_to_global_when_no_per_workspace_override() {
         .build();
     hub.sync_configuration(l);
     hub.focus_workspace("2");
-    hub.insert_tiling(hub.current_workspace(), titled("w63"));
-    hub.insert_tiling(hub.current_workspace(), titled("w64"));
-    hub.insert_tiling(hub.current_workspace(), titled("w65"));
+    hub.insert_window(titled("w63"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w64"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w65"), default_dim(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -676,9 +682,9 @@ fn more_master_promotes_unmatched_over_matched() {
                 .build(),
         ])
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("A")); // W0 = master (unmatched)
-    hub.insert_tiling(hub.current_workspace(), titled("B")); // W1 = stack (matched secondary)
-    hub.insert_tiling(hub.current_workspace(), titled("C")); // W2 = stack (unmatched, focused)
+    hub.insert_window(titled("A"), default_dim(), WindowRestrictions::None); // W0 = master (unmatched)
+    hub.insert_window(titled("B"), default_dim(), WindowRestrictions::None); // W1 = stack (matched secondary)
+    hub.insert_window(titled("C"), default_dim(), WindowRestrictions::None); // W2 = stack (unmatched, focused)
 
     hub.handle_tiling_action(TilingAction::MoreMaster);
 
@@ -748,9 +754,9 @@ fn more_master_noop_when_no_unmatched_in_stack() {
                 .build(),
         ])
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("A")); // W0 = master
-    hub.insert_tiling(hub.current_workspace(), titled("B")); // W1 = stack (matched)
-    hub.insert_tiling(hub.current_workspace(), titled("C")); // W2 = stack (matched, focused)
+    hub.insert_window(titled("A"), default_dim(), WindowRestrictions::None); // W0 = master
+    hub.insert_window(titled("B"), default_dim(), WindowRestrictions::None); // W1 = stack (matched)
+    hub.insert_window(titled("C"), default_dim(), WindowRestrictions::None); // W2 = stack (matched, focused)
 
     hub.handle_tiling_action(TilingAction::MoreMaster);
 
@@ -815,9 +821,9 @@ fn fewer_master_demotes_last_unmatched() {
                 .build(),
         ])
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("B")); // W0 = master (unmatched)
-    hub.insert_tiling(hub.current_workspace(), titled("A")); // W1 = master (matched, focused)
-    hub.insert_tiling(hub.current_workspace(), titled("C")); // W2 = stack
+    hub.insert_window(titled("B"), default_dim(), WindowRestrictions::None); // W0 = master (unmatched)
+    hub.insert_window(titled("A"), default_dim(), WindowRestrictions::None); // W1 = master (matched, focused)
+    hub.insert_window(titled("C"), default_dim(), WindowRestrictions::None); // W2 = stack
 
     hub.handle_tiling_action(TilingAction::FewerMaster);
 

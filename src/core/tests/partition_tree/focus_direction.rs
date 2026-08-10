@@ -1,13 +1,14 @@
-use crate::core::tests::{setup, snapshot, titled};
+use crate::core::node::WindowRestrictions;
+use crate::core::tests::{default_dim, setup, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
 fn focus_left_right_in_horizontal_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
 
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
@@ -98,10 +99,10 @@ fn focus_left_right_in_horizontal_container() {
 fn focus_up_down_in_vertical_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
-    hub.insert_tiling(hub.current_workspace(), titled("w5"));
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
 
     hub.focus_up();
     assert_snapshot!(snapshot(&hub), @r"
@@ -192,13 +193,13 @@ fn focus_up_down_in_vertical_container() {
 fn focus_right_selects_first_child_of_next_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w6"));
-    hub.insert_tiling(hub.current_workspace(), titled("w7"));
+    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w8"));
+    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
     hub.focus_up();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w9"));
+    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
 
     // Focus w0
     hub.focus_left();
@@ -298,12 +299,12 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
     let mut hub = setup();
 
     // Create: [w0, [w1, [w2, w3]]]
-    hub.insert_tiling(hub.current_workspace(), titled("w10"));
-    hub.insert_tiling(hub.current_workspace(), titled("w11"));
+    hub.insert_window(titled("w10"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w12"));
+    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w13"));
+    hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None);
 
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @r"
@@ -400,15 +401,15 @@ fn focus_left_from_nested_container_goes_to_grandparent_previous() {
 fn focus_down_from_nested_container_goes_to_grandparent_next() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w14"));
+    hub.insert_window(titled("w14"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w15"));
+    hub.insert_window(titled("w15"), default_dim(), WindowRestrictions::None);
     hub.focus_up();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w16"));
+    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
     hub.focus_left();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w17"));
+    hub.insert_window(titled("w17"), default_dim(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -504,12 +505,12 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
     let mut hub = setup();
 
     // Create: [w0, w1] [w2]
-    hub.insert_tiling(hub.current_workspace(), titled("w18"));
+    hub.insert_window(titled("w18"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w19"));
+    hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w20"));
+    hub.insert_window(titled("w20"), default_dim(), WindowRestrictions::None);
 
     // Focus w1 (last in nested container)
     hub.focus_left();
@@ -605,12 +606,12 @@ fn focus_right_from_last_child_goes_to_next_sibling_in_parent() {
 fn focus_down_into_horizontal_nested_container() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w21"));
+    hub.insert_window(titled("w21"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w22"));
+    hub.insert_window(titled("w22"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w23"));
-    hub.insert_tiling(hub.current_workspace(), titled("w24"));
+    hub.insert_window(titled("w23"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w24"), default_dim(), WindowRestrictions::None);
 
     // Move to middle
     hub.focus_left();
@@ -709,8 +710,8 @@ fn focus_down_into_horizontal_nested_container() {
 fn focus_left_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w25"));
-    hub.insert_tiling(hub.current_workspace(), titled("w26"));
+    hub.insert_window(titled("w25"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w26"), default_dim(), WindowRestrictions::None);
     hub.focus_left();
     hub.focus_left(); // Already at leftmost
 
@@ -759,8 +760,8 @@ fn focus_left_at_boundary_does_nothing() {
 fn focus_right_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w27"));
-    hub.insert_tiling(hub.current_workspace(), titled("w28"));
+    hub.insert_window(titled("w27"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w28"), default_dim(), WindowRestrictions::None);
     hub.focus_right(); // Already at rightmost
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -808,9 +809,9 @@ fn focus_right_at_boundary_does_nothing() {
 fn focus_up_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w29"));
+    hub.insert_window(titled("w29"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w30"));
+    hub.insert_window(titled("w30"), default_dim(), WindowRestrictions::None);
     hub.focus_up();
     hub.focus_up(); // Already at topmost
 
@@ -859,9 +860,9 @@ fn focus_up_at_boundary_does_nothing() {
 fn focus_down_at_boundary_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w31"));
+    hub.insert_window(titled("w31"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w32"));
+    hub.insert_window(titled("w32"), default_dim(), WindowRestrictions::None);
     hub.focus_down(); // Already at bottommost
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -908,11 +909,11 @@ fn focus_down_at_boundary_does_nothing() {
 #[test]
 fn focus_from_inside_tabbed_parent_goes_to_parent_sibling() {
     let mut hub = setup();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
     hub.focus_left();
@@ -962,11 +963,11 @@ fn focus_from_inside_tabbed_parent_goes_to_parent_sibling() {
 fn focus_into_container_uses_container_focus() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w33"));
-    hub.insert_tiling(hub.current_workspace(), titled("w34"));
+    hub.insert_window(titled("w33"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w34"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w35"));
-    hub.insert_tiling(hub.current_workspace(), titled("w36"));
+    hub.insert_window(titled("w35"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w36"), default_dim(), WindowRestrictions::None);
 
     hub.focus_up();
     assert_snapshot!(snapshot(&hub), @r"
@@ -1106,12 +1107,16 @@ fn focus_into_container_uses_container_focus() {
 fn focus_left_skips_tabbed_grandparent() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    let w1 = hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_spawn_mode();
-    let w2 = hub.insert_tiling_titled();
+    let w2 = hub
+        .insert_window(titled("W2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
 
     hub.set_focus(w1);
     hub.toggle_container_layout();
@@ -1218,7 +1223,7 @@ fn focus_direction_noop() {
     hub.focus_down();
     assert_eq!(before, snapshot(&hub));
 
-    hub.insert_tiling(hub.current_workspace(), titled("w37"));
+    hub.insert_window(titled("w37"), default_dim(), WindowRestrictions::None);
     let before = snapshot(&hub);
     hub.focus_left();
     assert_eq!(before, snapshot(&hub));

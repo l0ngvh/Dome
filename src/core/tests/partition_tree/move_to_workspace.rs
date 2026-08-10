@@ -1,5 +1,7 @@
+use crate::core::node::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, setup, snapshot, titled,
+    LayoutConfigBuilder, PartitionTreeConfigBuilder, TestHubBuilder, default_dim, setup, snapshot,
+    titled,
 };
 use insta::assert_snapshot;
 
@@ -7,10 +9,10 @@ use insta::assert_snapshot;
 fn move_container_to_workspace() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
     hub.move_focused_to_workspace("1");
 
@@ -97,13 +99,13 @@ fn move_container_to_workspace() {
 fn move_container_to_workspace_with_matching_direction() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w5"));
-    hub.insert_tiling(hub.current_workspace(), titled("w6"));
+    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
 
     hub.focus_workspace("0");
     hub.move_focused_to_workspace("1");
@@ -161,12 +163,12 @@ fn move_container_to_workspace_with_matching_direction() {
 fn move_horizontal_container_to_workspace_with_one_window() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w7"));
-    hub.insert_tiling(hub.current_workspace(), titled("w8"));
+    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w9"));
+    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
 
     hub.focus_workspace("0");
     hub.move_focused_to_workspace("1");
@@ -223,13 +225,13 @@ fn move_horizontal_container_to_workspace_with_one_window() {
 fn move_vertical_container_to_workspace_with_one_window() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w10"));
+    hub.insert_window(titled("w10"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w11"));
+    hub.insert_window(titled("w11"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w12"));
+    hub.insert_window(titled("w12"), default_dim(), WindowRestrictions::None);
 
     hub.focus_workspace("0");
     hub.move_focused_to_workspace("1");
@@ -286,14 +288,14 @@ fn move_vertical_container_to_workspace_with_one_window() {
 fn move_container_to_workspace_with_container_direction_matching_workspace_spawn_direction() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w13"));
+    hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w14"));
+    hub.insert_window(titled("w14"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
 
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w15"));
-    hub.insert_tiling(hub.current_workspace(), titled("w16"));
+    hub.insert_window(titled("w15"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w16"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
 
     hub.focus_workspace("0");
@@ -354,14 +356,14 @@ fn move_container_to_tabbed_workspace() {
     let mut hub = setup();
 
     // Create container with 2 windows on workspace 0
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
 
     // Create tabbed container on workspace 1
     hub.focus_workspace("1");
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
     hub.toggle_spawn_mode();
@@ -431,13 +433,13 @@ fn move_to_empty_workspace_resets_spawn_mode() {
         )
         .build();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w17"));
+    hub.insert_window(titled("w17"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w18"));
+    hub.insert_window(titled("w18"), default_dim(), WindowRestrictions::None);
 
     hub.move_focused_to_workspace("1");
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w19"));
+    hub.insert_window(titled("w19"), default_dim(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -492,14 +494,14 @@ fn move_to_empty_workspace_resets_spawn_mode() {
         )
         .build();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w20"));
+    hub.insert_window(titled("w20"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w21"));
+    hub.insert_window(titled("w21"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
 
     hub.move_focused_to_workspace("1");
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w22"));
+    hub.insert_window(titled("w22"), default_dim(), WindowRestrictions::None);
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -558,16 +560,18 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
         )
         .build();
 
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w23"));
+    let w0 = hub
+        .insert_window(titled("w23"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w24"));
-    hub.insert_tiling(hub.current_workspace(), titled("w25"));
+    hub.insert_window(titled("w24"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w25"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w26"));
+    hub.insert_window(titled("w26"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w27"));
-    hub.insert_tiling(hub.current_workspace(), titled("w28"));
-    hub.insert_tiling(hub.current_workspace(), titled("w29"));
+    hub.insert_window(titled("w27"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w28"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w29"), default_dim(), WindowRestrictions::None);
 
     hub.toggle_float();
 
@@ -627,8 +631,8 @@ fn move_to_workspace_insert_to_last_focused_tiling_when_float_is_focused() {
 #[test]
 fn move_container_to_same_workspace_noop() {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w30"));
-    hub.insert_tiling(hub.current_workspace(), titled("w31"));
+    hub.insert_window(titled("w30"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w31"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
     // Target == current workspace ("0" is the default). Should be a no-op.
     hub.move_focused_to_workspace("0");

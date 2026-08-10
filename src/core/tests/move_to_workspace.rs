@@ -1,9 +1,10 @@
-use crate::core::tests::{setup, snapshot, titled};
+use crate::core::node::WindowRestrictions;
+use crate::core::tests::{default_dim, setup, snapshot, titled};
 use insta::assert_snapshot;
 
 fn snapshot_with_only_w0_fullscreen() -> String {
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
     snapshot(&hub)
 }
 
@@ -11,8 +12,8 @@ fn snapshot_with_only_w0_fullscreen() -> String {
 fn move_window_to_empty_workspace() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @"
@@ -96,10 +97,10 @@ fn move_window_to_empty_workspace() {
 fn move_window_to_workspace_with_windows() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
     hub.focus_workspace("1");
-    hub.insert_tiling(hub.current_workspace(), titled("w5"));
+    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
     hub.focus_workspace("0");
     hub.move_focused_to_workspace("1");
 
@@ -150,7 +151,7 @@ fn move_window_to_workspace_with_windows() {
 fn move_only_window_to_workspace() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w6"));
+    hub.insert_window(titled("w6"), default_dim(), WindowRestrictions::None);
     hub.move_focused_to_workspace("1");
 
     assert_snapshot!(snapshot(&hub), @"
@@ -165,8 +166,8 @@ fn move_only_window_to_workspace() {
 fn move_to_same_workspace_does_nothing() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w7"));
-    hub.insert_tiling(hub.current_workspace(), titled("w8"));
+    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
     hub.move_focused_to_workspace("0");
 
     assert_snapshot!(snapshot(&hub), @r"

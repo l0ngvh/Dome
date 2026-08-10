@@ -2,9 +2,7 @@ use super::LayoutWorkspaceConfigBuilder;
 use crate::config::{Strategy, WindowMatcher};
 use crate::core::node::{Dimension, DisplayMode, Length, WindowRestrictions};
 use crate::core::strategy::WorkspaceExport;
-use crate::core::tests::{
-    LayoutConfigBuilder, TestHubBuilder, process_meta, snapshot, titled_meta,
-};
+use crate::core::tests::{LayoutConfigBuilder, TestHubBuilder, process_meta, snapshot, titled};
 use insta::assert_snapshot;
 
 #[test]
@@ -218,7 +216,7 @@ fn fullscreen_beats_float_when_both_match() {
         ])
         .build();
     hub.insert_window(
-        titled_meta("matchme"),
+        titled("matchme"),
         Dimension::new(
             Length::new(10.0),
             Length::new(5.0),
@@ -892,7 +890,7 @@ fn no_tiling_match_falls_back_to_current() {
     )
     .unwrap();
     hub.insert_window(
-        titled_meta("Unknown1"),
+        titled("Unknown1"),
         Dimension::new(
             Length::new(10.0),
             Length::new(5.0),

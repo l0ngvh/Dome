@@ -516,6 +516,7 @@ impl Hub {
         self.strategies.validate(&self.access);
     }
 
+    #[tracing::instrument(skip(self))]
     pub(crate) fn insert_window(
         &mut self,
         metadata: Box<dyn WindowMetadata>,
@@ -538,34 +539,55 @@ impl Hub {
             .and_then(|hit| hit.ws_id)
             .unwrap_or_else(|| self.current_workspace());
 
-        // Restrictions == None: use matcher mode if present, else default to tiling.
-        // Restrictions != None: always fullscreen (matcher only routes workspace).
-        if restrictions == WindowRestrictions::None {
-            if let Some(MatcherHit {
-                mode, matcher_id, ..
-            }) = matcher
-            {
-                let id = match mode {
-                    WindowMode::Fullscreen => {
-                        self.insert_fullscreen(target_ws, WindowRestrictions::None, metadata)
-                    }
-                    WindowMode::Float => self.insert_float(target_ws, dimension, metadata),
-                    WindowMode::Tiling => self.insert_tiling(target_ws, metadata),
-                };
-                // Link the created window back to the matcher that routed it.
-                // Tiling mode has no occupy field, so skip it.
-                match &mut self.access.windows.get_mut(id).mode {
-                    DisplayMode::Float { occupy, .. } => *occupy = matcher_id,
-                    DisplayMode::Fullscreen { occupy } => *occupy = matcher_id,
-                    DisplayMode::Tiling => {}
-                }
-                return Some(id);
+        let (mode, restrictions, occupy_id) = if restrictions == WindowRestrictions::None {
+            match matcher {
+                Some(MatcherHit {
+                    mode, matcher_id, ..
+                }) => (mode, restrictions, matcher_id),
+                None => (WindowMode::Tiling, restrictions, None),
             }
-            let id = self.insert_tiling(target_ws, metadata);
-            return Some(id);
-        }
-        let id = self.insert_fullscreen(target_ws, restrictions, metadata);
-        Some(id)
+        } else {
+            // Restrictions force fullscreen, so the matcher only routes the
+            // workspace here, and a restricted window never picks up an occupy.
+            (WindowMode::Fullscreen, restrictions, None)
+        };
+
+        let window_id = match mode {
+            WindowMode::Tiling => {
+                let window_id = self
+                    .access
+                    .windows
+                    .allocate(Window::tiling(target_ws, metadata));
+                self.strategies.for_workspace_mut(target_ws).attach_window(
+                    &mut self.access,
+                    window_id,
+                    target_ws,
+                );
+                window_id
+            }
+            WindowMode::Float => {
+                let window_id = self
+                    .access
+                    .windows
+                    .allocate(Window::float(target_ws, dimension, metadata));
+                tracing::debug!(%window_id, ?dimension, "Inserting float window");
+                // `occupy_id` links the window back to the matcher that routed it.
+                self.attach_float_to_workspace(target_ws, window_id, dimension, occupy_id);
+                window_id
+            }
+            WindowMode::Fullscreen => {
+                let window_id = self.access.windows.allocate(Window::fullscreen(
+                    target_ws,
+                    restrictions,
+                    metadata,
+                ));
+                self.attach_fullscreen_to_workspace(target_ws, window_id, occupy_id);
+                self.set_focus(window_id);
+                window_id
+            }
+        };
+
+        Some(window_id)
     }
 
     pub(crate) fn set_window_title(&mut self, window_id: WindowId, title: String) -> bool {
@@ -644,59 +666,6 @@ impl Hub {
             focused_monitor: self.access.focused_monitor,
             monitors,
         }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub(super) fn insert_tiling(
-        &mut self,
-        target_ws: WorkspaceId,
-        metadata: Box<dyn WindowMetadata>,
-    ) -> WindowId {
-        let window_id = self
-            .access
-            .windows
-            .allocate(Window::tiling(target_ws, metadata));
-        self.strategies.for_workspace_mut(target_ws).attach_window(
-            &mut self.access,
-            window_id,
-            target_ws,
-        );
-        window_id
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub(super) fn insert_float(
-        &mut self,
-        target_ws: WorkspaceId,
-        dimension: Dimension,
-        metadata: Box<dyn WindowMetadata>,
-    ) -> WindowId {
-        let window_id = self
-            .access
-            .windows
-            .allocate(Window::float(target_ws, dimension, metadata));
-        tracing::debug!(%window_id, ?dimension, "Inserting float window");
-        // Frozen helper cannot carry a matcher occupy. For a matched insert the
-        // real id is written by the inline occupy write in insert_window after
-        // this returns. This is the initial classification, not a workspace hop.
-        self.attach_float_to_workspace(target_ws, window_id, dimension, None);
-        window_id
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub(super) fn insert_fullscreen(
-        &mut self,
-        target_ws: WorkspaceId,
-        restrictions: WindowRestrictions,
-        metadata: Box<dyn WindowMetadata>,
-    ) -> WindowId {
-        let window_id =
-            self.access
-                .windows
-                .allocate(Window::fullscreen(target_ws, restrictions, metadata));
-        self.attach_fullscreen_to_workspace(target_ws, window_id, None);
-        self.set_focus(window_id);
-        window_id
     }
 
     #[tracing::instrument(skip(self))]

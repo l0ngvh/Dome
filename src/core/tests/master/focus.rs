@@ -1,6 +1,8 @@
 use crate::config::Strategy;
+use crate::core::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, snapshot, titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, snapshot,
+    titled,
 };
 use insta::assert_snapshot;
 
@@ -13,8 +15,12 @@ fn focus_direction_left_right() {
                 .build(),
         )
         .build();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w6")); // W0 = master
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w7")); // W1 = stack (focused)
+    let w0 = hub
+        .insert_window(titled("w6"), default_dim(), WindowRestrictions::None)
+        .unwrap(); // W0 = master
+    let w1 = hub
+        .insert_window(titled("w7"), default_dim(), WindowRestrictions::None)
+        .unwrap(); // W1 = stack (focused)
 
     // Focus is on W1 (stack). Move left to master.
     hub.focus_left();
@@ -50,11 +56,21 @@ fn focus_across_panes_restores_last_focused() {
                 .build(),
         ])
         .build();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
-    let w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    let w0 = hub
+        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w1 = hub
+        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w2 = hub
+        .insert_window(titled("w2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w3 = hub
+        .insert_window(titled("w3"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w4 = hub
+        .insert_window(titled("w4"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     let ws = hub.current_workspace();
 
     assert_snapshot!(snapshot(&hub), @"
@@ -136,11 +152,21 @@ fn focus_across_panes_after_moving_a_window() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
-    let _w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    let _w4 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    let _w0 = hub
+        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w1 = hub
+        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w2 = hub
+        .insert_window(titled("w2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let _w3 = hub
+        .insert_window(titled("w3"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let _w4 = hub
+        .insert_window(titled("w4"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     let ws = hub.current_workspace();
 
     hub.set_focus(w1);
@@ -210,11 +236,21 @@ fn focus_across_panes_after_remembered_window_deleted() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
-    let _w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    let _w0 = hub
+        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w1 = hub
+        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w2 = hub
+        .insert_window(titled("w2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let _w3 = hub
+        .insert_window(titled("w3"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w4 = hub
+        .insert_window(titled("w4"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     let ws = hub.current_workspace();
 
     hub.focus_left();
@@ -284,11 +320,21 @@ fn removal_focuses_most_recent_surviving_window() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w2"));
-    let _w3 = hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    let w4 = hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    let _w0 = hub
+        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w1 = hub
+        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w2 = hub
+        .insert_window(titled("w2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let _w3 = hub
+        .insert_window(titled("w3"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w4 = hub
+        .insert_window(titled("w4"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     let ws = hub.current_workspace();
 
     hub.set_focus(w2);

@@ -1,16 +1,26 @@
 use crate::core::ContainerId;
+use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
-use crate::core::node::{Dimension, Length};
-use crate::core::tests::{setup, snapshot, titled};
+use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::tests::{
+    LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
+};
 use insta::assert_snapshot;
+
+/// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
+fn layout_floating(titles: &[&str]) -> GlobalLayoutConfig {
+    LayoutConfigBuilder::new()
+        .with_float(titles.iter().map(|t| titled_matcher(t)).collect())
+        .build()
+}
 
 #[test]
 fn toggle_tabbed_mode() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
     assert_snapshot!(snapshot(&hub), @"
@@ -57,9 +67,9 @@ fn toggle_tabbed_mode() {
 fn toggle_tabbed_mode_focus_currently_focused_node() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.focus_left();
     hub.toggle_container_layout();
 
@@ -107,9 +117,9 @@ fn toggle_tabbed_mode_focus_currently_focused_node() {
 fn focus_prev_next_tab() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.focus_prev_tab();
 
@@ -196,9 +206,9 @@ fn focus_prev_next_tab() {
 fn focus_next_tab_wrapped() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.focus_next_tab();
 
@@ -246,9 +256,9 @@ fn focus_next_tab_wrapped() {
 fn focus_prev_tab_wraps() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.focus_prev_tab();
     hub.focus_prev_tab();
@@ -298,11 +308,11 @@ fn focus_prev_tab_wraps() {
 fn focus_tab_change_workspace_focus_to_active_tab_container_focused() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
     hub.focus_up();
     hub.focus_left();
     hub.toggle_container_layout();
@@ -355,11 +365,11 @@ fn focus_tab_change_workspace_focus_to_active_tab_container_focused() {
 fn focus_tab_change_workspace_focus_to_tabbed_container_active_tab_focused() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
     hub.focus_up();
     hub.toggle_container_layout();
     hub.focus_left();
@@ -411,8 +421,8 @@ fn focus_tab_change_workspace_focus_to_tabbed_container_active_tab_focused() {
 fn toggle_tabbed_off() {
     let mut hub = setup();
 
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_container_layout();
 
@@ -461,11 +471,11 @@ fn toggle_tabbed_off() {
 fn tabbed_container_takes_one_slot() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
 
     hub.toggle_container_layout();
 
@@ -515,11 +525,11 @@ fn tabbed_container_takes_one_slot() {
 fn vertical_to_tabbed() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
     hub.focus_parent();
     hub.toggle_container_layout();
 
@@ -567,14 +577,16 @@ fn vertical_to_tabbed() {
 fn container_in_tabbed_container() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
 
     hub.toggle_spawn_mode();
-    let w4 = hub.insert_tiling_titled();
+    let w4 = hub
+        .insert_window(titled("W4"), default_dim(), WindowRestrictions::None)
+        .unwrap();
 
     hub.focus_parent();
     hub.focus_parent();
@@ -673,15 +685,15 @@ fn container_in_tabbed_container() {
 fn change_tab_shows_container_focus() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W5"), default_dim(), WindowRestrictions::None);
 
     hub.focus_left();
     assert_snapshot!(snapshot(&hub), @"
@@ -822,9 +834,11 @@ fn change_tab_shows_container_focus() {
 #[test]
 fn set_focus_updates_active_tab() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    let w0 = hub
+        .insert_window(titled("W0"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
     // Focus W0 should update active_tab to 0
@@ -872,9 +886,11 @@ fn set_focus_updates_active_tab() {
 #[test]
 fn delete_active_tab_updates_active_tab() {
     let mut hub = setup();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    let w2 = hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    let w2 = hub
+        .insert_window(titled("W2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_container_layout();
 
     // W2 is active (index 2), delete it
@@ -923,15 +939,19 @@ fn delete_active_tab_updates_active_tab() {
 fn toggle_tabbed_off_fixes_direction_conflict_with_parent_and_children() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    let w1 = hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
-    let w3 = hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    let w3 = hub
+        .insert_window(titled("W3"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("W4"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W5"), default_dim(), WindowRestrictions::None);
     hub.set_focus(w1);
 
     hub.toggle_direction();
@@ -1031,9 +1051,9 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     let mut hub = setup();
 
     // Create horizontal container with 3 windows
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
 
     // Make it tabbed
     hub.toggle_container_layout();
@@ -1041,7 +1061,7 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
     // Create a vertical nested container in the middle tab
     hub.focus_prev_tab();
     hub.toggle_spawn_mode();
-    hub.insert_tiling(hub.current_workspace(), titled("w5"));
+    hub.insert_window(titled("w5"), default_dim(), WindowRestrictions::None);
 
     // Focus parent and toggle back to split (horizontal)
     hub.focus_parent();
@@ -1097,13 +1117,15 @@ fn toggle_tabbed_off_dont_rotate_child_when_its_already_correct() {
 fn replace_focus_should_not_change_active_tab_when_not_replacing_focused() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.focus_prev_tab();
     hub.toggle_spawn_mode();
-    let w3 = hub.insert_tiling_titled();
+    let w3 = hub
+        .insert_window(titled("W3"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.focus_prev_tab();
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -1190,13 +1212,17 @@ fn replace_focus_should_not_change_active_tab_when_not_replacing_focused() {
 fn toggle_container_layout_in_nested_tabbed_maintain_direction_invariant() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    let w1 = hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
 
     hub.toggle_container_layout();
-    let w2 = hub.insert_tiling_titled();
+    let w2 = hub
+        .insert_window(titled("W2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W3"), default_dim(), WindowRestrictions::None);
     hub.set_focus(w1);
     hub.toggle_container_layout();
     // [w2, w3] was still vertical as toggle_container_layout doesn't change child orientation, nor
@@ -1298,19 +1324,25 @@ fn toggle_container_layout_in_nested_tabbed_maintain_direction_invariant() {
 fn toggle_tabbed_when_focused_is_inside_child_container() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    let w1 = hub.insert_tiling_titled();
-    let w2 = hub.insert_tiling_titled();
-    let w3 = hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w2 = hub
+        .insert_window(titled("W2"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w3 = hub
+        .insert_window(titled("W3"), default_dim(), WindowRestrictions::None)
+        .unwrap();
     // Creating multiple nested container to cover non focused container branch
     hub.set_focus(w1);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W4"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W5"), default_dim(), WindowRestrictions::None);
     hub.set_focus(w2);
     hub.toggle_spawn_mode();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W6"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W7"), default_dim(), WindowRestrictions::None);
 
     hub.set_focus(w3);
     hub.focus_parent();
@@ -1367,9 +1399,9 @@ fn toggle_tabbed_when_focused_is_inside_child_container() {
 fn focus_tab_index() {
     let mut hub = setup();
 
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    hub.insert_window(titled("W0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("W2"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
 
     hub.focus_tab_index(ContainerId::new(0), 0);
@@ -1426,17 +1458,18 @@ fn focus_tab_noop() {
     hub.focus_prev_tab();
     assert_eq!(before, snapshot(&hub));
 
-    let mut hub = setup();
-    hub.insert_float(
-        hub.current_workspace(),
+    let mut hub = setup_with_layout(layout_floating(&["w6"]));
+    hub.insert_window(
+        titled("w6"),
         Dimension::new(
             Length::new(10.0),
             Length::new(5.0),
             Length::new(30.0),
             Length::new(20.0),
         ),
-        titled("w6"),
-    );
+        WindowRestrictions::None,
+    )
+    .unwrap();
     let before = snapshot(&hub);
     hub.focus_next_tab();
     assert_eq!(before, snapshot(&hub));
@@ -1445,8 +1478,8 @@ fn focus_tab_noop() {
 
     // Two tiling windows with no tabbed ancestor
     let mut hub = setup();
-    hub.insert_tiling(hub.current_workspace(), titled("w7"));
-    hub.insert_tiling(hub.current_workspace(), titled("w8"));
+    hub.insert_window(titled("w7"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w8"), default_dim(), WindowRestrictions::None);
     let before = snapshot(&hub);
     hub.focus_next_tab();
     assert_eq!(before, snapshot(&hub));
@@ -1461,22 +1494,23 @@ fn toggle_container_layout_noop() {
     hub.toggle_container_layout();
     assert_eq!(before, snapshot(&hub));
 
-    hub.insert_tiling(hub.current_workspace(), titled("w9"));
+    hub.insert_window(titled("w9"), default_dim(), WindowRestrictions::None);
     let before = snapshot(&hub);
     hub.toggle_container_layout();
     assert_eq!(before, snapshot(&hub));
 
-    let mut hub = setup();
-    hub.insert_float(
-        hub.current_workspace(),
+    let mut hub = setup_with_layout(layout_floating(&["w10"]));
+    hub.insert_window(
+        titled("w10"),
         Dimension::new(
             Length::new(10.0),
             Length::new(5.0),
             Length::new(30.0),
             Length::new(20.0),
         ),
-        titled("w10"),
-    );
+        WindowRestrictions::None,
+    )
+    .unwrap();
     let before = snapshot(&hub);
     hub.toggle_container_layout();
     assert_eq!(before, snapshot(&hub));
@@ -1485,8 +1519,10 @@ fn toggle_container_layout_noop() {
 #[test]
 fn tab_bar_visible_when_min_height_exceeds_screen() {
     let mut hub = setup();
-    let w0 = hub.insert_tiling_titled();
-    hub.insert_tiling_titled();
+    let w0 = hub
+        .insert_window(titled("W0"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
     hub.set_window_constraint(w0, None, Some(60.0), None, None);
     hub.set_focus(w0);

@@ -2,10 +2,10 @@ use insta::assert_snapshot;
 
 use crate::config::{Strategy, WindowMatcher};
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, TestMetadata, process_meta,
-    snapshot, titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, process_meta,
+    snapshot, titled, titled_process,
 };
-use crate::core::{Direction, TilingAction, WindowMetadata};
+use crate::core::{Direction, TilingAction, WindowRestrictions};
 
 #[test]
 fn secondary_matched_goes_to_stack() {
@@ -26,14 +26,20 @@ fn secondary_matched_goes_to_stack() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Term", "terminal.exe"),
-    );
-    let _w1 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Filler", "other.exe"),
-    );
+    let _w0 = hub
+        .insert_window(
+            titled_process("Term", "terminal.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("Filler", "other.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -96,14 +102,20 @@ fn master_matched_goes_to_master_pane() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Editor", "editor.exe"),
-    );
-    let _w1 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Browser", "browser.exe"),
-    );
+    let _w0 = hub
+        .insert_window(
+            titled_process("Editor", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("Browser", "browser.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -162,14 +174,20 @@ fn master_full_pushes_unmatched_to_secondary() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Filler", "other.exe"),
-    );
-    let _w1 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Editor", "editor.exe"),
-    );
+    let _w0 = hub
+        .insert_window(
+            titled_process("Filler", "other.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("Editor", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -244,15 +262,27 @@ fn master_full_continue_matching_in_secondary() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Editor", "editor.exe"),
-    );
-    let _w1 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Browser", "browser.exe"),
-    );
-    let _w2 = hub.insert_tiling(hub.current_workspace(), titled_process("Code", "code.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("Editor", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("Browser", "browser.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w2 = hub
+        .insert_window(
+            titled_process("Code", "code.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -313,13 +343,15 @@ fn unmatched_fills_master_room() {
                 .build(),
         ])
         .build();
-    hub.insert_tiling(
-        hub.current_workspace(),
+    hub.insert_window(
         titled_process("Editor", "editor.exe"),
+        default_dim(),
+        WindowRestrictions::None,
     );
-    hub.insert_tiling(
-        hub.current_workspace(),
+    hub.insert_window(
         titled_process("Other", "other.exe"),
+        default_dim(),
+        WindowRestrictions::None,
     );
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -390,9 +422,27 @@ fn mixed_matched_and_unmatched_order() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
-    let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
-    let _w2 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("A", "A.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("B", "B.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w2 = hub
+        .insert_window(
+            titled_process("C", "C.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -448,8 +498,8 @@ fn unmatched_goes_to_stack_when_master_full() {
                 .build(),
         ])
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -509,14 +559,20 @@ fn insert_master_full_evicts_unmatched() {
                 .build(),
         ])
         .build();
-    let _filler = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Filler", "other.exe"),
-    );
-    let _editor = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Editor", "editor.exe"),
-    );
+    let _filler = hub
+        .insert_window(
+            titled_process("Filler", "other.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _editor = hub
+        .insert_window(
+            titled_process("Editor", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -597,11 +653,41 @@ fn matched_order_on_both_lanes() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));
-    let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("E", "E.exe"));
-    let _w2 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
-    let _w3 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
-    let _w4 = hub.insert_tiling(hub.current_workspace(), titled_process("D", "D.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("C", "C.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("E", "E.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w2 = hub
+        .insert_window(
+            titled_process("A", "A.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w3 = hub
+        .insert_window(
+            titled_process("B", "B.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w4 = hub
+        .insert_window(
+            titled_process("D", "D.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(4))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -670,10 +756,34 @@ fn decrease_master_count_drop_matched_master() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
-    let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
-    let _w2 = hub.insert_tiling(hub.current_workspace(), titled_process("D", "D.exe"));
-    let _w3 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("A", "A.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("B", "B.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w2 = hub
+        .insert_window(
+            titled_process("D", "D.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w3 = hub
+        .insert_window(
+            titled_process("C", "C.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     hub.handle_tiling_action(TilingAction::FewerMaster);
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
@@ -738,9 +848,27 @@ fn reloading_preferred_layout_puts_matched_windows_to_place() {
         ])
         .build();
 
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
-    let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));
-    let _w2 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("B", "B.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("C", "C.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w2 = hub
+        .insert_window(
+            titled_process("A", "A.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
 
     hub.sync_preferred_layout(vec![
         LayoutWorkspaceConfigBuilder::new("0")
@@ -829,13 +957,31 @@ fn reordering_matched_windows_doesnt_guarrantee_next_match() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
-    let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("A", "A.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("C", "C.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     hub.handle_tiling_action(TilingAction::MoveDirection {
         direction: Direction::Vertical,
         forward: false,
     });
-    let _w2 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
+    let _w2 = hub
+        .insert_window(
+            titled_process("B", "B.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -897,13 +1043,31 @@ fn swapping_secondary_window_doesnt_guarrantee_next_match() {
                 .build(),
         ])
         .build();
-    let _w0 = hub.insert_tiling(hub.current_workspace(), titled_process("B", "B.exe"));
-    let _w1 = hub.insert_tiling(hub.current_workspace(), titled_process("C", "C.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("B", "B.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("C", "C.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     hub.handle_tiling_action(TilingAction::MoveDirection {
         direction: Direction::Horizontal,
         forward: true,
     });
-    let _w2 = hub.insert_tiling(hub.current_workspace(), titled_process("A", "A.exe"));
+    let _w2 = hub
+        .insert_window(
+            titled_process("A", "A.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -961,9 +1125,9 @@ fn increase_master_count_without_matcher_change() {
                 .build(),
         ])
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
 
     // Hot-reload preferred layout with count=2, same (empty) matchers.
     hub.sync_preferred_layout(vec![
@@ -1053,14 +1217,62 @@ fn insert_multiple_matched_windows_to_the_same_slot() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    let _w0 = hub.insert_tiling(ws_id, titled_process("Terminal A", "terminal.exe"));
-    let _w1 = hub.insert_tiling(ws_id, titled_process("Editor A", "editor.exe"));
-    let _w2 = hub.insert_tiling(ws_id, titled_process("Browser A", "browser.exe"));
-    let _w3 = hub.insert_tiling(ws_id, titled_process("Editor B", "editor.exe"));
-    let _w4 = hub.insert_tiling(ws_id, titled_process("Mail A", "mail.exe"));
-    let _w5 = hub.insert_tiling(ws_id, titled_process("Browser B", "browser.exe"));
-    let _w6 = hub.insert_tiling(ws_id, titled_process("Terminal B", "terminal.exe"));
-    let _w7 = hub.insert_tiling(ws_id, titled_process("Main B", "mail.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("Terminal A", "terminal.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("Editor A", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w2 = hub
+        .insert_window(
+            titled_process("Browser A", "browser.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w3 = hub
+        .insert_window(
+            titled_process("Editor B", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w4 = hub
+        .insert_window(
+            titled_process("Mail A", "mail.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w5 = hub
+        .insert_window(
+            titled_process("Browser B", "browser.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w6 = hub
+        .insert_window(
+            titled_process("Terminal B", "terminal.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w7 = hub
+        .insert_window(
+            titled_process("Main B", "mail.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
 
     let prev_snapshot = snapshot(&hub);
 
@@ -1154,11 +1366,34 @@ fn insert_master_full_no_evictable_matches_against_secondary() {
                 .build(),
         ])
         .build();
-    let ws_id = hub.current_workspace();
-    let _w0 = hub.insert_tiling(ws_id, titled_process("Editor A", "editor.exe"));
-    let _w1 = hub.insert_tiling(ws_id, titled_process("Terminal", "terminal.exe"));
-    let _w2 = hub.insert_tiling(ws_id, titled_process("Mail", "mail.exe"));
-    let _w3 = hub.insert_tiling(ws_id, titled_process("Editor B", "editor.exe"));
+    let _w0 = hub
+        .insert_window(
+            titled_process("Editor A", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w1 = hub
+        .insert_window(
+            titled_process("Terminal", "terminal.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w2 = hub
+        .insert_window(
+            titled_process("Mail", "mail.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    let _w3 = hub
+        .insert_window(
+            titled_process("Editor B", "editor.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -1200,13 +1435,6 @@ fn insert_master_full_no_evictable_matches_against_secondary() {
     |                                                                         ||                                                                         |
     +-------------------------------------------------------------------------++-------------------------------------------------------------------------+
     ");
-}
-
-fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
-    Box::new(TestMetadata {
-        title: Some(title.into()),
-        process: Some(process.into()),
-    })
 }
 
 #[test]

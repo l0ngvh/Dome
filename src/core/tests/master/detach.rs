@@ -1,10 +1,10 @@
 use insta::assert_snapshot;
 
 use crate::config::{MasterConfig, Strategy, WindowMatcher};
-use crate::core::WindowMetadata;
+use crate::core::WindowRestrictions;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, TestMetadata, snapshot,
-    titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, snapshot,
+    titled, titled_process,
 };
 
 #[test]
@@ -16,9 +16,13 @@ fn delete_window() {
                 .build(),
         )
         .build();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w25")); // W0 = master
-    hub.insert_tiling(hub.current_workspace(), titled("w26")); // W1 = stack
-    let w2 = hub.insert_tiling(hub.current_workspace(), titled("w27")); // W2 = stack (focused)
+    let w0 = hub
+        .insert_window(titled("w25"), default_dim(), WindowRestrictions::None)
+        .unwrap(); // W0 = master
+    hub.insert_window(titled("w26"), default_dim(), WindowRestrictions::None); // W1 = stack
+    let w2 = hub
+        .insert_window(titled("w27"), default_dim(), WindowRestrictions::None)
+        .unwrap(); // W2 = stack (focused)
 
     hub.delete_window(w2);
     assert_snapshot!(snapshot(&hub), @"
@@ -110,9 +114,11 @@ fn detach_refills_master_from_unmatched_secondary() {
                 .build(),
         )
         .build();
-    let w0 = hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    let w0 = hub
+        .insert_window(titled("w0"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
 
     hub.delete_window(w0);
     assert_snapshot!(snapshot(&hub), @r"
@@ -179,17 +185,22 @@ fn detach_keeps_matched_secondary_pinned() {
                 .build(),
         ])
         .build();
-    let f0 = hub.insert_tiling(
-        hub.current_workspace(),
-        titled_process("Filler", "other.exe"),
-    );
-    hub.insert_tiling(
-        hub.current_workspace(),
+    let f0 = hub
+        .insert_window(
+            titled_process("Filler", "other.exe"),
+            default_dim(),
+            WindowRestrictions::None,
+        )
+        .unwrap();
+    hub.insert_window(
         titled_process("Term", "terminal.exe"),
+        default_dim(),
+        WindowRestrictions::None,
     );
-    hub.insert_tiling(
-        hub.current_workspace(),
+    hub.insert_window(
         titled_process("Editor", "editor.exe"),
+        default_dim(),
+        WindowRestrictions::None,
     );
 
     hub.delete_window(f0);
@@ -242,9 +253,9 @@ fn detach_focused_child_refills_master() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
 
     hub.focus_left();
     hub.move_focused_to_workspace("1");
@@ -302,11 +313,13 @@ fn detach_refills_when_master_count_above_one() {
                 .build(),
         )
         .build();
-    hub.insert_tiling(hub.current_workspace(), titled("w0"));
-    let w1 = hub.insert_tiling(hub.current_workspace(), titled("w1"));
-    hub.insert_tiling(hub.current_workspace(), titled("w2"));
-    hub.insert_tiling(hub.current_workspace(), titled("w3"));
-    hub.insert_tiling(hub.current_workspace(), titled("w4"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
+    let w1 = hub
+        .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w2"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
 
     hub.delete_window(w1);
     assert_snapshot!(snapshot(&hub), @r"
@@ -349,11 +362,4 @@ fn detach_refills_when_master_count_above_one() {
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
     ");
-}
-
-fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
-    Box::new(TestMetadata {
-        title: Some(title.into()),
-        process: Some(process.into()),
-    })
 }

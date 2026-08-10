@@ -1,8 +1,9 @@
 use crate::config::{Strategy, WindowMatcher};
-use crate::core::WindowMetadata;
+use crate::core::WindowRestrictions;
 use crate::core::strategy::WorkspaceExport;
 use crate::core::tests::{
-    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, TestMetadata, titled,
+    LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, titled,
+    titled_process,
 };
 
 #[test]
@@ -38,7 +39,7 @@ fn export_master_single_window() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    hub.insert_tiling(ws_id, titled("w0"));
+    hub.insert_window(titled("w0"), default_dim(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -75,7 +76,7 @@ fn export_master_matched_preserves_slot_matcher() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    hub.insert_tiling(ws_id, titled("AAA"));
+    hub.insert_window(titled("AAA"), default_dim(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -111,8 +112,8 @@ fn export_master_mixed_matched_and_unmatched() {
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
 
-    hub.insert_tiling(ws_id, titled("AAA"));
-    hub.insert_tiling(ws_id, titled("foreign"));
+    hub.insert_window(titled("AAA"), default_dim(), WindowRestrictions::None);
+    hub.insert_window(titled("foreign"), default_dim(), WindowRestrictions::None);
 
     let result = hub.export_workspace(ws_id);
     assert_eq!(
@@ -150,8 +151,16 @@ fn export_two_windows_one_slot_emits_single_matcher() {
         .build();
     hub.focus_workspace("1");
     let ws_id = hub.current_workspace();
-    hub.insert_tiling(ws_id, titled_process("Browser A", "browser.exe"));
-    hub.insert_tiling(ws_id, titled_process("Browser B", "browser.exe"));
+    hub.insert_window(
+        titled_process("Browser A", "browser.exe"),
+        default_dim(),
+        WindowRestrictions::None,
+    );
+    hub.insert_window(
+        titled_process("Browser B", "browser.exe"),
+        default_dim(),
+        WindowRestrictions::None,
+    );
 
     let result = hub.export_workspace(ws_id);
     // Two windows share one slot, so the slot's matcher must be emitted once.
@@ -163,11 +172,4 @@ fn export_two_windows_one_slot_emits_single_matcher() {
             ..Default::default()
         }]
     );
-}
-
-fn titled_process(title: &str, process: &str) -> Box<dyn WindowMetadata> {
-    Box::new(TestMetadata {
-        title: Some(title.into()),
-        process: Some(process.into()),
-    })
 }
