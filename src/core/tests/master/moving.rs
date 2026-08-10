@@ -863,7 +863,7 @@ fn top_to_bottom(hub: &Hub, ids: &[WindowId]) -> Vec<WindowId> {
         };
         for placement in tiling_windows {
             if ids.contains(&placement.id) {
-                found.push((placement.visible_frame.y.value(), placement.id));
+                found.push((placement.visible_border_box.y.value(), placement.id));
             }
         }
     }

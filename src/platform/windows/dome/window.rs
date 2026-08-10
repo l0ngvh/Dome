@@ -263,7 +263,7 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        let content = apply_inset(wp.frame, border);
+        let content = apply_inset(wp.border_box, border);
         let new_target = content.round();
 
         let (needs_topmost, settled) = match entry.state {
@@ -347,7 +347,7 @@ impl Dome {
         let Some(entry) = self.registry.get_mut(id) else {
             return;
         };
-        let content = apply_inset(wp.frame, border);
+        let content = apply_inset(wp.border_box, border);
         let new_target = content.round();
 
         let tiling_state = |actual: Dimension<Physical>| {
@@ -682,8 +682,8 @@ impl Dome {
                 let hwnd = entry.ext.id();
                 let wp = FloatWindowPlacement {
                     id,
-                    frame: outer_dim,
-                    visible_frame: outer_dim,
+                    border_box: outer_dim,
+                    visible_border_box: outer_dim,
                     is_highlighted: self.last_focused == Some(id),
                 };
                 if let Some(overlay) = self.float_overlays.get_mut(&id) {

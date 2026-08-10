@@ -47,7 +47,7 @@ enum FloatOverlayState {
     Hidden,
     Visible {
         window_id: WindowId,
-        visible_frame: Dimension,
+        visible_border_box: Dimension,
         z_order: ZOrder,
     },
 }
@@ -942,7 +942,7 @@ impl FloatOverlayApi for MockFloatOverlay {
     ) {
         self.shared.state.set(FloatOverlayState::Visible {
             window_id: wp.id,
-            visible_frame: wp.visible_frame,
+            visible_border_box: wp.visible_border_box,
             z_order,
         });
         self.overlays
@@ -1165,7 +1165,7 @@ impl CreateOverlay for Rc<RefCell<MockOverlays>> {
         &self,
         config: Config,
         _scale: f32,
-        _visible_frame: Dimension,
+        _visible_border_box: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
         let this = self.borrow();
         let id_val = this.next_float_overlay_id.get();

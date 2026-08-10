@@ -95,13 +95,13 @@ impl MasterStrategy {
         let mut push_pane = |vec: &[WindowId], y_offset: Length| {
             for &wid in vec.iter() {
                 let dim = self.window_states[&wid].dimension;
-                let frame = translate(dim, Length::ZERO, y_offset, screen).round();
-                if let Some(visible_frame) = clip(frame, screen).map(Dimension::round) {
+                let border_box = translate(dim, Length::ZERO, y_offset, screen).round();
+                if let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round) {
                     let is_highlighted = focused_id == Some(wid);
                     windows.push(TilingWindowPlacement {
                         id: wid,
-                        frame,
-                        visible_frame,
+                        border_box,
+                        visible_border_box,
                         is_highlighted,
                         spawn_indicator: None,
                     });

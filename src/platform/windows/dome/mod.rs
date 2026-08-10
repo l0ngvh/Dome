@@ -93,7 +93,7 @@ pub(super) trait CreateOverlay {
         &self,
         config: Config,
         scale: f32,
-        visible_frame: Dimension,
+        visible_border_box: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>>;
     fn create_tab_bar(
         &self,
@@ -743,7 +743,7 @@ impl Dome {
                     match self.overlay_factory.create_float_overlay(
                         self.config.clone(),
                         self.monitors.monitor(data.monitor_id).scale(),
-                        wp.visible_frame,
+                        wp.visible_border_box,
                     ) {
                         Ok(o) => {
                             self.float_overlays.insert(wp.id, o);
@@ -797,7 +797,7 @@ impl Dome {
                 );
             let tab_bar_h_logical = self.config.partition_tree.tab_bar_height;
             for (placement, titles) in data.containers.iter().filter(|(p, _)| p.is_tabbed) {
-                let rect = compute_tab_bar_rect(placement.frame, tab_bar_h_logical, scale);
+                let rect = compute_tab_bar_rect(placement.border_box, tab_bar_h_logical, scale);
                 let tab_bar = match self.tab_bars.entry(placement.id) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
@@ -1009,16 +1009,16 @@ pub(super) fn display_from_process(process: &str) -> String {
     process.strip_suffix(".exe").unwrap_or(process).to_string()
 }
 
-// Tab bar rect from a tabbed container's physical-pixel `frame`. The bar
+// Tab bar rect from a tabbed container's physical-pixel `border_box`. The bar
 // hugs the container's top edge with the configured logical height
 // rounded into the platform's `Unit` (physical pixels on Windows).
 fn compute_tab_bar_rect(
-    frame: Dimension,
+    border_box: Dimension,
     tab_bar_h_logical: Length<Logical>,
     scale: f32,
 ) -> Dimension {
     let h_phys = tab_bar_h_logical.to_unit(scale).round();
-    Dimension::new(frame.x, frame.y, frame.width, h_phys)
+    Dimension::new(border_box.x, border_box.y, border_box.width, h_phys)
 }
 
 #[cfg(test)]

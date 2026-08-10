@@ -476,8 +476,8 @@ impl TilingOverlay {
             .iter()
             .map(|wp| overlay::LogicalTiledWindow {
                 id: wp.id,
-                frame: wp.frame.to_logical(scale),
-                visible_frame: wp.visible_frame.to_logical(scale),
+                frame: wp.border_box.to_logical(scale),
+                visible_frame: wp.visible_border_box.to_logical(scale),
                 is_highlighted: wp.is_highlighted,
                 spawn_indicator: wp.spawn_indicator,
             })
@@ -487,8 +487,8 @@ impl TilingOverlay {
             .iter()
             .map(|(cp, titles)| overlay::LogicalTiledContainer {
                 id: cp.id,
-                frame: cp.frame.to_logical(scale),
-                visible_frame: cp.visible_frame.to_logical(scale),
+                frame: cp.border_box.to_logical(scale),
+                visible_frame: cp.visible_border_box.to_logical(scale),
                 is_highlighted: cp.is_highlighted,
                 spawn_indicator: cp.spawn_indicator,
                 is_tabbed: cp.is_tabbed,
@@ -760,7 +760,7 @@ impl FloatOverlay {
 
 impl FloatOverlayApi for FloatOverlay {
     fn update(&mut self, wp: &FloatWindowPlacement, config: &Config, z: ZOrder, scale: f32) {
-        let vf = wp.visible_frame;
+        let vf = wp.visible_border_box;
         let (x_phys, y_phys, w_phys, h_phys) = vf.to_surface_size();
 
         if self.width_phys != w_phys || self.height_phys != h_phys {
@@ -792,7 +792,7 @@ impl FloatOverlayApi for FloatOverlay {
         self.window.show();
 
         let vf_logical = vf.to_logical(scale);
-        let frame_logical = wp.frame.to_logical(scale);
+        let frame_logical = wp.border_box.to_logical(scale);
         let theme = config.theme();
         let border =
             overlay::BorderMetrics::from_thickness(Length::<Logical>::new(config.border_size));
@@ -887,9 +887,9 @@ impl CreateOverlay for WgpuOverlayFactory {
         &self,
         config: Config,
         _scale: f32,
-        visible_frame: Dimension,
+        visible_border_box: Dimension,
     ) -> anyhow::Result<Box<dyn FloatOverlayApi>> {
-        let (x_phys, y_phys, w_phys, h_phys) = visible_frame.to_surface_size();
+        let (x_phys, y_phys, w_phys, h_phys) = visible_border_box.to_surface_size();
         Ok(FloatOverlay::new(
             &self.instance,
             &self.adapter,

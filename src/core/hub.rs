@@ -24,8 +24,8 @@ pub(crate) struct VisiblePlacements {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TilingWindowPlacement {
     pub(crate) id: WindowId,
-    pub(crate) frame: Dimension,
-    pub(crate) visible_frame: Dimension,
+    pub(crate) border_box: Dimension,
+    pub(crate) visible_border_box: Dimension,
     /// Whether to highlight the window, for example when the window is focused. Doesn't require
     /// that the window has keyboard focus.
     pub(crate) is_highlighted: bool,
@@ -35,16 +35,16 @@ pub(crate) struct TilingWindowPlacement {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FloatWindowPlacement {
     pub(crate) id: WindowId,
-    pub(crate) frame: Dimension,
-    pub(crate) visible_frame: Dimension,
+    pub(crate) border_box: Dimension,
+    pub(crate) visible_border_box: Dimension,
     pub(crate) is_highlighted: bool,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ContainerPlacement {
     pub(crate) id: ContainerId,
-    pub(crate) frame: Dimension,
-    pub(crate) visible_frame: Dimension,
+    pub(crate) border_box: Dimension,
+    pub(crate) visible_border_box: Dimension,
     pub(crate) is_highlighted: bool,
     pub(crate) spawn_indicator: Option<SpawnIndicator>,
     pub(crate) is_tabbed: bool,
@@ -651,13 +651,14 @@ impl Hub {
                     let DisplayMode::Float { dim, .. } = window.mode else {
                         panic!("window {id} in float_windows but mode is not Float");
                     };
-                    let frame = dim.round();
-                    if let Some(visible_frame) = clip(frame, screen).map(Dimension::round) {
+                    let border_box = dim.round();
+                    if let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round)
+                    {
                         let is_highlighted = focused == Some(id);
                         float_windows.push(FloatWindowPlacement {
                             id,
-                            frame,
-                            visible_frame,
+                            border_box,
+                            visible_border_box,
                             is_highlighted,
                         });
                     }

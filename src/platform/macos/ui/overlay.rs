@@ -193,14 +193,14 @@ impl FloatOverlay {
             let clip = egui::Rect::from_min_size(
                 egui::pos2(0.0, 0.0),
                 egui::vec2(
-                    placement.visible_frame.width.logical(),
-                    placement.visible_frame.height.logical(),
+                    placement.visible_border_box.width.logical(),
+                    placement.visible_border_box.height.logical(),
                 ),
             );
             overlay::paint_window_border(
                 &painter.with_clip_rect(clip),
-                placement.frame,
-                placement.visible_frame,
+                placement.border_box,
+                placement.visible_border_box,
                 placement.is_highlighted,
                 None,
                 &theme,
@@ -234,14 +234,14 @@ impl FloatOverlay {
                 let clip = egui::Rect::from_min_size(
                     egui::pos2(0.0, 0.0),
                     egui::vec2(
-                        placement.visible_frame.width.logical(),
-                        placement.visible_frame.height.logical(),
+                        placement.visible_border_box.width.logical(),
+                        placement.visible_border_box.height.logical(),
                     ),
                 );
                 overlay::paint_window_border(
                     &painter.with_clip_rect(clip),
-                    placement.frame,
-                    placement.visible_frame,
+                    placement.border_box,
+                    placement.visible_border_box,
                     placement.is_highlighted,
                     None,
                     &theme,
@@ -541,8 +541,8 @@ impl TilingOverlayView {
             .iter()
             .map(|wp| LogicalTiledWindow {
                 id: wp.id,
-                frame: wp.frame,
-                visible_frame: wp.visible_frame,
+                frame: wp.border_box,
+                visible_frame: wp.visible_border_box,
                 is_highlighted: wp.is_highlighted,
                 spawn_indicator: wp.spawn_indicator,
             })
@@ -551,8 +551,8 @@ impl TilingOverlayView {
             .iter()
             .map(|cs| LogicalTiledContainer {
                 id: cs.placement.id,
-                frame: cs.placement.frame,
-                visible_frame: cs.placement.visible_frame,
+                frame: cs.placement.border_box,
+                visible_frame: cs.placement.visible_border_box,
                 is_highlighted: cs.placement.is_highlighted,
                 spawn_indicator: cs.placement.spawn_indicator,
                 is_tabbed: cs.placement.is_tabbed,

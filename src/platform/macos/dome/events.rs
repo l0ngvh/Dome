@@ -141,7 +141,7 @@ pub(in crate::platform::macos) struct MonitorTilingData {
 #[derive(Clone)]
 pub(in crate::platform::macos) struct ContainerShow {
     pub(in crate::platform::macos) placement: ContainerPlacement,
-    /// Top `tab_bar_height` strip of `placement.frame` in logical points.
+    /// Top `tab_bar_height` strip of `placement.border_box` in logical points.
     pub(in crate::platform::macos) tab_bar_dim: Dimension<Logical>,
     /// Pre-flipped Cocoa frame for `tab_bar_dim`. Always populated, even when
     /// `!placement.is_tabbed`. The UI loop filters before creating the overlay

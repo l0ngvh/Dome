@@ -516,7 +516,7 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     let float_overlays = env.float_overlays();
     let float_overlay = &float_overlays[0];
     let FloatOverlayState::Visible {
-        visible_frame: overlay_dim,
+        visible_border_box: overlay_dim,
         ..
     } = float_overlay.state
     else {
@@ -536,7 +536,7 @@ fn float_move_monitor_same_dpi_preserves_content_rect() {
     let float_overlays = env.float_overlays();
     let float_overlay = &float_overlays[0];
     let FloatOverlayState::Visible {
-        visible_frame: overlay_dim,
+        visible_border_box: overlay_dim,
         ..
     } = float_overlay.state
     else {
@@ -610,7 +610,7 @@ fn float_move_monitor_different_dpi_rescales_border() {
     let float_overlays = env.float_overlays();
     let float_overlay = &float_overlays[0];
     let FloatOverlayState::Visible {
-        visible_frame: overlay_dim,
+        visible_border_box: overlay_dim,
         ..
     } = float_overlay.state
     else {
@@ -733,12 +733,15 @@ fn float_drift_repositions_overlay() {
         .find(|f| f.state.is_visible())
         .map(|f| f.state)
         .unwrap_or(FloatOverlayState::Hidden);
-    let FloatOverlayState::Visible { visible_frame, .. } = state else {
+    let FloatOverlayState::Visible {
+        visible_border_box, ..
+    } = state
+    else {
         panic!("float overlay must be visible after drag, got {:?}", state);
     };
     assert_eq!(
-        visible_frame, expected_outer,
-        "overlay should receive the border-expanded outer_dim as visible_frame"
+        visible_border_box, expected_outer,
+        "overlay should receive the border-expanded outer_dim as visible_border_box"
     );
 }
 

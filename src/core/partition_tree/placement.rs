@@ -105,14 +105,15 @@ impl PartitionTreeStrategy {
             let Some(child) = stack.pop() else { break };
             match child {
                 Child::Window(id) => {
-                    let frame =
+                    let border_box =
                         translate(self.child_dimension(child), offset_x, offset_y, screen).round();
-                    if let Some(visible_frame) = clip(frame, screen).map(Dimension::round) {
+                    if let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round)
+                    {
                         let is_highlighted = focused == Some(Child::Window(id));
                         windows.push(TilingWindowPlacement {
                             id,
-                            frame,
-                            visible_frame,
+                            border_box,
+                            visible_border_box,
                             is_highlighted,
                             spawn_indicator: if is_highlighted {
                                 Some(SpawnIndicator::from(self.child_spawn_mode(child)))
@@ -124,16 +125,17 @@ impl PartitionTreeStrategy {
                 }
                 Child::Container(id) => {
                     let container = self.containers.get(id);
-                    let frame =
+                    let border_box =
                         translate(self.child_dimension(child), offset_x, offset_y, screen).round();
-                    let Some(visible_frame) = clip(frame, screen).map(Dimension::round) else {
+                    let Some(visible_border_box) = clip(border_box, screen).map(Dimension::round)
+                    else {
                         continue;
                     };
                     let is_highlighted = focused == Some(Child::Container(id));
                     containers.push(ContainerPlacement {
                         id,
-                        frame,
-                        visible_frame,
+                        border_box,
+                        visible_border_box,
                         is_highlighted,
                         spawn_indicator: if is_highlighted {
                             Some(SpawnIndicator::from(self.child_spawn_mode(child)))

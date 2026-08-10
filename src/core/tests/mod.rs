@@ -76,8 +76,8 @@ pub(super) fn snapshot(hub: &Hub) -> String {
 
     // Draw tiling windows
     for wp in tiling_windows {
-        let d = wp.visible_frame;
-        let clip = clip_edges(wp.frame, wp.visible_frame);
+        let d = wp.visible_border_box;
+        let clip = clip_edges(wp.border_box, wp.visible_border_box);
         draw_rect(
             &mut grid,
             d.x.value(),
@@ -92,7 +92,7 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     // Draw tab bars
     for cp in containers {
         if cp.is_tabbed {
-            let d = cp.visible_frame;
+            let d = cp.visible_border_box;
             draw_tab_bar(
                 &mut grid,
                 d.x.value(),
@@ -108,8 +108,8 @@ pub(super) fn snapshot(hub: &Hub) -> String {
     let focused_float = float_windows.iter().find(|p| p.is_highlighted);
     if focused_float.is_none() {
         if let Some(wp) = tiling_windows.iter().find(|p| p.is_highlighted) {
-            let d = wp.visible_frame;
-            let clip = clip_edges(wp.frame, wp.visible_frame);
+            let d = wp.visible_border_box;
+            let clip = clip_edges(wp.border_box, wp.visible_border_box);
             draw_focused_border(
                 &mut grid,
                 d.x.value(),
@@ -119,8 +119,8 @@ pub(super) fn snapshot(hub: &Hub) -> String {
                 clip,
             );
         } else if let Some(cp) = containers.iter().find(|p| p.is_highlighted) {
-            let d = cp.visible_frame;
-            let clip = clip_edges(cp.frame, cp.visible_frame);
+            let d = cp.visible_border_box;
+            let clip = clip_edges(cp.border_box, cp.visible_border_box);
             draw_focused_border(
                 &mut grid,
                 d.x.value(),
@@ -134,8 +134,8 @@ pub(super) fn snapshot(hub: &Hub) -> String {
 
     // Draw float windows on top
     for wp in float_windows {
-        let d = wp.visible_frame;
-        let clip = clip_edges(wp.frame, wp.visible_frame);
+        let d = wp.visible_border_box;
+        let clip = clip_edges(wp.border_box, wp.visible_border_box);
         let grid_w = grid[0].len() as isize;
         let grid_h = grid.len() as isize;
         let x1 = d.x.round().value() as isize;
@@ -160,8 +160,8 @@ pub(super) fn snapshot(hub: &Hub) -> String {
 
     // Draw focus border for float focused (on top of everything)
     if let Some(wp) = focused_float {
-        let d = wp.visible_frame;
-        let clip = clip_edges(wp.frame, wp.visible_frame);
+        let d = wp.visible_border_box;
+        let clip = clip_edges(wp.border_box, wp.visible_border_box);
         draw_focused_border(
             &mut grid,
             d.x.value(),
@@ -258,7 +258,7 @@ fn fmt_spawn(indicator: &SpawnIndicator) -> String {
 }
 
 fn fmt_tiling_placement(wp: &TilingWindowPlacement) -> String {
-    let d = wp.visible_frame;
+    let d = wp.visible_border_box;
     let mut parts = format!(
         "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         wp.id, d.x, d.y, d.width, d.height
@@ -274,7 +274,7 @@ fn fmt_tiling_placement(wp: &TilingWindowPlacement) -> String {
 }
 
 fn fmt_float_placement(wp: &FloatWindowPlacement) -> String {
-    let d = wp.visible_frame;
+    let d = wp.visible_border_box;
     let mut parts = format!(
         "    Window(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         wp.id, d.x, d.y, d.width, d.height
@@ -288,7 +288,7 @@ fn fmt_float_placement(wp: &FloatWindowPlacement) -> String {
 }
 
 fn fmt_container_placement(cp: &ContainerPlacement) -> String {
-    let d = cp.visible_frame;
+    let d = cp.visible_border_box;
     let mut parts = format!(
         "    Container(id={}, x={:.2}, y={:.2}, w={:.2}, h={:.2}",
         cp.id, d.x, d.y, d.width, d.height
@@ -375,13 +375,13 @@ fn draw_tab_bar(
     }
 }
 
-fn clip_edges(frame: Dimension, visible: Dimension) -> [bool; 4] {
+fn clip_edges(border_box: Dimension, visible: Dimension) -> [bool; 4] {
     let half = Length::new(0.5);
     [
-        visible.x > frame.x + half,
-        (visible.x + visible.width) < (frame.x + frame.width) - half,
-        visible.y > frame.y + half,
-        (visible.y + visible.height) < (frame.y + frame.height) - half,
+        visible.x > border_box.x + half,
+        (visible.x + visible.width) < (border_box.x + border_box.width) - half,
+        visible.y > border_box.y + half,
+        (visible.y + visible.height) < (border_box.y + border_box.height) - half,
     ]
 }
 
@@ -531,9 +531,9 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                clip(wp.frame, screen),
-                Some(wp.visible_frame),
-                "Window {} visible_frame doesn't match clip(frame, screen)",
+                clip(wp.border_box, screen),
+                Some(wp.visible_border_box),
+                "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
             );
         }
@@ -544,17 +544,17 @@ fn validate_visible_placements(hub: &Hub) {
                 wp.id
             );
             assert_eq!(
-                clip(wp.frame, screen),
-                Some(wp.visible_frame),
-                "Window {} visible_frame doesn't match clip(frame, screen)",
+                clip(wp.border_box, screen),
+                Some(wp.visible_border_box),
+                "Window {} visible_border_box doesn't match clip(border_box, screen)",
                 wp.id
             );
         }
         for cp in containers {
             assert_eq!(
-                clip(cp.frame, screen),
-                Some(cp.visible_frame),
-                "Container {} visible_frame doesn't match clip(frame, screen)",
+                clip(cp.border_box, screen),
+                Some(cp.visible_border_box),
+                "Container {} visible_border_box doesn't match clip(border_box, screen)",
                 cp.id
             );
         }

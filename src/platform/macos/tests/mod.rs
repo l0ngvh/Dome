@@ -485,7 +485,7 @@ impl FrameSender for TestSender {
                     (
                         show.cg_id,
                         FloatSnapshot {
-                            outer_frame: show.placement.frame,
+                            outer_frame: show.placement.border_box,
                             content_dim: show.content_dim,
                         },
                     )

@@ -159,12 +159,12 @@ impl Dome {
                 let mut float_shows = Vec::new();
 
                 for wp in tiling_windows {
-                    let content_dim = apply_inset(wp.frame, border_size);
-                    // Clip to visible_frame bounds -- macOS doesn't reliably allow
+                    let content_dim = apply_inset(wp.border_box, border_size);
+                    // Clip to visible_border_box bounds -- macOS doesn't reliably allow
                     // placing windows partially off-screen (especially above menu bar)
-                    let visible_content = clip_to_bounds(content_dim, wp.visible_frame);
+                    let visible_content = clip_to_bounds(content_dim, wp.visible_border_box);
                     let Some(target) = visible_content else {
-                        let _span = tracing::debug_span!("empty_visible_content", ?content_dim, visible_frame = ?wp.visible_frame).entered();
+                        let _span = tracing::debug_span!("empty_visible_content", ?content_dim, visible_border_box = ?wp.visible_border_box).entered();
                         self.move_window_offscreen(wp.id);
                         continue;
                     };
@@ -174,8 +174,8 @@ impl Dome {
 
                 for wp in float_windows {
                     // Float dimensions are screen-absolute. The OS clips at screen
-                    // edges, so we use wp.frame for everything (no visible_frame).
-                    let content_dim = apply_inset(wp.frame, border_size);
+                    // edges, so we use wp.border_box for everything (no visible_border_box).
+                    let content_dim = apply_inset(wp.border_box, border_size);
                     if focused_window != Some(wp.id) {
                         self.move_window_offscreen(wp.id);
                     } else {
@@ -189,7 +189,7 @@ impl Dome {
                         placement: *wp,
                         cocoa_frame: dimension_to_ns_rect_cocoa(
                             Length::new(self.primary_full_height),
-                            wp.frame,
+                            wp.border_box,
                         ),
                         scale,
                         content_dim,
@@ -199,7 +199,7 @@ impl Dome {
                 let mut container_data = Vec::with_capacity(containers.len());
                 for cp in containers {
                     let tab_bar_dim =
-                        tab_bar_dimension(cp.frame, self.config.partition_tree.tab_bar_height);
+                        tab_bar_dimension(cp.border_box, self.config.partition_tree.tab_bar_height);
                     let tab_bar_cocoa_frame = dimension_to_ns_rect_cocoa(
                         Length::new(self.primary_full_height),
                         tab_bar_dim,
