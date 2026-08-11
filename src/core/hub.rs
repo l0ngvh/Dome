@@ -532,6 +532,7 @@ impl Hub {
     }
 
     pub(crate) fn sync_configuration(&mut self, layout: GlobalLayoutConfig) {
+        self.access.layout = layout.clone();
         for (ws_id, _) in self.access.workspaces.all_active() {
             self.strategies
                 .for_workspace_mut(ws_id)
@@ -543,7 +544,6 @@ impl Hub {
         self.strategies
             .resync(&mut self.access, &preferred_layouts, layout.strategy);
 
-        self.access.layout = layout;
         self.index_matchers(&preferred_layouts);
     }
 

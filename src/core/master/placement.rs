@@ -1,9 +1,9 @@
 use crate::core::{
     Dimension, Length, TilingWindowPlacement, WindowId,
     hub::HubAccess,
-    master::{MasterStrategy, WindowState, effective_constraints},
+    master::{MasterStrategy, WindowState},
     node::WorkspaceId,
-    strategy::{TilingPlacements, clip, distribute_space, translate},
+    strategy::{TilingPlacements, clip, distribute_space, translate, window_constraints},
 };
 
 impl MasterStrategy {
@@ -36,11 +36,11 @@ impl MasterStrategy {
             (_, _) => {
                 let master_min_w = master_ids
                     .iter()
-                    .map(|&id| effective_constraints(hub, &self.size_constraints, id).min_width)
+                    .map(|&id| window_constraints(hub, &self.size_constraints, id).min_width)
                     .fold(Length::ZERO, Length::max);
                 let stack_min_w = stack_ids
                     .iter()
-                    .map(|&id| effective_constraints(hub, &self.size_constraints, id).min_width)
+                    .map(|&id| window_constraints(hub, &self.size_constraints, id).min_width)
                     .fold(Length::ZERO, Length::max);
 
                 let desired_master_w = Length::new(
@@ -135,14 +135,14 @@ impl MasterStrategy {
         }
         let pane_min_w = ids
             .iter()
-            .map(|&id| effective_constraints(hub, &self.size_constraints, id).min_width)
+            .map(|&id| window_constraints(hub, &self.size_constraints, id).min_width)
             .fold(Length::ZERO, Length::max);
         let adjusted_w = pane_min_w.max(pane_width);
 
         let constraints: Vec<(Length, Length)> = ids
             .iter()
             .map(|&id| {
-                let c = effective_constraints(hub, &self.size_constraints, id);
+                let c = window_constraints(hub, &self.size_constraints, id);
                 (c.min_height, c.max_height)
             })
             .collect();
@@ -154,7 +154,7 @@ impl MasterStrategy {
             Length::ZERO
         };
         for (i, &id) in ids.iter().enumerate() {
-            let c = effective_constraints(hub, &self.size_constraints, id);
+            let c = window_constraints(hub, &self.size_constraints, id);
             let (w, x_off) = apply_max_constraint(c.max_width, adjusted_w);
             let (slot_h, y_off) = apply_max_constraint(c.max_height, heights[i]);
             let dim = Dimension::new(x_start + x_off, y + y_off, w, slot_h);

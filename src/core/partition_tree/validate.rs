@@ -2,13 +2,11 @@ use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 use crate::core::partition_tree::{Child, Container, Parent};
-use crate::core::strategy::ValidateStrategy;
+use crate::core::strategy::{VALIDATION_TOLERANCE, ValidateStrategy, window_constraints};
 
 use std::collections::HashSet;
 
 use super::PartitionTreeStrategy;
-
-const VALIDATION_TOLERANCE: Length = Length::new(0.01);
 
 impl ValidateStrategy for PartitionTreeStrategy {
     fn validate(&self, hub: &HubAccess) {
@@ -211,18 +209,7 @@ impl PartitionTreeStrategy {
         let dim = self.child_dimension(child);
 
         match child {
-            Child::Window(wid) => {
-                let limits = hub.windows.get(wid).limits();
-                (
-                    dim,
-                    Constraints {
-                        min_width: limits.min_width.unwrap_or(Length::ZERO),
-                        min_height: limits.min_height.unwrap_or(Length::ZERO),
-                        max_width: limits.max_width.unwrap_or(Length::ZERO),
-                        max_height: limits.max_height.unwrap_or(Length::ZERO),
-                    },
-                )
-            }
+            Child::Window(wid) => (dim, window_constraints(hub, &self.size_constraints, wid)),
             Child::Container(id) => {
                 let (min_w, min_h) = self.containers.get(id).min_size();
                 (
@@ -366,11 +353,11 @@ impl PartitionTreeStrategy {
         );
 
         let dim = self.tiling_windows.get(&wid).unwrap().dimension;
-        let limits = window.limits();
-        let min_w = limits.min_width.unwrap_or(Length::ZERO).value();
-        let min_h = limits.min_height.unwrap_or(Length::ZERO).value();
-        let max_w = limits.max_width.unwrap_or(Length::ZERO).value();
-        let max_h = limits.max_height.unwrap_or(Length::ZERO).value();
+        let c = window_constraints(hub, &self.size_constraints, wid);
+        let min_w = c.min_width.value();
+        let min_h = c.min_height.value();
+        let max_w = c.max_width.value();
+        let max_h = c.max_height.value();
 
         assert!(
             dim.width.value() >= min_w - VALIDATION_TOLERANCE.value(),
@@ -392,12 +379,6 @@ impl PartitionTreeStrategy {
                 dim.width.value(),
                 max_w
             );
-            assert!(
-                max_w >= min_w,
-                "Window {wid} max_width {:.2} < min_width {:.2}",
-                max_w,
-                min_w
-            );
         }
         if max_h > 0.0 {
             assert!(
@@ -406,11 +387,21 @@ impl PartitionTreeStrategy {
                 dim.height.value(),
                 max_h
             );
+        }
+
+        // window_constraints caps min by max, so an inverted stored pair is only
+        // observable before that cap runs.
+        let stored = window.limits();
+        if let (Some(min), Some(max)) = (stored.min_width, stored.max_width) {
             assert!(
-                max_h >= min_h,
-                "Window {wid} max_height {:.2} < min_height {:.2}",
-                max_h,
-                min_h
+                max >= min,
+                "Window {wid} stored max_width {max} < min_width {min}"
+            );
+        }
+        if let (Some(min), Some(max)) = (stored.min_height, stored.max_height) {
+            assert!(
+                max >= min,
+                "Window {wid} stored max_height {max} < min_height {min}"
             );
         }
     }

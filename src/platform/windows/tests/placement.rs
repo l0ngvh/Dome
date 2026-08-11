@@ -57,6 +57,52 @@ fn three_windows_split_screen() {
     );
 }
 
+#[test]
+fn reported_min_width_binds_while_zero_min_height_is_cleared() {
+    let mut env = TestEnv::new();
+    let w1 = env.open_with_min_size(1, "App1", "app1.exe", SPAWN_DIM, (1200.0, 0.0));
+    env.open(2, "App2", "app2.exe", SPAWN_DIM);
+
+    // An even split would leave each window near 952, so the minimum binds. The
+    // shell forwards it untouched and core outsets it by the border, so the app
+    // gets back exactly the content width it asked for.
+    assert_eq!(env.dim(w1).width, Length::new(1200.0));
+    // The zero height component reads as Cleared, not a zero-height minimum.
+    assert_eq!(
+        env.dim(w1).height,
+        SCREEN_HEIGHT - env.config.border_size.to_unit(1.0) * 2.0
+    );
+}
+
+#[test]
+fn dropping_all_limits_restores_the_even_split() {
+    let mut env = TestEnv::new();
+    let w1 = env.open_with_min_size(1, "App1", "app1.exe", SPAWN_DIM, (1200.0, 0.0));
+    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
+    assert_eq!(env.dim(w1).width, Length::new(1200.0));
+
+    // Mirrors dispatch_constraint_read re-reading an app that no longer reports a
+    // minimum. Discarding an all-clear observation would strand the 1200 forever.
+    env.dome.set_constraints_for(
+        w1,
+        LimitObservation {
+            min_width: LimitUpdate::Cleared,
+            min_height: LimitUpdate::Cleared,
+            max_width: LimitUpdate::Cleared,
+            max_height: LimitUpdate::Cleared,
+        },
+    );
+    env.dome.apply_layout();
+
+    assert_eq!(env.dim(w1).width, Length::new(952.0));
+    assert_eq!(env.dim(w2).width, Length::new(952.0));
+    assert_h_tiled(
+        &[env.dim(w1), env.dim(w2)],
+        default_monitor().dimension,
+        env.config.border_size,
+    );
+}
+
 /// distribute_space uses binary search and may produce fractional widths
 /// (e.g. 1920/3 ≈ 639.999). The f32→i32 conversion in show_tiling must
 /// round, not truncate, or the cumulative error pushes the last window's

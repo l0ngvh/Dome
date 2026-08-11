@@ -13,10 +13,11 @@ use crate::core::allocator::Allocator;
 use crate::core::hub::HubAccess;
 use crate::core::master::preferred_layout::{Slot, SlotId};
 use crate::core::node::{
-    Child, Constraints, Dimension, Direction, Length, WindowId, WindowMetadata, WorkspaceId,
+    Child, Dimension, Direction, Length, WindowId, WindowMetadata, WorkspaceId,
 };
 use crate::core::strategy::{
     TilingAction, TilingPlacements, TilingStrategy, WorkspaceExport, distribute_space,
+    window_constraints,
 };
 
 /// XMonad-style tiling: a master area on the left and a stack on the right.
@@ -503,7 +504,7 @@ impl MasterStrategy {
         let constraints: Vec<(Length, Length)> = pane_windows
             .iter()
             .map(|&id| {
-                let c = effective_constraints(hub, &self.size_constraints, id);
+                let c = window_constraints(hub, &self.size_constraints, id);
                 (c.min_height, c.max_height)
             })
             .collect();
@@ -636,65 +637,5 @@ fn wrap_index(idx: usize, len: usize, forward: bool) -> usize {
         len - 1
     } else {
         idx - 1
-    }
-}
-
-fn effective_constraints(
-    hub: &HubAccess,
-    size_constraints: &SizeConstraints,
-    wid: WindowId,
-) -> Constraints {
-    let ws_id = hub
-        .windows
-        .get(wid)
-        .workspace()
-        .expect("tiling window has a workspace");
-    let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-    let scale = monitor.scale;
-    let screen = monitor.dimension;
-
-    let global_min_w = size_constraints.minimum_width.resolve(screen.width, scale);
-    let global_min_h = size_constraints
-        .minimum_height
-        .resolve(screen.height, scale);
-    let global_max_w = size_constraints.maximum_width.resolve(screen.width, scale);
-    let global_max_h = size_constraints
-        .maximum_height
-        .resolve(screen.height, scale);
-
-    let window = hub.windows.get(wid);
-    let limits = window.limits();
-    let win_min_w = limits.min_width.unwrap_or(Length::ZERO);
-    let win_min_h = limits.min_height.unwrap_or(Length::ZERO);
-    let win_max_w = limits.max_width.unwrap_or(Length::ZERO);
-    let win_max_h = limits.max_height.unwrap_or(Length::ZERO);
-
-    let max_w = if win_max_w > Length::ZERO {
-        win_max_w
-    } else {
-        global_max_w
-    };
-    let max_h = if win_max_h > Length::ZERO {
-        win_max_h
-    } else {
-        global_max_h
-    };
-
-    let min_w = if max_w > Length::ZERO {
-        win_min_w.max(global_min_w).min(max_w)
-    } else {
-        win_min_w.max(global_min_w)
-    };
-    let min_h = if max_h > Length::ZERO {
-        win_min_h.max(global_min_h).min(max_h)
-    } else {
-        win_min_h.max(global_min_h)
-    };
-
-    Constraints {
-        min_width: min_w,
-        min_height: min_h,
-        max_width: max_w,
-        max_height: max_h,
     }
 }

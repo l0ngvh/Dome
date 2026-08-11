@@ -16,8 +16,8 @@ use crate::action::{Action, Actions};
 use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
-    ContainerId, ContainerPlacement, Dimension, Length, Logical, Physical, TilingWindowPlacement,
-    WindowId, WorkspaceInfo,
+    ContainerId, ContainerPlacement, Dimension, Length, LimitObservation, LimitUpdate, Logical,
+    Physical, TilingWindowPlacement, WindowId, WorkspaceInfo,
 };
 use crate::font::FontConfig;
 use crate::platform::windows::dome::MonitorInfo;
@@ -286,6 +286,29 @@ impl TestEnv {
         self.open_with(ext)
     }
 
+    fn open_with_min_size(
+        &mut self,
+        id: isize,
+        title: &str,
+        process: &str,
+        dim: Dimension<Physical>,
+        min: (f32, f32),
+    ) -> HwndId {
+        let ext = Arc::new(
+            MockExternalHwnd::with_title(
+                id,
+                title,
+                process,
+                self.moves.clone(),
+                self.z_stack.clone(),
+                self.focus_target.clone(),
+            )
+            .with_dimension(dim)
+            .with_min_size(min.0, min.1),
+        );
+        self.open_with(ext)
+    }
+
     /// Mirrors the runner's create-side fork instead of driving the real
     /// `dispatch_window_created` closure, so keep the two in sync.
     fn open_with(&mut self, ext: Arc<MockExternalHwnd>) -> HwndId {
@@ -309,12 +332,7 @@ impl TestEnv {
         let new = NewWindow {
             ext: ext.clone(),
             metadata,
-            constraints: (
-                ext.min_size.0,
-                ext.min_size.1,
-                ext.max_size.0,
-                ext.max_size.1,
-            ),
+            constraints: ext.constraints,
         };
         let dim = ext.get_dim();
         self.dome.add_window(new, dim, 1);
@@ -696,8 +714,7 @@ struct MockExternalHwnd {
     dimension: Mutex<Dimension>,
     override_position: Mutex<Option<(i32, i32, i32, i32)>>,
     minimized: AtomicBool,
-    min_size: (f32, f32),
-    max_size: (f32, f32),
+    constraints: LimitObservation,
     z_stack: ZOrderStack,
     moves: MoveLog,
     focus_target: Arc<Mutex<FocusTarget>>,
@@ -729,8 +746,14 @@ impl MockExternalHwnd {
             )),
             override_position: Mutex::new(None),
             minimized: AtomicBool::new(false),
-            min_size: (0.0, 0.0),
-            max_size: (0.0, 0.0),
+            // Four Cleared, not LimitObservation::default(), because handle.rs reports
+            // Cleared for an app that sets no limits.
+            constraints: LimitObservation {
+                min_width: LimitUpdate::Cleared,
+                min_height: LimitUpdate::Cleared,
+                max_width: LimitUpdate::Cleared,
+                max_height: LimitUpdate::Cleared,
+            },
             z_stack,
             moves,
             focus_target,
@@ -754,6 +777,20 @@ impl MockExternalHwnd {
 
     fn with_dimension(self, dim: Dimension) -> Self {
         *self.dimension.lock().unwrap() = dim;
+        self
+    }
+
+    /// Mirrors `handle.rs`, where a non-positive component means no limit.
+    fn with_min_size(mut self, width: f32, height: f32) -> Self {
+        let limit = |v: f32| {
+            if v > 0.0 {
+                LimitUpdate::Set(Length::new(v))
+            } else {
+                LimitUpdate::Cleared
+            }
+        };
+        self.constraints.min_width = limit(width);
+        self.constraints.min_height = limit(height);
         self
     }
 

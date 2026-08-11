@@ -22,7 +22,7 @@ use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
-    LimitObservation, LimitUpdate, Logical, MonitorId, MonitorLayout, Physical, TilingAction,
+    LimitObservation, Logical, MonitorId, MonitorLayout, Physical, TilingAction,
     TilingWindowPlacement, WindowId, WindowRestrictions, WorkspaceInfo,
 };
 
@@ -386,7 +386,7 @@ impl Dome {
             })
         };
         let id_key = ext.id();
-        self.set_constraints(id, constraints);
+        self.hub.set_window_constraint(id, constraints);
         self.recovery.track(&ext);
         self.registry.insert(
             id_key,
@@ -401,32 +401,11 @@ impl Dome {
         self.apply_layout();
     }
 
-    fn resolve_window_monitor(&self, id: WindowId) -> MonitorId {
-        let Some(entry) = self.registry.get(id) else {
-            return self.hub.focused_monitor();
-        };
-        if entry.is_minimized {
-            return self.hub.focused_monitor();
-        }
-        match entry.state {
-            WindowState::Positioned(PositionedState::Tiling(d)) => d.monitor,
-            WindowState::Positioned(PositionedState::Float(fp)) => fp.monitor,
-            // Offscreen, BorderlessFullscreen, ExclusiveFullscreen, or unregistered:
-            // best-effort fallback to focused monitor.
-            // The next apply_layout retriggers set_constraints via the Tiling/Float branch.
-            _ => self.hub.focused_monitor(),
-        }
-    }
-
-    pub(super) fn set_constraints_for(
-        &mut self,
-        hwnd_id: HwndId,
-        constraints: (f32, f32, f32, f32),
-    ) {
+    pub(super) fn set_constraints_for(&mut self, hwnd_id: HwndId, constraints: LimitObservation) {
         let Some(id) = self.registry.get_id(hwnd_id) else {
             return;
         };
-        self.set_constraints(id, constraints);
+        self.hub.set_window_constraint(id, constraints);
     }
 
     #[tracing::instrument(
@@ -991,41 +970,6 @@ impl Dome {
         let window_ids: Vec<(HwndId, WindowId)> = self.registry.iter().collect();
         for (_hwnd_id, window_id) in window_ids {
             self.retry_drift(window_id);
-        }
-    }
-
-    fn set_constraints(&mut self, id: WindowId, constraints: (f32, f32, f32, f32)) {
-        // FIXME: resolve_window_monitor is best effort, so it can return the wrong monitor. If the
-        // window is immediately minimized after spawn, then we'd get the wrong border
-        let monitor = self.resolve_window_monitor(id);
-        let border = self
-            .monitors
-            .physical_border(monitor, self.config.border_size)
-            .value();
-        let (min_w, min_h, max_w, max_h) = constraints;
-        if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
-            let to_frame = |v: f32| {
-                if v > 0.0 {
-                    LimitUpdate::Set(Length::new(v + 2.0 * border))
-                } else {
-                    // TODO: report Cleared once handle.rs can tell a genuine "no limit" from a
-                    // limit that subtracts down to zero. Until then a dropped limit is never
-                    // cleared in core.
-                    LimitUpdate::Unchanged
-                }
-            };
-            // No pre-check against stored values: calling set_window_constraint with
-            // unchanged values is cheap (the runner's apply_layout diffs against cached
-            // placements and skips windows whose target is unchanged).
-            self.hub.set_window_constraint(
-                id,
-                LimitObservation {
-                    min_width: to_frame(min_w),
-                    min_height: to_frame(min_h),
-                    max_width: to_frame(max_w),
-                    max_height: to_frame(max_h),
-                },
-            );
         }
     }
 

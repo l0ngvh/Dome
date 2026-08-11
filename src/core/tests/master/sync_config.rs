@@ -1,5 +1,6 @@
 use crate::config::{MasterConfig, Strategy};
 use crate::core::WindowRestrictions;
+use crate::core::node::{Length, LimitObservation, LimitUpdate, Logical};
 use crate::core::strategy::TilingAction;
 use crate::core::tests::{
     LayoutConfigBuilder, LayoutWorkspaceConfigBuilder, TestHubBuilder, default_dim, snapshot,
@@ -509,5 +510,114 @@ fn sync_config_global_count_decrease() {
     |                                                                         |*                                                                         *
     |                                                                         |*                                                                         *
     +-------------------------------------------------------------------------+***************************************************************************
+    ");
+}
+
+#[test]
+fn constraint_survives_border_size_change() {
+    let mut hub = TestHubBuilder::new()
+        .with_layout(
+            LayoutConfigBuilder::new()
+                .with_strategy(Strategy::Master)
+                .build(),
+        )
+        .build();
+    let w0 = hub
+        .insert_window(titled("w41"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    hub.insert_window(titled("w42"), default_dim(), WindowRestrictions::None);
+
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=102.00, h=30.00)
+        Window(id=WindowId(1), x=102.00, y=0.00, w=48.00, h=30.00, highlighted)
+      )
+
+    +----------------------------------------------------------------------------------------------------+************************************************
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                 W0                                                 |*                      W1                      *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    |                                                                                                    |*                                              *
+    +----------------------------------------------------------------------------------------------------+************************************************
+    ");
+
+    hub.sync_configuration(
+        LayoutConfigBuilder::new()
+            .with_strategy(Strategy::Master)
+            .with_border_size(Length::<Logical>::new(5.0))
+            .build(),
+    );
+
+    // The stored limit is content-box, so w41 keeps 100 of content and its
+    // border box grows with the border instead.
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=0.00, y=0.00, w=110.00, h=30.00)
+        Window(id=WindowId(1), x=110.00, y=0.00, w=40.00, h=30.00, highlighted)
+      )
+
+    +------------------------------------------------------------------------------------------------------------+****************************************
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                     W0                                                     |*                  W1                  *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    |                                                                                                            |*                                      *
+    +------------------------------------------------------------------------------------------------------------+****************************************
     ");
 }

@@ -30,7 +30,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{BOOL, PCWSTR, w};
 
-use crate::core::{Dimension, Length, Physical};
+use crate::core::{Dimension, Length, LimitObservation, LimitUpdate, Physical};
 use crate::platform::windows::external::{
     HwndId, InspectExternalWindow, ManageExternalWindow, ShowCmd, ZOrder,
 };
@@ -188,23 +188,6 @@ fn target_scale_to_physical(hwnd: HWND) -> f32 {
             dpi as f32 / 96.0
         }
     }
-}
-
-/// Subtracts invisible border widths from raw min/max track-size pairs, returning
-/// the content-area constraints as f32. Negative results are clamped to zero.
-fn constraints_subtract_border(
-    min_track: (i32, i32),
-    max_track: (i32, i32),
-    border: (i32, i32, i32, i32),
-) -> (f32, f32, f32, f32) {
-    let h_border = border.0 + border.2;
-    let v_border = border.1 + border.3;
-    (
-        (min_track.0 - h_border).max(0) as f32,
-        (min_track.1 - v_border).max(0) as f32,
-        (max_track.0 - h_border).max(0) as f32,
-        (max_track.1 - v_border).max(0) as f32,
-    )
 }
 
 pub(crate) fn enum_windows<F>(mut callback: F) -> windows::core::Result<()>
@@ -652,16 +635,13 @@ impl InspectExternalWindow for ExternalHwnd {
         Ok(String::from_utf16_lossy(&path_wide[..end]))
     }
 
-    /// Applies `target_scale_to_physical` to handle legacy-DPI-unaware targets,
-    /// then subtracts invisible borders.
-    fn get_size_constraints(&self) -> (f32, f32, f32, f32) {
+    /// A failed or timed-out read reports `Unchanged`, leaving core's stored limits alone.
+    fn get_size_constraints(&self) -> LimitObservation {
         let hwnd = self.0;
-        // MINMAXINFO is an in/out parameter to WM_GETMINMAXINFO.
-        // Zero-initialisation is the documented initial state: the target wndproc
-        // fills all fields before returning. See Win32 docs for WM_GETMINMAXINFO.
+        // Zero-initialisation is the documented initial state for MINMAXINFO, which the
+        // target wndproc fills in before returning.
         let mut info = MINMAXINFO::default();
-        let mut result = 0usize;
-        unsafe {
+        let sent = unsafe {
             SendMessageTimeoutW(
                 hwnd,
                 WM_GETMINMAXINFO,
@@ -669,20 +649,31 @@ impl InspectExternalWindow for ExternalHwnd {
                 LPARAM(&mut info as *mut _ as isize),
                 SMTO_ABORTIFHUNG,
                 MSG_TIMEOUT_MS,
-                Some(&mut result),
+                None,
             )
         };
+        if sent.0 == 0 {
+            tracing::trace!(?hwnd, "WM_GETMINMAXINFO failed or timed out");
+            return LimitObservation::default();
+        }
         let scale = target_scale_to_physical(hwnd);
-        let min_track = (
-            (info.ptMinTrackSize.x as f32 * scale) as i32,
-            (info.ptMinTrackSize.y as f32 * scale) as i32,
-        );
-        let max_track = (
-            (info.ptMaxTrackSize.x as f32 * scale) as i32,
-            (info.ptMaxTrackSize.y as f32 * scale) as i32,
-        );
-        let border = get_invisible_border(hwnd);
-        constraints_subtract_border(min_track, max_track, border)
+        let (left, top, right, bottom) = get_invisible_border(hwnd);
+        let horizontal = left + right;
+        let vertical = top + bottom;
+        // Win32 reports a zero track size when the app set no limit on that axis.
+        let limit = |track: i32, border: i32| {
+            let track = (track as f32 * scale) as i32;
+            if track <= 0 {
+                return LimitUpdate::Cleared;
+            }
+            LimitUpdate::Set(Length::new((track - border).max(0) as f32))
+        };
+        LimitObservation {
+            min_width: limit(info.ptMinTrackSize.x, horizontal),
+            min_height: limit(info.ptMinTrackSize.y, vertical),
+            max_width: limit(info.ptMaxTrackSize.x, horizontal),
+            max_height: limit(info.ptMaxTrackSize.y, vertical),
+        }
     }
 
     /// Returns the DWM extended frame bounds in physical pixels. Falls back to

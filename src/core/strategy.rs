@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
-use crate::config::{LayoutWorkspaceConfig, Strategy, TreeLayoutNode, WindowMatcher};
+use crate::config::{
+    LayoutWorkspaceConfig, SizeConstraints, Strategy, TreeLayoutNode, WindowMatcher,
+};
 use crate::core::GlobalLayoutConfig;
 use crate::core::hub::{ContainerPlacement, HubAccess, TilingWindowPlacement};
 use crate::core::master::MasterStrategy;
 use crate::core::node::{
-    Child, ContainerId, Dimension, Direction, Length, WindowId, WindowMetadata, WorkspaceId,
+    Child, Constraints, ContainerId, Dimension, Direction, Length, WindowId, WindowMetadata,
+    WorkspaceId,
 };
 use crate::core::partition_tree::PartitionTreeStrategy;
 
@@ -168,6 +171,77 @@ pub(crate) trait TilingStrategy: std::fmt::Debug {
 #[cfg(test)]
 pub(super) trait ValidateStrategy {
     fn validate(&self, hub: &HubAccess);
+}
+
+/// Absorbs the f32 error a constraint accumulates while being distributed.
+#[cfg(test)]
+pub(super) const VALIDATION_TOLERANCE: Length = Length::new(0.01);
+
+/// Resolve one tiling window's effective constraints, in border-box space.
+///
+/// `Window::limits` records what the app asked for, which describes its content
+/// area, so each per-window limit gains `2 * border` here. The global
+/// `size_constraints` are already border-box and must not be outset, or what a
+/// percentage means would start depending on `border_size`.
+pub(crate) fn window_constraints(
+    hub: &HubAccess,
+    size_constraints: &SizeConstraints,
+    wid: WindowId,
+) -> Constraints {
+    let ws_id = hub
+        .windows
+        .get(wid)
+        .workspace()
+        .expect("tiling window has a workspace");
+    let monitor_id = hub.workspaces.get(ws_id).monitor;
+    let monitor = hub.monitors.get(monitor_id);
+    let scale = monitor.scale;
+    let screen = monitor.dimension;
+
+    let global_min_w = size_constraints.minimum_width.resolve(screen.width, scale);
+    let global_min_h = size_constraints
+        .minimum_height
+        .resolve(screen.height, scale);
+    let global_max_w = size_constraints.maximum_width.resolve(screen.width, scale);
+    let global_max_h = size_constraints
+        .maximum_height
+        .resolve(screen.height, scale);
+
+    let outset = hub.border(monitor_id) * 2.0;
+    let limits = hub.windows.get(wid).limits();
+    let win_min_w = limits.min_width.map_or(Length::ZERO, |v| v + outset);
+    let win_min_h = limits.min_height.map_or(Length::ZERO, |v| v + outset);
+    let win_max_w = limits.max_width.map_or(Length::ZERO, |v| v + outset);
+    let win_max_h = limits.max_height.map_or(Length::ZERO, |v| v + outset);
+
+    let max_w = if win_max_w > Length::ZERO {
+        win_max_w
+    } else {
+        global_max_w
+    };
+    let max_h = if win_max_h > Length::ZERO {
+        win_max_h
+    } else {
+        global_max_h
+    };
+
+    let min_w = if max_w > Length::ZERO {
+        win_min_w.max(global_min_w).min(max_w)
+    } else {
+        win_min_w.max(global_min_w)
+    };
+    let min_h = if max_h > Length::ZERO {
+        win_min_h.max(global_min_h).min(max_h)
+    } else {
+        win_min_h.max(global_min_h)
+    };
+
+    Constraints {
+        min_width: min_w,
+        min_height: min_h,
+        max_width: max_w,
+        max_height: max_h,
+    }
 }
 
 /// Convert layout-space coordinates to screen-absolute. Layout positions are

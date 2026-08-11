@@ -3,8 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::core::{
-    Dimension, Length, LimitObservation, LimitUpdate, Logical, MonitorId, Unit, WindowId,
-    WindowRestrictions,
+    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, Unit, WindowId, WindowRestrictions,
 };
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -188,7 +187,7 @@ impl Placement {
     }
 
     /// Compare actual vs target, return the limits learned if size mismatched.
-    fn detect_constraint(&self, border: Length<Logical>) -> Option<LimitObservation> {
+    fn detect_constraint(&self) -> Option<LimitObservation> {
         let (actual, target) = (self.actual, self.target);
         let min_w = (actual.width > target.width).then_some(actual.width as f32);
         let min_h = (actual.height > target.height).then_some(actual.height as f32);
@@ -206,14 +205,10 @@ impl Placement {
             ?max_h,
             "window constrained"
         );
-        // AX reports the content box, so add the border back before core stores it. A
-        // limit observed below the sum of the borders still yields a border box that
-        // can accommodate them.
-        let observed = |v: Option<f32>| {
-            v.map_or(LimitUpdate::Unchanged, |v| {
-                LimitUpdate::Set(Length::new(v + 2.0 * border.logical()))
-            })
-        };
+        // AX reports the content box, which is the space core stores limits in,
+        // so the observation needs no border conversion.
+        let observed =
+            |v: Option<f32>| v.map_or(LimitUpdate::Unchanged, |v| LimitUpdate::Set(Length::new(v)));
         Some(LimitObservation {
             min_width: observed(min_w),
             min_height: observed(min_h),
@@ -618,7 +613,7 @@ impl Dome {
                     }
 
                     p.actual = new_placement;
-                    let Some(observation) = p.detect_constraint(self.config.border_size) else {
+                    let Some(observation) = p.detect_constraint() else {
                         return;
                     };
                     self.hub.set_window_constraint(window_id, observation);

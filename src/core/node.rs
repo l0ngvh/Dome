@@ -435,7 +435,8 @@ impl Length<Logical> {
     }
 }
 
-/// Effective per-child layout constraints in the `Length` unit.
+/// Effective per-child layout constraints in the `Length` unit, in border-box
+/// space.
 ///
 /// `Length::ZERO` on a `max_*` field means "unbounded" on that axis. Containers
 /// always set both maxes to `Length::ZERO`.
@@ -447,8 +448,8 @@ pub(crate) struct Constraints {
     pub(crate) max_height: Length,
 }
 
-/// OS-reported size limits, in border-box space since each shell adds its border
-/// back before forwarding. `None` means that limit is absent.
+/// OS-reported size limits, in content-box space, which is what an app's stated
+/// minimum or maximum describes.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct SizeLimits {
     pub(crate) min_width: Option<Length<Unit>>,
@@ -457,24 +458,15 @@ pub(crate) struct SizeLimits {
     pub(crate) max_height: Option<Length<Unit>>,
 }
 
-/// One limit of an OS size-limit observation.
-///
-/// Distinct from `SizeLimits` because a shell can fail to learn anything about a
-/// limit, which is not the same as learning it is unconstrained. macOS derives
-/// limits by comparing where a window landed against where it was told to go, so
-/// on one axis it observes either a minimum or a maximum and never both.
-/// Collapsing `Unchanged` into `Cleared` would make each observation erase the
-/// opposite limit learned from an earlier event.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) enum LimitUpdate {
     #[default]
     Unchanged,
     #[cfg_attr(
-        not(test),
+        all(not(test), not(target_os = "windows")),
         expect(
             dead_code,
-            reason = "no production producer until Windows reports genuine per-edge \
-                      unconstrained-ness, which needs the handle.rs sentinel fix"
+            reason = "only the Windows shell reports a genuine no-limit observation"
         )
     )]
     Cleared,

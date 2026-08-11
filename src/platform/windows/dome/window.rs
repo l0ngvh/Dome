@@ -5,8 +5,8 @@ use super::Dome;
 use super::display_from_process;
 use crate::config::{WindowMatcher, pattern_matches};
 use crate::core::{
-    Dimension, FloatWindowPlacement, Length, MonitorId, Physical, TilingWindowPlacement, WindowId,
-    WindowRestrictions,
+    Dimension, FloatWindowPlacement, Length, LimitObservation, MonitorId, Physical,
+    TilingWindowPlacement, WindowId, WindowRestrictions,
 };
 use crate::platform::windows::external::{ManageExternalWindow, ShowCmd, ZOrder};
 use crate::platform::windows::handle::OFFSCREEN_POS;
@@ -18,7 +18,7 @@ use crate::platform::windows::handle::OFFSCREEN_POS;
 pub(in crate::platform::windows) struct NewWindow {
     pub(in crate::platform::windows) ext: Arc<dyn ManageExternalWindow>,
     pub(in crate::platform::windows) metadata: WindowsMetadata,
-    pub(in crate::platform::windows) constraints: (f32, f32, f32, f32),
+    pub(in crate::platform::windows) constraints: LimitObservation,
 }
 
 impl std::fmt::Display for NewWindow {

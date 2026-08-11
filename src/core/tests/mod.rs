@@ -780,6 +780,13 @@ impl LayoutConfigBuilder {
         Self { master, ..self }
     }
 
+    fn with_border_size(self, border_size: Length<Logical>) -> Self {
+        Self {
+            border_size,
+            ..self
+        }
+    }
+
     fn with_min_width(self, min_width: SizeConstraint) -> Self {
         Self {
             size_constraints: SizeConstraints {

@@ -1,7 +1,7 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
 
-use crate::core::{Dimension, Physical};
+use crate::core::{Dimension, LimitObservation, Physical};
 
 /// Opaque window identity. Replaces `ManagedHwnd` throughout the codebase.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -97,7 +97,7 @@ pub(crate) trait InspectExternalWindow: Send + Sync {
     /// Sibling of `get_process_name`. Returns the full path from
     /// `QueryFullProcessImageNameW` without splitting the basename off.
     fn get_process_path(&self) -> anyhow::Result<String>;
-    fn get_size_constraints(&self) -> (f32, f32, f32, f32);
+    fn get_size_constraints(&self) -> LimitObservation;
     /// Returns the visible frame bounds excluding invisible window borders,
     /// in physical pixels. Same coordinate space as `set_position`.
     fn get_visible_rect(&self) -> Dimension<Physical>;

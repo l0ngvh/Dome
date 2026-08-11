@@ -2,7 +2,9 @@ use crate::core::hub::HubAccess;
 use crate::core::node::Constraints;
 use crate::core::node::{ContainerId, Dimension, Direction, Length, WorkspaceId};
 use crate::core::partition_tree::{Child, SpawnMode};
-use crate::core::strategy::{TilingPlacements, clip, distribute_space, translate};
+use crate::core::strategy::{
+    TilingPlacements, clip, distribute_space, translate, window_constraints,
+};
 use crate::core::{ContainerPlacement, SpawnIndicator, TilingWindowPlacement};
 
 use super::PartitionTreeStrategy;
@@ -386,75 +388,12 @@ impl PartitionTreeStrategy {
 
     /// Resolve the effective constraints for a child.
     ///
-    /// Window: per-instance max (`Window::limits`) wins when present, otherwise
-    /// the global `max_*` config applies. The resolved max also caps the
-    /// effective min so a window's min cannot exceed its max.
-    ///
     /// Container: returns its tracked `min_size` and `(ZERO, ZERO)` for max.
     /// Containers have no max constraint. `ZERO` is the sentinel that
     /// downstream layout reads as "unconstrained".
     fn get_effective_constraints(&self, hub: &HubAccess, child: Child) -> Constraints {
-        let ws_id = self.child_workspace(hub, child);
-        let monitor = hub.monitors.get(hub.workspaces.get(ws_id).monitor);
-        let screen = monitor.dimension;
-        let scale = monitor.scale;
-        let global_min_w = self
-            .size_constraints
-            .minimum_width
-            .resolve(screen.width, scale);
-        let global_min_h = self
-            .size_constraints
-            .minimum_height
-            .resolve(screen.height, scale);
-
         match child {
-            Child::Window(id) => {
-                let window = hub.windows.get(id);
-                let limits = window.limits();
-                let win_min_w = limits.min_width.unwrap_or(Length::ZERO);
-                let win_min_h = limits.min_height.unwrap_or(Length::ZERO);
-                let win_max_w = limits.max_width.unwrap_or(Length::ZERO);
-                let win_max_h = limits.max_height.unwrap_or(Length::ZERO);
-
-                let global_max_w = self
-                    .size_constraints
-                    .maximum_width
-                    .resolve(screen.width, scale);
-                let global_max_h = self
-                    .size_constraints
-                    .maximum_height
-                    .resolve(screen.height, scale);
-
-                let max_w = if win_max_w > Length::ZERO {
-                    win_max_w
-                } else {
-                    global_max_w
-                };
-                let max_h = if win_max_h > Length::ZERO {
-                    win_max_h
-                } else {
-                    global_max_h
-                };
-
-                // Window-specific max caps the effective min
-                let min_w = if max_w > Length::ZERO {
-                    win_min_w.max(global_min_w).min(max_w)
-                } else {
-                    win_min_w.max(global_min_w)
-                };
-                let min_h = if max_h > Length::ZERO {
-                    win_min_h.max(global_min_h).min(max_h)
-                } else {
-                    win_min_h.max(global_min_h)
-                };
-
-                Constraints {
-                    min_width: min_w,
-                    min_height: min_h,
-                    max_width: max_w,
-                    max_height: max_h,
-                }
-            }
+            Child::Window(id) => window_constraints(hub, &self.size_constraints, id),
             Child::Container(id) => {
                 let (min_w, min_h) = self.containers.get(id).min_size();
                 Constraints {
