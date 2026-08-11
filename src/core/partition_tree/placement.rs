@@ -386,9 +386,9 @@ impl PartitionTreeStrategy {
 
     /// Resolve the effective constraints for a child.
     ///
-    /// Window: per-instance max (`Window::max_size`) wins when non-zero,
-    /// otherwise the global `max_*` config applies. The resolved max also caps
-    /// the effective min so a window's min cannot exceed its max.
+    /// Window: per-instance max (`Window::limits`) wins when present, otherwise
+    /// the global `max_*` config applies. The resolved max also caps the
+    /// effective min so a window's min cannot exceed its max.
     ///
     /// Container: returns its tracked `min_size` and `(ZERO, ZERO)` for max.
     /// Containers have no max constraint. `ZERO` is the sentinel that
@@ -410,13 +410,11 @@ impl PartitionTreeStrategy {
         match child {
             Child::Window(id) => {
                 let window = hub.windows.get(id);
-                // Window.min_*/max_* are raw f32 (pre-scaled platform hints); wrap at this Dimension seam.
-                let (win_min_w_raw, win_min_h_raw) = window.min_size();
-                let (win_max_w_raw, win_max_h_raw) = window.max_size();
-                let win_min_w = Length::new(win_min_w_raw);
-                let win_min_h = Length::new(win_min_h_raw);
-                let win_max_w = Length::new(win_max_w_raw);
-                let win_max_h = Length::new(win_max_h_raw);
+                let limits = window.limits();
+                let win_min_w = limits.min_width.unwrap_or(Length::ZERO);
+                let win_min_h = limits.min_height.unwrap_or(Length::ZERO);
+                let win_max_w = limits.max_width.unwrap_or(Length::ZERO);
+                let win_max_h = limits.max_height.unwrap_or(Length::ZERO);
 
                 let global_max_w = self
                     .size_constraints

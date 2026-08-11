@@ -22,8 +22,8 @@ use crate::config::{Config, LayoutConfig, LayoutWorkspaceConfig};
 use crate::core::GlobalLayoutConfig;
 use crate::core::{
     ContainerId, ContainerPlacement, Dimension, Direction, FloatWindowPlacement, Hub, Length,
-    Logical, MonitorId, MonitorLayout, Physical, TilingAction, TilingWindowPlacement, WindowId,
-    WindowRestrictions, WorkspaceInfo,
+    LimitObservation, LimitUpdate, Logical, MonitorId, MonitorLayout, Physical, TilingAction,
+    TilingWindowPlacement, WindowId, WindowRestrictions, WorkspaceInfo,
 };
 
 use self::app_window::AppWindowApi;
@@ -1006,9 +1006,12 @@ impl Dome {
         if min_w > 0.0 || min_h > 0.0 || max_w > 0.0 || max_h > 0.0 {
             let to_frame = |v: f32| {
                 if v > 0.0 {
-                    Some(v + 2.0 * border)
+                    LimitUpdate::Set(Length::new(v + 2.0 * border))
                 } else {
-                    None
+                    // TODO: report Cleared once handle.rs can tell a genuine "no limit" from a
+                    // limit that subtracts down to zero. Until then a dropped limit is never
+                    // cleared in core.
+                    LimitUpdate::Unchanged
                 }
             };
             // No pre-check against stored values: calling set_window_constraint with
@@ -1016,10 +1019,12 @@ impl Dome {
             // placements and skips windows whose target is unchanged).
             self.hub.set_window_constraint(
                 id,
-                to_frame(min_w),
-                to_frame(min_h),
-                to_frame(max_w),
-                to_frame(max_h),
+                LimitObservation {
+                    min_width: to_frame(min_w),
+                    min_height: to_frame(min_h),
+                    max_width: to_frame(max_w),
+                    max_height: to_frame(max_h),
+                },
             );
         }
     }

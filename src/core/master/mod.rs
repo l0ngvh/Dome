@@ -663,12 +663,11 @@ fn effective_constraints(
         .resolve(screen.height, scale);
 
     let window = hub.windows.get(wid);
-    let (raw_min_w, raw_min_h) = window.min_size();
-    let (raw_max_w, raw_max_h) = window.max_size();
-    let win_min_w = Length::new(raw_min_w);
-    let win_min_h = Length::new(raw_min_h);
-    let win_max_w = Length::new(raw_max_w);
-    let win_max_h = Length::new(raw_max_h);
+    let limits = window.limits();
+    let win_min_w = limits.min_width.unwrap_or(Length::ZERO);
+    let win_min_h = limits.min_height.unwrap_or(Length::ZERO);
+    let win_max_w = limits.max_width.unwrap_or(Length::ZERO);
+    let win_max_h = limits.max_height.unwrap_or(Length::ZERO);
 
     let max_w = if win_max_w > Length::ZERO {
         win_max_w

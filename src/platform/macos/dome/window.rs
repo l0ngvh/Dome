@@ -2,7 +2,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use crate::core::{Dimension, Length, MonitorId, Unit, WindowId, WindowRestrictions};
+use crate::core::{
+    Dimension, Length, LimitObservation, LimitUpdate, Logical, MonitorId, Unit, WindowId,
+    WindowRestrictions,
+};
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
 
@@ -184,32 +187,39 @@ impl Placement {
         self.retries == MAX_ENFORCEMENT_RETRIES + 1
     }
 
-    /// Compare actual vs target, return constraint if size mismatched.
-    fn detect_constraint(&self) -> Option<RawConstraint> {
+    /// Compare actual vs target, return the limits learned if size mismatched.
+    fn detect_constraint(&self, border: Length<Logical>) -> Option<LimitObservation> {
         let (actual, target) = (self.actual, self.target);
         let min_w = (actual.width > target.width).then_some(actual.width as f32);
         let min_h = (actual.height > target.height).then_some(actual.height as f32);
         let max_w = (actual.width < target.width).then_some(actual.width as f32);
         let max_h = (actual.height < target.height).then_some(actual.height as f32);
-        if min_w.is_some() || min_h.is_some() || max_w.is_some() || max_h.is_some() {
-            tracing::trace!(
-                ?target,
-                ?actual,
-                ?min_w,
-                ?min_h,
-                ?max_w,
-                ?max_h,
-                "window constrained"
-            );
-            Some(RawConstraint {
-                min_width: min_w,
-                min_height: min_h,
-                max_width: max_w,
-                max_height: max_h,
-            })
-        } else {
-            None
+        if min_w.is_none() && min_h.is_none() && max_w.is_none() && max_h.is_none() {
+            return None;
         }
+        tracing::trace!(
+            ?target,
+            ?actual,
+            ?min_w,
+            ?min_h,
+            ?max_w,
+            ?max_h,
+            "window constrained"
+        );
+        // AX reports the content box, so add the border back before core stores it. A
+        // limit observed below the sum of the borders still yields a border box that
+        // can accommodate them.
+        let observed = |v: Option<f32>| {
+            v.map_or(LimitUpdate::Unchanged, |v| {
+                LimitUpdate::Set(Length::new(v + 2.0 * border.logical()))
+            })
+        };
+        Some(LimitObservation {
+            min_width: observed(min_w),
+            min_height: observed(min_h),
+            max_width: observed(max_w),
+            max_height: observed(max_h),
+        })
     }
 }
 
@@ -223,13 +233,6 @@ fn reverse_inset(rounded: RoundedDimension, border: Length<Unit>) -> Dimension {
         Length::new(rounded.width as f32) + border * 2.0,
         Length::new(rounded.height as f32) + border * 2.0,
     )
-}
-
-struct RawConstraint {
-    min_width: Option<f32>,
-    min_height: Option<f32>,
-    max_width: Option<f32>,
-    max_height: Option<f32>,
 }
 
 /// Window position/size with integer coordinates. Integers are used for
@@ -615,21 +618,10 @@ impl Dome {
                     }
 
                     p.actual = new_placement;
-                    let Some(c) = p.detect_constraint() else {
+                    let Some(observation) = p.detect_constraint(self.config.border_size) else {
                         return;
                     };
-                    // Convert actual window size back to frame size by adding border back.
-                    // Frame dimensions have border inset applied. If in the original frame,
-                    // window width is smaller than sum of borders, then we will request a size
-                    // that can accommodate the borders here.
-                    let remove_inset = |v: f32| v + 2.0 * self.config.border_size.logical();
-                    self.hub.set_window_constraint(
-                        window_id,
-                        c.min_width.map(remove_inset),
-                        c.min_height.map(remove_inset),
-                        c.max_width.map(remove_inset),
-                        c.max_height.map(remove_inset),
-                    );
+                    self.hub.set_window_constraint(window_id, observation);
                 } else {
                     // This is likely not caused by Dome calling AX's set_frame but by app
                     // resizing itself or user move actions.

@@ -1,7 +1,7 @@
 use crate::core::ContainerId;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
-use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::node::{Dimension, Length, LimitObservation, LimitUpdate, WindowRestrictions};
 use crate::core::tests::{
     LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
@@ -1524,7 +1524,13 @@ fn tab_bar_visible_when_min_height_exceeds_screen() {
         .unwrap();
     hub.insert_window(titled("W1"), default_dim(), WindowRestrictions::None);
     hub.toggle_container_layout();
-    hub.set_window_constraint(w0, None, Some(60.0), None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(60.0)),
+            ..Default::default()
+        },
+    );
     hub.set_focus(w0);
 
     assert_snapshot!(snapshot(&hub), @"

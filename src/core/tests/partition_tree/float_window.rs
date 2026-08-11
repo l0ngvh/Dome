@@ -1,7 +1,7 @@
 use crate::core::ContainerId;
 use crate::core::GlobalLayoutConfig;
 use crate::core::allocator::NodeId;
-use crate::core::node::{Dimension, Length, WindowRestrictions};
+use crate::core::node::{Dimension, Length, LimitObservation, LimitUpdate, WindowRestrictions};
 use crate::core::tests::{
     LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
@@ -204,15 +204,33 @@ fn toggle_float_with_scrolled_viewport() {
     let w0 = hub
         .insert_window(titled("w10"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
     let w1 = hub
         .insert_window(titled("w11"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    hub.set_window_constraint(w1, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
     let w2 = hub
         .insert_window(titled("w12"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    hub.set_window_constraint(w2, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w2,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     // Focus w2 scrolls viewport right (offset = 150, since total 300px, screen 150px)
     hub.set_focus(w2);
@@ -267,11 +285,23 @@ fn toggle_float_to_tiling_with_scrolled_viewport() {
     let w0 = hub
         .insert_window(titled("w13"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
     let w1 = hub
         .insert_window(titled("w14"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    hub.set_window_constraint(w1, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     // Make w1 a float
     hub.set_focus(w1);

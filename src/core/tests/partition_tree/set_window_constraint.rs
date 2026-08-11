@@ -2,7 +2,7 @@ use insta::assert_snapshot;
 
 use crate::config::SizeConstraint;
 
-use crate::core::node::{Length, WindowRestrictions};
+use crate::core::node::{Length, LimitObservation, LimitUpdate, WindowRestrictions};
 use crate::core::tests::{
     LayoutConfigBuilder, PartitionTreeConfigBuilder, default_dim, setup, snapshot, titled,
 };
@@ -16,7 +16,13 @@ fn set_min_size_respects_minimum_height() {
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w1"), default_dim(), WindowRestrictions::None);
 
-    hub.set_window_constraint(w0, None, Some(20.0), None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -68,7 +74,13 @@ fn set_min_size_distributes_remaining_space_equally() {
     hub.insert_window(titled("w3"), default_dim(), WindowRestrictions::None);
     hub.insert_window(titled("w4"), default_dim(), WindowRestrictions::None);
 
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
@@ -122,7 +134,13 @@ fn set_min_size_propagates_to_parent_container() {
         .insert_window(titled("w7"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w2, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w2,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -177,8 +195,20 @@ fn children_combined_size_exceeds_screen_size() {
         .insert_window(titled("w9"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
-    hub.set_window_constraint(w1, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -235,8 +265,20 @@ fn children_combined_size_exceeds_container_size() {
         .insert_window(titled("w13"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w2, Some(100.0), None, None, None);
-    hub.set_window_constraint(w3, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w2,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w3,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(3))
@@ -293,8 +335,20 @@ fn children_combined_size_exceeds_screen_height() {
         .insert_window(titled("w15"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, None, Some(20.0), None, None);
-    hub.set_window_constraint(w1, None, Some(20.0), None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -349,7 +403,14 @@ fn set_min_size_tabbed_child_container() {
         .insert_window(titled("W3"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w3, Some(100.0), Some(20.0), None, None);
+    hub.set_window_constraint(
+        w3,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(3))
@@ -411,9 +472,27 @@ fn delete_window_with_min_size_shrinks_parent_container() {
         .insert_window(titled("w19"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w1, Some(100.0), None, None, None);
-    hub.set_window_constraint(w2, Some(100.0), None, None, None);
-    hub.set_window_constraint(w3, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w2,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w3,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     // Container min_width = 300 (w1 + w2 + w3), exceeds screen width 150
     assert_snapshot!(snapshot(&hub), @r"
@@ -512,7 +591,13 @@ fn delete_window_with_min_size_allows_siblings_to_expand() {
         .unwrap();
     hub.insert_window(titled("w21"), default_dim(), WindowRestrictions::None);
 
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -604,7 +689,13 @@ fn max_height_centers_window_vertically_in_horizontal_split() {
         .unwrap();
     hub.insert_window(titled("w23"), default_dim(), WindowRestrictions::None);
 
-    hub.set_window_constraint(w0, None, None, None, Some(15.0));
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_height: LimitUpdate::Set(Length::new(15.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
@@ -656,7 +747,13 @@ fn max_width_centers_window_horizontally_in_vertical_split() {
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w25"), default_dim(), WindowRestrictions::None);
 
-    hub.set_window_constraint(w0, None, None, Some(50.0), None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(50.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -707,7 +804,13 @@ fn max_width_limits_window_in_horizontal_split() {
         .unwrap();
     hub.insert_window(titled("w27"), default_dim(), WindowRestrictions::None);
 
-    hub.set_window_constraint(w0, None, None, Some(30.0), None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(30.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -760,8 +863,20 @@ fn both_windows_at_max_centered_collectively() {
         .insert_window(titled("w29"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, None, None, Some(30.0), None);
-    hub.set_window_constraint(w1, None, None, Some(30.0), None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(30.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(30.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -814,7 +929,14 @@ fn tabbed_window_with_max_size_is_centered() {
         .insert_window(titled("W1"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w1, None, None, Some(60.0), Some(10.0));
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(60.0)),
+            max_height: LimitUpdate::Set(Length::new(10.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -861,10 +983,29 @@ fn nested_window_center_due_to_max_constraints() {
         .insert_window(titled("w32"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, None, None, None, Some(10.0));
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_height: LimitUpdate::Set(Length::new(10.0)),
+            ..Default::default()
+        },
+    );
 
-    hub.set_window_constraint(w1, None, None, None, Some(10.0));
-    hub.set_window_constraint(w2, None, Some(10.0), None, Some(10.0));
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            max_height: LimitUpdate::Set(Length::new(10.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w2,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(10.0)),
+            max_height: LimitUpdate::Set(Length::new(10.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(2))
@@ -978,7 +1119,13 @@ fn per_window_max_overrides_global() {
         .with_max_width(SizeConstraint::Pixels(Length::new(60.0)))
         .build();
     hub.sync_configuration(l);
-    hub.set_window_constraint(w0, None, None, Some(30.0), None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(30.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -1028,7 +1175,14 @@ fn single_window_with_max_size_centered() {
         .insert_window(titled("w37"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, None, None, Some(60.0), Some(15.0));
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(60.0)),
+            max_height: LimitUpdate::Set(Length::new(15.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -1069,7 +1223,14 @@ fn single_window_with_max_larger_than_screen_fills_screen() {
         .insert_window(titled("w38"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, None, None, Some(200.0), Some(50.0));
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(200.0)),
+            max_height: LimitUpdate::Set(Length::new(50.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
@@ -1118,7 +1279,13 @@ fn clearing_constraint_allows_window_to_resize() {
         .unwrap();
     hub.insert_window(titled("w40"), default_dim(), WindowRestrictions::None);
 
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -1160,7 +1327,13 @@ fn clearing_constraint_allows_window_to_resize() {
     +--------------------------------------------------------------------------------------------------+**************************************************
     ");
 
-    hub.set_window_constraint(w0, Some(0.0), None, None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Cleared,
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -1211,7 +1384,14 @@ fn new_max_clamps_existing_min() {
         .unwrap();
     hub.insert_window(titled("w42"), default_dim(), WindowRestrictions::None);
 
-    hub.set_window_constraint(w0, Some(100.0), None, Some(50.0), None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            max_width: LimitUpdate::Set(Length::new(50.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
@@ -1255,6 +1435,117 @@ fn new_max_clamps_existing_min() {
 }
 
 #[test]
+fn setting_max_keeps_a_min_set_earlier() {
+    let mut hub = setup();
+    let w0 = hub
+        .insert_window(titled("w60"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+    let w1 = hub
+        .insert_window(titled("w61"), default_dim(), WindowRestrictions::None)
+        .unwrap();
+
+    // macOS observes either a min or a max per axis, never both, so the two arrive in
+    // separate calls. See LimitUpdate.
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(140.0)),
+            ..Default::default()
+        },
+    );
+
+    // min_width still binds at 100 against a natural 75. Were the max call treated as
+    // a replace, min would be gone and w0 would sit at 75.
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(1))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(1), x=100.00, y=0.00, w=50.00, h=30.00, highlighted, spawn=right)
+        Window(id=WindowId(0), x=0.00, y=0.00, w=100.00, h=30.00)
+        Container(id=ContainerId(0), x=0.00, y=0.00, w=150.00, h=30.00, titles=[w60, w61])
+      )
+
+    +--------------------------------------------------------------------------------------------------+**************************************************
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                W0                                                |*                       W1                       *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    |                                                                                                  |*                                                *
+    +--------------------------------------------------------------------------------------------------+**************************************************
+    ");
+
+    // Removing the sibling frees the whole 150, so max_width binds and proves the
+    // second call was stored too.
+    hub.delete_window(w1);
+    assert_snapshot!(snapshot(&hub), @"
+    Hub(focused=WindowId(0))
+      Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
+        Window(id=WindowId(0), x=5.00, y=0.00, w=140.00, h=30.00, highlighted, spawn=right)
+      )
+
+         ********************************************************************************************************************************************     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                    W0                                                                    *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         *                                                                                                                                          *     
+         ********************************************************************************************************************************************
+    ");
+}
+
+#[test]
 fn raising_min_above_existing_max_raises_max() {
     let mut hub = setup();
     let w0 = hub
@@ -1264,7 +1555,13 @@ fn raising_min_above_existing_max_raises_max() {
 
     // Set max_h=10. In a horizontal split with screen height 30,
     // w0 height is capped at 10, centered vertically.
-    hub.set_window_constraint(w0, None, None, None, Some(10.0));
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_height: LimitUpdate::Set(Length::new(10.0)),
+            ..Default::default()
+        },
+    );
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1308,7 +1605,13 @@ fn raising_min_above_existing_max_raises_max() {
     // Raise min_h=15 above max_h=10. If max stays at 10, the layout
     // is contradictory and the implementation must raise max to 15.
     // Observable: w0 height is now 15, not 10 and not 30.
-    hub.set_window_constraint(w0, None, Some(15.0), None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(15.0)),
+            ..Default::default()
+        },
+    );
     assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1351,7 +1654,7 @@ fn raising_min_above_existing_max_raises_max() {
 }
 
 #[test]
-fn setting_max_to_zero_clears_constraint() {
+fn clearing_max_removes_the_limit() {
     let mut hub = setup();
     let w0 = hub
         .insert_window(titled("w45"), default_dim(), WindowRestrictions::None)
@@ -1359,7 +1662,13 @@ fn setting_max_to_zero_clears_constraint() {
     hub.insert_window(titled("w46"), default_dim(), WindowRestrictions::None);
 
     // Cap w0 height at 10. w0 takes 75x10 centered.
-    hub.set_window_constraint(w0, None, None, None, Some(10.0));
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_height: LimitUpdate::Set(Length::new(10.0)),
+            ..Default::default()
+        },
+    );
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
@@ -1400,9 +1709,14 @@ fn setting_max_to_zero_clears_constraint() {
                                                                                ***************************************************************************
     ");
 
-    // Clear max_h with Some(-1.0). Negative is normalized to 0.0,
-    // which clears the constraint. w0 expands to 75x30.
-    hub.set_window_constraint(w0, None, None, None, Some(-1.0));
+    // Clear max_h. w0 expands to 75x30.
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_height: LimitUpdate::Cleared,
+            ..Default::default()
+        },
+    );
     let cleared = snapshot(&hub);
     assert_snapshot!(cleared, @r"
     Hub(focused=WindowId(1))
@@ -1444,9 +1758,22 @@ fn setting_max_to_zero_clears_constraint() {
     +-------------------------------------------------------------------------+***************************************************************************
     ");
 
-    // Re-cap w0 height at 10, then clear with Some(0.0).
-    hub.set_window_constraint(w0, None, None, None, Some(10.0));
-    hub.set_window_constraint(w0, None, None, None, Some(0.0));
+    // Capping again and clearing again returns to the same layout, so clearing is
+    // repeatable rather than a one-shot.
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_height: LimitUpdate::Set(Length::new(10.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_height: LimitUpdate::Cleared,
+            ..Default::default()
+        },
+    );
     assert_eq!(snapshot(&hub), cleared);
 }
 
@@ -1459,7 +1786,13 @@ fn setting_min_below_existing_max_keeps_max() {
     hub.insert_window(titled("w48"), default_dim(), WindowRestrictions::None);
 
     // Cap w0 height at 20. w0 takes 75x20 centered.
-    hub.set_window_constraint(w0, None, None, None, Some(20.0));
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
     let capped = snapshot(&hub);
     assert_snapshot!(capped, @r"
     Hub(focused=WindowId(1))
@@ -1503,7 +1836,13 @@ fn setting_min_below_existing_max_keeps_max() {
 
     // Set min_h=10 below max_h=20. If max were incorrectly lowered
     // to 10, w0 would render at height 10. It should stay at 20.
-    hub.set_window_constraint(w0, None, Some(10.0), None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(10.0)),
+            ..Default::default()
+        },
+    );
     assert_eq!(snapshot(&hub), capped);
 }
 
@@ -1520,7 +1859,13 @@ fn window_max_smaller_than_global_min_width() {
     hub.sync_configuration(l);
 
     // Window max (50) < global min (300) - should not panic, window max takes precedence
-    hub.set_window_constraint(w0, None, None, Some(50.0), None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(50.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
@@ -1574,7 +1919,13 @@ fn window_max_height_smaller_than_global_min_height() {
     hub.sync_configuration(l);
 
     // Window max (10) < global min (300) - should not panic
-    hub.set_window_constraint(w0, None, None, None, Some(10.0));
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_height: LimitUpdate::Set(Length::new(10.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(0))
@@ -1619,7 +1970,13 @@ fn window_max_width_smaller_than_global_min_width() {
     hub.sync_configuration(l);
 
     // Window max (50) < global min (100) - should not panic
-    hub.set_window_constraint(w0, None, None, Some(50.0), None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(50.0)),
+            ..Default::default()
+        },
+    );
 
     assert_snapshot!(snapshot(&hub), @r"
     Hub(focused=WindowId(1))

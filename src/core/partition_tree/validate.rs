@@ -212,15 +212,14 @@ impl PartitionTreeStrategy {
 
         match child {
             Child::Window(wid) => {
-                let (min_w, min_h) = hub.windows.get(wid).min_size();
-                let (max_w, max_h) = hub.windows.get(wid).max_size();
+                let limits = hub.windows.get(wid).limits();
                 (
                     dim,
                     Constraints {
-                        min_width: Length::new(min_w),
-                        min_height: Length::new(min_h),
-                        max_width: Length::new(max_w),
-                        max_height: Length::new(max_h),
+                        min_width: limits.min_width.unwrap_or(Length::ZERO),
+                        min_height: limits.min_height.unwrap_or(Length::ZERO),
+                        max_width: limits.max_width.unwrap_or(Length::ZERO),
+                        max_height: limits.max_height.unwrap_or(Length::ZERO),
                     },
                 )
             }
@@ -367,8 +366,11 @@ impl PartitionTreeStrategy {
         );
 
         let dim = self.tiling_windows.get(&wid).unwrap().dimension;
-        let (min_w, min_h) = window.min_size();
-        let (max_w, max_h) = window.max_size();
+        let limits = window.limits();
+        let min_w = limits.min_width.unwrap_or(Length::ZERO).value();
+        let min_h = limits.min_height.unwrap_or(Length::ZERO).value();
+        let max_w = limits.max_width.unwrap_or(Length::ZERO).value();
+        let max_h = limits.max_height.unwrap_or(Length::ZERO).value();
 
         assert!(
             dim.width.value() >= min_w - VALIDATION_TOLERANCE.value(),

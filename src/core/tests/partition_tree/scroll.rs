@@ -3,7 +3,7 @@ use insta::assert_snapshot;
 use crate::{
     config::SizeConstraint,
     core::{
-        Length, WindowRestrictions,
+        Length, LimitObservation, LimitUpdate, WindowRestrictions,
         tests::{LayoutConfigBuilder, default_dim, setup, snapshot, titled},
     },
 };
@@ -19,8 +19,20 @@ fn scroll_vertically_to_focus() {
         .insert_window(titled("w1"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, None, Some(20.0), None, None);
-    hub.set_window_constraint(w1, None, Some(20.0), None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
     hub.set_focus(w0);
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -80,9 +92,27 @@ fn scroll_horizontally_to_focus() {
         .insert_window(titled("w5"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, Some(50.0), None, None, None);
-    hub.set_window_constraint(w2, Some(90.0), None, None, None);
-    hub.set_window_constraint(w3, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(50.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w2,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(90.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w3,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
     hub.set_focus(w0);
 
     assert_snapshot!(snapshot(&hub), @r"
@@ -143,8 +173,20 @@ fn scroll_container_into_focus() {
         .insert_window(titled("w9"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, Some(100.0), None, None, None);
-    hub.set_window_constraint(w3, Some(100.0), None, None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w3,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            ..Default::default()
+        },
+    );
 
     hub.focus_parent();
     hub.focus_parent();
@@ -207,9 +249,30 @@ fn scroll_window_into_view_in_vertical_child_container() {
         .insert_window(titled("w12"), default_dim(), WindowRestrictions::None)
         .unwrap();
 
-    hub.set_window_constraint(w0, Some(100.0), Some(20.0), None, None);
-    hub.set_window_constraint(w1, Some(100.0), Some(20.0), None, None);
-    hub.set_window_constraint(w2, Some(100.0), Some(20.0), None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
+    hub.set_window_constraint(
+        w2,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            min_height: LimitUpdate::Set(Length::new(20.0)),
+            ..Default::default()
+        },
+    );
     hub.focus_parent();
     hub.toggle_spawn_mode();
     hub.insert_window(titled("w13"), default_dim(), WindowRestrictions::None);
@@ -393,17 +456,35 @@ fn laying_out_max_constrained_windows_leaves_no_hole() {
     let w1 = hub
         .insert_window(titled("w24"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    hub.set_window_constraint(w1, None, None, Some(120.0), None);
+    hub.set_window_constraint(
+        w1,
+        LimitObservation {
+            max_width: LimitUpdate::Set(Length::new(120.0)),
+            ..Default::default()
+        },
+    );
     hub.toggle_spawn_mode();
     let w2 = hub
         .insert_window(titled("w25"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    hub.set_window_constraint(w2, None, Some(25.), None, None);
+    hub.set_window_constraint(
+        w2,
+        LimitObservation {
+            min_height: LimitUpdate::Set(Length::new(25.)),
+            ..Default::default()
+        },
+    );
     hub.toggle_spawn_mode();
     let w3 = hub
         .insert_window(titled("w26"), default_dim(), WindowRestrictions::None)
         .unwrap();
-    hub.set_window_constraint(w3, Some(50.), None, None, None);
+    hub.set_window_constraint(
+        w3,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(50.)),
+            ..Default::default()
+        },
+    );
     hub.insert_window(titled("w27"), default_dim(), WindowRestrictions::None);
     hub.toggle_spawn_mode();
     let w5 = hub

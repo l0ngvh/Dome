@@ -10,7 +10,9 @@ use super::{
 use crate::action::MonitorTarget;
 use crate::config::{SizeConstraint, SplitMode, Strategy, TreeLayoutNode, WindowMatcher};
 use crate::core::hub::{GlobalLayoutConfig, Hub};
-use crate::core::node::{Dimension, Length, MonitorId, WindowId, WindowRestrictions};
+use crate::core::node::{
+    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, WindowId, WindowRestrictions,
+};
 use crate::core::strategy::TilingAction;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -296,10 +298,10 @@ enum RecordedOp {
     },
     SetWindowConstraint {
         window: RecordedWindow,
-        min_w: Option<f32>,
-        min_h: Option<f32>,
-        max_w: Option<f32>,
-        max_h: Option<f32>,
+        min_w: LimitUpdate,
+        min_h: LimitUpdate,
+        max_w: LimitUpdate,
+        max_h: LimitUpdate,
     },
     SetWindowTitle {
         window: RecordedWindow,
@@ -649,24 +651,24 @@ fn build_op(
             }
             let idx = rng.random_range(0..windows.len());
             let min_w = match rng.random_range(0..3) {
-                0 => None,
-                1 => Some(0.0),
-                _ => Some(rng.random_range(1.0f32..50.0)),
+                0 => LimitUpdate::Unchanged,
+                1 => LimitUpdate::Cleared,
+                _ => LimitUpdate::Set(Length::new(rng.random_range(1.0f32..50.0))),
             };
             let min_h = match rng.random_range(0..3) {
-                0 => None,
-                1 => Some(0.0),
-                _ => Some(rng.random_range(1.0f32..10.0)),
+                0 => LimitUpdate::Unchanged,
+                1 => LimitUpdate::Cleared,
+                _ => LimitUpdate::Set(Length::new(rng.random_range(1.0f32..10.0))),
             };
             let max_w = match rng.random_range(0..3) {
-                0 => None,
-                1 => Some(0.0),
-                _ => Some(rng.random_range(1.0f32..100.0)),
+                0 => LimitUpdate::Unchanged,
+                1 => LimitUpdate::Cleared,
+                _ => LimitUpdate::Set(Length::new(rng.random_range(1.0f32..100.0))),
             };
             let max_h = match rng.random_range(0..3) {
-                0 => None,
-                1 => Some(0.0),
-                _ => Some(rng.random_range(1.0f32..20.0)),
+                0 => LimitUpdate::Unchanged,
+                1 => LimitUpdate::Cleared,
+                _ => LimitUpdate::Set(Length::new(rng.random_range(1.0f32..20.0))),
             };
             Some(RecordedOp::SetWindowConstraint {
                 window: RecordedWindow(window_origin[idx]),
@@ -860,7 +862,15 @@ fn apply_op(
                 .iter()
                 .position(|&o| o == window.0)
                 .expect("apply_op: window producer_id not found");
-            hub.set_window_constraint(windows[pos], *min_w, *min_h, *max_w, *max_h);
+            hub.set_window_constraint(
+                windows[pos],
+                LimitObservation {
+                    min_width: *min_w,
+                    min_height: *min_h,
+                    max_width: *max_w,
+                    max_height: *max_h,
+                },
+            );
         }
         RecordedOp::SetWindowTitle { window, title } => {
             let pos = window_origin
@@ -1211,7 +1221,15 @@ fn replay_without_capture(ops: &[RecordedOp], make_hub: impl FnOnce() -> Hub) {
                 let Some(id) = live_window.get(window.0).copied().flatten() else {
                     continue;
                 };
-                hub.set_window_constraint(id, *min_w, *min_h, *max_w, *max_h);
+                hub.set_window_constraint(
+                    id,
+                    LimitObservation {
+                        min_width: *min_w,
+                        min_height: *min_h,
+                        max_width: *max_w,
+                        max_height: *max_h,
+                    },
+                );
             }
             RecordedOp::SetWindowTitle { window, title } => {
                 let Some(id) = live_window.get(window.0).copied().flatten() else {

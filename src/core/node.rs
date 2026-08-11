@@ -174,10 +174,7 @@ pub(crate) struct Window {
     pub(super) restrictions: WindowRestrictions,
     is_minimized: bool,
     pub(super) metadata: Box<dyn WindowMetadata>,
-    pub(super) min_width: f32,
-    pub(super) min_height: f32,
-    pub(super) max_width: f32,
-    pub(super) max_height: f32,
+    pub(super) limits: SizeLimits,
 }
 
 impl Node for Window {
@@ -192,10 +189,7 @@ impl Clone for Window {
             mode: self.mode,
             restrictions: self.restrictions,
             is_minimized: self.is_minimized,
-            min_width: self.min_width,
-            min_height: self.min_height,
-            max_width: self.max_width,
-            max_height: self.max_height,
+            limits: self.limits,
         }
     }
 }
@@ -226,10 +220,7 @@ impl Window {
             restrictions: WindowRestrictions::None,
             is_minimized: false,
             metadata,
-            min_width: 0.0,
-            min_height: 0.0,
-            max_width: 0.0,
-            max_height: 0.0,
+            limits: SizeLimits::default(),
         }
     }
 
@@ -244,10 +235,7 @@ impl Window {
             restrictions: WindowRestrictions::None,
             is_minimized: false,
             metadata,
-            min_width: 0.0,
-            min_height: 0.0,
-            max_width: 0.0,
-            max_height: 0.0,
+            limits: SizeLimits::default(),
         }
     }
 
@@ -262,19 +250,12 @@ impl Window {
             restrictions,
             is_minimized: false,
             metadata,
-            min_width: 0.0,
-            min_height: 0.0,
-            max_width: 0.0,
-            max_height: 0.0,
+            limits: SizeLimits::default(),
         }
     }
 
-    pub(crate) fn min_size(&self) -> (f32, f32) {
-        (self.min_width, self.min_height)
-    }
-
-    pub(crate) fn max_size(&self) -> (f32, f32) {
-        (self.max_width, self.max_height)
+    pub(crate) fn limits(&self) -> SizeLimits {
+        self.limits
     }
 
     pub(crate) fn title(&self) -> &str {
@@ -456,15 +437,56 @@ impl Length<Logical> {
 
 /// Effective per-child layout constraints in the `Length` unit.
 ///
-/// `Length::ZERO` on a `max_*` field means "unbounded" on that axis. This
-/// matches the platform-side encoding of `Window::max_size` (zero means
-/// "no max"). Containers always set both maxes to `Length::ZERO`.
+/// `Length::ZERO` on a `max_*` field means "unbounded" on that axis. Containers
+/// always set both maxes to `Length::ZERO`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Constraints {
     pub(crate) min_width: Length,
     pub(crate) min_height: Length,
     pub(crate) max_width: Length,
     pub(crate) max_height: Length,
+}
+
+/// OS-reported size limits, in border-box space since each shell adds its border
+/// back before forwarding. `None` means that limit is absent.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct SizeLimits {
+    pub(crate) min_width: Option<Length<Unit>>,
+    pub(crate) min_height: Option<Length<Unit>>,
+    pub(crate) max_width: Option<Length<Unit>>,
+    pub(crate) max_height: Option<Length<Unit>>,
+}
+
+/// One limit of an OS size-limit observation.
+///
+/// Distinct from `SizeLimits` because a shell can fail to learn anything about a
+/// limit, which is not the same as learning it is unconstrained. macOS derives
+/// limits by comparing where a window landed against where it was told to go, so
+/// on one axis it observes either a minimum or a maximum and never both.
+/// Collapsing `Unchanged` into `Cleared` would make each observation erase the
+/// opposite limit learned from an earlier event.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) enum LimitUpdate {
+    #[default]
+    Unchanged,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "no production producer until Windows reports genuine per-edge \
+                      unconstrained-ness, which needs the handle.rs sentinel fix"
+        )
+    )]
+    Cleared,
+    Set(Length<Unit>),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct LimitObservation {
+    pub(crate) min_width: LimitUpdate,
+    pub(crate) min_height: LimitUpdate,
+    pub(crate) max_width: LimitUpdate,
+    pub(crate) max_height: LimitUpdate,
 }
 
 impl Length<Unit> {

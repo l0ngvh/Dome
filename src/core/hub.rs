@@ -7,8 +7,8 @@ use crate::config::{
 use super::allocator::{Allocator, NodeId};
 use super::matcher::{FloatFullscreenMatcherId, MatcherHit};
 use super::node::{
-    ContainerId, Dimension, DisplayMode, Length, Logical, Monitor, MonitorId, Unit, Window,
-    WindowId, WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
+    ContainerId, Dimension, DisplayMode, Length, LimitObservation, LimitUpdate, Logical, Monitor,
+    MonitorId, Unit, Window, WindowId, WindowMetadata, WindowRestrictions, Workspace, WorkspaceId,
 };
 use super::partition_tree::Child;
 use super::strategy::{StrategySet, TilingAction, WorkspaceExport, clip};
@@ -753,65 +753,64 @@ impl Hub {
     }
 
     #[tracing::instrument(skip(self))]
-    /// Set size constraints for a window.
-    ///
-    /// - `None`: don't change existing value
-    /// - `Some(0.0)`: clear constraint
-    /// - `Some(x)`: set constraint to x
-    ///
     /// If setting min above existing max, max is raised to match min.
     pub(crate) fn set_window_constraint(
         &mut self,
         window_id: WindowId,
-        min_width: Option<f32>,
-        min_height: Option<f32>,
-        max_width: Option<f32>,
-        max_height: Option<f32>,
+        observed: LimitObservation,
     ) {
         let window = self.access.windows.get_mut(window_id);
 
         let update = |name: &str,
-                      min: &mut f32,
-                      max: &mut f32,
-                      new_min: Option<f32>,
-                      new_max: Option<f32>| {
-            if let Some(new_min) = new_min {
-                *min = new_min;
-                if *max > 0.0 && *max < new_min {
-                    tracing::debug!(
-                        "{name}: existing max {:.2} < new min {:.2}, raising max",
-                        *max,
-                        new_min
-                    );
-                    *max = new_min;
+                      min: &mut Option<Length<Unit>>,
+                      max: &mut Option<Length<Unit>>,
+                      new_min: LimitUpdate,
+                      new_max: LimitUpdate| {
+            match new_min {
+                LimitUpdate::Unchanged => {}
+                LimitUpdate::Cleared => *min = None,
+                LimitUpdate::Set(new_min) => {
+                    *min = Some(new_min);
+                    if max.is_some_and(|m| m < new_min) {
+                        tracing::debug!(
+                            "{name}: existing max {:.2} < new min {:.2}, raising max",
+                            max.unwrap_or(Length::ZERO).value(),
+                            new_min.value()
+                        );
+                        *max = Some(new_min);
+                    }
                 }
             }
-            if let Some(new_max) = new_max {
-                *max = if new_max > 0.0 { new_max } else { 0.0 };
-                if *max > 0.0 && *min > *max {
-                    tracing::debug!(
-                        "{name}: existing min {:.2} > new max {:.2}, lowering min",
-                        *min,
-                        *max
-                    );
-                    *min = *max;
+            match new_max {
+                LimitUpdate::Unchanged => {}
+                LimitUpdate::Cleared => *max = None,
+                LimitUpdate::Set(new_max) => {
+                    *max = Some(new_max);
+                    if min.is_some_and(|m| m > new_max) {
+                        tracing::debug!(
+                            "{name}: existing min {:.2} > new max {:.2}, lowering min",
+                            min.unwrap_or(Length::ZERO).value(),
+                            new_max.value()
+                        );
+                        *min = Some(new_max);
+                    }
                 }
             }
         };
 
         update(
             "width",
-            &mut window.min_width,
-            &mut window.max_width,
-            min_width,
-            max_width,
+            &mut window.limits.min_width,
+            &mut window.limits.max_width,
+            observed.min_width,
+            observed.max_width,
         );
         update(
             "height",
-            &mut window.min_height,
-            &mut window.max_height,
-            min_height,
-            max_height,
+            &mut window.limits.min_height,
+            &mut window.limits.max_height,
+            observed.min_height,
+            observed.max_height,
         );
 
         tracing::debug!("Window constraint set");

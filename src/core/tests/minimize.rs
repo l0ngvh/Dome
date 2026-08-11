@@ -4,7 +4,10 @@ use super::{
     LayoutConfigBuilder, default_dim, setup, setup_with_layout, snapshot, titled, titled_matcher,
 };
 use crate::core::GlobalLayoutConfig;
-use crate::core::node::{Dimension, Length, MinimizedWindowEntry, MonitorId, WindowRestrictions};
+use crate::core::node::{
+    Dimension, Length, LimitObservation, LimitUpdate, MinimizedWindowEntry, MonitorId,
+    WindowRestrictions,
+};
 use insta::assert_snapshot;
 
 /// Float matchers by exact title, since this file also inserts tiling windows named `wN`.
@@ -427,7 +430,14 @@ fn set_window_constraint_on_minimized_no_panic() {
         .insert_window(titled("w19"), default_dim(), WindowRestrictions::None)
         .unwrap();
     hub.minimize_window(w0);
-    hub.set_window_constraint(w0, Some(100.0), Some(50.0), None, None);
+    hub.set_window_constraint(
+        w0,
+        LimitObservation {
+            min_width: LimitUpdate::Set(Length::new(100.0)),
+            min_height: LimitUpdate::Set(Length::new(50.0)),
+            ..Default::default()
+        },
+    );
     assert_eq!(hub.minimized_window_entries().len(), 1);
 }
 
