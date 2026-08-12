@@ -27,6 +27,12 @@ fn degenerate_content_box_parks_window() {
     macos.settle(&mut dome, 10);
 
     assert!(macos.is_offscreen(cg1));
+
+    dome.config_changed(Config::default());
+    macos.settle(&mut dome, 10);
+
+    assert!(!macos.is_offscreen(cg1));
+    assert_eq!(macos.window_frame(cg1), (4, 4, 1912, 1072));
 }
 
 #[test]

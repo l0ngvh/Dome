@@ -13,23 +13,6 @@ fn single_window_fills_screen() {
 }
 
 #[test]
-fn degenerate_content_box_hides_window() {
-    // 600 physical per edge against a 1080-tall monitor leaves no content height,
-    // so core hands the shell an empty content box.
-    let mut env = TestEnv::new_with_monitors(
-        Config {
-            border_size: Length::new(600.0),
-            ..Config::default()
-        },
-        LayoutConfig::default(),
-        vec![scaled_monitor(1.0)],
-    );
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-
-    assert!(env.is_offscreen(w1));
-}
-
-#[test]
 fn two_windows_split_screen() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
@@ -101,23 +84,6 @@ fn dropping_all_limits_restores_the_even_split() {
         default_monitor().dimension,
         env.config.border_size,
     );
-}
-
-/// distribute_space uses binary search and may produce fractional widths
-/// (e.g. 1920/3 ≈ 639.999). The f32→i32 conversion in show_tiling must
-/// round, not truncate, or the cumulative error pushes the last window's
-/// right edge away from the screen edge.
-#[test]
-fn positions_are_rounded_not_truncated() {
-    let config = Config::default();
-    let mut layout = GlobalLayoutConfig::default();
-    layout.partition_tree.automatic_tiling = false;
-    let mut env = TestEnv::new_with_layout_settings(config, layout, Vec::new());
-    let wins: Vec<HwndId> = (1..=7)
-        .map(|i| env.open(i, "App", "app.exe", SPAWN_DIM))
-        .collect();
-    let dims: Vec<_> = wins.iter().map(|w| env.dim(*w)).collect();
-    assert_h_tiled(&dims, default_monitor().dimension, env.config.border_size);
 }
 
 #[test]
@@ -212,6 +178,23 @@ fn dont_correct_float_move() {
     );
 }
 
+/// distribute_space uses binary search and may produce fractional widths
+/// (e.g. 1920/3 ≈ 639.999). The f32→i32 conversion in show_tiling must
+/// round, not truncate, or the cumulative error pushes the last window's
+/// right edge away from the screen edge.
+#[test]
+fn positions_are_rounded_not_truncated() {
+    let config = Config::default();
+    let mut layout = GlobalLayoutConfig::default();
+    layout.partition_tree.automatic_tiling = false;
+    let mut env = TestEnv::new_with_layout_settings(config, layout, Vec::new());
+    let wins: Vec<HwndId> = (1..=7)
+        .map(|i| env.open(i, "App", "app.exe", SPAWN_DIM))
+        .collect();
+    let dims: Vec<_> = wins.iter().map(|w| env.dim(*w)).collect();
+    assert_h_tiled(&dims, default_monitor().dimension, env.config.border_size);
+}
+
 // These tests verify that show_tiling, show_float, and show_fullscreen_window
 // pass physical-native frames from Hub directly to SetWindowPos. The shell no
 // longer insets anything: it places core's `content_box` verbatim.
@@ -260,51 +243,29 @@ fn assert_content_box_centered_in_border_box(wp: &TilingWindowPlacement) {
 }
 
 #[test]
-fn show_tiling_places_at_100pct() {
-    let mut env = TestEnv::new_with_monitors(
-        Config::default(),
-        LayoutConfig::default(),
-        vec![scaled_monitor(1.0)],
-    );
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let wp = only_recorded_tiling(&env);
+fn tiling_border_scales_with_dpi() {
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        let mut env = TestEnv::new_with_monitors(
+            Config::default(),
+            LayoutConfig::default(),
+            vec![scaled_monitor(scale)],
+        );
+        let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+        let wp = only_recorded_tiling(&env);
+        let expected_inset = Length::new(env.config.border_size.logical() * scale).round();
 
-    assert_eq!(env.dim(w1), wp.content_box);
-    assert_content_box_centered_in_border_box(&wp);
+        assert_eq!(env.dim(w1), wp.content_box, "scale {scale}");
+        assert_content_box_centered_in_border_box(&wp);
+        assert_eq!(
+            wp.content_box.x - wp.border_box.x,
+            expected_inset,
+            "scale {scale}"
+        );
+    }
 }
 
 #[test]
-fn show_tiling_places_at_150pct() {
-    let mut env = TestEnv::new_with_monitors(
-        Config::default(),
-        LayoutConfig::default(),
-        vec![scaled_monitor(1.5)],
-    );
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let wp = only_recorded_tiling(&env);
-
-    assert_eq!(env.dim(w1), wp.content_box);
-    assert_content_box_centered_in_border_box(&wp);
-}
-
-// 4.0 logical * 1.25 is exactly 5.0 physical, so the scaled border is
-// representable and the assertion needs no rounding slack.
-#[test]
-fn show_tiling_scales_border_at_125pct() {
-    let mut env = TestEnv::new_with_monitors(
-        Config::default(),
-        LayoutConfig::default(),
-        vec![scaled_monitor(1.25)],
-    );
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let wp = only_recorded_tiling(&env);
-
-    assert_eq!(wp.content_box.x - wp.border_box.x, Length::new(5.0));
-    assert_eq!(env.dim(w1), wp.content_box);
-}
-
-#[test]
-fn painted_thickness_equals_border_box_minus_content_box() {
+fn painted_thickness_matches_core_inset() {
     let mut env = TestEnv::new_with_monitors(
         Config::default(),
         LayoutConfig::default(),
@@ -332,6 +293,33 @@ fn painted_thickness_equals_border_box_minus_content_box() {
         border_thickness * 2.0,
         wp.border_box.width - wp.content_box.width
     );
+}
+
+#[test]
+fn degenerate_content_box_hides_window() {
+    // 600 physical per edge against a 1080-tall monitor leaves no content height,
+    // so core hands the shell an empty content box.
+    let mut env = TestEnv::new_with_monitors(
+        Config {
+            border_size: Length::new(600.0),
+            ..Config::default()
+        },
+        LayoutConfig::default(),
+        vec![scaled_monitor(1.0)],
+    );
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+
+    assert!(env.is_offscreen(w1));
+
+    let mut restored = env.config.clone();
+    restored.border_size = Config::default().border_size;
+    env.dome.config_changed(restored);
+    env.dome.apply_layout();
+
+    let wp = only_recorded_tiling(&env);
+    assert!(!env.is_offscreen(w1));
+    assert_eq!(env.dim(w1), wp.content_box);
+    assert_content_box_centered_in_border_box(&wp);
 }
 
 #[test]
