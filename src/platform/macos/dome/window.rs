@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::core::{
-    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, Unit, WindowId, WindowRestrictions,
+    Dimension, Length, LimitObservation, LimitUpdate, MonitorId, WindowId, WindowRestrictions,
 };
 use crate::platform::macos::MonitorInfo;
 use crate::platform::macos::accessibility::ExternalWindow;
@@ -216,18 +216,6 @@ impl Placement {
             max_height: observed(max_h),
         })
     }
-}
-
-/// Inverse of `Dimension::inset_by`: converts an observed content rect (post-inset, i32)
-/// back to the outer frame stored in core's `float_windows`.
-// TODO: revisit if config.border_size is ever non-integer -- round-trip can drift by +/-1 px per edge
-fn reverse_inset(rounded: RoundedDimension, border: Length<Unit>) -> Dimension {
-    Dimension::new(
-        Length::new(rounded.x as f32) - border,
-        Length::new(rounded.y as f32) - border,
-        Length::new(rounded.width as f32) + border * 2.0,
-        Length::new(rounded.height as f32) + border * 2.0,
-    )
 }
 
 /// Window position/size with integer coordinates. Integers are used for
@@ -649,7 +637,6 @@ impl Dome {
                 // Write target directly -- placed_at is NOT bumped because
                 // this is an observation, not an outbound set_frame.
                 fp.target = new_placement;
-                let outer_dim = reverse_inset(new_placement, self.config.border_size.to_unit(1.0));
                 let dim = Dimension::new(
                     Length::new(new_placement.x as f32),
                     Length::new(new_placement.y as f32),
@@ -661,8 +648,7 @@ impl Dome {
                     .find_closest_monitor(dim)
                     .map(|m| m.id())
                     .unwrap_or_else(|| self.monitor_registry.primary_monitor_id());
-                self.hub
-                    .update_float_dimension(window_id, outer_dim, monitor_id);
+                self.hub.update_float_dimension(window_id, dim, monitor_id);
             }
             WindowState::BorderlessMinimized { retries } => {
                 tracing::trace!("Previously minimized borderless fullscreen window reappeared");

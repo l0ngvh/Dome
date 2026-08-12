@@ -63,7 +63,8 @@ impl Hub {
         dim
     }
 
-    /// Write back the observed screen-absolute dimension for a floating window.
+    /// Write back the observed screen-absolute content box for a floating window,
+    /// storing it as a border box.
     /// Called by platform shells after a user drag/resize settles.
     /// Clients must make sure that the dimension and the monitor_id are consistent. If the
     /// `monitor_id` is not what the operating system agreed with, the window will be assigned to a
@@ -73,9 +74,11 @@ impl Hub {
     pub(crate) fn update_float_dimension(
         &mut self,
         window_id: WindowId,
-        dim: Dimension,
+        content_box: Dimension,
         monitor_id: MonitorId,
     ) {
+        let border = self.access.border(monitor_id);
+        let dim = content_box.outset_by(border);
         let old_ws = {
             let window = self.access.windows.get_mut(window_id);
             assert!(

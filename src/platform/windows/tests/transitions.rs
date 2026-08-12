@@ -1,13 +1,5 @@
 use super::*;
 
-fn visible_float_state(env: &TestEnv) -> FloatOverlayState {
-    env.float_overlays()
-        .iter()
-        .find(|f| f.state.is_visible())
-        .map(|f| f.state)
-        .unwrap_or(FloatOverlayState::Hidden)
-}
-
 #[test]
 fn toggle_fullscreen_hides_siblings() {
     let mut env = TestEnv::new();
@@ -333,7 +325,7 @@ fn borderless_fullscreen_exit_reflows_siblings() {
 }
 
 #[test]
-fn float_overlay_updates_on_focus_away() {
+fn focusing_another_float_raises_it_with_its_overlay() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
@@ -342,12 +334,29 @@ fn float_overlay_updates_on_focus_away() {
     env.run_actions("toggle float");
     env.focus_window(w2);
 
-    let before = visible_float_state(&env);
     env.focus_window(w1);
-    assert_ne!(
-        visible_float_state(&env),
-        before,
-        "float overlay state must change when focus moves to a different float",
+
+    // Each overlay is a larger window directly beneath its float, so its edges form the border.
+    let z = env.z_order();
+    let overlays: Vec<HwndId> = env
+        .float_overlays()
+        .iter()
+        .filter(|f| f.state.is_visible())
+        .map(|f| f.overlay_id)
+        .collect();
+    assert_eq!(
+        z[0], w1,
+        "newly focused float must be raised to the top: {z:?}"
+    );
+    assert!(
+        overlays.contains(&z[1]),
+        "raised float must carry its overlay directly beneath it: {z:?}"
+    );
+    let w2_pos = z.iter().position(|&h| h == w2).expect("w2 in z-order");
+    assert!(
+        z.get(w2_pos + 1)
+            .is_some_and(|below| overlays.contains(below)),
+        "unfocused float keeps its overlay directly beneath it: {z:?}"
     );
 }
 
@@ -364,23 +373,6 @@ fn float_overlay_updates_on_focus_to_tiling() {
         visible_float_state(&env),
         before,
         "float overlay state must change when focus moves from a float to a tiling window",
-    );
-}
-
-#[test]
-fn float_overlay_updates_on_focus_from_tiling() {
-    let mut env = TestEnv::new();
-    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
-    let w2 = env.open(2, "App2", "app2.exe", SPAWN_DIM);
-    env.run_actions("toggle float");
-    env.focus_window(w1);
-
-    let before = visible_float_state(&env);
-    env.focus_window(w2);
-    assert_ne!(
-        visible_float_state(&env),
-        before,
-        "float overlay state must change when focus moves from a tiling window to a float",
     );
 }
 
@@ -538,4 +530,12 @@ fn dome_issued_fullscreen_placement_does_not_flip_to_borderless_fullscreen() {
         "expected re-tiled width < monitor width"
     );
     assert!(!env.is_offscreen(w1), "sibling should be re-tiled");
+}
+
+fn visible_float_state(env: &TestEnv) -> FloatOverlayState {
+    env.float_overlays()
+        .iter()
+        .find(|f| f.state.is_visible())
+        .map(|f| f.state)
+        .unwrap_or(FloatOverlayState::Hidden)
 }

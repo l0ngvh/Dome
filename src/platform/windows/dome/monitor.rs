@@ -9,7 +9,7 @@ use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotific
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, MONITORINFOF_PRIMARY};
 use windows::core::BOOL;
 
-use crate::core::{Dimension, Hub, Length, Logical, MonitorId, Physical, WindowId};
+use crate::core::{Dimension, Hub, MonitorId, Physical, WindowId};
 use crate::platform::windows::external::HwndId;
 use crate::platform::windows::handle;
 
@@ -63,10 +63,6 @@ impl Monitor {
 
     pub(super) fn scale(&self) -> f32 {
         self.scale
-    }
-
-    pub(super) fn physical_border(&self, border_size: Length<Logical>) -> Length<Physical> {
-        border_size.to_unit(self.scale)
     }
 
     pub(super) fn displayed(&self) -> &HashSet<WindowId> {
@@ -147,14 +143,6 @@ impl MonitorRegistry {
             .get_mut(&monitor_id)
             .expect("monitor present")
             .displayed = displayed;
-    }
-
-    pub(super) fn physical_border(
-        &self,
-        id: MonitorId,
-        border_size: Length<Logical>,
-    ) -> Length<Physical> {
-        self.monitor(id).physical_border(border_size)
     }
 
     pub(super) fn is_borderless_fullscreen_at(

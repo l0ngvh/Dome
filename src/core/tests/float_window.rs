@@ -840,10 +840,10 @@ fn update_float_dimension_writes_new_dim() {
         ),
         MonitorId::new(0),
     );
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(0))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=50.00, y=20.00, w=60.00, h=10.00, float, highlighted)
+        Window(id=WindowId(0), x=49.00, y=19.00, w=62.00, h=11.00, float, highlighted)
       )
 
                                                                                                                                                           
@@ -865,17 +865,17 @@ fn update_float_dimension_writes_new_dim() {
                                                                                                                                                           
                                                                                                                                                           
                                                                                                                                                           
-                                                                                                                                                          
-                                                      ************************************************************                                        
-                                                      *                                                          *                                        
-                                                      *                                                          *                                        
-                                                      *                                                          *                                        
-                                                      *                                                          *                                        
-                                                      *                            F0                            *                                        
-                                                      *                                                          *                                        
-                                                      *                                                          *                                        
-                                                      *                                                          *                                        
-                                                      *                                                          *
+                                                     **************************************************************                                       
+                                                     *                                                            *                                       
+                                                     *                                                            *                                       
+                                                     *                                                            *                                       
+                                                     *                                                            *                                       
+                                                     *                                                            *                                       
+                                                     *                             F0                             *                                       
+                                                     *                                                            *                                       
+                                                     *                                                            *                                       
+                                                     *                                                            *                                       
+                                                     *                                                            *
     ");
 }
 
@@ -927,10 +927,10 @@ fn update_float_dimension_preserves_z_order() {
         ),
         MonitorId::new(0),
     );
-    assert_snapshot!(snapshot(&hub), @r"
+    assert_snapshot!(snapshot(&hub), @"
     Hub(focused=WindowId(2))
       Monitor(id=MonitorId(0), screen=(x=0.00 y=0.00 w=150.00 h=30.00),
-        Window(id=WindowId(0), x=15.00, y=10.00, w=30.00, h=20.00, float)
+        Window(id=WindowId(0), x=14.00, y=9.00, w=32.00, h=21.00, float)
         Window(id=WindowId(1), x=50.00, y=5.00, w=30.00, h=20.00, float)
         Window(id=WindowId(2), x=90.00, y=5.00, w=30.00, h=20.00, float, highlighted)
       )
@@ -944,27 +944,27 @@ fn update_float_dimension_preserves_z_order() {
                                                       |                            |          *                            *                              
                                                       |                            |          *                            *                              
                                                       |                            |          *                            *                              
-                                                      |                            |          *                            *                              
-                   +----------------------------+     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     |             F1             |          *             F2             *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |             F0             |     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     |                            |          *                            *                              
-                   |                            |     +----------------------------+          ******************************                              
-                   |                            |                                                                                                         
-                   |                            |                                                                                                         
-                   |                            |                                                                                                         
-                   |                            |                                                                                                         
-                   +----------------------------+
+                  +------------------------------+    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |             F1             |          *             F2             *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |              F0              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    |                            |          *                            *                              
+                  |                              |    +----------------------------+          ******************************                              
+                  |                              |                                                                                                        
+                  |                              |                                                                                                        
+                  |                              |                                                                                                        
+                  |                              |                                                                                                        
+                  |                              |
     ");
 }
 

@@ -315,7 +315,7 @@ impl Dome {
                     scale,
                     border_thickness,
                 );
-            } else if focus_changed {
+            } else {
                 overlay.update(wp, &self.config, ZOrder::Unchanged, scale, border_thickness);
             }
         }
@@ -682,25 +682,7 @@ impl Dome {
                 fp.monitor = resolved;
                 fp.actual = new_placement;
                 fp.target = new_placement;
-                let border = self
-                    .monitors
-                    .physical_border(resolved, self.config.border_size);
-                let scale = self.monitors.monitor(resolved).scale();
-                let outer_dim = reverse_inset(new_placement, border);
-                self.hub.update_float_dimension(id, outer_dim, resolved);
-
-                // Reposition the float overlay to follow the drag.
-                let hwnd = entry.ext.id();
-                let wp = FloatWindowPlacement {
-                    id,
-                    border_box: outer_dim,
-                    visible_border_box: outer_dim,
-                    content_box: new_placement,
-                    is_highlighted: self.last_focused == Some(id),
-                };
-                if let Some(overlay) = self.float_overlays.get_mut(&id) {
-                    overlay.update(&wp, &self.config, ZOrder::After(hwnd), scale, border);
-                }
+                self.hub.update_float_dimension(id, new_placement, resolved);
             }
 
             (
@@ -788,16 +770,4 @@ impl Dome {
         }
         self.hub.set_fullscreen(id, WindowRestrictions::BlockAll);
     }
-}
-
-/// Inverse of `Dimension::inset_by`: converts a content rect back to the outer frame
-/// stored in core's `float_windows`. Both input and output are in physical
-/// pixels on Windows.
-fn reverse_inset(visible: Dimension<Physical>, border: Length<Physical>) -> Dimension<Physical> {
-    Dimension::new(
-        visible.x - border,
-        visible.y - border,
-        visible.width + 2.0 * border,
-        visible.height + 2.0 * border,
-    )
 }

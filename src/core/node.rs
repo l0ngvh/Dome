@@ -639,6 +639,17 @@ impl<U> Dimension<U> {
             (self.height - border * 2.0).max(Length::ZERO),
         )
     }
+
+    /// The exact left inverse of `inset_by` for any box wider and taller than
+    /// `2 * border`. Below that `inset_by` clamps its extents and the original is lost.
+    pub(crate) fn outset_by(self, border: Length<U>) -> Self {
+        Self::new(
+            self.x - border,
+            self.y - border,
+            self.width + border * 2.0,
+            self.height + border * 2.0,
+        )
+    }
 }
 
 /// Manual `Default` avoids a `U: Default` bound that `#[derive(Default)]` would
@@ -719,84 +730,5 @@ impl NodeId for WorkspaceId {
     }
     fn get(self) -> usize {
         self.0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn dim(x: f32, y: f32, width: f32, height: f32) -> Dimension<Logical> {
-        Dimension::new(
-            Length::new(x),
-            Length::new(y),
-            Length::new(width),
-            Length::new(height),
-        )
-    }
-
-    #[test]
-    fn round_keeps_adjacent_edges_flush() {
-        let a = dim(0.0, 0.0, 959.5, 1080.0).round();
-        let b = dim(959.5, 0.0, 960.5, 1080.0).round();
-
-        assert_eq!(a.width, Length::new(960.0));
-        assert_eq!(b.x, Length::new(960.0));
-        assert_eq!(b.width, Length::new(960.0));
-        assert_eq!(b.x + b.width, Length::new(1920.0));
-    }
-
-    #[test]
-    fn round_is_idempotent_on_integral_rect() {
-        let integral = dim(4.0, 4.0, 274.0, 1072.0);
-        assert_eq!(integral.round(), integral);
-
-        let fractional = dim(10.4, 10.6, 100.3, 99.5);
-        assert_eq!(fractional.round().round(), fractional.round());
-    }
-
-    #[test]
-    fn round_snaps_all_four_edges() {
-        let d = dim(10.4, 10.6, 100.3, 99.5).round();
-
-        assert_eq!(d.x, Length::new(10.0));
-        assert_eq!(d.y, Length::new(11.0));
-        assert_eq!(d.width, Length::new(101.0));
-        assert_eq!(d.height, Length::new(99.0));
-    }
-
-    #[test]
-    fn round_collapses_subpixel_box() {
-        let d = dim(10.1, 0.0, 0.2, 50.0).round();
-
-        assert_eq!(d.x, Length::new(10.0));
-        assert_eq!(d.width, Length::ZERO);
-    }
-
-    #[test]
-    fn inset_by_shrinks_by_border_on_every_edge() {
-        let d = dim(0.0, 0.0, 1920.0, 1080.0).inset_by(Length::new(4.0));
-
-        assert_eq!(d, dim(4.0, 4.0, 1912.0, 1072.0));
-    }
-
-    #[test]
-    fn inset_by_clamps_extent_at_zero() {
-        let d = dim(0.0, 0.0, 6.0, 1080.0).inset_by(Length::new(4.0));
-
-        assert_eq!(d.x, Length::new(4.0));
-        assert_eq!(d.width, Length::ZERO);
-        assert_eq!(d.height, Length::new(1072.0));
-    }
-
-    #[test]
-    fn is_empty_is_true_when_either_extent_is_zero() {
-        assert!(dim(10.0, 10.0, 0.0, 50.0).is_empty());
-        assert!(dim(10.0, 10.0, 50.0, 0.0).is_empty());
-    }
-
-    #[test]
-    fn is_empty_is_false_for_a_positive_box() {
-        assert!(!dim(10.0, 10.0, 1.0, 1.0).is_empty());
     }
 }

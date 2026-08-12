@@ -412,7 +412,7 @@ fn show_float_places_at_125pct() {
     env.settle(10);
 
     // Under physical-native core, the observation (200,150,600,400) is stored
-    // directly (reverse_inset on the way into Hub, then core's inset back out).
+    // directly: core outsets it by the border on the way in and insets it back out.
     // Round-trip is identity: no conversion.
     let d = env.dim(w1);
     assert_eq!(d.x, Length::new(200.0));
@@ -483,6 +483,42 @@ fn float_round_trip_converges_at_125pct() {
     assert_eq!(d1.height, d2.height, "height diverged");
 
     // Identity: values round-trip back to original physical coords
+    assert_eq!(d2.x, Length::new(300.0));
+    assert_eq!(d2.y, Length::new(200.0));
+    assert_eq!(d2.width, Length::new(500.0));
+    assert_eq!(d2.height, Length::new(400.0));
+}
+
+/// 4.0 logical * 1.3 is 5.2 physical, so both crossings must round the border.
+#[test]
+fn float_settle_does_not_drift_at_fractional_scaled_border() {
+    let mut env = TestEnv::new_with_monitors(
+        Config::default(),
+        LayoutConfig::default(),
+        vec![scaled_monitor(1.3)],
+    );
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.run_actions("toggle float");
+    env.settle(10);
+    env.moves.lock().unwrap().clear();
+
+    env.move_window_to(w1, dim(300, 200, 500, 400));
+    env.dome.apply_layout();
+    env.settle(10);
+
+    let d1 = env.dim(w1);
+
+    env.move_window_to(w1, d1);
+    env.dome.apply_layout();
+    env.settle(10);
+
+    let d2 = env.dim(w1);
+
+    assert_eq!(d1.x, d2.x, "x diverged");
+    assert_eq!(d1.y, d2.y, "y diverged");
+    assert_eq!(d1.width, d2.width, "width diverged");
+    assert_eq!(d1.height, d2.height, "height diverged");
+
     assert_eq!(d2.x, Length::new(300.0));
     assert_eq!(d2.y, Length::new(200.0));
     assert_eq!(d2.width, Length::new(500.0));
@@ -839,7 +875,7 @@ fn float_drift_repositions_overlay() {
     );
     env.flush_moves();
 
-    // The overlay receives the border-expanded outer_dim, not the raw managed-window rect.
+    // The overlay paints the emitted visible border box, not the raw managed-window rect.
     let border = Length::new(env.config.border_size.logical());
     let expected_outer = Dimension::new(
         Length::new(500.0) - border,
@@ -861,12 +897,57 @@ fn float_drift_repositions_overlay() {
     };
     assert_eq!(
         visible_border_box, expected_outer,
-        "overlay should receive the border-expanded outer_dim as visible_border_box"
+        "overlay should receive the emitted border box as visible_border_box"
     );
 }
 
 #[test]
-fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
+fn float_dragged_past_the_screen_origin_paints_a_clipped_overlay() {
+    let mut env = TestEnv::new();
+    let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
+    env.run_actions("toggle float");
+    env.settle(10);
+
+    env.move_window_to(
+        w1,
+        Dimension::new(
+            Length::ZERO,
+            Length::ZERO,
+            Length::new(400.0),
+            Length::new(250.0),
+        ),
+    );
+    env.flush_moves();
+
+    // Core stores the border box at (-border, -border, 400 + 2 * border, 250 + 2 * border) and
+    // clips it to the screen before emitting, so the overlay loses one border off each extent.
+    let border = Length::new(env.config.border_size.logical());
+    let expected_clipped = Dimension::new(
+        Length::ZERO,
+        Length::ZERO,
+        Length::new(400.0) + border,
+        Length::new(250.0) + border,
+    );
+    let state = env
+        .float_overlays()
+        .iter()
+        .find(|f| f.state.is_visible())
+        .map(|f| f.state)
+        .unwrap_or(FloatOverlayState::Hidden);
+    let FloatOverlayState::Visible {
+        visible_border_box, ..
+    } = state
+    else {
+        panic!("float overlay must be visible after drag, got {:?}", state);
+    };
+    assert_eq!(
+        visible_border_box, expected_clipped,
+        "overlay surface must match core's clipped border box, not the unclipped one"
+    );
+}
+
+#[test]
+fn float_overlay_geometry_is_stable_across_repeated_apply_layout() {
     let mut env = TestEnv::new();
     let w1 = env.open(1, "App1", "app1.exe", SPAWN_DIM);
     env.run_actions("toggle float");
@@ -891,7 +972,7 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
         .map(|f| f.state)
         .unwrap_or(FloatOverlayState::Hidden);
 
-    // show_float's settled branch must remain a no-op
+    // A second apply_layout re-emits the same placement, so the overlay repaints identically
     env.dome.apply_layout();
     env.settle(10);
 
@@ -903,7 +984,7 @@ fn float_drift_overlay_update_does_not_repeat_on_next_apply_layout() {
         .unwrap_or(FloatOverlayState::Hidden);
     assert_eq!(
         after_settle, after_drift,
-        "apply_layout after drift must not re-update the overlay (settled short-circuit)"
+        "apply_layout after drift must re-emit the same overlay geometry"
     );
 }
 
